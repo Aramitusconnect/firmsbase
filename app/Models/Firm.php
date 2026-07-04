@@ -36,6 +36,10 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * fillable column was added to firms itself — commercial columns landed
  * on organizations/billing_accounts/firm_licenses/firm_users instead
  * (approved Phase 6 manifest).
+ * Phase 7 addition: support access requests/sessions, one implementation
+ * project, and customer success health score snapshots — all
+ * platform-staff-facing, cross-firm-accessible relations. No new
+ * fillable column was added to firms itself in Phase 7 either.
  */
 class Firm extends Model
 {
@@ -322,5 +326,28 @@ class Firm extends Model
     public function templateUpgradeLogs(): HasMany
     {
         return $this->hasMany(TemplateUpgradeLog::class);
+    }
+
+    /**
+     * Phase 7 additions below.
+     */
+    public function supportAccessRequests(): HasMany
+    {
+        return $this->hasMany(SupportAccessRequest::class);
+    }
+
+    public function supportAccessSessions(): HasMany
+    {
+        return $this->hasMany(SupportAccessSession::class);
+    }
+
+    public function implementationProject(): HasOne
+    {
+        return $this->hasOne(ImplementationProject::class);
+    }
+
+    public function customerSuccessHealthScores(): HasMany
+    {
+        return $this->hasMany(CustomerSuccessHealthScore::class);
     }
 }

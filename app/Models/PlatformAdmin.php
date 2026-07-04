@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use App\Enums\PlatformRoleCode;
 use App\Models\Concerns\HasPublicUuid;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 
 /**
@@ -14,6 +16,12 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
  * later, explicitly-approved change). Not tenant-owned — platform
  * admins operate across firms by design, so BelongsToTenant is
  * intentionally not applied here.
+ *
+ * Phase 7 addition: roles() — the platform_roles grant relation — and
+ * hasRole(), a thin convenience wrapper. platform_admins itself gains
+ * no new column; role state lives entirely in platform_roles (Phase 7
+ * approved decision: platform_admins remains the sole platform-staff
+ * identity table, never duplicated).
  */
 class PlatformAdmin extends Authenticatable
 {
@@ -47,5 +55,21 @@ class PlatformAdmin extends Authenticatable
             'two_factor_confirmed_at' => 'datetime',
             'is_active' => 'boolean',
         ];
+    }
+
+    /**
+     * Phase 7 additions below.
+     */
+    public function roles(): HasMany
+    {
+        return $this->hasMany(PlatformRole::class);
+    }
+
+    public function hasRole(PlatformRoleCode $role): bool
+    {
+        return $this->roles()
+            ->where('role_code', $role->value)
+            ->whereNull('revoked_at')
+            ->exists();
     }
 }

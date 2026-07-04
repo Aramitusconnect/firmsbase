@@ -24,6 +24,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * usage rollups). consolidation_mode is NOT duplicated here — it
  * already lives on organizations (Phase 1); see the Phase 6 manifest's
  * note on this catalog imprecision.
+ *
+ * Phase 7 addition: commissionEvents() — commission_events is keyed to
+ * billing_account_id (project rule: commission must key to platform
+ * billing only, never firm-client invoices/payments).
  */
 class BillingAccount extends Model
 {
@@ -96,5 +100,13 @@ class BillingAccount extends Model
     public function usageRollups(): HasMany
     {
         return $this->hasMany(UsageRollup::class);
+    }
+
+    /**
+     * Phase 7 addition below.
+     */
+    public function commissionEvents(): HasMany
+    {
+        return $this->hasMany(CommissionEvent::class);
     }
 }
