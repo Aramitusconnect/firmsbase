@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * Matter — status transitions to Open are gated by MatterOpeningService
@@ -16,6 +17,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * pinned_template_pack_version_id is set once at creation and never
  * changed afterward by a pack upgrade. stage is a freeform,
  * template-driven string, not a rigid state machine.
+ *
+ * Phase 4 addition: document requests, tasks, deadlines, calendar
+ * events, and a single current readiness score.
  */
 class Matter extends Model
 {
@@ -104,5 +108,47 @@ class Matter extends Model
             MatterStatus::Closed,
             MatterStatus::Archived,
         ], true);
+    }
+
+    /**
+     * Phase 4 additions below.
+     */
+    public function documentRequests(): HasMany
+    {
+        return $this->hasMany(DocumentRequest::class);
+    }
+
+    public function documents(): HasMany
+    {
+        return $this->hasMany(Document::class);
+    }
+
+    public function tasks(): HasMany
+    {
+        return $this->hasMany(Task::class);
+    }
+
+    public function deadlines(): HasMany
+    {
+        return $this->hasMany(Deadline::class);
+    }
+
+    public function calendarEvents(): HasMany
+    {
+        return $this->hasMany(CalendarEvent::class);
+    }
+
+    /**
+     * One current row, recomputed in place by MatterReadinessService —
+     * never a history of past scores.
+     */
+    public function readinessScore(): HasOne
+    {
+        return $this->hasOne(MatterReadinessScore::class);
+    }
+
+    public function readinessScoreEvents(): HasMany
+    {
+        return $this->hasMany(ReadinessScoreEvent::class);
     }
 }

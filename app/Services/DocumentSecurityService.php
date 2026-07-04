@@ -1,0 +1,124 @@
+<?php
+
+namespace App\Services;
+
+use App\Enums\DocumentScanStatus;
+use App\Enums\DocumentStatus;
+use App\Models\Client;
+use App\Models\Document;
+use App\Models\DocumentRequestItem;
+use App\Models\Firm;
+use App\Models\Matter;
+use App\Models\TenantEncryptionKey;
+use App\Models\User;
+use App\ValueObjects\VirusScanResult;
+
+/**
+ * DocumentSecurityService — the only place a Document row is created
+ * or has its lifecycle status/scan outcome applied. Documents are
+ * private by default and never exposed via a public URL (project
+ * rule) — canAccess() is the explicit check any future signed-URL/
+ * download endpoint must call first. A document may only reach
+ * Approved while scan_status is Clean (project rule: virus scanning
+ * must be enforced) — enforced here, not left to callers.
+ */
+class DocumentSecurityService
+{
+    public function __construct(private DocumentUploadPolicyService $uploadPolicy)
+    {
+    }
+
+    public function upload(
+        Firm $firm,
+        string $originalFilename,
+        string $mimeType,
+        int $sizeBytes,
+        string $storageDisk,
+        string $storagePath,
+        string $fileHash,
+        ?Matter $matter = null,
+        ?Client $client = null,
+        ?DocumentRequestItem $requestItem = null,
+        ?User $uploadedBy = null,
+        ?TenantEncryptionKey $encryptionKey = null,
+    ): Document {
+        $this->uploadPolicy->assertUploadIsAllowed($originalFilename, $sizeBytes);
+
+        return Document::create([
+            'firm_id' => $firm->id,
+            'matter_id' => $matter?->id,
+            'client_id' => $client?->id,
+            'document_request_item_id' => $requestItem?->id,
+            'status' => DocumentStatus::Uploaded,
+            'scan_status' => DocumentScanStatus::Pending,
+            'storage_disk' => $storageDisk,
+            'storage_path' => $storagePath,
+            'original_filename' => $originalFilename,
+            'mime_type' => $mimeType,
+            'size_bytes' => $sizeBytes,
+            'file_hash' => $fileHash,
+            'encryption_key_id' => $encryptionKey?->id,
+            'uploaded_by' => $uploadedBy?->id,
+        ]);
+    }
+
+    /**
+     * Applied by ScanDocumentJob once a VirusScanner has run. Never
+     * called directly by controllers/tests bypassing the scan step —
+     * that would defeat the entire point of the scan gate.
+     */
+    public function applyScanResult(Document $document, VirusScanResult $result): Document
+    {
+        $document->update([
+            'scan_status' => $result->status,
+            'scan_result_detail' => $result->detail,
+            'scanned_at' => now(),
+        ]);
+
+        if ($result->status === DocumentScanStatus::Infected) {
+            $document->update([
+                'status' => DocumentStatus::Rejected,
+                'rejected_reason' => 'Virus scan detected malware: '.($result->threatName ?? 'unknown signature'),
+            ]);
+        }
+
+        return $document->fresh();
+    }
+
+    public function approve(Document $document, User $approver): Document
+    {
+        if (! $document->isUsable()) {
+            throw new \RuntimeException('Only a document with a clean scan result can be approved.');
+        }
+
+        $document->update([
+            'status' => DocumentStatus::Approved,
+            'approved_by' => $approver->id,
+            'approved_at' => now(),
+        ]);
+
+        return $document->fresh();
+    }
+
+    public function reject(Document $document, User $approver, string $reason): Document
+    {
+        $document->update([
+            'status' => DocumentStatus::Rejected,
+            'approved_by' => $approver->id,
+            'approved_at' => now(),
+            'rejected_reason' => $reason,
+        ]);
+
+        return $document->fresh();
+    }
+
+    /**
+     * The explicit private-access check. Documents are never exposed
+     * via a public URL; any future signed-URL/download endpoint must
+     * call this first (project rule).
+     */
+    public function canAccess(Document $document, Firm $contextFirm): bool
+    {
+        return $document->firm_id === $contextFirm->id;
+    }
+}

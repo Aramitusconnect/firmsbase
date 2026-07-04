@@ -17,6 +17,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * ClientCommunicationPreference; portal_status/portal_invitation_*
  * prepare the schema for client-portal access (no invitation is
  * actually sent in Phase 2 — see the migration comment).
+ *
+ * Phase 4 addition: document requests and tasks addressed to this
+ * client (client_id is nullable on tasks — most tasks are internal/
+ * matter-only and never reach a client).
  */
 class Client extends Model
 {
@@ -85,5 +89,23 @@ class Client extends Model
     public function intakeSubmissions(): HasMany
     {
         return $this->hasMany(IntakeSubmission::class);
+    }
+
+    /**
+     * Phase 4 additions below.
+     */
+    public function documentRequests(): HasMany
+    {
+        return $this->hasMany(DocumentRequest::class);
+    }
+
+    public function tasks(): HasMany
+    {
+        return $this->hasMany(Task::class);
+    }
+
+    public function notificationEvents(): HasMany
+    {
+        return $this->hasMany(NotificationEvent::class);
     }
 }

@@ -23,6 +23,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * template-pack installs, and the firm's timeline log.
  * Phase 3 addition: employee rates, time entries, invoices, payment
  * plans, and canonical payments.
+ * Phase 4 addition: documents/document requests, tasks, deadlines,
+ * calendar events, notification templates/events, document chase
+ * rules, and matter readiness scores.
  */
 class Firm extends Model
 {
@@ -201,5 +204,57 @@ class Firm extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
+    }
+
+    /**
+     * Phase 4 additions below.
+     */
+    public function documentRequests(): HasMany
+    {
+        return $this->hasMany(DocumentRequest::class);
+    }
+
+    public function documents(): HasMany
+    {
+        return $this->hasMany(Document::class);
+    }
+
+    public function tasks(): HasMany
+    {
+        return $this->hasMany(Task::class);
+    }
+
+    public function deadlines(): HasMany
+    {
+        return $this->hasMany(Deadline::class);
+    }
+
+    public function calendarEvents(): HasMany
+    {
+        return $this->hasMany(CalendarEvent::class);
+    }
+
+    /**
+     * Firm-specific notification template overrides only — global
+     * defaults (firm_id null) are never returned by this relation.
+     */
+    public function notificationTemplates(): HasMany
+    {
+        return $this->hasMany(NotificationTemplate::class);
+    }
+
+    public function notificationEvents(): HasMany
+    {
+        return $this->hasMany(NotificationEvent::class);
+    }
+
+    public function documentChaseRules(): HasMany
+    {
+        return $this->hasMany(DocumentChaseRule::class);
+    }
+
+    public function matterReadinessScores(): HasMany
+    {
+        return $this->hasMany(MatterReadinessScore::class);
     }
 }
