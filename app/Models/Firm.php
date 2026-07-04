@@ -31,6 +31,11 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * pilot feedback items. status_page_events is deliberately NOT a Firm
  * relation — it is a platform-level table with no firm_id (see that
  * model's own doc comment).
+ * Phase 6 addition: per-firm seat allocations, usage rollup
+ * attribution rows, and template upgrade previews/logs. No new
+ * fillable column was added to firms itself — commercial columns landed
+ * on organizations/billing_accounts/firm_licenses/firm_users instead
+ * (approved Phase 6 manifest).
  */
 class Firm extends Model
 {
@@ -294,5 +299,28 @@ class Firm extends Model
     public function pilotFeedbackItems(): HasMany
     {
         return $this->hasMany(PilotFeedbackItem::class);
+    }
+
+    /**
+     * Phase 6 additions below.
+     */
+    public function seatAllocations(): HasMany
+    {
+        return $this->hasMany(SeatAllocation::class);
+    }
+
+    public function usageRollups(): HasMany
+    {
+        return $this->hasMany(UsageRollup::class);
+    }
+
+    public function templateUpgradePreviews(): HasMany
+    {
+        return $this->hasMany(TemplateUpgradePreview::class);
+    }
+
+    public function templateUpgradeLogs(): HasMany
+    {
+        return $this->hasMany(TemplateUpgradeLog::class);
     }
 }
