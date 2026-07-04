@@ -26,6 +26,11 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * Phase 4 addition: documents/document requests, tasks, deadlines,
  * calendar events, notification templates/events, document chase
  * rules, and matter readiness scores.
+ * Phase 5 addition: firm activation audit events, health checks,
+ * backup/restore tests, incident events, maintenance windows, and
+ * pilot feedback items. status_page_events is deliberately NOT a Firm
+ * relation — it is a platform-level table with no firm_id (see that
+ * model's own doc comment).
  */
 class Firm extends Model
 {
@@ -256,5 +261,38 @@ class Firm extends Model
     public function matterReadinessScores(): HasMany
     {
         return $this->hasMany(MatterReadinessScore::class);
+    }
+
+    /**
+     * Phase 5 additions below.
+     */
+    public function activationEvents(): HasMany
+    {
+        return $this->hasMany(FirmActivationEvent::class);
+    }
+
+    public function healthChecks(): HasMany
+    {
+        return $this->hasMany(HealthCheck::class);
+    }
+
+    public function backupRestoreTests(): HasMany
+    {
+        return $this->hasMany(BackupRestoreTest::class);
+    }
+
+    public function incidentEvents(): HasMany
+    {
+        return $this->hasMany(IncidentEvent::class);
+    }
+
+    public function maintenanceWindows(): HasMany
+    {
+        return $this->hasMany(MaintenanceWindow::class);
+    }
+
+    public function pilotFeedbackItems(): HasMany
+    {
+        return $this->hasMany(PilotFeedbackItem::class);
     }
 }

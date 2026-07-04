@@ -21,6 +21,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * Phase 4 addition: document requests and tasks addressed to this
  * client (client_id is nullable on tasks — most tasks are internal/
  * matter-only and never reach a client).
+ * Phase 5 addition: pilot feedback items submitted by or about this
+ * client.
  */
 class Client extends Model
 {
@@ -107,5 +109,13 @@ class Client extends Model
     public function notificationEvents(): HasMany
     {
         return $this->hasMany(NotificationEvent::class);
+    }
+
+    /**
+     * Phase 5 addition.
+     */
+    public function pilotFeedbackItems(): HasMany
+    {
+        return $this->hasMany(PilotFeedbackItem::class);
     }
 }

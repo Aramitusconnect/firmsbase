@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  *
  * Phase 4 addition: document requests, tasks, deadlines, calendar
  * events, and a single current readiness score.
+ * Phase 5 addition: pilot feedback items linked to this matter.
  */
 class Matter extends Model
 {
@@ -150,5 +151,13 @@ class Matter extends Model
     public function readinessScoreEvents(): HasMany
     {
         return $this->hasMany(ReadinessScoreEvent::class);
+    }
+
+    /**
+     * Phase 5 addition.
+     */
+    public function pilotFeedbackItems(): HasMany
+    {
+        return $this->hasMany(PilotFeedbackItem::class);
     }
 }
