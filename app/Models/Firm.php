@@ -21,6 +21,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  *
  * Phase 2 addition: leads, clients, matters, practice-area enablement,
  * template-pack installs, and the firm's timeline log.
+ * Phase 3 addition: employee rates, time entries, invoices, payment
+ * plans, and canonical payments.
  */
 class Firm extends Model
 {
@@ -171,5 +173,33 @@ class Firm extends Model
     public function timelineEvents(): HasMany
     {
         return $this->hasMany(TimelineEvent::class);
+    }
+
+    /**
+     * Phase 3 additions below.
+     */
+    public function employeeRates(): HasMany
+    {
+        return $this->hasMany(EmployeeRate::class);
+    }
+
+    public function timeEntries(): HasMany
+    {
+        return $this->hasMany(TimeEntry::class);
+    }
+
+    public function invoices(): HasMany
+    {
+        return $this->hasMany(Invoice::class);
+    }
+
+    public function paymentPlans(): HasMany
+    {
+        return $this->hasMany(PaymentPlan::class);
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
     }
 }
