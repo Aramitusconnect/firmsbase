@@ -4,6 +4,7 @@ namespace Tests\Feature\Activation;
 
 use App\Enums\ConsentChannel;
 use App\Enums\ConsentStatus;
+use App\Models\Client;
 use App\Models\CommunicationConsent;
 use App\Models\Firm;
 use Illuminate\Database\QueryException;
@@ -38,7 +39,9 @@ class CommunicationConsentTest extends TestCase
 
     public function test_is_granted_false_when_expired_even_if_status_still_granted(): void
     {
-        $consent = CommunicationConsent::factory()->create(['expires_at' => now()->subDay()]);
+        $consent = CommunicationConsent::factory()->create([
+            'expires_at' => now()->subDay(),
+        ]);
 
         $this->assertFalse($consent->isGranted());
     }
@@ -46,25 +49,37 @@ class CommunicationConsentTest extends TestCase
     public function test_unique_firm_client_channel(): void
     {
         $firm = Firm::factory()->create();
+        $client = Client::factory()->forFirm($firm)->create();
 
-        CommunicationConsent::factory()->forFirm($firm)
+        CommunicationConsent::factory()
+            ->forClient($client)
             ->channel(ConsentChannel::Sms)
-            ->create(['client_id' => 42]);
+            ->create();
 
         $this->expectException(QueryException::class);
 
-        CommunicationConsent::factory()->forFirm($firm)
+        CommunicationConsent::factory()
+            ->forClient($client)
             ->channel(ConsentChannel::Sms)
-            ->create(['client_id' => 42]);
+            ->create();
     }
 
     public function test_different_channels_for_same_client_are_allowed(): void
     {
         $firm = Firm::factory()->create();
+        $client = Client::factory()->forFirm($firm)->create();
 
-        CommunicationConsent::factory()->forFirm($firm)->channel(ConsentChannel::Sms)->create(['client_id' => 42]);
-        CommunicationConsent::factory()->forFirm($firm)->channel(ConsentChannel::Email)->create(['client_id' => 42]);
+        $smsConsent = CommunicationConsent::factory()
+            ->forClient($client)
+            ->channel(ConsentChannel::Sms)
+            ->create();
 
-        $this->assertDatabaseCount('communication_consents', 2);
+        $emailConsent = CommunicationConsent::factory()
+            ->forClient($client)
+            ->channel(ConsentChannel::Email)
+            ->create();
+
+        $this->assertDatabaseHas('communication_consents', ['id' => $smsConsent->id]);
+        $this->assertDatabaseHas('communication_consents', ['id' => $emailConsent->id]);
     }
 }

@@ -18,6 +18,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * itself). billing_account_id is nullable to allow a firm to exist
  * pre-activation; the transition guard requiring it before activation
  * lives in ActivationChecklistService, not here or in the migration.
+ *
+ * Phase 2 addition: leads, clients, matters, practice-area enablement,
+ * template-pack installs, and the firm's timeline log.
  */
 class Firm extends Model
 {
@@ -100,5 +103,73 @@ class Firm extends Model
     public function communicationConsents(): HasMany
     {
         return $this->hasMany(CommunicationConsent::class);
+    }
+
+    /**
+     * Phase 2 additions below.
+     */
+    public function leadSources(): HasMany
+    {
+        return $this->hasMany(LeadSource::class);
+    }
+
+    public function consultationOutcomes(): HasMany
+    {
+        return $this->hasMany(ConsultationOutcome::class);
+    }
+
+    public function firmLeads(): HasMany
+    {
+        return $this->hasMany(FirmLead::class);
+    }
+
+    public function consultations(): HasMany
+    {
+        return $this->hasMany(Consultation::class);
+    }
+
+    public function clients(): HasMany
+    {
+        return $this->hasMany(Client::class);
+    }
+
+    public function contacts(): HasMany
+    {
+        return $this->hasMany(Contact::class);
+    }
+
+    public function parties(): HasMany
+    {
+        return $this->hasMany(Party::class);
+    }
+
+    public function matters(): HasMany
+    {
+        return $this->hasMany(Matter::class);
+    }
+
+    public function firmPracticeAreas(): HasMany
+    {
+        return $this->hasMany(FirmPracticeArea::class);
+    }
+
+    public function installedTemplatePacks(): HasMany
+    {
+        return $this->hasMany(InstalledTemplatePack::class);
+    }
+
+    public function intakeSubmissions(): HasMany
+    {
+        return $this->hasMany(IntakeSubmission::class);
+    }
+
+    public function conflictCheckRuns(): HasMany
+    {
+        return $this->hasMany(ConflictCheckRun::class);
+    }
+
+    public function timelineEvents(): HasMany
+    {
+        return $this->hasMany(TimelineEvent::class);
     }
 }

@@ -4,6 +4,7 @@ namespace Tests\Feature\Activation;
 
 use App\Enums\ConsentChannel;
 use App\Enums\ConsentStatus;
+use App\Models\Client;
 use App\Models\CommunicationConsent;
 use App\Models\Firm;
 use App\Models\User;
@@ -26,11 +27,12 @@ class ConsentServiceTest extends TestCase
     public function test_capture_creates_granted_consent_and_audit_event(): void
     {
         $firm = Firm::factory()->create();
+        $client = Client::factory()->forFirm($firm)->create();
         $actor = User::factory()->create();
 
         $consent = $this->service->capture(
             firm: $firm,
-            clientId: 501,
+            clientId: $client->id,
             channel: ConsentChannel::Sms,
             consentTextVersion: 'v3',
             actor: $actor,
@@ -52,16 +54,17 @@ class ConsentServiceTest extends TestCase
     public function test_capture_twice_updates_in_place_rather_than_duplicating(): void
     {
         $firm = Firm::factory()->create();
+        $client = Client::factory()->forFirm($firm)->create();
 
-        $first = $this->service->capture($firm, 501, ConsentChannel::Email, 'v1');
-        $second = $this->service->capture($firm, 501, ConsentChannel::Email, 'v2');
+        $first = $this->service->capture($firm, $client->id, ConsentChannel::Email, 'v1');
+        $second = $this->service->capture($firm, $client->id, ConsentChannel::Email, 'v2');
 
         $this->assertSame($first->id, $second->id);
         $this->assertSame('v2', $second->fresh()->consent_text_version);
         $this->assertSame(
             1,
             CommunicationConsent::where('firm_id', $firm->id)
-                ->where('client_id', 501)
+                ->where('client_id', $client->id)
                 ->where('channel', 'email')
                 ->count()
         );
@@ -75,9 +78,10 @@ class ConsentServiceTest extends TestCase
     public function test_revoke_transitions_status_and_writes_audit_event(): void
     {
         $firm = Firm::factory()->create();
-        $consent = $this->service->capture($firm, 501, ConsentChannel::WhatsApp, 'v1');
+        $client = Client::factory()->forFirm($firm)->create();
+        $consent = $this->service->capture($firm, $client->id, ConsentChannel::WhatsApp, 'v1');
 
-        $revoked = $this->service->revoke($firm, 501, ConsentChannel::WhatsApp, reason: 'client requested opt-out');
+        $revoked = $this->service->revoke($firm, $client->id, ConsentChannel::WhatsApp, reason: 'client requested opt-out');
 
         $this->assertSame(ConsentStatus::Revoked, $revoked->status);
         $this->assertNotNull($revoked->revoked_at);
@@ -109,17 +113,20 @@ class ConsentServiceTest extends TestCase
     public function test_is_granted_true_after_capture(): void
     {
         $firm = Firm::factory()->create();
-        $this->service->capture($firm, 501, ConsentChannel::Sms, 'v1');
+        $client = Client::factory()->forFirm($firm)->create();
+        $this->service->capture($firm, $client->id, ConsentChannel::Sms, 'v1');
 
-        $this->assertTrue($this->service->isGranted($firm, 501, ConsentChannel::Sms));
+        $this->assertTrue($this->service->isGranted($firm, $client->id, ConsentChannel::Sms));
     }
 
     public function test_is_granted_false_after_revoke(): void
     {
         $firm = Firm::factory()->create();
-        $this->service->capture($firm, 501, ConsentChannel::Sms, 'v1');
-        $this->service->revoke($firm, 501, ConsentChannel::Sms);
+        $client = Client::factory()->forFirm($firm)->create();
 
-        $this->assertFalse($this->service->isGranted($firm, 501, ConsentChannel::Sms));
+        $this->service->capture($firm, $client->id, ConsentChannel::Sms, 'v1');
+        $this->service->revoke($firm, $client->id, ConsentChannel::Sms, reason: 'client requested opt-out');
+
+        $this->assertFalse($this->service->isGranted($firm, $client->id, ConsentChannel::Sms));
     }
 }

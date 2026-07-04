@@ -12,10 +12,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * CommunicationConsent — the compliance record. client_id is a
- * deferred FK (see ClientCommunicationPreference). Only ConsentService
- * may transition status/granted_at/revoked_at — every transition must
- * be paired with a CommunicationConsentEvent row.
+ * CommunicationConsent — client_id's real foreign key is now completed
+ * (Phase 2 migration
+ * 2026_07_05_600023_add_client_foreign_key_to_communication_consents_table.php).
+ * Adding the client() relationship below, same as
+ * ClientCommunicationPreference. Only ConsentService may transition
+ * status/granted_at/revoked_at — every transition must be paired with
+ * a CommunicationConsentEvent row.
  */
 class CommunicationConsent extends Model
 {
@@ -48,6 +51,14 @@ class CommunicationConsent extends Model
     public function firm(): BelongsTo
     {
         return $this->belongsTo(Firm::class);
+    }
+
+    /**
+     * Phase 2 addition — the real relationship, now that Client exists.
+     */
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(Client::class);
     }
 
     public function events(): HasMany

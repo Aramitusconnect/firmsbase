@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Models\Client;
 use App\Models\ClientCommunicationPreference;
 use App\Models\Firm;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -17,8 +18,7 @@ class ClientCommunicationPreferenceFactory extends Factory
     {
         return [
             'firm_id' => Firm::factory(),
-            // Deferred FK: no Client model exists yet.
-            'client_id' => $this->faker->numberBetween(1, 100000),
+            'client_id' => null,
             'preferred_language' => 'en',
             'preferred_timezone' => 'America/New_York',
             'notification_frequency' => 'immediate',
@@ -28,11 +28,35 @@ class ClientCommunicationPreferenceFactory extends Factory
 
     public function forFirm(Firm $firm): static
     {
-        return $this->state(fn () => ['firm_id' => $firm->id]);
+        return $this->state(fn () => [
+            'firm_id' => $firm->id,
+        ]);
+    }
+
+    public function forClient(Client $client): static
+    {
+        return $this->state(fn () => [
+            'firm_id' => $client->firm_id,
+            'client_id' => $client->id,
+        ]);
+    }
+
+    public function withClient(): static
+    {
+        return $this->state(function () {
+            $client = Client::factory()->create();
+
+            return [
+                'firm_id' => $client->firm_id,
+                'client_id' => $client->id,
+            ];
+        });
     }
 
     public function doNotContact(): static
     {
-        return $this->state(fn () => ['do_not_contact' => true]);
+        return $this->state(fn () => [
+            'do_not_contact' => true,
+        ]);
     }
 }

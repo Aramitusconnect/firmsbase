@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Enums\ConsentChannel;
 use App\Enums\ConsentStatus;
+use App\Models\Client;
 use App\Models\CommunicationConsent;
 use App\Models\Firm;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -19,7 +20,7 @@ class CommunicationConsentFactory extends Factory
     {
         return [
             'firm_id' => Firm::factory(),
-            'client_id' => $this->faker->numberBetween(1, 100000),
+            'client_id' => null,
             'channel' => ConsentChannel::Email,
             'status' => ConsentStatus::Granted,
             'consent_text_version' => 'v1',
@@ -33,26 +34,52 @@ class CommunicationConsentFactory extends Factory
 
     public function forFirm(Firm $firm): static
     {
-        return $this->state(fn () => ['firm_id' => $firm->id]);
+        return $this->state(fn () => [
+            'firm_id' => $firm->id,
+        ]);
+    }
+
+    public function forClient(Client $client): static
+    {
+        return $this->state(fn () => [
+            'firm_id' => $client->firm_id,
+            'client_id' => $client->id,
+        ]);
+    }
+
+    public function withClient(): static
+    {
+        return $this->state(function () {
+            $client = Client::factory()->create();
+
+            return [
+                'firm_id' => $client->firm_id,
+                'client_id' => $client->id,
+            ];
+        });
     }
 
     public function channel(ConsentChannel $channel): static
     {
-        return $this->state(fn () => ['channel' => $channel]);
+        return $this->state(fn () => [
+            'channel' => $channel,
+        ]);
     }
 
     public function revoked(): static
     {
         return $this->state(fn () => [
             'status' => ConsentStatus::Revoked,
-            'revoked_at' => now(),
+            'granted_at' => now()->subDays(2),
+            'revoked_at' => now()->subDay(),
         ]);
     }
 
     public function expired(): static
     {
         return $this->state(fn () => [
-            'status' => ConsentStatus::Expired,
+            'status' => ConsentStatus::Granted,
+            'granted_at' => now()->subDays(10),
             'expires_at' => now()->subDay(),
         ]);
     }

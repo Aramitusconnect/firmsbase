@@ -9,10 +9,11 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * ClientCommunicationPreference — client_id is a deferred FK (plain
- * nullable unsigned bigint). `clients` does not exist yet; the client
- * phase adds the real foreign key via ALTER TABLE. No clientId()
- * relationship yet — there is no Client model to point it at.
+ * ClientCommunicationPreference — client_id's real foreign key is now
+ * completed (Phase 2 migration
+ * 2026_07_05_600022_add_client_foreign_key_to_client_communication_preferences_table.php),
+ * now that `clients` exists. Adding the client() relationship below is
+ * exactly the moment Phase 1's doc comment said would come.
  */
 class ClientCommunicationPreference extends Model
 {
@@ -31,11 +32,20 @@ class ClientCommunicationPreference extends Model
     {
         return [
             'do_not_contact' => 'boolean',
+            'metadata' => 'array',
         ];
     }
 
     public function firm(): BelongsTo
     {
         return $this->belongsTo(Firm::class);
+    }
+
+    /**
+     * Phase 2 addition — the real relationship, now that Client exists.
+     */
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(Client::class);
     }
 }
