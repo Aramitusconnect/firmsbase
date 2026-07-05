@@ -50,6 +50,18 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * rules are reachable transitively through these, so no additional
  * relation was added for each of them). No new fillable column was
  * added to firms itself in Phase 9 either.
+ * Phase 10 addition: form drafts and generated documents — the two
+ * top-level firm-owned workflow roots of the legal form automation and
+ * document generation foundation (form draft values, review events,
+ * missing-data items, and checklist items are reachable transitively
+ * through form_drafts; generated_document_events are reachable
+ * transitively through generated_documents, so no additional relation
+ * was added for each of them). form_templates, form_template_versions,
+ * form_fields, form_mapping_rules, form_edition_watch_items,
+ * document_templates, and document_template_versions are global/
+ * platform-curated content — not firm-owned — and are deliberately NOT
+ * Firm relations. No new fillable column was added to firms itself in
+ * Phase 10 either.
  */
 class Firm extends Model
 {
@@ -395,5 +407,18 @@ class Firm extends Model
     public function emailMessages(): HasMany
     {
         return $this->hasMany(EmailMessage::class);
+    }
+
+    /**
+     * Phase 10 additions below.
+     */
+    public function formDrafts(): HasMany
+    {
+        return $this->hasMany(FormDraft::class);
+    }
+
+    public function generatedDocuments(): HasMany
+    {
+        return $this->hasMany(GeneratedDocument::class);
     }
 }
