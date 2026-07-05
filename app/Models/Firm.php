@@ -100,6 +100,18 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * firm.firmSettings (payment_mode/trust_iolta_protection), the existing
  * trust_iolta entitlement, and a TrustModeActivationLinked
  * trust_approval_events row — none of which required a new column here.
+ * Phase 14 addition: webhook subscriptions — the single top-level
+ * firm-owned root of the outbound webhook foundation (webhook_events,
+ * webhook_deliveries, webhook_delivery_attempts, and webhook_secrets
+ * are all reachable transitively through webhook_subscriptions, or are
+ * firm-scoped-but-not-subscription-owned append-only logs reachable by
+ * direct query, matching the transitive-reachability reasoning used in
+ * every prior phase — webhook_events in particular is a firm-wide log
+ * that fans out to N webhook_deliveries across possibly-multiple
+ * subscriptions, so it deliberately is NOT reachable only through one
+ * subscription and is given no separate Firm relation of its own,
+ * consistent with how trust_approval_events was handled in Phase 13).
+ * No new fillable column was added to firms itself in Phase 14 either.
  */
 class Firm extends Model
 {
@@ -502,5 +514,13 @@ class Firm extends Model
     public function trustRefundRequests(): HasMany
     {
         return $this->hasMany(TrustRefundRequest::class);
+    }
+
+    /**
+     * Phase 14 additions below.
+     */
+    public function webhookSubscriptions(): HasMany
+    {
+        return $this->hasMany(WebhookSubscription::class);
     }
 }
