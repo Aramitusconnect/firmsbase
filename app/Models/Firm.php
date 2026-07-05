@@ -62,6 +62,16 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * platform-curated content — not firm-owned — and are deliberately NOT
  * Firm relations. No new fillable column was added to firms itself in
  * Phase 10 either.
+ * Phase 11 addition: signature requests and PDF view events — the two
+ * top-level firm-owned roots of the advanced PDF viewer, e-signature,
+ * and execution evidence foundation (signature_request_recipients,
+ * signature_events, and signature_certificates are reachable
+ * transitively through signature_requests, so no additional relation
+ * was added for each of them; document_hashes is reachable per source
+ * document, not through Firm, since it is shared evidentiary metadata
+ * for both documents and generated_documents rather than a child of
+ * either). No new fillable column was added to firms itself in Phase
+ * 11 either.
  */
 class Firm extends Model
 {
@@ -420,5 +430,18 @@ class Firm extends Model
     public function generatedDocuments(): HasMany
     {
         return $this->hasMany(GeneratedDocument::class);
+    }
+
+    /**
+     * Phase 11 additions below.
+     */
+    public function signatureRequests(): HasMany
+    {
+        return $this->hasMany(SignatureRequest::class);
+    }
+
+    public function pdfViewEvents(): HasMany
+    {
+        return $this->hasMany(PdfViewEvent::class);
     }
 }

@@ -53,14 +53,33 @@ class Phase6NoDuplicateTableTest extends TestCase
         );
     }
 
-    public function test_signature_requests_table_was_not_created(): void
+    public function test_signature_requests_table_is_owned_by_phase_11_not_phase_6(): void
     {
-        $this->assertFalse(
-            Schema::hasTable('signature_requests'),
-            'signature_requests must not exist in Phase 6 — the acknowledgment foundation is a '
-            .'value object and service only, with no table, per the approved manifest.'
-        );
+        $allMigrations = glob(database_path('migrations/*.php'));
+        $phase11Migrations = glob(database_path('migrations/2026_07_14_*.php'));
+
+        $this->assertNotEmpty($phase11Migrations);
+
+        $phase11Contents = '';
+        foreach ($phase11Migrations as $migration) {
+            $phase11Contents .= file_get_contents($migration) . PHP_EOL;
+        }
+
+        $this->assertStringContainsString("Schema::create('signature_requests'", $phase11Contents);
+
+        $nonPhase11Contents = '';
+        foreach ($allMigrations as $migration) {
+            if (str_starts_with(basename($migration), '2026_07_14_')) {
+                continue;
+            }
+
+            $nonPhase11Contents .= file_get_contents($migration) . PHP_EOL;
+        }
+
+        $this->assertStringNotContainsString("Schema::create('signature_requests'", $nonPhase11Contents);
+        $this->assertStringNotContainsString('Schema::create("signature_requests"', $nonPhase11Contents);
     }
+
 
     public function test_firm_licenses_gained_only_the_approved_additive_columns(): void
     {
