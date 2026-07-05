@@ -12,6 +12,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * (tenant isolation flows through invoice_id, same pattern as
  * Phase 2's matter_parties). No uuid — accessed only through the
  * parent Invoice.
+ *
+ * Phase 12 addition: expense_id (nullable, unique) — populated only
+ * when line_type is ReimbursableExpense, and only by
+ * ReimbursableExpenseInvoiceLineService (the sole writer of that
+ * combination). The unique constraint on invoice_lines.expense_id
+ * (2026_07_16_900010 migration) guarantees a given expense can never
+ * back more than one invoice line, at the database level.
  */
 class InvoiceLine extends Model
 {
@@ -20,6 +27,7 @@ class InvoiceLine extends Model
     protected $fillable = [
         'invoice_id',
         'time_entry_id',
+        'expense_id',
         'line_type',
         'description',
         'quantity',
@@ -44,5 +52,14 @@ class InvoiceLine extends Model
     public function timeEntry(): BelongsTo
     {
         return $this->belongsTo(TimeEntry::class);
+    }
+
+    /**
+     * Phase 12 addition. Only populated for line_type ===
+     * InvoiceLineType::ReimbursableExpense.
+     */
+    public function expense(): BelongsTo
+    {
+        return $this->belongsTo(Expense::class);
     }
 }

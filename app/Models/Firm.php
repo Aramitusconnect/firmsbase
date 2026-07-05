@@ -72,6 +72,19 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * for both documents and generated_documents rather than a child of
  * either). No new fillable column was added to firms itself in Phase
  * 11 either.
+ * Phase 12 addition: expenses and accounting export batches — the two
+ * top-level firm-owned roots of the operating accounting and expenses
+ * foundation (expense_receipts, expense_approvals, and matter_expenses
+ * are reachable transitively through expenses; accounting_export_lines
+ * and accounting_export_errors are reachable transitively through
+ * accounting_export_batches, so no additional relation was added for
+ * each of them). chart_of_accounts and expense_categories are firm-
+ * owned but not given direct Firm relations either, for the same
+ * transitive-reachability reasoning (chart_of_accounts is reachable via
+ * expense_categories.chartOfAccount() and accounting_export_lines.chartOfAccount();
+ * expense_categories via expenses.category()). No new fillable column
+ * was added to firms itself in Phase 12 either — this table has and
+ * must never have any trust/IOLTA column (project rule).
  */
 class Firm extends Model
 {
@@ -443,5 +456,18 @@ class Firm extends Model
     public function pdfViewEvents(): HasMany
     {
         return $this->hasMany(PdfViewEvent::class);
+    }
+
+    /**
+     * Phase 12 additions below.
+     */
+    public function expenses(): HasMany
+    {
+        return $this->hasMany(Expense::class);
+    }
+
+    public function accountingExportBatches(): HasMany
+    {
+        return $this->hasMany(AccountingExportBatch::class);
     }
 }
