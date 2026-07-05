@@ -25,11 +25,26 @@ use Illuminate\Support\Facades\DB;
  * production data, and does not move trust/IOLTA money — those
  * remain entirely out of Phase 7 scope, gated behind whichever future
  * phase implements execution.
+ *
+ * Phase 13 addition (approved correction #7): request() now accepts an
+ * optional `array $metadata = []` parameter, persisted into the
+ * EXISTING, already-fillable, already-array-cast `metadata` column.
+ * The default of `[]` is fully backward-compatible — every Phase 7
+ * caller/test that does not pass this argument behaves exactly as
+ * before. This lets TrustModeActivationService (Phase 13) record which
+ * firm a given trust_mode_activation request belongs to
+ * (`['firm_id' => $firm->id]`) without this table gaining a new column
+ * and without any other Phase 7 file changing. No other line in this
+ * file was touched.
  */
 class HighRiskPlatformChangePolicyService
 {
-    public function request(HighRiskChangeType $changeType, PlatformAdmin $requestedBy, string $reason): HighRiskChangeRequest
-    {
+    public function request(
+        HighRiskChangeType $changeType,
+        PlatformAdmin $requestedBy,
+        string $reason,
+        array $metadata = [],
+    ): HighRiskChangeRequest {
         if (trim($reason) === '') {
             throw new \InvalidArgumentException('A reason is required for every high-risk change request.');
         }
@@ -39,6 +54,7 @@ class HighRiskPlatformChangePolicyService
             'status' => HighRiskChangeRequestStatus::Pending,
             'reason' => $reason,
             'requested_by' => $requestedBy->id,
+            'metadata' => $metadata,
         ]);
 
         $this->audit($request, 'high_risk_change_requested');

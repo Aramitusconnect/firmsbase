@@ -85,6 +85,21 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * expense_categories via expenses.category()). No new fillable column
  * was added to firms itself in Phase 12 either — this table has and
  * must never have any trust/IOLTA column (project rule).
+ * Phase 13 addition: trust accounts, trust transfer requests, and
+ * trust refund requests — the three top-level firm-owned roots of the
+ * trust accounting foundation (trust_ledgers/trust_balances/
+ * matter_trust_balances/trust_ledger_entries are reachable transitively
+ * through trust_accounts -> trust_ledgers; trust_approval_events and
+ * trust_chargeback_events are firm-owned append-only/lifecycle logs
+ * reachable by direct query but not given their own Firm relation,
+ * matching the transitive-reachability reasoning used in every prior
+ * phase; trust_reconciliations is reachable via
+ * trustAccounts()->reconciliations()). No new fillable column was
+ * added to firms itself in Phase 13 either. Trust eligibility itself is
+ * resolved by TrustEligibilityService from firm.customer_type,
+ * firm.firmSettings (payment_mode/trust_iolta_protection), the existing
+ * trust_iolta entitlement, and a TrustModeActivationLinked
+ * trust_approval_events row — none of which required a new column here.
  */
 class Firm extends Model
 {
@@ -469,5 +484,23 @@ class Firm extends Model
     public function accountingExportBatches(): HasMany
     {
         return $this->hasMany(AccountingExportBatch::class);
+    }
+
+    /**
+     * Phase 13 additions below.
+     */
+    public function trustAccounts(): HasMany
+    {
+        return $this->hasMany(TrustAccount::class);
+    }
+
+    public function trustTransferRequests(): HasMany
+    {
+        return $this->hasMany(TrustTransferRequest::class);
+    }
+
+    public function trustRefundRequests(): HasMany
+    {
+        return $this->hasMany(TrustRefundRequest::class);
     }
 }
