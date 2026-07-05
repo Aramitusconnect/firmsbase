@@ -44,6 +44,12 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * migration projects — all firm-scoped Import/Export/API foundation
  * relations. No new fillable column was added to firms itself in
  * Phase 8 either.
+ * Phase 9 addition: connected email accounts and captured email
+ * messages — the two top-level roots of the email integration
+ * foundation (message links, attachments, sync events, and visibility
+ * rules are reachable transitively through these, so no additional
+ * relation was added for each of them). No new fillable column was
+ * added to firms itself in Phase 9 either.
  */
 class Firm extends Model
 {
@@ -376,5 +382,18 @@ class Firm extends Model
     public function migrationProjects(): HasMany
     {
         return $this->hasMany(MigrationProject::class);
+    }
+
+    /**
+     * Phase 9 additions below.
+     */
+    public function emailAccounts(): HasMany
+    {
+        return $this->hasMany(EmailAccount::class);
+    }
+
+    public function emailMessages(): HasMany
+    {
+        return $this->hasMany(EmailMessage::class);
     }
 }
