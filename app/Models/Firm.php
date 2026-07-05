@@ -40,6 +40,10 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * project, and customer success health score snapshots — all
  * platform-staff-facing, cross-firm-accessible relations. No new
  * fillable column was added to firms itself in Phase 7 either.
+ * Phase 8 addition: API keys, import batches, export jobs, and
+ * migration projects — all firm-scoped Import/Export/API foundation
+ * relations. No new fillable column was added to firms itself in
+ * Phase 8 either.
  */
 class Firm extends Model
 {
@@ -349,5 +353,28 @@ class Firm extends Model
     public function customerSuccessHealthScores(): HasMany
     {
         return $this->hasMany(CustomerSuccessHealthScore::class);
+    }
+
+    /**
+     * Phase 8 additions below.
+     */
+    public function apiKeys(): HasMany
+    {
+        return $this->hasMany(ApiKey::class);
+    }
+
+    public function importBatches(): HasMany
+    {
+        return $this->hasMany(ImportBatch::class);
+    }
+
+    public function exportJobs(): HasMany
+    {
+        return $this->hasMany(ExportJob::class);
+    }
+
+    public function migrationProjects(): HasMany
+    {
+        return $this->hasMany(MigrationProject::class);
     }
 }
