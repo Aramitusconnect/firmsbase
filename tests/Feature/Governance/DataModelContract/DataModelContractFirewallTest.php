@@ -1,0 +1,168 @@
+<?php
+
+namespace Tests\Feature\Governance\DataModelContract;
+
+use Tests\TestCase;
+
+/**
+ * DataModelContractFirewallTest — proves Section 26 stayed within its
+ * declared implementation boundary: no migrations, no new tables, no
+ * UI/routes/controllers, no activity_logs, no real execution in any
+ * new mapping service, and no protected file was modified (other than
+ * the one explicitly allowed exception).
+ */
+class DataModelContractFirewallTest extends TestCase
+{
+    private const NEW_SERVICE_FILES = [
+        'DataModelContractMappingService.php',
+        'RowLevelSecurityCoverageMappingService.php',
+        'IdempotencyKeyCoverageMappingService.php',
+    ];
+
+    private const FORBIDDEN_TOKENS = [
+        'DB::statement', 'DB::unprepared', 'Schema::create', 'Schema::table', 'Schema::drop',
+        'Http::', 'GuzzleHttp', 'curl_init', 'curl_exec', 'fsockopen', 'pfsockopen',
+        'stream_socket_client', 'proc_open(', 'popen(', 'passthru(', 'exec(', 'shell_exec(', 'system(',
+        'Process::', 'mkdir(', 'Aws\\', 'Docker', 'ssh2_connect', 'phpseclib',
+        'Stripe\\', 'STRIPE_', 'dns_get_record', 'gethostbyname', 'checkdnsrr',
+        'Route::', 'extends Controller', 'Livewire\\Component', 'Filament\\Resources',
+    ];
+
+    private const PROTECTED_FILES = [
+        'app/Models/Concerns/BelongsToTenant.php',
+        'app/Models/Concerns/HasPublicUuid.php',
+        'app/Services/TenantContextResolver.php',
+        'app/Services/TrustLedgerEntryReversalService.php',
+        'app/Enums/FirmUserRole.php',
+        'app/Services/ImportDuplicateDetectionService.php',
+        'app/Models/Payment.php',
+        'app/Models/TrustLedgerEntry.php',
+        'app/Models/WebhookEvent.php',
+        'app/Models/WebhookDelivery.php',
+        'app/Models/WebhookDeliveryAttempt.php',
+        'app/Models/SecurityEvent.php',
+        'app/Services/TimelineEventRecorder.php',
+    ];
+
+    public function test_no_new_migration_files_were_added(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('database/migrations');
+
+        $this->assertEmpty(
+            $changed,
+            'Section 26 must add no migrations, but found changed/untracked migration files: '.implode(', ', $changed)
+        );
+    }
+
+    public function test_no_activity_logs_model_table_or_migration_was_added(): void
+    {
+        $this->assertFalse(\Illuminate\Support\Facades\Schema::hasTable('activity_logs'));
+        $this->assertFileDoesNotExist(app_path('Models/ActivityLog.php'));
+
+        $migrationMatches = glob(database_path('migrations/*activity_log*'));
+        $this->assertEmpty($migrationMatches, 'No activity_log* migration file may exist: '.implode(', ', $migrationMatches ?: []));
+    }
+
+    public function test_no_forbidden_execution_or_network_token_appears_in_any_new_mapping_service(): void
+    {
+        $violations = [];
+
+        foreach (self::NEW_SERVICE_FILES as $filename) {
+            $path = app_path("Services/{$filename}");
+            $this->assertFileExists($path, "Expected Section 26 service file missing: {$filename}");
+
+            $source = $this->stripComments(file_get_contents($path));
+
+            foreach (self::FORBIDDEN_TOKENS as $token) {
+                if (str_contains($source, $token)) {
+                    $violations[] = "{$filename} contains forbidden token: {$token}";
+                }
+            }
+        }
+
+        $this->assertEmpty($violations, implode("\n", $violations));
+    }
+
+    public function test_no_route_controller_filament_blade_or_livewire_file_was_added(): void
+    {
+        $markers = [
+            'DataModelContractMappingService', 'RowLevelSecurityCoverageMappingService',
+            'IdempotencyKeyCoverageMappingService',
+        ];
+
+        foreach (['routes', 'app/Http/Controllers', 'app/Filament', 'resources/views', 'app/Livewire'] as $relativeDir) {
+            $dir = base_path($relativeDir);
+
+            if (! is_dir($dir)) {
+                continue;
+            }
+
+            $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
+
+            foreach ($iterator as $file) {
+                if (! $file->isFile()) {
+                    continue;
+                }
+
+                $contents = file_get_contents($file->getPathname());
+
+                foreach ($markers as $marker) {
+                    $this->assertStringNotContainsString(
+                        $marker,
+                        $contents,
+                        "Section 26 must introduce no UI/route surface, but found '{$marker}' referenced in {$file->getPathname()}"
+                    );
+                }
+            }
+        }
+
+        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
+        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
+    }
+
+    public function test_protected_files_were_not_modified(): void
+    {
+        $changedRepoWide = $this->changedOrUntrackedPaths('.');
+
+        $touched = array_values(array_intersect(self::PROTECTED_FILES, $changedRepoWide));
+
+        $this->assertEmpty($touched, 'Section 26 must not modify protected files, but found changes to: '.implode(', ', $touched));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function changedOrUntrackedPaths(string $scope): array
+    {
+        $changed = trim((string) shell_exec(
+            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
+        ));
+
+        if ($changed === '') {
+            return [];
+        }
+
+        return preg_split('/\R/', $changed) ?: [];
+    }
+
+    /**
+     * Strips PHP comments (// # and block/doc comments) via the real
+     * tokenizer so forbidden-token checks only ever see executable
+     * code — a token merely mentioned in prose must never fail a
+     * firewall test.
+     */
+    private function stripComments(string $source): string
+    {
+        $stripped = '';
+
+        foreach (token_get_all($source) as $token) {
+            if (is_array($token) && in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true)) {
+                continue;
+            }
+
+            $stripped .= is_array($token) ? $token[1] : $token;
+        }
+
+        return $stripped;
+    }
+}
