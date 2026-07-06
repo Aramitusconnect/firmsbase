@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ManualPaymentMethod;
 use App\Enums\PaymentClassification;
 use App\Enums\PaymentStatus;
+use App\Enums\WebhookEventType;
 use App\Exceptions\PaymentBlockedException;
 use App\Models\Client;
 use App\Models\Firm;
@@ -30,6 +31,13 @@ use Illuminate\Support\Facades\DB;
  * creating a second row. The partial unique index on
  * payments(firm_id, idempotency_key) is the concurrency-safe backstop
  * if two requests race past the initial check simultaneously.
+ *
+ * Phase 14b addition: fires payment.recorded exactly once, ONLY inside
+ * the $result->accepted branch (never for a blocked payment, and never
+ * on the idempotent-replay early return above — that return happens
+ * before this branch is ever reached, so a repeated idempotency key
+ * cannot double-fire), registered via DB::afterCommit() from inside
+ * the existing DB::transaction().
  */
 class ManualPaymentService
 {
@@ -67,7 +75,8 @@ class ManualPaymentService
 
             if ($existing) {
                 // Idempotent replay: same key always returns the
-                // original outcome, never a second row.
+                // original outcome, never a second row, and never
+                // fires a second payment.recorded webhook event.
                 return $existing;
             }
 
@@ -109,6 +118,16 @@ class ManualPaymentService
                     'payment_id' => $payment->id,
                     'amount_cents' => $amountCents,
                 ]);
+
+                $payment = $payment->fresh();
+
+                DB::afterCommit(function () use ($firm, $payment) {
+                    try {
+                        app(WebhookEventRecorderService::class)->record($firm, WebhookEventType::PaymentRecorded, $payment);
+                    } catch (\Throwable $e) {
+                        report($e);
+                    }
+                });
             } else {
                 $this->timeline->record($firm, 'payment_blocked', $payment, $recordedBy, [
                     'payment_id' => $payment->id,

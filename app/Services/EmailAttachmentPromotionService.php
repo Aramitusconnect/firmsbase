@@ -8,9 +8,11 @@ use App\Enums\EmailAttachmentPromotionStatus;
 use App\Enums\EmailStorageMode;
 use App\Enums\EmailSyncEventType;
 use App\Enums\EmailSyncOutcome;
+use App\Enums\WebhookEventType;
 use App\Models\Document;
 use App\Models\EmailAttachment;
 use App\ValueObjects\EmailAttachmentPromotionResult;
+use Illuminate\Support\Facades\DB;
 
 /**
  * EmailAttachmentPromotionService — the ONLY place an EmailAttachment
@@ -28,6 +30,15 @@ use App\ValueObjects\EmailAttachmentPromotionResult;
  * requirement) — never from provider_attachment_id or any other
  * provider-supplied field — which is what makes "no cross-firm mailbox
  * exposure" hold even against malformed/malicious fixture data.
+ *
+ * Phase 14b addition: fires document.uploaded exactly once, only on
+ * the true promotion-success path below (after the firm-crossing guard
+ * and the document_id/promotion_status update) — never from either
+ * block() early return (unsupported storage mode, failed/infected
+ * scan). Not wrapped in an explicit DB::transaction(), so
+ * DB::afterCommit() runs the closure immediately (no active
+ * transaction to defer past), same documented behavior relied on in
+ * DocumentSecurityService::upload().
  */
 class EmailAttachmentPromotionService
 {
@@ -93,6 +104,14 @@ class EmailAttachmentPromotionService
         ]);
 
         $this->auditPromoted($attachment);
+
+        DB::afterCommit(function () use ($attachment, $document) {
+            try {
+                app(WebhookEventRecorderService::class)->record($attachment->firm, WebhookEventType::DocumentUploaded, $document);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        });
 
         return EmailAttachmentPromotionResult::promoted($document->id);
     }

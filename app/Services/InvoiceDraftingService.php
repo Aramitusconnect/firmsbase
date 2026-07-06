@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\InvoiceLineType;
 use App\Enums\InvoiceStatus;
 use App\Enums\InvoiceType;
+use App\Enums\WebhookEventType;
 use App\Models\Client;
 use App\Models\Firm;
 use App\Models\Invoice;
@@ -21,6 +22,12 @@ use Illuminate\Support\Facades\DB;
  * FlatFeeInvoiceService). All Invoice status transitions live here;
  * amount fields are recomputed from invoice_lines every time, never
  * hand-set elsewhere.
+ *
+ * Phase 14b addition: both creation methods below fire invoice.created
+ * exactly once, registered via DB::afterCommit() from inside each
+ * method's existing DB::transaction(), after totals have already been
+ * recomputed — so the payload-visible total_cents/currency reflect the
+ * final, durable invoice, not a pre-totals snapshot.
  */
 class InvoiceDraftingService
 {
@@ -97,7 +104,17 @@ class InvoiceDraftingService
                 'invoice_type' => InvoiceType::TimeAndExpense->value,
             ]);
 
-            return $invoice->fresh('lines');
+            $invoice = $invoice->fresh('lines');
+
+            DB::afterCommit(function () use ($firm, $invoice) {
+                try {
+                    app(WebhookEventRecorderService::class)->record($firm, WebhookEventType::InvoiceCreated, $invoice);
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+            });
+
+            return $invoice;
         });
     }
 
@@ -136,7 +153,17 @@ class InvoiceDraftingService
                 'invoice_type' => InvoiceType::FlatFee->value,
             ]);
 
-            return $invoice->fresh('lines');
+            $invoice = $invoice->fresh('lines');
+
+            DB::afterCommit(function () use ($firm, $invoice) {
+                try {
+                    app(WebhookEventRecorderService::class)->record($firm, WebhookEventType::InvoiceCreated, $invoice);
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+            });
+
+            return $invoice;
         });
     }
 

@@ -7,6 +7,7 @@ use App\Enums\ImportBatchStatus;
 use App\Enums\ImportEntityType;
 use App\Enums\ImportRowStatus;
 use App\Enums\RollbackRecordStatus;
+use App\Enums\WebhookEventType;
 use App\Models\Client;
 use App\Models\Contact;
 use App\Models\Document;
@@ -44,6 +45,22 @@ use Illuminate\Support\Facades\DB;
  * "foundation" scope covers safely. applyRow() marks these two entity
  * types' rows Skipped with a clear reason rather than silently
  * fabricating a partial record.
+ *
+ * Phase 14b addition: on a successfully applied row whose entity type
+ * is one of the 5 webhook-approved kinds (FirmLead, Client, Matter,
+ * Document, Invoice), fires the matching WebhookEventType exactly once,
+ * registered via DB::afterCommit() from inside applyRow()'s existing
+ * DB::transaction() closure so the event is never recorded ahead of the
+ * row's own durable commit (Phase 14b rule 11) and never fires at all
+ * if the transaction rolls back (rule 10 — it rolls back together, same
+ * as every other write in this closure). Contact/Party/TimeEntry/
+ * PaymentPlan are not approved webhook event subjects and are
+ * deliberately left unwired. Even though WebhookEventRecorderService::
+ * record() is documented to never throw (Phase 14 correction #16), the
+ * call in recordWebhookEventForAppliedRecord() is still wrapped in its
+ * own try/catch(\Throwable) that reports and swallows any failure — the
+ * import-apply workflow must survive regardless of what happens inside
+ * record() (Phase 14b rule 14).
  */
 class ImportApplyService
 {
@@ -110,12 +127,48 @@ class ImportApplyService
                     'record_type' => $record::class,
                     'record_id' => $record->id,
                 ]);
+
+                $this->recordWebhookEventForAppliedRecord($firm, $batch->entity_type, $record);
             } catch (\Throwable $e) {
                 $row->update(['status' => ImportRowStatus::Failed]);
                 $row->errors()->create([
                     'severity' => \App\Enums\ImportErrorSeverity::Blocking,
                     'message' => 'Apply failed: '.$e->getMessage(),
                 ]);
+            }
+        });
+    }
+
+    /**
+     * Fires the webhook event matching a just-applied import row, only
+     * for the 5 entity types that are approved webhook subjects.
+     * Registered via DB::afterCommit() so it never fires ahead of this
+     * row's own transaction commit and never fires at all if the
+     * transaction rolls back (it is inside the same transaction as the
+     * record creation, row status update, rollback-record, and audit
+     * writes above — correction: rolls back together, per Phase 14b
+     * rule 10/11).
+     */
+    private function recordWebhookEventForAppliedRecord(Firm $firm, ImportEntityType $entityType, object $record): void
+    {
+        $eventType = match ($entityType) {
+            ImportEntityType::FirmLead => WebhookEventType::LeadCreated,
+            ImportEntityType::Client => WebhookEventType::ClientCreated,
+            ImportEntityType::Matter => WebhookEventType::MatterCreated,
+            ImportEntityType::Document => WebhookEventType::DocumentUploaded,
+            ImportEntityType::Invoice => WebhookEventType::InvoiceCreated,
+            default => null,
+        };
+
+        if ($eventType === null) {
+            return;
+        }
+
+        DB::afterCommit(function () use ($firm, $eventType, $record) {
+            try {
+                app(WebhookEventRecorderService::class)->record($firm, $eventType, $record);
+            } catch (\Throwable $e) {
+                report($e);
             }
         });
     }

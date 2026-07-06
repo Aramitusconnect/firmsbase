@@ -6,6 +6,7 @@ use App\Enums\DocumentRequestItemStatus;
 use App\Enums\DocumentScanStatus;
 use App\Enums\DocumentStatus;
 use App\Enums\DocumentVersionStatus;
+use App\Enums\WebhookEventType;
 use App\Models\Document;
 use App\Models\DocumentVersion;
 use App\Models\User;
@@ -18,6 +19,14 @@ use Illuminate\Support\Facades\DB;
  * documents unless firm policy allows replacement and preserves
  * history" (project rule) — the prior version/document is never
  * deleted, only superseded.
+ *
+ * Phase 14b addition: replaceWith() fires document.uploaded exactly
+ * once for the new replacement Document (never for $original, which is
+ * merely marked Replaced, not re-uploaded), registered via
+ * DB::afterCommit() from inside this method's existing
+ * DB::transaction() so it never fires ahead of the durable commit and
+ * rolls back together with the version snapshot / original-document
+ * update if anything here throws.
  */
 class DocumentReplacementService
 {
@@ -89,6 +98,14 @@ class DocumentReplacementService
             if ($original->documentRequestItem && $original->documentRequestItem->status === DocumentRequestItemStatus::NeedsReplacement) {
                 $original->documentRequestItem->update(['status' => DocumentRequestItemStatus::Submitted, 'submitted_at' => now()]);
             }
+
+            DB::afterCommit(function () use ($replacement) {
+                try {
+                    app(WebhookEventRecorderService::class)->record($replacement->firm, WebhookEventType::DocumentUploaded, $replacement);
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+            });
 
             return $replacement;
         });

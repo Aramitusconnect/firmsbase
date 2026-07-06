@@ -3,8 +3,10 @@
 namespace App\Services;
 
 use App\Enums\MatterReadinessStatus;
+use App\Enums\WebhookEventType;
 use App\Models\Matter;
 use App\Models\MatterReadinessScore;
+use Illuminate\Support\Facades\DB;
 
 /**
  * MatterReadinessService — recomputes and persists exactly one
@@ -12,6 +14,15 @@ use App\Models\MatterReadinessScore;
  * ReadinessScorecardRegistry currently evaluates (project rule:
  * "Readiness must work only with components that currently exist").
  * Never requires AI (project rule).
+ *
+ * Phase 14b addition: recompute() fires matter.readiness_changed only
+ * when the status actually changes ($previousStatus !== $status->value)
+ * — NOT on every call, unlike the unconditional ReadinessScoreEvent
+ * audit row created below. The webhook subject is always the
+ * MatterReadinessScore itself, never ReadinessScoreEvent (which lacks
+ * satisfied_count/total_count and would over-fire). Not wrapped in an
+ * explicit DB::transaction(); DB::afterCommit() runs the closure
+ * immediately since there is no active transaction to defer past.
  */
 class MatterReadinessService
 {
@@ -63,6 +74,18 @@ class MatterReadinessService
             'metadata_json' => ['satisfied_count' => $satisfiedCount, 'total_count' => $totalCount],
         ]);
 
-        return $score->fresh();
+        $freshScore = $score->fresh();
+
+        if ($previousStatus !== $status->value) {
+            DB::afterCommit(function () use ($matter, $freshScore) {
+                try {
+                    app(WebhookEventRecorderService::class)->record($matter->firm, WebhookEventType::MatterReadinessChanged, $freshScore);
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+            });
+        }
+
+        return $freshScore;
     }
 }

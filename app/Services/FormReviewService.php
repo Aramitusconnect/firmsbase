@@ -6,9 +6,11 @@ use App\Enums\FormDraftStatus;
 use App\Enums\FormDraftValueSource;
 use App\Enums\FormMappingContentStatus;
 use App\Enums\FormReviewEventType;
+use App\Enums\WebhookEventType;
 use App\Models\FirmUser;
 use App\Models\FormDraft;
 use App\Models\FormReviewEvent;
+use Illuminate\Support\Facades\DB;
 
 /**
  * FormReviewService — every status transition on a FormDraft goes
@@ -27,6 +29,15 @@ use App\Models\FormReviewEvent;
  * generation time), and refreshes used_sample_mapping as a side
  * effect. Approval additionally requires the review checklist to be
  * complete.
+ *
+ * Phase 14b addition: approve() fires form.approved exactly once, only
+ * after every precondition above has already passed and the status
+ * update + review event have both been written — never on the
+ * role-check throw, the transition-not-allowed throw, the incomplete-
+ * checklist throw, or the used-sample-mapping throw, all of which
+ * happen before this line is ever reached. Not wrapped in an explicit
+ * DB::transaction(); DB::afterCommit() runs the closure immediately
+ * since there is no active transaction to defer past.
  */
 class FormReviewService
 {
@@ -109,7 +120,17 @@ class FormReviewService
 
         $this->recordEvent($draft, FormReviewEventType::Approved, $actor);
 
-        return $draft->fresh();
+        $draft = $draft->fresh();
+
+        DB::afterCommit(function () use ($draft) {
+            try {
+                app(WebhookEventRecorderService::class)->record($draft->firm, WebhookEventType::FormApproved, $draft);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        });
+
+        return $draft;
     }
 
     public function reject(FormDraft $draft, FirmUser $actor, string $reason): FormDraft

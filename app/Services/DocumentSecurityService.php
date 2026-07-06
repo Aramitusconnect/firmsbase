@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\DocumentScanStatus;
 use App\Enums\DocumentStatus;
+use App\Enums\WebhookEventType;
 use App\Models\Client;
 use App\Models\Document;
 use App\Models\DocumentRequestItem;
@@ -12,6 +13,7 @@ use App\Models\Matter;
 use App\Models\TenantEncryptionKey;
 use App\Models\User;
 use App\ValueObjects\VirusScanResult;
+use Illuminate\Support\Facades\DB;
 
 /**
  * DocumentSecurityService — the only place a Document row is created
@@ -21,6 +23,16 @@ use App\ValueObjects\VirusScanResult;
  * download endpoint must call first. A document may only reach
  * Approved while scan_status is Clean (project rule: virus scanning
  * must be enforced) — enforced here, not left to callers.
+ *
+ * Phase 14b addition: upload() fires document.uploaded exactly once
+ * per successful creation. This method is NOT wrapped in an explicit
+ * DB::transaction() (the single Document::create() call below is
+ * already its own durable write), so DB::afterCommit() executes the
+ * closure immediately, synchronously, with no active transaction to
+ * wait for — this is documented Laravel behavior (a connection with
+ * transactionLevel() === 0 runs afterCommit callbacks right away
+ * rather than deferring them), covered by a dedicated wiring test
+ * (Phase 14b rule 13).
  */
 class DocumentSecurityService
 {
@@ -44,7 +56,7 @@ class DocumentSecurityService
     ): Document {
         $this->uploadPolicy->assertUploadIsAllowed($originalFilename, $sizeBytes);
 
-        return Document::create([
+        $document = Document::create([
             'firm_id' => $firm->id,
             'matter_id' => $matter?->id,
             'client_id' => $client?->id,
@@ -60,6 +72,16 @@ class DocumentSecurityService
             'encryption_key_id' => $encryptionKey?->id,
             'uploaded_by' => $uploadedBy?->id,
         ]);
+
+        DB::afterCommit(function () use ($firm, $document) {
+            try {
+                app(WebhookEventRecorderService::class)->record($firm, WebhookEventType::DocumentUploaded, $document);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        });
+
+        return $document;
     }
 
     /**

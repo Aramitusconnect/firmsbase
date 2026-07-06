@@ -4,11 +4,13 @@ namespace App\Services;
 
 use App\Enums\TaskPriority;
 use App\Enums\TaskStatus;
+use App\Enums\WebhookEventType;
 use App\Models\Client;
 use App\Models\Firm;
 use App\Models\Matter;
 use App\Models\Task;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 /**
  * TaskService — task lifecycle (create/assign/complete/cancel) and
@@ -16,6 +18,14 @@ use App\Models\User;
  * transition exclusively — this service never sets or clears Blocked
  * directly (PDF: "overdue is derived from due_at and status, not
  * manually trusted"; the same discipline applies to Blocked).
+ *
+ * Phase 14b addition: complete() fires task.completed exactly once,
+ * only when the status update below actually succeeds (the guard
+ * above throws for a Blocked task before any write happens, so a
+ * disallowed transition can never fire the event). Not wrapped in an
+ * explicit DB::transaction() — the single update() call is already a
+ * durable write by the time DB::afterCommit()'s closure is registered,
+ * so it runs immediately.
  */
 class TaskService
 {
@@ -70,7 +80,17 @@ class TaskService
 
         $task->update(['status' => TaskStatus::Completed, 'completed_at' => now()]);
 
-        return $task->fresh();
+        $task = $task->fresh();
+
+        DB::afterCommit(function () use ($task) {
+            try {
+                app(WebhookEventRecorderService::class)->record($task->firm, WebhookEventType::TaskCompleted, $task);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        });
+
+        return $task;
     }
 
     public function cancel(Task $task): Task

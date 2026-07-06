@@ -6,11 +6,13 @@ use App\Enums\SignatureEventActorType;
 use App\Enums\SignatureEventType;
 use App\Enums\SignatureRequestStatus;
 use App\Enums\SignatureSourceDocumentType;
+use App\Enums\WebhookEventType;
 use App\Models\DocumentHash;
 use App\Models\SignatureCertificate;
 use App\Models\SignatureRequest;
 use App\ValueObjects\CertificateGenerationResult;
 use App\ValueObjects\SignatureEvidenceSnapshot;
+use Illuminate\Support\Facades\DB;
 
 /**
  * SignatureCertificateService — the ONLY place a signature_certificates
@@ -23,6 +25,16 @@ use App\ValueObjects\SignatureEvidenceSnapshot;
  * signature_request_id DB-unique constraint (see migration) makes a
  * second certificate for the same request structurally impossible,
  * independent of this service's own pre-check.
+ *
+ * Phase 14b addition: generate() fires signature.completed exactly
+ * once, after the request's status is actually set to Completed. The
+ * DB-unique constraint on signature_certificates.signature_request_id
+ * means a second call to generate() for the same request throws at the
+ * "already generated" pre-check above, long before this point — so a
+ * duplicate completion (and a duplicate webhook event) is structurally
+ * impossible, not just discouraged by convention. Not wrapped in an
+ * explicit DB::transaction(); DB::afterCommit() runs the closure
+ * immediately since there is no active transaction to defer past.
  */
 class SignatureCertificateService
 {
@@ -83,6 +95,16 @@ class SignatureCertificateService
             eventType: SignatureEventType::RequestCompleted,
             actorType: SignatureEventActorType::System,
         );
+
+        $completedRequest = $request->fresh();
+
+        DB::afterCommit(function () use ($completedRequest) {
+            try {
+                app(WebhookEventRecorderService::class)->record($completedRequest->firm, WebhookEventType::SignatureCompleted, $completedRequest);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        });
 
         return new CertificateGenerationResult($certificate->id, $certificate->status, $hash->id, $certificate->generated_at);
     }
