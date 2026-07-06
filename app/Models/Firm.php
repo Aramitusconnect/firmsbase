@@ -112,6 +112,18 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * subscription and is given no separate Firm relation of its own,
  * consistent with how trust_approval_events was handled in Phase 13).
  * No new fillable column was added to firms itself in Phase 14 either.
+ * Phase 15 addition: AI settings, firm-owned provider keys, retrieval
+ * index record, usage events, and approval requests — the five
+ * top-level firm-owned roots of the AI governance foundation
+ * (ai_approval_events and ai_tool_actions are reachable transitively
+ * through ai_approval_requests and ai_usage_events respectively, so no
+ * additional relation was added for each of them, matching the
+ * transitive-reachability reasoning used in every prior phase).
+ * ai_policy_settings is platform-level, not firm-owned, and
+ * deliberately has no Firm relation. No new fillable column was added
+ * to firms itself in Phase 15 either — AI mode continues to live on
+ * firm_settings.ai_mode (Phase 1), unchanged in shape; only its enum's
+ * case values were updated (approved decision #1).
  */
 class Firm extends Model
 {
@@ -522,5 +534,33 @@ class Firm extends Model
     public function webhookSubscriptions(): HasMany
     {
         return $this->hasMany(WebhookSubscription::class);
+    }
+
+    /**
+     * Phase 15 additions below.
+     */
+    public function aiSettings(): HasOne
+    {
+        return $this->hasOne(FirmAiSettings::class);
+    }
+
+    public function aiProviderKeys(): HasMany
+    {
+        return $this->hasMany(FirmAiProviderKey::class);
+    }
+
+    public function aiRetrievalIndex(): HasOne
+    {
+        return $this->hasOne(AiRetrievalIndex::class);
+    }
+
+    public function aiUsageEvents(): HasMany
+    {
+        return $this->hasMany(AiUsageEvent::class);
+    }
+
+    public function aiApprovalRequests(): HasMany
+    {
+        return $this->hasMany(AiApprovalRequest::class);
     }
 }
