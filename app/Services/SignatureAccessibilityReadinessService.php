@@ -17,6 +17,7 @@ class SignatureAccessibilityReadinessService
 {
     public const REQUIRED_CHECKS = [
         'keyboard_accessible_signing' => 'Every signing action must be fully keyboard-accessible.',
+        'visible_focus_states' => 'Every focusable element must have a visible, unambiguous focus indicator.',
         'clear_consent_presentation' => 'Consent text and the act of giving consent must be clearly, unambiguously presented.',
         'readable_validation_errors' => 'Signing and consent validation errors must be readable and understandable, not just color-coded.',
         'accessible_signature_controls' => 'Signature controls must be individually labeled and operable via keyboard/screen reader.',

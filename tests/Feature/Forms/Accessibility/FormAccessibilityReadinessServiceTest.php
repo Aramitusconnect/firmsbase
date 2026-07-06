@@ -15,12 +15,13 @@ class FormAccessibilityReadinessServiceTest extends TestCase
         $this->service = new FormAccessibilityReadinessService();
     }
 
-    public function test_checklist_returns_the_four_required_checks(): void
+    public function test_checklist_returns_the_five_required_checks(): void
     {
         $checklist = $this->service->checklist();
 
-        $this->assertCount(4, $checklist);
+        $this->assertCount(5, $checklist);
         $this->assertArrayHasKey('keyboard_accessible_actions', $checklist);
+        $this->assertArrayHasKey('visible_focus_states', $checklist);
         $this->assertArrayHasKey('accessible_labels', $checklist);
         $this->assertArrayHasKey('readable_validation_errors', $checklist);
         $this->assertArrayHasKey('accessible_checklist_controls', $checklist);

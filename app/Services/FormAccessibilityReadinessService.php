@@ -14,6 +14,7 @@ class FormAccessibilityReadinessService
 {
     public const REQUIRED_CHECKS = [
         'keyboard_accessible_actions' => 'Every form/document workflow action (generate, submit, approve, reject, archive) must be fully keyboard-accessible.',
+        'visible_focus_states' => 'Every focusable element must have a visible, unambiguous focus indicator.',
         'accessible_labels' => 'Every form field and control must have an accessible, programmatically-associated label.',
         'readable_validation_errors' => 'Missing-data and validation errors must be readable and understandable, not just color-coded.',
         'accessible_checklist_controls' => 'Review checklist controls must be individually labeled and operable via keyboard/screen reader, not a single opaque flag.',

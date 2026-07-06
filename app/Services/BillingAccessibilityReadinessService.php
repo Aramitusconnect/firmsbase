@@ -15,6 +15,7 @@ class BillingAccessibilityReadinessService
 {
     public const REQUIRED_CHECKS = [
         'keyboard_accessible_flow' => 'Payment and billing flows must be fully keyboard-accessible.',
+        'visible_focus_states' => 'Every focusable element must have a visible, unambiguous focus indicator.',
         'readable_errors' => 'Error messages must be readable and understandable, not just color-coded.',
         'accessible_status_labels' => 'Status labels (e.g. paid, past due) must be accessible to screen readers.',
         'readable_contrast' => 'Text and controls must meet readable contrast requirements.',

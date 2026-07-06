@@ -15,12 +15,13 @@ class SignatureAccessibilityReadinessServiceTest extends TestCase
         $this->service = new SignatureAccessibilityReadinessService();
     }
 
-    public function test_checklist_returns_the_five_required_wcag_mobile_checks(): void
+    public function test_checklist_returns_the_six_required_wcag_mobile_checks(): void
     {
         $checklist = $this->service->checklist();
 
-        $this->assertCount(5, $checklist);
+        $this->assertCount(6, $checklist);
         $this->assertArrayHasKey('keyboard_accessible_signing', $checklist);
+        $this->assertArrayHasKey('visible_focus_states', $checklist);
         $this->assertArrayHasKey('clear_consent_presentation', $checklist);
         $this->assertArrayHasKey('readable_validation_errors', $checklist);
         $this->assertArrayHasKey('accessible_signature_controls', $checklist);
