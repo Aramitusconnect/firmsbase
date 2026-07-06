@@ -124,6 +124,21 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * to firms itself in Phase 15 either — AI mode continues to live on
  * firm_settings.ai_mode (Phase 1), unchanged in shape; only its enum's
  * case values were updated (approved decision #1).
+ * Phase 16 addition: deployment config, deployment health checks,
+ * license files, and private enterprise settings — the four top-level
+ * firm-owned roots of the dedicated/private enterprise deployment
+ * governance foundation. fleet_migration_instance_status and
+ * license_validation_events are reachable transitively (through
+ * license_files and, for instance-status, through the non-firm-owned
+ * fleet_migration_runs by firm_id query) and get no direct Firm
+ * relation, matching the transitive-reachability convention used since
+ * Phase 10. fleet_migration_runs itself is NOT a Firm relation — a
+ * single run spans many firms, exactly like webhook_events fanning out
+ * to N webhook_deliveries in Phase 14. integration_degradation_modes is
+ * platform-level, not firm-owned, and deliberately has no Firm
+ * relation. No new fillable column was added to firms itself in Phase
+ * 16 either — deployment_mode/customer_type (Phase 1) are unchanged in
+ * shape and are only read, never branched on, by Phase 16 code.
  */
 class Firm extends Model
 {
@@ -562,5 +577,28 @@ class Firm extends Model
     public function aiApprovalRequests(): HasMany
     {
         return $this->hasMany(AiApprovalRequest::class);
+    }
+
+    /**
+     * Phase 16 additions below.
+     */
+    public function deploymentConfig(): HasOne
+    {
+        return $this->hasOne(DeploymentConfig::class);
+    }
+
+    public function deploymentHealthChecks(): HasMany
+    {
+        return $this->hasMany(DeploymentHealthCheck::class);
+    }
+
+    public function licenseFiles(): HasMany
+    {
+        return $this->hasMany(LicenseFile::class);
+    }
+
+    public function privateEnterpriseSettings(): HasOne
+    {
+        return $this->hasOne(PrivateEnterpriseSettings::class);
     }
 }
