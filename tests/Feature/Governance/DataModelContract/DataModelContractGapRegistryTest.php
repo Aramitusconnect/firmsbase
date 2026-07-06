@@ -20,9 +20,11 @@ class DataModelContractGapRegistryTest extends TestCase
         $this->service = new ComplianceGapRegistryService();
     }
 
-    public function test_exactly_seven_gap_items_still_exist(): void
+    public function test_gap_registry_now_contains_section_25_26_gaps_plus_section_27_gaps(): void
     {
-        $this->assertCount(7, $this->service->all());
+        // 7 Section 25/26 gaps + 2 Section 27 gaps (org_admin_role_missing,
+        // emergency_support_access_high_risk_approval_not_wired).
+        $this->assertCount(9, $this->service->all());
     }
 
     public function test_rls_gap_exists(): void

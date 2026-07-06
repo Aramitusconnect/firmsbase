@@ -16,6 +16,8 @@ class ComplianceGapRegistryServiceTest extends TestCase
         'signed_document_url_service_missing',
         'real_malware_scanning_engine_stubbed',
         'auth_admin_override_events_generic_only',
+        'org_admin_role_missing',
+        'emergency_support_access_high_risk_approval_not_wired',
     ];
 
     private ComplianceGapRegistryService $service;
@@ -26,11 +28,11 @@ class ComplianceGapRegistryServiceTest extends TestCase
         $this->service = new ComplianceGapRegistryService();
     }
 
-    public function test_exactly_seven_gap_items_are_declared(): void
+    public function test_exactly_nine_gap_items_are_declared(): void
     {
         $items = $this->service->all();
 
-        $this->assertCount(7, $items);
+        $this->assertCount(9, $items);
 
         $declaredKeys = array_map(fn ($item) => $item->key, $items);
 
@@ -50,12 +52,14 @@ class ComplianceGapRegistryServiceTest extends TestCase
     public function test_by_severity_filters_correctly(): void
     {
         $high = $this->service->bySeverity(GovernanceGapSeverity::High);
-        $this->assertCount(2, $high);
+        $this->assertCount(3, $high);
         $this->assertContains('rls_prepared_not_enforced', array_map(fn ($i) => $i->key, $high));
         $this->assertContains('firm_user_2fa_missing', array_map(fn ($i) => $i->key, $high));
+        $this->assertContains('emergency_support_access_high_risk_approval_not_wired', array_map(fn ($i) => $i->key, $high));
 
         $medium = $this->service->bySeverity(GovernanceGapSeverity::Medium);
-        $this->assertCount(3, $medium);
+        $this->assertCount(4, $medium);
+        $this->assertContains('org_admin_role_missing', array_map(fn ($i) => $i->key, $medium));
 
         $low = $this->service->bySeverity(GovernanceGapSeverity::Low);
         $this->assertCount(2, $low);

@@ -71,6 +71,22 @@ class ComplianceGapRegistryService
             'suggested_owning_gate' => 'accepted generic SecurityEvent/TimelineEventRecorder mapping; no second audit system recommended',
             'status' => 'open',
         ],
+        [
+            'key' => 'org_admin_role_missing',
+            'area' => 'permission_matrix',
+            'description' => 'No org_admin role exists: no organization_users table, no OrganizationRole enum, no organization-level admin grant/membership mechanism of any kind. Organization-level administration (as distinct from firm-level FirmUserRole access) is a real, unimplemented boundary — confirmed by direct repository search.',
+            'severity' => GovernanceGapSeverity::Medium,
+            'suggested_owning_gate' => 'future organization administration access model',
+            'status' => 'open',
+        ],
+        [
+            'key' => 'emergency_support_access_high_risk_approval_not_wired',
+            'area' => 'permission_matrix',
+            'description' => 'HighRiskChangeType::EmergencySupportAccess exists and HighRiskPlatformChangePolicyService can process it in isolation, but SupportAccessPolicyService/SupportAccessRequestService never call it — the real emergency support access flow allows a request the instant emergency_justification is non-empty, with no platform-admin approval step and no high_risk_change_requests row ever created for it.',
+            'severity' => GovernanceGapSeverity::High,
+            'suggested_owning_gate' => 'future emergency-access hardening phase',
+            'status' => 'open',
+        ],
     ];
 
     /**
