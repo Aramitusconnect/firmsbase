@@ -17,8 +17,27 @@ use Illuminate\Support\Facades\DB;
  * decrypt() is the only method that ever returns plaintext key
  * material, and never persists or logs it. Rotation creates a new
  * active key version and demotes the previous one to `rotated` — it
- * never deletes key rows. Destruction is a distinct, later operation
- * gated by a key_destruction_requests workflow that does not exist yet.
+ * never deletes key rows.
+ *
+ * Phase 17 addition: destroy() is the governed final step of
+ * cryptographic offboarding (crypto-shredding), gated entirely by the
+ * key_destruction_requests/key_destruction_approvals workflow
+ * (KeyDestructionRequestService/KeyDestructionApprovalService/
+ * KeyDestructionExecutionService) — this method itself performs no
+ * clearance or approval checks; it is the LAST, irreversible action
+ * those services call only after every check has already passed. It
+ * destroys EVERY non-already-destroyed key version for the firm (not
+ * only the active one), because a rotated key's encrypted_key value can
+ * still decrypt historical ciphertext (e.g. old WebhookSecret/
+ * AiApprovalRequest rows) — "renders residual encrypted data
+ * unreadable" only holds if every version is destroyed. It never
+ * deletes the tenant_encryption_keys rows themselves (governance
+ * evidence and FK targets survive); it only irreversibly overwrites
+ * encrypted_key with a non-decryptable tombstone value and flips status
+ * to Destroyed. A firm is never bricked by this: provision() only
+ * refuses when an Active key already exists, so a firm with zero Active
+ * keys (post-destruction) can always be issued a fresh key later if a
+ * future governed reason required it.
  */
 class EncryptionKeyService
 {
@@ -95,10 +114,57 @@ class EncryptionKeyService
         return Crypt::decryptString($active->encrypted_key);
     }
 
+    /**
+     * Governed, irreversible crypto-shredding step. Callers are
+     * KeyDestructionExecutionService only — this method assumes every
+     * clearance/approval check has already passed and performs none
+     * itself. Only affects the target firm's own key rows (scoped by
+     * firm_id); never touches another firm's keys.
+     *
+     * @return int number of key versions destroyed
+     */
+    public function destroy(Firm $firm, ?int $keyDestructionRequestId = null): int
+    {
+        return DB::transaction(function () use ($firm, $keyDestructionRequestId) {
+            $keys = TenantEncryptionKey::query()
+                ->where('firm_id', $firm->id)
+                ->where('status', '!=', TenantEncryptionKeyStatus::Destroyed->value)
+                ->get();
+
+            if ($keys->isEmpty()) {
+                throw new \RuntimeException("Firm {$firm->id} has no non-destroyed encryption keys to destroy.");
+            }
+
+            foreach ($keys as $key) {
+                $key->update([
+                    'status' => TenantEncryptionKeyStatus::Destroyed,
+                    'destroyed_at' => now(),
+                    'destruction_request_id' => $keyDestructionRequestId,
+                    'encrypted_key' => $this->tombstoneValue(),
+                ]);
+            }
+
+            return $keys->count();
+        });
+    }
+
     private function encryptNewKeyMaterial(): string
     {
         $innerKey = base64_encode(random_bytes(self::KEY_BYTES));
 
         return Crypt::encryptString($innerKey);
+    }
+
+    /**
+     * A fixed-format, deliberately NOT-a-valid-Laravel-encrypted-payload
+     * string. Crypt::decryptString() throws a DecryptException against
+     * it unconditionally — this is what makes destruction irreversible
+     * and what proves "sampled encrypted data becomes unreadable" in
+     * tests: any ciphertext that depended on the destroyed inner key can
+     * no longer be recovered, because the inner key itself is gone.
+     */
+    private function tombstoneValue(): string
+    {
+        return 'destroyed::'.bin2hex(random_bytes(16));
     }
 }

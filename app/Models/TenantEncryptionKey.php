@@ -15,6 +15,17 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * model never decrypts the key itself — only EncryptionKeyService does
  * — so plaintext key material never leaks via ->toArray()/->toJson().
  * No uuid: internal key material, never public-facing.
+ *
+ * Phase 17 addition: destructionRequest() links this row to the
+ * key_destruction_requests row that (irreversibly) destroyed it, via
+ * the existing, previously-unused destruction_request_id column (Phase
+ * 1 pre-provisioned this exact column and the Destroyed status case for
+ * this purpose — see EncryptionKeyService::destroy()). No FK constraint
+ * exists on destruction_request_id at the database layer (documented in
+ * the tenant_encryption_keys migration, unchanged in Phase 17) since
+ * key_destruction_requests did not exist until now and adding one would
+ * require altering a protected existing migration; the relation below
+ * is an application-layer convenience only.
  */
 class TenantEncryptionKey extends Model
 {
@@ -46,8 +57,18 @@ class TenantEncryptionKey extends Model
         return $this->belongsTo(Firm::class);
     }
 
+    public function destructionRequest(): BelongsTo
+    {
+        return $this->belongsTo(KeyDestructionRequest::class, 'destruction_request_id');
+    }
+
     public function isActive(): bool
     {
         return $this->status === TenantEncryptionKeyStatus::Active;
+    }
+
+    public function isDestroyed(): bool
+    {
+        return $this->status === TenantEncryptionKeyStatus::Destroyed;
     }
 }

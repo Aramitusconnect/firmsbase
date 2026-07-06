@@ -139,6 +139,17 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * relation. No new fillable column was added to firms itself in Phase
  * 16 either — deployment_mode/customer_type (Phase 1) are unchanged in
  * shape and are only read, never branched on, by Phase 16 code.
+ * Phase 17 addition: retention policies, legal holds, offboarding
+ * requests, key destruction requests, deletion requests, and access
+ * reviews — the data-ownership/offboarding/governance foundation.
+ * offboarding_exports, key_destruction_approvals, deletion_approvals,
+ * and access_review_items are reachable transitively (through their
+ * parent request/review row) and get no direct Firm relation, matching
+ * the transitive-reachability convention used since Phase 10.
+ * vendor_register, subprocessors, and data_processing_records are
+ * platform-level (data_processing_records.firm_id is nullable but not
+ * exclusively firm-owned) and deliberately have no Firm relation. No
+ * new fillable column was added to firms itself in Phase 17 either.
  */
 class Firm extends Model
 {
@@ -600,5 +611,38 @@ class Firm extends Model
     public function privateEnterpriseSettings(): HasOne
     {
         return $this->hasOne(PrivateEnterpriseSettings::class);
+    }
+
+    /**
+     * Phase 17 additions below.
+     */
+    public function retentionPolicies(): HasMany
+    {
+        return $this->hasMany(RetentionPolicy::class);
+    }
+
+    public function legalHolds(): HasMany
+    {
+        return $this->hasMany(LegalHold::class);
+    }
+
+    public function offboardingRequests(): HasMany
+    {
+        return $this->hasMany(OffboardingRequest::class);
+    }
+
+    public function keyDestructionRequests(): HasMany
+    {
+        return $this->hasMany(KeyDestructionRequest::class);
+    }
+
+    public function deletionRequests(): HasMany
+    {
+        return $this->hasMany(DeletionRequest::class);
+    }
+
+    public function accessReviews(): HasMany
+    {
+        return $this->hasMany(AccessReview::class);
     }
 }

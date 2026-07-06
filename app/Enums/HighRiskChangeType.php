@@ -19,6 +19,16 @@ namespace App\Enums;
  * this existing two-person-approval workflow exactly as
  * TrustModeActivationService (Phase 13) already does; no second
  * approval system is introduced.
+ *
+ * Phase 17 addition (additive only, no existing case changed):
+ * CryptographicKeyDestruction gates the two-person approval required
+ * before a firm's envelope encryption key(s) may be irreversibly
+ * destroyed (crypto-shredding) — see KeyDestructionApprovalService. This
+ * is deliberately a NEW case, not a reuse of ProductionDataDeletion
+ * (approved decision #2): key destruction is a distinct, uniquely
+ * irreversible action with its own clearance chain (offboarding export,
+ * retention, legal hold), and ProductionDataDeletion is reserved for
+ * deletion_requests governance (DeletionApprovalService) only.
  */
 enum HighRiskChangeType: string
 {
@@ -28,4 +38,5 @@ enum HighRiskChangeType: string
     case EmergencySupportAccess = 'emergency_support_access';
     case DedicatedLegalSpecialistApproval = 'dedicated_legal_specialist_approval';
     case OperatingOnlyTrustDisableAcknowledgment = 'operating_only_trust_disable_acknowledgment';
+    case CryptographicKeyDestruction = 'cryptographic_key_destruction';
 }
