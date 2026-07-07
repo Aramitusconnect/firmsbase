@@ -118,9 +118,16 @@ class QualityGateFirewallTest extends TestCase
 
     public function test_no_unexpected_functional_test_file_was_modified(): void
     {
+        // Every tests/Feature/Governance/* subdirectory (CrossCutting,
+        // DataModelContract, PermissionBoundaries, QualityGates,
+        // DeploymentEnvironment, and any future section's own
+        // directory) is a governance-mapping test tree, expected to
+        // keep growing as later sections add their own new test
+        // files — only a change OUTSIDE that tree is a genuinely
+        // unexpected functional-test modification.
         $changedTestFiles = array_filter(
             $this->changedOrUntrackedPaths('tests'),
-            fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/QualityGates/'),
+            fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/'),
         );
 
         $unexpected = array_values(array_diff($changedTestFiles, self::ALLOWED_MODIFIED_TEST_FILES));

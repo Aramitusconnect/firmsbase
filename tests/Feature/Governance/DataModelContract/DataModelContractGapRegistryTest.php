@@ -25,8 +25,10 @@ class DataModelContractGapRegistryTest extends TestCase
         // 7 Section 25/26 gaps + 2 Section 27 gaps (org_admin_role_missing,
         // emergency_support_access_high_risk_approval_not_wired) + 2
         // Section 28 gaps (seed_data_defaults_and_test_secrets_not_audited,
-        // restore_tests_do_not_exercise_real_restore_path).
-        $this->assertCount(11, $this->service->all());
+        // restore_tests_do_not_exercise_real_restore_path) + 2 Section 29
+        // gaps (integration_degradation_registry_missing_ai_sms_whatsapp,
+        // secret_rotation_schedule_or_reminder_missing).
+        $this->assertCount(13, $this->service->all());
     }
 
     public function test_rls_gap_exists(): void

@@ -18,7 +18,7 @@ class ComplianceGapRegistryService
         [
             'key' => 'rls_prepared_not_enforced',
             'area' => 'tenant_isolation',
-            'description' => 'PostgreSQL row-level security policies are prepared (ENABLE ROW LEVEL SECURITY + CREATE POLICY) but not enforced (no FORCE ROW LEVEL SECURITY, no SET LOCAL app.current_firm_id wiring). Defense-in-depth is not yet active at the database layer. RLS preparation itself is also incomplete: it covers only tenant tables introduced through Phase 6 — every tenant-owned table introduced from Phase 7 onward (see RowLevelSecurityCoverageMappingService::missingPreparedTables()) has no RLS policy at all. Later tenant-owned tables must be covered before FORCE ROW LEVEL SECURITY / SET LOCAL enforcement can safely be turned on for the whole schema. Section 28 test-coverage impact: the master plan\'s required "broken query scope caught by row-level security" test group cannot honestly be classified Implemented while this same blocker persists — tests/Feature/Tenancy/RowLevelSecurityPreparationTest.php explicitly asserts FORCE ROW LEVEL SECURITY is NOT enabled, proving there is nothing at the database layer yet to catch a broken/bypassed application-layer scope. See TestCoverageMappingService::byKey(\'tenant_isolation_broken_scope_caught_by_rls\').',
+            'description' => 'PostgreSQL row-level security policies are prepared (ENABLE ROW LEVEL SECURITY + CREATE POLICY) but not enforced (no FORCE ROW LEVEL SECURITY, no SET LOCAL app.current_firm_id wiring). Defense-in-depth is not yet active at the database layer. RLS preparation itself is also incomplete: it covers only tenant tables introduced through Phase 6 — every tenant-owned table introduced from Phase 7 onward (see RowLevelSecurityCoverageMappingService::missingPreparedTables()) has no RLS policy at all. Later tenant-owned tables must be covered before FORCE ROW LEVEL SECURITY / SET LOCAL enforcement can safely be turned on for the whole schema. Section 28 test-coverage impact: the master plan\'s required "broken query scope caught by row-level security" test group cannot honestly be classified Implemented while this same blocker persists — tests/Feature/Tenancy/RowLevelSecurityPreparationTest.php explicitly asserts FORCE ROW LEVEL SECURITY is NOT enabled, proving there is nothing at the database layer yet to catch a broken/bypassed application-layer scope. See TestCoverageMappingService::byKey(\'tenant_isolation_broken_scope_caught_by_rls\'). Section 29 deployment-mode impact: SaaS is the deployment mode most exposed by this gap, since SaaS firms share the same database/schema and rely on tenant isolation the most heavily — see DeploymentModeCoverageMappingService::byKey(\'saas_firm_isolation_rls_defense_in_depth\').',
             'severity' => GovernanceGapSeverity::High,
             'suggested_owning_gate' => 'Phase 1 RLS Enforcement Activation',
             'status' => 'open',
@@ -101,6 +101,22 @@ class ComplianceGapRegistryService
             'description' => 'BackupRestoreTestService\'s own docblock states it "never performs a real infrastructure backup/restore" — it only records the result of whatever BackupRestoreDrillRunner it is given, and FakeBackupRestoreDrillRunner is the only implementation exercised by tests/Feature/BackupRestore/BackupRestoreTestServiceTest.php. Restore testing today is readiness/bookkeeping only and does not exercise a real restore path.',
             'severity' => GovernanceGapSeverity::Medium,
             'suggested_owning_gate' => 'future restore-drill hardening phase',
+            'status' => 'open',
+        ],
+        [
+            'key' => 'integration_degradation_registry_missing_ai_sms_whatsapp',
+            'area' => 'deployment_environment',
+            'description' => 'IntegrationDegradationRegistryService only declares a degradation mode for IntegrationType::{Stripe,EmailProvider,VirusScanning,Telemetry}. AiProvider (5 real, modeled provider cases backed by FirmAiProviderKey) and ConsentChannel::{Sms,WhatsApp} (real, modeled communication channels) are external dependencies with no declared degradation mode at all. everyIntegrationHasADeclaredMode() is scoped only to IntegrationType::cases(), so it would silently report coverage as complete even though these three dependencies are uncovered.',
+            'severity' => GovernanceGapSeverity::Medium,
+            'suggested_owning_gate' => 'future integration-degradation expansion',
+            'status' => 'open',
+        ],
+        [
+            'key' => 'secret_rotation_schedule_or_reminder_missing',
+            'area' => 'deployment_environment',
+            'description' => 'AiProviderKeyService::rotate() and EncryptionKeyService::rotate() are real, callable rotation capabilities, but no automated rotation schedule, key-age policy, or reminder mechanism exists anywhere in the repository (confirmed by direct search) — rotation only ever happens if a human explicitly calls it.',
+            'severity' => GovernanceGapSeverity::Low,
+            'suggested_owning_gate' => 'future operational-hardening phase',
             'status' => 'open',
         ],
     ];

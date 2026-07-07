@@ -20,6 +20,8 @@ class ComplianceGapRegistryServiceTest extends TestCase
         'emergency_support_access_high_risk_approval_not_wired',
         'seed_data_defaults_and_test_secrets_not_audited',
         'restore_tests_do_not_exercise_real_restore_path',
+        'integration_degradation_registry_missing_ai_sms_whatsapp',
+        'secret_rotation_schedule_or_reminder_missing',
     ];
 
     private ComplianceGapRegistryService $service;
@@ -30,11 +32,11 @@ class ComplianceGapRegistryServiceTest extends TestCase
         $this->service = new ComplianceGapRegistryService();
     }
 
-    public function test_exactly_eleven_gap_items_are_declared(): void
+    public function test_exactly_thirteen_gap_items_are_declared(): void
     {
         $items = $this->service->all();
 
-        $this->assertCount(11, $items);
+        $this->assertCount(13, $items);
 
         $declaredKeys = array_map(fn ($item) => $item->key, $items);
 
@@ -60,13 +62,15 @@ class ComplianceGapRegistryServiceTest extends TestCase
         $this->assertContains('emergency_support_access_high_risk_approval_not_wired', array_map(fn ($i) => $i->key, $high));
 
         $medium = $this->service->bySeverity(GovernanceGapSeverity::Medium);
-        $this->assertCount(6, $medium);
+        $this->assertCount(7, $medium);
         $this->assertContains('org_admin_role_missing', array_map(fn ($i) => $i->key, $medium));
         $this->assertContains('seed_data_defaults_and_test_secrets_not_audited', array_map(fn ($i) => $i->key, $medium));
         $this->assertContains('restore_tests_do_not_exercise_real_restore_path', array_map(fn ($i) => $i->key, $medium));
+        $this->assertContains('integration_degradation_registry_missing_ai_sms_whatsapp', array_map(fn ($i) => $i->key, $medium));
 
         $low = $this->service->bySeverity(GovernanceGapSeverity::Low);
-        $this->assertCount(2, $low);
+        $this->assertCount(3, $low);
+        $this->assertContains('secret_rotation_schedule_or_reminder_missing', array_map(fn ($i) => $i->key, $low));
     }
 
     public function test_is_tracked_works(): void
