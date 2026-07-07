@@ -18,6 +18,8 @@ class ComplianceGapRegistryServiceTest extends TestCase
         'auth_admin_override_events_generic_only',
         'org_admin_role_missing',
         'emergency_support_access_high_risk_approval_not_wired',
+        'seed_data_defaults_and_test_secrets_not_audited',
+        'restore_tests_do_not_exercise_real_restore_path',
     ];
 
     private ComplianceGapRegistryService $service;
@@ -28,11 +30,11 @@ class ComplianceGapRegistryServiceTest extends TestCase
         $this->service = new ComplianceGapRegistryService();
     }
 
-    public function test_exactly_nine_gap_items_are_declared(): void
+    public function test_exactly_eleven_gap_items_are_declared(): void
     {
         $items = $this->service->all();
 
-        $this->assertCount(9, $items);
+        $this->assertCount(11, $items);
 
         $declaredKeys = array_map(fn ($item) => $item->key, $items);
 
@@ -58,8 +60,10 @@ class ComplianceGapRegistryServiceTest extends TestCase
         $this->assertContains('emergency_support_access_high_risk_approval_not_wired', array_map(fn ($i) => $i->key, $high));
 
         $medium = $this->service->bySeverity(GovernanceGapSeverity::Medium);
-        $this->assertCount(4, $medium);
+        $this->assertCount(6, $medium);
         $this->assertContains('org_admin_role_missing', array_map(fn ($i) => $i->key, $medium));
+        $this->assertContains('seed_data_defaults_and_test_secrets_not_audited', array_map(fn ($i) => $i->key, $medium));
+        $this->assertContains('restore_tests_do_not_exercise_real_restore_path', array_map(fn ($i) => $i->key, $medium));
 
         $low = $this->service->bySeverity(GovernanceGapSeverity::Low);
         $this->assertCount(2, $low);

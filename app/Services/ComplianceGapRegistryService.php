@@ -18,7 +18,7 @@ class ComplianceGapRegistryService
         [
             'key' => 'rls_prepared_not_enforced',
             'area' => 'tenant_isolation',
-            'description' => 'PostgreSQL row-level security policies are prepared (ENABLE ROW LEVEL SECURITY + CREATE POLICY) but not enforced (no FORCE ROW LEVEL SECURITY, no SET LOCAL app.current_firm_id wiring). Defense-in-depth is not yet active at the database layer. RLS preparation itself is also incomplete: it covers only tenant tables introduced through Phase 6 — every tenant-owned table introduced from Phase 7 onward (see RowLevelSecurityCoverageMappingService::missingPreparedTables()) has no RLS policy at all. Later tenant-owned tables must be covered before FORCE ROW LEVEL SECURITY / SET LOCAL enforcement can safely be turned on for the whole schema.',
+            'description' => 'PostgreSQL row-level security policies are prepared (ENABLE ROW LEVEL SECURITY + CREATE POLICY) but not enforced (no FORCE ROW LEVEL SECURITY, no SET LOCAL app.current_firm_id wiring). Defense-in-depth is not yet active at the database layer. RLS preparation itself is also incomplete: it covers only tenant tables introduced through Phase 6 — every tenant-owned table introduced from Phase 7 onward (see RowLevelSecurityCoverageMappingService::missingPreparedTables()) has no RLS policy at all. Later tenant-owned tables must be covered before FORCE ROW LEVEL SECURITY / SET LOCAL enforcement can safely be turned on for the whole schema. Section 28 test-coverage impact: the master plan\'s required "broken query scope caught by row-level security" test group cannot honestly be classified Implemented while this same blocker persists — tests/Feature/Tenancy/RowLevelSecurityPreparationTest.php explicitly asserts FORCE ROW LEVEL SECURITY is NOT enabled, proving there is nothing at the database layer yet to catch a broken/bypassed application-layer scope. See TestCoverageMappingService::byKey(\'tenant_isolation_broken_scope_caught_by_rls\').',
             'severity' => GovernanceGapSeverity::High,
             'suggested_owning_gate' => 'Phase 1 RLS Enforcement Activation',
             'status' => 'open',
@@ -85,6 +85,22 @@ class ComplianceGapRegistryService
             'description' => 'HighRiskChangeType::EmergencySupportAccess exists and HighRiskPlatformChangePolicyService can process it in isolation, but SupportAccessPolicyService/SupportAccessRequestService never call it — the real emergency support access flow allows a request the instant emergency_justification is non-empty, with no platform-admin approval step and no high_risk_change_requests row ever created for it.',
             'severity' => GovernanceGapSeverity::High,
             'suggested_owning_gate' => 'future emergency-access hardening phase',
+            'status' => 'open',
+        ],
+        [
+            'key' => 'seed_data_defaults_and_test_secrets_not_audited',
+            'area' => 'release_quality_gates',
+            'description' => 'No seed-data audit/check service exists anywhere in the repository (confirmed by direct search). database/seeders/DatabaseSeeder.php seeds a fixed test@example.com user via the default UserFactory, whose password is always the literal string "password" (Hash::make(\'password\')) — a classic test-secret default with nothing in place to flag or rotate it before a real deployment.',
+            'severity' => GovernanceGapSeverity::Medium,
+            'suggested_owning_gate' => 'future release-engineering phase',
+            'status' => 'open',
+        ],
+        [
+            'key' => 'restore_tests_do_not_exercise_real_restore_path',
+            'area' => 'release_quality_gates',
+            'description' => 'BackupRestoreTestService\'s own docblock states it "never performs a real infrastructure backup/restore" — it only records the result of whatever BackupRestoreDrillRunner it is given, and FakeBackupRestoreDrillRunner is the only implementation exercised by tests/Feature/BackupRestore/BackupRestoreTestServiceTest.php. Restore testing today is readiness/bookkeeping only and does not exercise a real restore path.',
+            'severity' => GovernanceGapSeverity::Medium,
+            'suggested_owning_gate' => 'future restore-drill hardening phase',
             'status' => 'open',
         ],
     ];

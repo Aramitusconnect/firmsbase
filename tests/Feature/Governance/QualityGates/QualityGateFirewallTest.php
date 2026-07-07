@@ -1,0 +1,205 @@
+<?php
+
+namespace Tests\Feature\Governance\QualityGates;
+
+use App\Enums\GovernanceMappingStatus;
+use App\Services\TestCoverageMappingService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Tests\TestCase;
+
+/**
+ * QualityGateFirewallTest — proves Section 28 stayed within its
+ * declared implementation boundary: no migrations, no new tables, no
+ * UI/routes/controllers, no CI/workflow files, no unexpected
+ * functional test file was modified, no real execution in any new
+ * mapping service, and the RLS broken-scope test group is never
+ * claimed Implemented while RLS enforcement is inactive.
+ */
+class QualityGateFirewallTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private const NEW_SERVICE_FILES = [
+        'TestCoverageMappingService.php',
+        'ReleaseChecklistReadinessService.php',
+        'DefinitionOfDoneReadinessService.php',
+    ];
+
+    private const FORBIDDEN_TOKENS = [
+        'DB::statement', 'DB::unprepared', 'Schema::create', 'Schema::table', 'Schema::drop',
+        'Http::', 'GuzzleHttp', 'curl_init', 'curl_exec', 'fsockopen', 'pfsockopen',
+        'stream_socket_client', 'proc_open(', 'popen(', 'passthru(', 'exec(', 'shell_exec(', 'system(',
+        'Process::', 'mkdir(', 'Aws\\', 'Docker', 'ssh2_connect', 'phpseclib',
+        'Stripe\\', 'STRIPE_', 'dns_get_record', 'gethostbyname', 'checkdnsrr',
+        'Route::', 'extends Controller', 'Livewire\\Component', 'Filament\\Resources',
+        'Mail::', 'Notification::send',
+    ];
+
+    /**
+     * Test files this Section legitimately modified (allowed per the
+     * approved scope: "tests that assert ComplianceGapRegistryService
+     * exact count/content"). Any OTHER changed/untracked test file
+     * outside tests/Feature/Governance/QualityGates would be a
+     * violation of the "existing functional test files not modified"
+     * rule.
+     */
+    private const ALLOWED_MODIFIED_TEST_FILES = [
+        'tests/Feature/Governance/CrossCutting/ComplianceGapRegistryServiceTest.php',
+        'tests/Feature/Governance/DataModelContract/DataModelContractGapRegistryTest.php',
+        'tests/Feature/Governance/PermissionBoundaries/PermissionBoundaryGapRegistryTest.php',
+    ];
+
+    public function test_no_new_migration_files_were_added(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('database/migrations');
+
+        $this->assertEmpty(
+            $changed,
+            'Section 28 must add no migrations, but found changed/untracked migration files: '.implode(', ', $changed)
+        );
+    }
+
+    public function test_no_new_tables_or_schema_files_were_added(): void
+    {
+        // No migration-created table can exist without a migration
+        // file, and no migration file was added (see the preceding
+        // test) — this additionally confirms no raw schema dump exists.
+        $this->assertEmpty(glob(database_path('schema/*.sql')) ?: []);
+        $this->assertEmpty($this->changedOrUntrackedPaths('database/migrations'));
+    }
+
+    public function test_no_ui_routes_controllers_filament_blade_or_livewire_were_added(): void
+    {
+        $markers = [
+            'TestCoverageMappingService', 'ReleaseChecklistReadinessService',
+            'DefinitionOfDoneReadinessService',
+        ];
+
+        foreach (['routes', 'app/Http/Controllers', 'app/Filament', 'resources/views', 'app/Livewire'] as $relativeDir) {
+            $dir = base_path($relativeDir);
+
+            if (! is_dir($dir)) {
+                continue;
+            }
+
+            $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
+
+            foreach ($iterator as $file) {
+                if (! $file->isFile()) {
+                    continue;
+                }
+
+                $contents = file_get_contents($file->getPathname());
+
+                foreach ($markers as $marker) {
+                    $this->assertStringNotContainsString(
+                        $marker,
+                        $contents,
+                        "Section 28 must introduce no UI/route surface, but found '{$marker}' referenced in {$file->getPathname()}"
+                    );
+                }
+            }
+        }
+
+        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
+        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
+    }
+
+    public function test_no_github_workflows_or_ci_files_were_added(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('.github');
+
+        $this->assertEmpty(
+            $changed,
+            'Section 28 must add no CI/workflow files, but found changed/untracked .github files: '.implode(', ', $changed)
+        );
+    }
+
+    public function test_no_unexpected_functional_test_file_was_modified(): void
+    {
+        $changedTestFiles = array_filter(
+            $this->changedOrUntrackedPaths('tests'),
+            fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/QualityGates/'),
+        );
+
+        $unexpected = array_values(array_diff($changedTestFiles, self::ALLOWED_MODIFIED_TEST_FILES));
+
+        $this->assertEmpty(
+            $unexpected,
+            'Section 28 must not modify existing functional test files beyond the allowed gap-registry count tests, but found: '.implode(', ', $unexpected)
+        );
+    }
+
+    public function test_no_forbidden_execution_or_network_token_appears_in_any_new_service(): void
+    {
+        $violations = [];
+
+        foreach (self::NEW_SERVICE_FILES as $filename) {
+            $path = app_path("Services/{$filename}");
+            $this->assertFileExists($path, "Expected Section 28 service file missing: {$filename}");
+
+            $source = $this->stripComments(file_get_contents($path));
+
+            foreach (self::FORBIDDEN_TOKENS as $token) {
+                if (str_contains($source, $token)) {
+                    $violations[] = "{$filename} contains forbidden token: {$token}";
+                }
+            }
+        }
+
+        $this->assertEmpty($violations, implode("\n", $violations));
+    }
+
+    public function test_test_coverage_mapping_service_does_not_claim_rls_broken_scope_is_implemented_while_enforcement_is_inactive(): void
+    {
+        $row = DB::selectOne(
+            'select relforcerowsecurity from pg_class where relname = ?',
+            ['firm_settings']
+        );
+        $enforcementActive = (bool) $row->relforcerowsecurity;
+
+        $item = (new TestCoverageMappingService())->byKey('tenant_isolation_broken_scope_caught_by_rls');
+
+        if (! $enforcementActive) {
+            $this->assertNotSame(GovernanceMappingStatus::Implemented, $item->status);
+        }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function changedOrUntrackedPaths(string $scope): array
+    {
+        $changed = trim((string) shell_exec(
+            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
+        ));
+
+        if ($changed === '') {
+            return [];
+        }
+
+        return preg_split('/\R/', $changed) ?: [];
+    }
+
+    /**
+     * Strips PHP comments (// # and block/doc comments) via the real
+     * tokenizer so forbidden-token checks only ever see executable
+     * code — a token merely mentioned in prose must never fail a
+     * firewall test.
+     */
+    private function stripComments(string $source): string
+    {
+        $stripped = '';
+
+        foreach (token_get_all($source) as $token) {
+            if (is_array($token) && in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true)) {
+                continue;
+            }
+
+            $stripped .= is_array($token) ? $token[1] : $token;
+        }
+
+        return $stripped;
+    }
+}
