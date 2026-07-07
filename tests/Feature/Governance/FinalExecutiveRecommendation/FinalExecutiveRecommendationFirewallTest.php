@@ -1,0 +1,261 @@
+<?php
+
+namespace Tests\Feature\Governance\FinalExecutiveRecommendation;
+
+use Tests\TestCase;
+
+/**
+ * FinalExecutiveRecommendationFirewallTest — proves Section 31 stayed
+ * within its declared implementation boundary: no migrations, no new
+ * tables/schema files, no UI/routes/controllers, no product-feature
+ * files outside the three allowed locations, ComplianceGapRegistryService
+ * and every Section 25-30 service untouched, and the new service
+ * contains no DB writes, Schema:: calls, or network/provider/process/
+ * shell execution.
+ */
+class FinalExecutiveRecommendationFirewallTest extends TestCase
+{
+    private const NEW_SERVICE_FILES = [
+        'FinalExecutiveReadinessMappingService.php',
+    ];
+
+    private const FORBIDDEN_TOKENS = [
+        'DB::statement', 'DB::unprepared', 'Schema::create', 'Schema::table', 'Schema::drop',
+        'Http::', 'GuzzleHttp', 'curl_init', 'curl_exec', 'fsockopen', 'pfsockopen',
+        'stream_socket_client', 'proc_open(', 'popen(', 'passthru(', 'exec(', 'shell_exec(', 'system(',
+        'Symfony\\Component\\Process', 'Process::', 'mkdir(', 'Aws\\', 'Docker', 'ssh2_connect', 'phpseclib',
+        'Stripe\\', 'STRIPE_', 'dns_get_record', 'gethostbyname', 'checkdnsrr',
+        'Route::', 'extends Controller', 'Livewire\\Component', 'Filament\\Resources',
+        'Mail::', 'Notification::send',
+    ];
+
+    /**
+     * Every Section 25-30 mapping/readiness service — none may be
+     * modified by Section 31.
+     */
+    private const PROTECTED_FILES = [
+        'app/Services/ComplianceGapRegistryService.php',
+        'app/Services/SecurityBaselineMappingService.php',
+        'app/Services/ComplianceReviewGateMappingService.php',
+        'app/Services/AccessibilityCoverageMappingService.php',
+        'app/Services/ClientPortalAccessibilityReadinessService.php',
+        'app/Services/DataModelContractMappingService.php',
+        'app/Services/RowLevelSecurityCoverageMappingService.php',
+        'app/Services/IdempotencyKeyCoverageMappingService.php',
+        'app/Services/PermissionMatrixMappingService.php',
+        'app/Services/EmergencyAccessGovernanceGapService.php',
+        'app/Services/LegalSpecialistConsistencyMappingService.php',
+        'app/Services/TestCoverageMappingService.php',
+        'app/Services/ReleaseChecklistReadinessService.php',
+        'app/Services/DefinitionOfDoneReadinessService.php',
+        'app/Services/DeploymentModeCoverageMappingService.php',
+        'app/Services/OperationalReadinessMappingService.php',
+        'app/Services/MobilePortalCoverageMappingService.php',
+        'app/Services/FirmCommandCenterAggregationService.php',
+        'app/Services/TemplatePackCoverageMappingService.php',
+        'app/Services/TrustDependentPackGatingMappingService.php',
+        'app/Models/Firm.php',
+        'app/Services/EntitlementService.php',
+        'app/Services/TenantContextResolver.php',
+        'app/Services/LicenseFileValidationService.php',
+        'app/Services/TrustPilotExitCriteriaService.php',
+        'app/Services/TrustEligibilityService.php',
+        'composer.json',
+    ];
+
+    /**
+     * Only these three locations may contain new files for Section 31.
+     */
+    private const ALLOWED_NEW_FILE_PREFIXES = [
+        'app/Services/FinalExecutiveReadinessMappingService.php',
+        'app/ValueObjects/ExecutiveReadinessSummary.php',
+        'tests/Feature/Governance/FinalExecutiveRecommendation/',
+    ];
+
+    public function test_no_new_migration_files_were_added(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('database/migrations');
+
+        $this->assertEmpty(
+            $changed,
+            'Section 31 must add no migrations, but found changed/untracked migration files: '.implode(', ', $changed)
+        );
+    }
+
+    public function test_no_new_tables_or_schema_files_were_added(): void
+    {
+        $this->assertEmpty(glob(database_path('schema/*.sql')) ?: []);
+        $this->assertEmpty($this->changedOrUntrackedPaths('database/migrations'));
+    }
+
+    public function test_no_ui_routes_controllers_filament_blade_or_livewire_were_added(): void
+    {
+        foreach (['routes', 'app/Http/Controllers', 'app/Filament', 'resources/views', 'app/Livewire'] as $relativeDir) {
+            $changed = $this->changedOrUntrackedPaths($relativeDir);
+
+            $this->assertEmpty($changed, "Section 31 must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
+        }
+
+        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
+        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
+    }
+
+    public function test_no_github_workflows_or_ci_files_were_added(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('.github');
+
+        $this->assertEmpty(
+            $changed,
+            'Section 31 must add no CI/workflow files, but found changed/untracked .github files: '.implode(', ', $changed)
+        );
+    }
+
+    public function test_no_product_feature_files_were_added_outside_the_three_allowed_locations(): void
+    {
+        $changedRepoWide = $this->changedOrUntrackedPaths('.');
+
+        $unexpected = array_values(array_filter(
+            $changedRepoWide,
+            function (string $path) {
+                foreach (self::ALLOWED_NEW_FILE_PREFIXES as $allowed) {
+                    if ($path === $allowed || str_starts_with($path, $allowed)) {
+                        return false;
+                    }
+                }
+
+                return true;
+            },
+        ));
+
+        $this->assertEmpty($unexpected, 'Section 31 must only add files under the three allowed locations, but found: '.implode(', ', $unexpected));
+    }
+
+    public function test_compliance_gap_registry_service_was_not_modified(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('.');
+
+        $this->assertNotContains('app/Services/ComplianceGapRegistryService.php', $changed, 'Section 31 must not modify ComplianceGapRegistryService.php.');
+    }
+
+    public function test_protected_section_25_to_30_services_and_core_files_were_not_modified(): void
+    {
+        $changedRepoWide = $this->changedOrUntrackedPaths('.');
+
+        $touched = array_values(array_intersect(self::PROTECTED_FILES, $changedRepoWide));
+
+        $this->assertEmpty($touched, 'Section 31 must not modify protected Section 25-30/core files, but found changes to: '.implode(', ', $touched));
+    }
+
+    public function test_no_unexpected_functional_test_file_was_modified(): void
+    {
+        $changedTestFiles = array_filter(
+            $this->changedOrUntrackedPaths('tests'),
+            fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/'),
+        );
+
+        $this->assertEmpty(
+            array_values($changedTestFiles),
+            'Section 31 must not modify existing functional test files outside the governance-mapping test tree, but found: '.implode(', ', $changedTestFiles)
+        );
+    }
+
+    public function test_new_service_contains_no_db_writes_schema_calls_or_network_provider_process_shell_execution(): void
+    {
+        $violations = [];
+
+        foreach (self::NEW_SERVICE_FILES as $filename) {
+            $path = app_path("Services/{$filename}");
+            $this->assertFileExists($path, "Expected Section 31 service file missing: {$filename}");
+
+            $source = $this->stripComments(file_get_contents($path));
+
+            foreach (self::FORBIDDEN_TOKENS as $token) {
+                if (str_contains($source, $token)) {
+                    $violations[] = "{$filename} contains forbidden token: {$token}";
+                }
+            }
+
+            foreach (['::create(', '::update(', '::delete(', '->save(', '->update(', '->delete('] as $writeToken) {
+                if (str_contains($source, $writeToken)) {
+                    $violations[] = "{$filename} contains write token: {$writeToken}";
+                }
+            }
+        }
+
+        $valueObjectPath = app_path('ValueObjects/ExecutiveReadinessSummary.php');
+        $this->assertFileExists($valueObjectPath);
+        $voSource = $this->stripComments(file_get_contents($valueObjectPath));
+
+        foreach (self::FORBIDDEN_TOKENS as $token) {
+            if (str_contains($voSource, $token)) {
+                $violations[] = "ExecutiveReadinessSummary.php contains forbidden token: {$token}";
+            }
+        }
+
+        $this->assertEmpty($violations, implode("\n", $violations));
+    }
+
+    public function test_no_payment_trust_ai_or_deployment_behavior_files_were_modified(): void
+    {
+        $changedRepoWide = $this->changedOrUntrackedPaths('.');
+
+        $behaviorFilePatterns = [
+            'PaymentClassificationService', 'PaymentApplicationService', 'PaymentPlanService',
+            'TrustDepositService', 'TrustReconciliationService', 'TrustTransferRequestService', 'TrustHighRiskAdjustmentService',
+            'AiProviderKeyService', 'AiApprovalWorkflowService', 'AiModeResolutionService',
+            'DeploymentHealthEnvelopeService', 'FleetMigrationOrchestrationService', 'LicenseFileSigningService',
+        ];
+
+        $touched = array_values(array_filter(
+            $changedRepoWide,
+            function (string $path) use ($behaviorFilePatterns) {
+                foreach ($behaviorFilePatterns as $pattern) {
+                    if (str_contains($path, $pattern)) {
+                        return true;
+                    }
+                }
+
+                return false;
+            },
+        ));
+
+        $this->assertEmpty($touched, 'Section 31 must not modify payment/trust/AI/deployment behavior files, but found: '.implode(', ', $touched));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function changedOrUntrackedPaths(string $scope): array
+    {
+        $changed = trim((string) shell_exec(
+            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
+        ));
+
+        if ($changed === '') {
+            return [];
+        }
+
+        return preg_split('/\R/', $changed) ?: [];
+    }
+
+    /**
+     * Strips PHP comments (// # and block/doc comments) via the real
+     * tokenizer so forbidden-token checks only ever see executable
+     * code — a token merely mentioned in prose must never fail a
+     * firewall test.
+     */
+    private function stripComments(string $source): string
+    {
+        $stripped = '';
+
+        foreach (token_get_all($source) as $token) {
+            if (is_array($token) && in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true)) {
+                continue;
+            }
+
+            $stripped .= is_array($token) ? $token[1] : $token;
+        }
+
+        return $stripped;
+    }
+}
