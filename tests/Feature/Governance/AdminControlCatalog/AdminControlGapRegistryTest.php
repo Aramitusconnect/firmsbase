@@ -28,7 +28,7 @@ class AdminControlGapRegistryTest extends TestCase
     {
         // 17 pre-existing (Section 25-33) + 1 new Section 34
         // form-edition-watch-SLA gap (confirmed) = 18.
-        $this->assertCount(18, $this->service->all());
+        $this->assertCount(21, $this->service->all());
     }
 
     public function test_form_edition_watch_sla_gap_exists_because_aws_confirmed_no_sla_representation(): void
@@ -41,7 +41,7 @@ class AdminControlGapRegistryTest extends TestCase
 
     public function test_final_gap_count_is_eighteen(): void
     {
-        $this->assertCount(18, $this->service->all());
+        $this->assertCount(21, $this->service->all());
     }
 
     public function test_no_duplicate_org_admin_or_emergency_access_gaps_were_added(): void

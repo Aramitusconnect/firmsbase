@@ -36,7 +36,7 @@ class ComplianceGapRegistryServiceTest extends TestCase
     {
         $items = $this->service->all();
 
-        $this->assertCount(18, $items);
+        $this->assertCount(21, $items);
 
         $declaredKeys = array_map(fn ($item) => $item->key, $items);
 
@@ -63,19 +63,22 @@ class ComplianceGapRegistryServiceTest extends TestCase
         $this->assertContains('trust_ledger_entry_posting_actor_not_guaranteed', array_map(fn ($i) => $i->key, $high));
 
         $medium = $this->service->bySeverity(GovernanceGapSeverity::Medium);
-        $this->assertCount(9, $medium);
+        $this->assertCount(11, $medium);
         $this->assertContains('org_admin_role_missing', array_map(fn ($i) => $i->key, $medium));
         $this->assertContains('seed_data_defaults_and_test_secrets_not_audited', array_map(fn ($i) => $i->key, $medium));
         $this->assertContains('restore_tests_do_not_exercise_real_restore_path', array_map(fn ($i) => $i->key, $medium));
         $this->assertContains('integration_degradation_registry_missing_ai_sms_whatsapp', array_map(fn ($i) => $i->key, $medium));
         $this->assertContains('client_facing_payment_receipts_missing', array_map(fn ($i) => $i->key, $medium));
         $this->assertContains('template_pack_per_pack_commercial_differentiation_missing', array_map(fn ($i) => $i->key, $medium));
+        $this->assertContains('ai_jobs_not_cancelled_when_entitlement_removed', array_map(fn ($i) => $i->key, $medium));
+        $this->assertContains('stripe_disconnect_payment_collection_block_not_enforced', array_map(fn ($i) => $i->key, $medium));
 
         $low = $this->service->bySeverity(GovernanceGapSeverity::Low);
-        $this->assertCount(5, $low);
+        $this->assertCount(6, $low);
         $this->assertContains('secret_rotation_schedule_or_reminder_missing', array_map(fn ($i) => $i->key, $low));
         $this->assertContains('ai_approval_request_lifecycle_states_incomplete', array_map(fn ($i) => $i->key, $low));
         $this->assertContains('form_edition_watch_sla_controls_missing', array_map(fn ($i) => $i->key, $low));
+        $this->assertContains('template_language_fallback_staff_notification_missing', array_map(fn ($i) => $i->key, $low));
     }
 
     public function test_is_tracked_works(): void

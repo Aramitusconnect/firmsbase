@@ -159,6 +159,30 @@ class ComplianceGapRegistryService
             'suggested_owning_gate' => 'future template-governance/admin UI phase',
             'status' => 'open',
         ],
+        [
+            'key' => 'ai_jobs_not_cancelled_when_entitlement_removed',
+            'area' => 'ai_governance',
+            'description' => 'No queued/async AI job class exists (AI actions are evaluated synchronously via AiModeResolutionService\'s entitlement gate), but AiApprovalRequestStatus::Pending rows can sit awaiting human review, and AiApprovalWorkflowService::approve()/reject() do not re-check the firm\'s AI entitlement/mode before resolving a Pending request (confirmed by direct inspection). A request submitted while entitled can still be approved after the firm\'s AI entitlement has since been removed, with no mechanism that cancels or blocks it.',
+            'severity' => GovernanceGapSeverity::Medium,
+            'suggested_owning_gate' => 'future AI job-lifecycle phase',
+            'status' => 'open',
+        ],
+        [
+            'key' => 'template_language_fallback_staff_notification_missing',
+            'area' => 'template_controls',
+            'description' => 'clients.preferred_language is real, but no FormTemplate/FormTemplateVersion/DocumentTemplate/DocumentTemplateVersion model has a language column at all (confirmed by direct inspection) — templates are not language-variant in this codebase. No fallback-to-approved-default-language behavior and no staff-notification mechanism for a missing translated template were found anywhere.',
+            'severity' => GovernanceGapSeverity::Low,
+            'suggested_owning_gate' => 'future multi-language template phase',
+            'status' => 'open',
+        ],
+        [
+            'key' => 'stripe_disconnect_payment_collection_block_not_enforced',
+            'area' => 'payment_controls',
+            'description' => 'IntegrationDegradationRegistryService::behaviorFor(IntegrationType::Stripe) is a real, generic degradation-mode declaration, but no stripe-account-status/connection field exists on any model, no payment-collection service consults the degradation registry before attempting a charge, no scheduled installment auto-collection process exists at all (app/Console does not exist), and no admin/firm alert mechanism for a Stripe disconnect event was found. Stripe degradation is declared, but payment collection blocking and admin/firm alert readiness on disconnect are not enforced.',
+            'severity' => GovernanceGapSeverity::Medium,
+            'suggested_owning_gate' => 'before firm-client online payment pilot',
+            'status' => 'open',
+        ],
     ];
 
     /**
