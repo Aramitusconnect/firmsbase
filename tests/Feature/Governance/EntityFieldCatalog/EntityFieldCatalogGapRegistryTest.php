@@ -71,7 +71,7 @@ class EntityFieldCatalogGapRegistryTest extends TestCase
         // trust-ledger-actor gap, confirmed by AWS evidence that
         // Reversal/ChargebackReversal postings have no guaranteed
         // actor trail = 16.
-        $this->assertCount(17, $this->service->all());
+        $this->assertCount(18, $this->service->all());
     }
 
     public function test_trust_ledger_actor_gap_is_tracked(): void

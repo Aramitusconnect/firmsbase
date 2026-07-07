@@ -28,7 +28,7 @@ class WorkflowStateMachineGapRegistryTest extends TestCase
     {
         // 16 pre-existing (Section 25-32) + 1 new Section 33
         // AI-approval-lifecycle gap (confirmed) = 17.
-        $this->assertCount(17, $this->service->all());
+        $this->assertCount(18, $this->service->all());
     }
 
     public function test_ai_approval_lifecycle_gap_exists_because_aws_confirmed_three_state_enum(): void
@@ -41,7 +41,7 @@ class WorkflowStateMachineGapRegistryTest extends TestCase
 
     public function test_final_gap_count_is_seventeen(): void
     {
-        $this->assertCount(17, $this->service->all());
+        $this->assertCount(18, $this->service->all());
     }
 
     public function test_no_gaps_were_added_for_cosmetic_enum_names_trust_request_reversed_or_import_completed_with_errors(): void

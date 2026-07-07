@@ -151,6 +151,14 @@ class ComplianceGapRegistryService
             'suggested_owning_gate' => 'future AI workflow richness phase',
             'status' => 'open',
         ],
+        [
+            'key' => 'form_edition_watch_sla_controls_missing',
+            'area' => 'admin_control_catalog',
+            'description' => 'form_edition_watch_items has no sla_due_at, no SLA status, no SLA policy, and no escalation column (confirmed by direct migration/model inspection). FormEditionWatchService\'s full method set (startWatching/markNewEditionDetected/markInReview/markUpdated/markNoActionNeeded) never computes or references a due date, deadline, or escalation trigger. Template controls include a form-edition watch queue, but SLA due-date/status/escalation controls are not represented anywhere.',
+            'severity' => GovernanceGapSeverity::Low,
+            'suggested_owning_gate' => 'future template-governance/admin UI phase',
+            'status' => 'open',
+        ],
     ];
 
     /**
