@@ -36,7 +36,7 @@ class ComplianceGapRegistryServiceTest extends TestCase
     {
         $items = $this->service->all();
 
-        $this->assertCount(13, $items);
+        $this->assertCount(15, $items);
 
         $declaredKeys = array_map(fn ($item) => $item->key, $items);
 
@@ -62,11 +62,13 @@ class ComplianceGapRegistryServiceTest extends TestCase
         $this->assertContains('emergency_support_access_high_risk_approval_not_wired', array_map(fn ($i) => $i->key, $high));
 
         $medium = $this->service->bySeverity(GovernanceGapSeverity::Medium);
-        $this->assertCount(7, $medium);
+        $this->assertCount(9, $medium);
         $this->assertContains('org_admin_role_missing', array_map(fn ($i) => $i->key, $medium));
         $this->assertContains('seed_data_defaults_and_test_secrets_not_audited', array_map(fn ($i) => $i->key, $medium));
         $this->assertContains('restore_tests_do_not_exercise_real_restore_path', array_map(fn ($i) => $i->key, $medium));
         $this->assertContains('integration_degradation_registry_missing_ai_sms_whatsapp', array_map(fn ($i) => $i->key, $medium));
+        $this->assertContains('client_facing_payment_receipts_missing', array_map(fn ($i) => $i->key, $medium));
+        $this->assertContains('template_pack_per_pack_commercial_differentiation_missing', array_map(fn ($i) => $i->key, $medium));
 
         $low = $this->service->bySeverity(GovernanceGapSeverity::Low);
         $this->assertCount(3, $low);

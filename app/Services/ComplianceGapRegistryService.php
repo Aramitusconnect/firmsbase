@@ -119,6 +119,22 @@ class ComplianceGapRegistryService
             'suggested_owning_gate' => 'future operational-hardening phase',
             'status' => 'open',
         ],
+        [
+            'key' => 'client_facing_payment_receipts_missing',
+            'area' => 'market_ready_value_multipliers',
+            'description' => 'No client-facing payment receipt concept exists anywhere in the repository (confirmed by direct search). The only Receipt-named model is ExpenseReceipt, an internal firm expense record unrelated to confirming a client\'s payment. Payment rows are real and canonical, but nothing renders or issues a receipt from them back to a client.',
+            'severity' => GovernanceGapSeverity::Medium,
+            'suggested_owning_gate' => 'future mobile-portal implementation phase',
+            'status' => 'open',
+        ],
+        [
+            'key' => 'template_pack_per_pack_commercial_differentiation_missing',
+            'area' => 'market_ready_value_multipliers',
+            'description' => 'TemplatePackCommercialService::installIfEntitled() gates every template pack behind a single blanket "practice_area_templates" module entitlement resolved via EntitlementService. No per-pack pricing, tier, add-on-purchase, or implementation-services-bundle mechanism exists anywhere (confirmed by direct search) — a firm entitled to install one pack is equally entitled to install any other, with no commercial differentiation between packs.',
+            'severity' => GovernanceGapSeverity::Medium,
+            'suggested_owning_gate' => 'future template-pack commercialization phase',
+            'status' => 'open',
+        ],
     ];
 
     /**

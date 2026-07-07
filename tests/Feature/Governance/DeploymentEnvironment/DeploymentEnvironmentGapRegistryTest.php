@@ -25,8 +25,9 @@ class DeploymentEnvironmentGapRegistryTest extends TestCase
 
     public function test_section_28_gap_count_before_section_29_additions_was_eleven(): void
     {
-        // 11 pre-existing (Section 25/26/27/28) + 2 new Section 29 gaps = 13.
-        $this->assertCount(13, $this->service->all());
+        // 11 pre-existing (Section 25/26/27/28) + 2 Section 29 gaps + 2
+        // Section 30 gaps = 15.
+        $this->assertCount(15, $this->service->all());
     }
 
     public function test_integration_degradation_gap_exists_because_aws_confirmed_ai_sms_whatsapp_undeclared(): void
@@ -72,6 +73,6 @@ class DeploymentEnvironmentGapRegistryTest extends TestCase
 
     public function test_exact_final_gap_count(): void
     {
-        $this->assertCount(13, $this->service->all());
+        $this->assertCount(15, $this->service->all());
     }
 }

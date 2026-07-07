@@ -69,7 +69,8 @@ class QualityGateGapRegistryTest extends TestCase
 
     public function test_exact_gap_count_after_section_28_additions(): void
     {
-        // 9 pre-existing (Section 25/26/27) + 2 new Section 28 gaps.
-        $this->assertCount(13, $this->service->all());
+        // 9 pre-existing (Section 25/26/27) + 2 new Section 28 gaps + 2
+        // Section 29 gaps + 2 Section 30 gaps.
+        $this->assertCount(15, $this->service->all());
     }
 }

@@ -27,8 +27,10 @@ class DataModelContractGapRegistryTest extends TestCase
         // Section 28 gaps (seed_data_defaults_and_test_secrets_not_audited,
         // restore_tests_do_not_exercise_real_restore_path) + 2 Section 29
         // gaps (integration_degradation_registry_missing_ai_sms_whatsapp,
-        // secret_rotation_schedule_or_reminder_missing).
-        $this->assertCount(13, $this->service->all());
+        // secret_rotation_schedule_or_reminder_missing) + 2 Section 30
+        // gaps (client_facing_payment_receipts_missing,
+        // template_pack_per_pack_commercial_differentiation_missing).
+        $this->assertCount(15, $this->service->all());
     }
 
     public function test_rls_gap_exists(): void
