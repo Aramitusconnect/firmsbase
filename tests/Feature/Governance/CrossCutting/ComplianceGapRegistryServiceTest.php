@@ -36,7 +36,7 @@ class ComplianceGapRegistryServiceTest extends TestCase
     {
         $items = $this->service->all();
 
-        $this->assertCount(16, $items);
+        $this->assertCount(17, $items);
 
         $declaredKeys = array_map(fn ($item) => $item->key, $items);
 
@@ -72,8 +72,9 @@ class ComplianceGapRegistryServiceTest extends TestCase
         $this->assertContains('template_pack_per_pack_commercial_differentiation_missing', array_map(fn ($i) => $i->key, $medium));
 
         $low = $this->service->bySeverity(GovernanceGapSeverity::Low);
-        $this->assertCount(3, $low);
+        $this->assertCount(4, $low);
         $this->assertContains('secret_rotation_schedule_or_reminder_missing', array_map(fn ($i) => $i->key, $low));
+        $this->assertContains('ai_approval_request_lifecycle_states_incomplete', array_map(fn ($i) => $i->key, $low));
     }
 
     public function test_is_tracked_works(): void

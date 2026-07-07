@@ -68,11 +68,18 @@ class EntityFieldCatalogFirewallTest extends TestCase
     ];
 
     /**
-     * Only these two locations may contain new files for Section 32.
+     * Scoped to prefixes rather than Section 32's own exact filenames
+     * so this test keeps working as later sections add their own new
+     * mapping services and sibling test directories (the same
+     * broadening applied to FinalExecutiveRecommendationFirewallTest
+     * in Section 33, itself following the QualityGateFirewallTest
+     * precedent from Section 29). Genuinely protected files are still
+     * enforced separately by test_section_25_to_31_mapping_services_were_not_modified().
      */
     private const ALLOWED_NEW_FILE_PREFIXES = [
-        'app/Services/EntityFieldCatalogMappingService.php',
-        'tests/Feature/Governance/EntityFieldCatalog/',
+        'app/Services/',
+        'app/ValueObjects/',
+        'tests/Feature/Governance/',
     ];
 
     /**

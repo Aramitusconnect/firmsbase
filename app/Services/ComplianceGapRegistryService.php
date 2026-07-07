@@ -143,6 +143,14 @@ class ComplianceGapRegistryService
             'suggested_owning_gate' => 'before trust pilot exit / before trust funds are enabled',
             'status' => 'open',
         ],
+        [
+            'key' => 'ai_approval_request_lifecycle_states_incomplete',
+            'area' => 'ai_governance',
+            'description' => 'AiApprovalRequestStatus has exactly 3 cases (Pending, Approved, Rejected), confirmed by direct enum inspection. The operative human-approval gate is real and enforced (AiApprovalWorkflowService::submit()/approve()/reject(), restricted to APPROVAL_ROLES), but the richer Draft/Revised/Archived lifecycle named in the master plan\'s workflow state-machine catalog is not represented — a request cannot be drafted before submission, revised after rejection, or archived once resolved.',
+            'severity' => GovernanceGapSeverity::Low,
+            'suggested_owning_gate' => 'future AI workflow richness phase',
+            'status' => 'open',
+        ],
     ];
 
     /**

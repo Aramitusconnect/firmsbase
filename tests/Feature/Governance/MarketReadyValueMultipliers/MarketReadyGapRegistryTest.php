@@ -26,7 +26,7 @@ class MarketReadyGapRegistryTest extends TestCase
     public function test_section_29_gap_count_before_section_30_additions_was_thirteen(): void
     {
         // 13 pre-existing (Section 25-29) + 2 new Section 30 gaps = 15.
-        $this->assertCount(16, $this->service->all());
+        $this->assertCount(17, $this->service->all());
     }
 
     public function test_client_facing_payment_receipts_gap_exists_because_aws_confirmed_no_receipt_concept(): void
@@ -80,6 +80,6 @@ class MarketReadyGapRegistryTest extends TestCase
 
     public function test_exact_final_gap_count(): void
     {
-        $this->assertCount(16, $this->service->all());
+        $this->assertCount(17, $this->service->all());
     }
 }
