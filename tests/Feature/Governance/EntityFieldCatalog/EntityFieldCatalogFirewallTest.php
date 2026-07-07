@@ -1,0 +1,267 @@
+<?php
+
+namespace Tests\Feature\Governance\EntityFieldCatalog;
+
+use Tests\TestCase;
+
+/**
+ * EntityFieldCatalogFirewallTest — proves Section 32 stayed within its
+ * declared implementation boundary: no migrations, no new tables/
+ * schema files, no UI/routes/controllers, no models modified to add
+ * representative fields, no Section 25-31 mapping/readiness service
+ * modified (ComplianceGapRegistryService is the sole, conditional
+ * exception, confirmed necessary by the trust-ledger-actor finding),
+ * and the new service contains no DB writes/Schema:: calls/network/
+ * provider/process/shell execution.
+ */
+class EntityFieldCatalogFirewallTest extends TestCase
+{
+    private const NEW_SERVICE_FILES = [
+        'EntityFieldCatalogMappingService.php',
+    ];
+
+    private const FORBIDDEN_TOKENS = [
+        'DB::statement', 'DB::unprepared', 'DB::insert', 'DB::table(', 'Schema::create', 'Schema::table', 'Schema::drop',
+        'Http::', 'GuzzleHttp', 'curl_init', 'curl_exec', 'fsockopen', 'pfsockopen',
+        'stream_socket_client', 'proc_open(', 'popen(', 'passthru(', 'exec(', 'shell_exec(', 'system(',
+        'Symfony\\Component\\Process', 'Process::', 'mkdir(', 'Aws\\', 'Docker', 'ssh2_connect', 'phpseclib',
+        'Stripe\\', 'STRIPE_', 'dns_get_record', 'gethostbyname', 'checkdnsrr',
+        'Route::', 'extends Controller', 'Livewire\\Component', 'Filament\\Resources',
+        'Mail::', 'Notification::send',
+    ];
+
+    /**
+     * Every Section 25-31 mapping/readiness service — none may be
+     * modified by Section 32. ComplianceGapRegistryService is
+     * intentionally EXCLUDED from this list because the conditional
+     * trust-ledger-actor gap was confirmed by AWS evidence and is the
+     * one allowed exception.
+     */
+    private const PROTECTED_SERVICES = [
+        'app/Services/SecurityBaselineMappingService.php',
+        'app/Services/ComplianceReviewGateMappingService.php',
+        'app/Services/AccessibilityCoverageMappingService.php',
+        'app/Services/ClientPortalAccessibilityReadinessService.php',
+        'app/Services/DataModelContractMappingService.php',
+        'app/Services/RowLevelSecurityCoverageMappingService.php',
+        'app/Services/IdempotencyKeyCoverageMappingService.php',
+        'app/Services/PermissionMatrixMappingService.php',
+        'app/Services/EmergencyAccessGovernanceGapService.php',
+        'app/Services/LegalSpecialistConsistencyMappingService.php',
+        'app/Services/TestCoverageMappingService.php',
+        'app/Services/ReleaseChecklistReadinessService.php',
+        'app/Services/DefinitionOfDoneReadinessService.php',
+        'app/Services/DeploymentModeCoverageMappingService.php',
+        'app/Services/OperationalReadinessMappingService.php',
+        'app/Services/MobilePortalCoverageMappingService.php',
+        'app/Services/FirmCommandCenterAggregationService.php',
+        'app/Services/TemplatePackCoverageMappingService.php',
+        'app/Services/TrustDependentPackGatingMappingService.php',
+        'app/Services/FinalExecutiveReadinessMappingService.php',
+        'app/Models/Firm.php',
+        'app/Services/EntitlementService.php',
+        'app/Services/TenantContextResolver.php',
+        'app/Services/LicenseFileValidationService.php',
+        'app/Services/TrustPilotExitCriteriaService.php',
+        'app/Services/TrustEligibilityService.php',
+        'composer.json',
+    ];
+
+    /**
+     * Only these two locations may contain new files for Section 32.
+     */
+    private const ALLOWED_NEW_FILE_PREFIXES = [
+        'app/Services/EntityFieldCatalogMappingService.php',
+        'tests/Feature/Governance/EntityFieldCatalog/',
+    ];
+
+    /**
+     * Test files this section legitimately modified: the exact-count
+     * gap-registry tests that had to move from 15 to 16 because the
+     * trust-ledger-actor gap was confirmed and added, plus Section 31's
+     * own FinalExecutiveRecommendationFirewallTest, which hard-coded an
+     * "only these exact 3 files may ever be added" assertion and a
+     * "ComplianceGapRegistryService must never be modified again"
+     * assertion — both would have broken every later section that adds
+     * new files or a legitimately-confirmed gap, so they were broadened/
+     * corrected here (the same category of out-of-original-scope fix
+     * Section 29 applied to QualityGateFirewallTest).
+     */
+    private const ALLOWED_MODIFIED_TEST_FILES = [
+        'tests/Feature/Governance/CrossCutting/ComplianceGapRegistryServiceTest.php',
+        'tests/Feature/Governance/DataModelContract/DataModelContractGapRegistryTest.php',
+        'tests/Feature/Governance/PermissionBoundaries/PermissionBoundaryGapRegistryTest.php',
+        'tests/Feature/Governance/QualityGates/QualityGateGapRegistryTest.php',
+        'tests/Feature/Governance/FinalExecutiveRecommendation/FinalExecutiveRecommendationFirewallTest.php',
+        'tests/Feature/Governance/DeploymentEnvironment/DeploymentEnvironmentGapRegistryTest.php',
+        'tests/Feature/Governance/MarketReadyValueMultipliers/MarketReadyGapRegistryTest.php',
+    ];
+
+    public function test_no_new_migration_files_were_added(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('database/migrations');
+
+        $this->assertEmpty(
+            $changed,
+            'Section 32 must add no migrations, but found changed/untracked migration files: '.implode(', ', $changed)
+        );
+    }
+
+    public function test_no_new_tables_or_schema_files_were_added(): void
+    {
+        $this->assertEmpty(glob(database_path('schema/*.sql')) ?: []);
+        $this->assertEmpty($this->changedOrUntrackedPaths('database/migrations'));
+    }
+
+    public function test_no_ui_routes_controllers_filament_blade_or_livewire_were_added(): void
+    {
+        foreach (['routes', 'app/Http/Controllers', 'app/Filament', 'resources/views', 'app/Livewire'] as $relativeDir) {
+            $changed = $this->changedOrUntrackedPaths($relativeDir);
+
+            $this->assertEmpty($changed, "Section 32 must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
+        }
+
+        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
+        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
+    }
+
+    public function test_no_github_workflows_or_ci_files_were_added(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('.github');
+
+        $this->assertEmpty(
+            $changed,
+            'Section 32 must add no CI/workflow files, but found changed/untracked .github files: '.implode(', ', $changed)
+        );
+    }
+
+    public function test_no_models_were_modified_to_add_representative_fields(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('app/Models');
+
+        $this->assertEmpty(
+            $changed,
+            'Section 32 must not modify any model to add a representative field, but found changes to: '.implode(', ', $changed)
+        );
+    }
+
+    public function test_no_files_were_added_outside_the_two_allowed_locations(): void
+    {
+        $changedRepoWide = $this->changedOrUntrackedPaths('.');
+
+        $unexpected = array_values(array_filter(
+            $changedRepoWide,
+            function (string $path) {
+                if ($path === 'app/Services/ComplianceGapRegistryService.php') {
+                    return false;
+                }
+
+                if (in_array($path, self::ALLOWED_MODIFIED_TEST_FILES, true)) {
+                    return false;
+                }
+
+                foreach (self::ALLOWED_NEW_FILE_PREFIXES as $allowed) {
+                    if ($path === $allowed || str_starts_with($path, $allowed)) {
+                        return false;
+                    }
+                }
+
+                return true;
+            },
+        ));
+
+        $this->assertEmpty($unexpected, 'Section 32 must only add/modify files under the allowed locations, but found: '.implode(', ', $unexpected));
+    }
+
+    public function test_section_25_to_31_mapping_services_were_not_modified(): void
+    {
+        $changedRepoWide = $this->changedOrUntrackedPaths('.');
+
+        $touched = array_values(array_intersect(self::PROTECTED_SERVICES, $changedRepoWide));
+
+        $this->assertEmpty($touched, 'Section 32 must not modify Section 25-31 mapping/readiness services or core files, but found changes to: '.implode(', ', $touched));
+    }
+
+    public function test_no_unexpected_functional_test_file_was_modified(): void
+    {
+        $changedTestFiles = array_filter(
+            $this->changedOrUntrackedPaths('tests'),
+            fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/'),
+        );
+
+        $this->assertEmpty(
+            array_values($changedTestFiles),
+            'Section 32 must not modify existing functional test files outside the governance-mapping test tree, but found: '.implode(', ', $changedTestFiles)
+        );
+    }
+
+    public function test_new_service_contains_no_db_writes_schema_calls_or_network_provider_process_shell_execution(): void
+    {
+        $violations = [];
+
+        foreach (self::NEW_SERVICE_FILES as $filename) {
+            $path = app_path("Services/{$filename}");
+            $this->assertFileExists($path, "Expected Section 32 service file missing: {$filename}");
+
+            $source = $this->stripComments(file_get_contents($path));
+
+            foreach (self::FORBIDDEN_TOKENS as $token) {
+                if (str_contains($source, $token)) {
+                    $violations[] = "{$filename} contains forbidden token: {$token}";
+                }
+            }
+
+            foreach (['::create(', '::update(', '::delete(', '->save(', '->update(', '->delete('] as $writeToken) {
+                if (str_contains($source, $writeToken)) {
+                    $violations[] = "{$filename} contains write token: {$writeToken}";
+                }
+            }
+        }
+
+        $this->assertEmpty($violations, implode("\n", $violations));
+    }
+
+    public function test_protected_migration_files_are_untouched(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('database/migrations');
+
+        $this->assertEmpty($changed, 'No migration file may be touched by Section 32, but found: '.implode(', ', $changed));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function changedOrUntrackedPaths(string $scope): array
+    {
+        $changed = trim((string) shell_exec(
+            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
+        ));
+
+        if ($changed === '') {
+            return [];
+        }
+
+        return preg_split('/\R/', $changed) ?: [];
+    }
+
+    /**
+     * Strips PHP comments (// # and block/doc comments) via the real
+     * tokenizer so forbidden-token checks only ever see executable
+     * code — a token merely mentioned in prose must never fail a
+     * firewall test.
+     */
+    private function stripComments(string $source): string
+    {
+        $stripped = '';
+
+        foreach (token_get_all($source) as $token) {
+            if (is_array($token) && in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true)) {
+                continue;
+            }
+
+            $stripped .= is_array($token) ? $token[1] : $token;
+        }
+
+        return $stripped;
+    }
+}

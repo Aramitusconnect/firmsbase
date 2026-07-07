@@ -30,7 +30,7 @@ class DataModelContractGapRegistryTest extends TestCase
         // secret_rotation_schedule_or_reminder_missing) + 2 Section 30
         // gaps (client_facing_payment_receipts_missing,
         // template_pack_per_pack_commercial_differentiation_missing).
-        $this->assertCount(15, $this->service->all());
+        $this->assertCount(16, $this->service->all());
     }
 
     public function test_rls_gap_exists(): void

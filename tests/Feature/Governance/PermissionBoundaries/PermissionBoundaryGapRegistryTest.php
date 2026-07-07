@@ -43,7 +43,7 @@ class PermissionBoundaryGapRegistryTest extends TestCase
         $this->assertContains('emergency_support_access_high_risk_approval_not_wired', $keys);
 
         // Section 28, Section 29, and Section 30 subsequently added 2 more gaps each on top of these.
-        $this->assertCount(15, $keys);
+        $this->assertCount(16, $keys);
     }
 
     public function test_org_admin_gap_severity_is_medium(): void
@@ -81,6 +81,6 @@ class PermissionBoundaryGapRegistryTest extends TestCase
 
     public function test_exact_count_is_eleven(): void
     {
-        $this->assertCount(15, $this->service->all());
+        $this->assertCount(16, $this->service->all());
     }
 }

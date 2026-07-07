@@ -135,6 +135,14 @@ class ComplianceGapRegistryService
             'suggested_owning_gate' => 'future template-pack commercialization phase',
             'status' => 'open',
         ],
+        [
+            'key' => 'trust_ledger_entry_posting_actor_not_guaranteed',
+            'area' => 'trust_accounting',
+            'description' => 'trust_ledger_entries has no direct posted_by column. For entry_type Deposit/WithdrawalToInvoice/Refund/Adjustment, an actor is guaranteed indirectly via trust_approval_event_id/trust_transfer_request_id/trust_refund_request_id, each pointing to a row with a real actor field (TrustApprovalEvent.actor_firm_user_id, TrustTransferRequest/TrustRefundRequest.requested_by_firm_user_id/approved_by_firm_user_id). However, TrustLedgerEntryReversalService::reverse() posts Reversal/ChargebackReversal entries with none of those three FKs set — only reverses_entry_id — and its sole caller, TrustChargebackService::reverse(), requires a FirmUser for authorization but never persists that actor anywhere (TrustChargebackEvent has no reported_by/reversed_by/resolved_by column). A Reversal/ChargebackReversal entry can be posted with no guaranteed direct or indirect actor trail.',
+            'severity' => GovernanceGapSeverity::High,
+            'suggested_owning_gate' => 'before trust pilot exit / before trust funds are enabled',
+            'status' => 'open',
+        ],
     ];
 
     /**

@@ -36,7 +36,7 @@ class ComplianceGapRegistryServiceTest extends TestCase
     {
         $items = $this->service->all();
 
-        $this->assertCount(15, $items);
+        $this->assertCount(16, $items);
 
         $declaredKeys = array_map(fn ($item) => $item->key, $items);
 
@@ -56,10 +56,11 @@ class ComplianceGapRegistryServiceTest extends TestCase
     public function test_by_severity_filters_correctly(): void
     {
         $high = $this->service->bySeverity(GovernanceGapSeverity::High);
-        $this->assertCount(3, $high);
+        $this->assertCount(4, $high);
         $this->assertContains('rls_prepared_not_enforced', array_map(fn ($i) => $i->key, $high));
         $this->assertContains('firm_user_2fa_missing', array_map(fn ($i) => $i->key, $high));
         $this->assertContains('emergency_support_access_high_risk_approval_not_wired', array_map(fn ($i) => $i->key, $high));
+        $this->assertContains('trust_ledger_entry_posting_actor_not_guaranteed', array_map(fn ($i) => $i->key, $high));
 
         $medium = $this->service->bySeverity(GovernanceGapSeverity::Medium);
         $this->assertCount(9, $medium);
