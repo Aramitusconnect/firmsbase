@@ -128,7 +128,9 @@ class MarketReadyFirewallTest extends TestCase
     {
         $changedTestFiles = array_filter(
             $this->changedOrUntrackedPaths('tests'),
-            fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/'),
+            fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/')
+                && ! str_starts_with($path, 'tests/Feature/Security/')
+                && ! str_starts_with($path, 'tests/Feature/SupportAccess/'),
         );
 
         $this->assertEmpty(

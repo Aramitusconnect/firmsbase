@@ -6,6 +6,16 @@ use App\Enums\GovernanceMappingStatus;
 use App\Services\EmergencyAccessGovernanceGapService;
 use Tests\TestCase;
 
+/**
+ * EmergencyAccessGovernanceGapServiceTest — updated by Section 39C to
+ * reflect that emergency support access high-risk approval is now
+ * wired (SupportAccessRequestService + SupportAccessPolicyService).
+ * This does not hide the original Section 27 finding — it records
+ * that the finding was real and has now been remediated, while the
+ * ComplianceGapRegistryService entry itself remains open/untouched
+ * (see the service's docblock) because no resolved-state lifecycle
+ * exists on GapRegisterItem yet.
+ */
 class EmergencyAccessGovernanceGapServiceTest extends TestCase
 {
     private const REQUIRED_CONTROLS = [
@@ -36,22 +46,18 @@ class EmergencyAccessGovernanceGapServiceTest extends TestCase
         }
     }
 
-    public function test_current_controls_reflects_aws_reality(): void
+    public function test_current_controls_now_includes_all_six_controls_after_section_39c(): void
     {
         $current = $this->service->currentControls();
 
-        $this->assertContains('reason_required', $current);
-        $this->assertContains('time_limit', $current);
-        $this->assertContains('automatic_notification', $current);
-        $this->assertContains('full_audit_trail', $current);
+        foreach (self::REQUIRED_CONTROLS as $control) {
+            $this->assertContains($control, $current, "Control '{$control}' should now be current after Section 39C wiring.");
+        }
     }
 
-    public function test_missing_controls_includes_platform_approval_and_high_risk_change_request(): void
+    public function test_missing_controls_is_now_empty_after_section_39c(): void
     {
-        $missing = $this->service->missingControls();
-
-        $this->assertContains('platform_approval', $missing);
-        $this->assertContains('high_risk_change_request', $missing);
+        $this->assertEmpty($this->service->missingControls());
     }
 
     public function test_missing_and_current_controls_partition_the_required_controls_with_no_overlap(): void
@@ -72,30 +78,33 @@ class EmergencyAccessGovernanceGapServiceTest extends TestCase
         $this->assertSame($required, $union);
     }
 
-    public function test_is_high_risk_approval_wired_is_false(): void
+    public function test_is_high_risk_approval_wired_is_now_true(): void
     {
-        $this->assertFalse($this->service->isHighRiskApprovalWired());
+        $this->assertTrue($this->service->isHighRiskApprovalWired());
     }
 
-    public function test_result_status_is_partially_implemented(): void
+    public function test_result_status_is_now_implemented(): void
     {
         $result = $this->service->result();
 
-        $this->assertSame(GovernanceMappingStatus::PartiallyImplemented, $result->status);
-        $this->assertNotSame(GovernanceMappingStatus::Implemented, $result->status);
+        $this->assertSame(GovernanceMappingStatus::Implemented, $result->status);
+        $this->assertNotSame(GovernanceMappingStatus::PartiallyImplemented, $result->status);
     }
 
-    public function test_result_documents_the_gap_without_fixing_it(): void
+    public function test_result_documents_the_fix_and_the_reused_high_risk_system(): void
     {
         $result = $this->service->result();
 
         $this->assertStringContainsString('SupportAccessPolicyService', $result->notes);
-        $this->assertStringContainsString('never calls it', $result->notes);
+        $this->assertStringContainsString('isEmergencyHighRiskApproved', $result->notes);
+        $this->assertStringContainsString('No second approval/audit system was introduced', $result->notes);
+    }
 
-        // Confirm the real service was not touched by this test suite.
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- app/Services/SupportAccessPolicyService.php app/Services/SupportAccessRequestService.php'
-        ));
-        $this->assertSame('', $changed);
+    public function test_result_transparently_notes_the_gap_registry_entry_remains_open(): void
+    {
+        $result = $this->service->result();
+
+        $this->assertStringContainsString('emergency_support_access_high_risk_approval_not_wired', $result->notes);
+        $this->assertStringContainsString('remains open/untouched', $result->notes);
     }
 }

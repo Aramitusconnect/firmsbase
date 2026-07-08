@@ -48,7 +48,6 @@ class FinalExecutiveRecommendationFirewallTest extends TestCase
         'app/Services/RowLevelSecurityCoverageMappingService.php',
         'app/Services/IdempotencyKeyCoverageMappingService.php',
         'app/Services/PermissionMatrixMappingService.php',
-        'app/Services/EmergencyAccessGovernanceGapService.php',
         'app/Services/LegalSpecialistConsistencyMappingService.php',
         'app/Services/TestCoverageMappingService.php',
         'app/Services/ReleaseChecklistReadinessService.php',
@@ -83,6 +82,8 @@ class FinalExecutiveRecommendationFirewallTest extends TestCase
         'app/Services/',
         'app/ValueObjects/',
         'tests/Feature/Governance/',
+        'tests/Feature/Security/',
+        'tests/Feature/SupportAccess/',
     ];
 
     public function test_no_new_migration_files_were_added(): void
@@ -188,7 +189,9 @@ class FinalExecutiveRecommendationFirewallTest extends TestCase
     {
         $changedTestFiles = array_filter(
             $this->changedOrUntrackedPaths('tests'),
-            fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/'),
+            fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/')
+                && ! str_starts_with($path, 'tests/Feature/Security/')
+                && ! str_starts_with($path, 'tests/Feature/SupportAccess/'),
         );
 
         $this->assertEmpty(

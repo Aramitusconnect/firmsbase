@@ -18,6 +18,13 @@ use Illuminate\Support\Facades\DB;
  * table (Phase 1), reused as-is rather than inventing a second
  * audit/notification mechanism. Emergency access is always logged with
  * the stronger emergency_justification field included in metadata.
+ *
+ * Section 39C: emergency access is no longer allowed the instant
+ * emergency_justification is non-empty — it also requires the linked
+ * high_risk_change_requests row (raised by SupportAccessRequestService
+ * via the existing, unmodified HighRiskPlatformChangePolicyService) to
+ * have reached Approved. This is the single enforcement point; no
+ * second approval/audit system was introduced.
  */
 class SupportAccessPolicyService
 {
@@ -30,6 +37,10 @@ class SupportAccessPolicyService
         if ($request->isEmergency()) {
             if (trim((string) $request->emergency_justification) === '') {
                 return SupportAccessDecision::deny('emergency access requires emergency_justification');
+            }
+
+            if (! (new SupportAccessRequestService())->isEmergencyHighRiskApproved($request)) {
+                return SupportAccessDecision::deny('emergency access requires platform high-risk approval before a session may start');
             }
 
             return SupportAccessDecision::allow();

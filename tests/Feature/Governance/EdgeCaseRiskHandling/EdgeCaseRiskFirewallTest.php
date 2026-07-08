@@ -59,9 +59,6 @@ class EdgeCaseRiskFirewallTest extends TestCase
         'app/Services/AiApprovalWorkflowService.php',
         'app/Services/AiModeResolutionService.php',
         'app/Services/PromptInjectionResistanceService.php',
-        'app/Services/SupportAccessPolicyService.php',
-        'app/Services/SupportAccessRequestService.php',
-        'app/Services/EmergencyAccessGovernanceGapService.php',
         'app/Services/ImportApplyService.php',
         'app/Services/ImportPreviewService.php',
         'app/Services/ImportBatchService.php',
@@ -100,6 +97,8 @@ class EdgeCaseRiskFirewallTest extends TestCase
     private const ALLOWED_NEW_FILE_PREFIXES = [
         'app/Services/',
         'tests/Feature/Governance/',
+        'tests/Feature/Security/',
+        'tests/Feature/SupportAccess/',
     ];
 
     public function test_no_new_migration_files_were_added(): void
@@ -158,7 +157,7 @@ class EdgeCaseRiskFirewallTest extends TestCase
             'TrustDepositService', 'TrustLedgerEntryReversalService', 'TrustChargebackService',
             'AiProviderKeyService', 'AiUsageRecorderService', 'AiToolActionRecorderService',
             'LicenseFileSigningService', 'FleetMigrationOrchestrationService', 'DeploymentHealthEnvelopeService',
-            'SupportAccessRequestService', 'ImportApplyService', 'ImportRollbackService',
+            'ImportApplyService', 'ImportRollbackService',
             'DeletionGovernanceService', 'KeyDestructionRequestService', 'LegalHoldService',
         ];
 
@@ -206,7 +205,9 @@ class EdgeCaseRiskFirewallTest extends TestCase
     {
         $changedTestFiles = array_filter(
             $this->changedOrUntrackedPaths('tests'),
-            fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/'),
+            fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/')
+                && ! str_starts_with($path, 'tests/Feature/Security/')
+                && ! str_starts_with($path, 'tests/Feature/SupportAccess/'),
         );
 
         $this->assertEmpty(

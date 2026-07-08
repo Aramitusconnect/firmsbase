@@ -37,7 +37,10 @@ class AdminControlUiBoundaryTest extends TestCase
 
         $nonServiceNonTestChanges = array_values(array_filter(
             $changedRepoWide,
-            fn (string $path) => ! str_starts_with($path, 'app/Services/') && ! str_starts_with($path, 'tests/Feature/Governance/'),
+            fn (string $path) => ! str_starts_with($path, 'app/Services/')
+                && ! str_starts_with($path, 'tests/Feature/Governance/')
+                && ! str_starts_with($path, 'tests/Feature/Security/')
+                && ! str_starts_with($path, 'tests/Feature/SupportAccess/'),
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

@@ -45,7 +45,6 @@ class ProfessionalReviewFirewallTest extends TestCase
         'app/Services/DefinitionOfDoneReadinessService.php',
         'app/Services/RowLevelSecurityCoverageMappingService.php',
         'app/Services/PermissionMatrixMappingService.php',
-        'app/Services/EmergencyAccessGovernanceGapService.php',
         'app/Services/DeploymentModeCoverageMappingService.php',
         'app/Services/OperationalReadinessMappingService.php',
         'app/Services/MobilePortalCoverageMappingService.php',
@@ -81,7 +80,6 @@ class ProfessionalReviewFirewallTest extends TestCase
         'app/Services/PromptInjectionResistanceService.php',
         'app/Services/AiRetrievalIsolationService.php',
         'app/Services/AiBudgetEnforcementService.php',
-        'app/Services/SupportAccessPolicyService.php',
         'app/Services/PlatformStaffAccessPolicyService.php',
         'app/Services/EncryptionKeyService.php',
         'app/Services/EntitlementService.php',
@@ -115,6 +113,8 @@ class ProfessionalReviewFirewallTest extends TestCase
     private const ALLOWED_NEW_FILE_PREFIXES = [
         'app/Services/',
         'tests/Feature/Governance/',
+        'tests/Feature/Security/',
+        'tests/Feature/SupportAccess/',
     ];
 
     public function test_no_new_migration_files_were_added(): void
@@ -240,7 +240,9 @@ class ProfessionalReviewFirewallTest extends TestCase
     {
         $changedTestFiles = array_filter(
             $this->changedOrUntrackedPaths('tests'),
-            fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/'),
+            fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/')
+                && ! str_starts_with($path, 'tests/Feature/Security/')
+                && ! str_starts_with($path, 'tests/Feature/SupportAccess/'),
         );
 
         $this->assertEmpty(

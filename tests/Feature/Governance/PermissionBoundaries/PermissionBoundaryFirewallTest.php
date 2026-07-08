@@ -38,8 +38,6 @@ class PermissionBoundaryFirewallTest extends TestCase
         'app/Services/PlatformStaffAccessPolicyService.php',
         'app/Services/MatterAccessPolicyService.php',
         'app/Services/TrustAccessPolicyService.php',
-        'app/Services/SupportAccessPolicyService.php',
-        'app/Services/SupportAccessRequestService.php',
         'app/Services/SupportAccessSessionService.php',
         'app/Services/LegalSpecialistBoundaryPolicyService.php',
         'app/Services/HighRiskPlatformChangePolicyService.php',

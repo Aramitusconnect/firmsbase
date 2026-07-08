@@ -49,7 +49,15 @@ class SupportAccessPolicyServiceTest extends TestCase
         $this->assertTrue($decision->allowed);
     }
 
-    public function test_emergency_request_bypasses_firm_approval(): void
+    /**
+     * Section 39C: emergency access bypasses FIRM approval (this firm
+     * never gets to block/allow it), but it is no longer self-declared
+     * only — it still requires platform high-risk approval before a
+     * session may start. See
+     * tests/Feature/Security/SupportAccess/EmergencySupportHighRiskApprovalTest.php
+     * for the full deny-before/allow-after coverage.
+     */
+    public function test_emergency_request_bypasses_firm_approval_but_still_requires_high_risk_approval(): void
     {
         $firm = Firm::factory()->create();
         $admin = PlatformAdmin::factory()->create();
@@ -57,9 +65,13 @@ class SupportAccessPolicyServiceTest extends TestCase
             $firm, $admin, SupportAccessType::Emergency, 'production incident', 30, 'Active outage impacting client access'
         );
 
+        // No firm_users approval exists at all for this request, and it
+        // is still denied — proving the firm-approval path was indeed
+        // bypassed (there is nothing for the firm to approve) while a
+        // *different* gate (platform high-risk approval) now applies.
         $decision = $this->policyService->canStartSession($request);
-
-        $this->assertTrue($decision->allowed);
+        $this->assertFalse($decision->allowed);
+        $this->assertStringContainsString('platform high-risk approval', $decision->reason);
     }
 
     public function test_emergency_access_is_audited_via_security_events(): void
