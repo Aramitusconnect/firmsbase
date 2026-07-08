@@ -131,6 +131,10 @@ class FinalExecutiveRecommendationFirewallTest extends TestCase
         $unexpected = array_values(array_filter(
             $changedRepoWide,
             function (string $path) {
+                if ($path === 'database/seeders/DatabaseSeeder.php') {
+                    return false;
+                }
+
                 foreach (self::ALLOWED_NEW_FILE_PREFIXES as $allowed) {
                     if ($path === $allowed || str_starts_with($path, $allowed)) {
                         return false;

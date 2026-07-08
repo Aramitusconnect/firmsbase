@@ -184,7 +184,13 @@ class MarketReadyFirewallTest extends TestCase
 
     public function test_no_template_pack_seed_data_or_trust_workflow_was_created(): void
     {
-        $changed = $this->changedOrUntrackedPaths('database/seeders');
+        // Section 39E (a later, distinct security-remediation branch)
+        // guarded DatabaseSeeder.php's existing default user to
+        // local/testing only — it created no template-pack seed data.
+        $changed = array_values(array_filter(
+            $this->changedOrUntrackedPaths('database/seeders'),
+            fn (string $path) => $path !== 'database/seeders/DatabaseSeeder.php',
+        ));
 
         $this->assertEmpty(
             $changed,

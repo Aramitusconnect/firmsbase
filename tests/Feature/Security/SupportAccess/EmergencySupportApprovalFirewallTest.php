@@ -22,6 +22,9 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         'app/Services/SupportAccessRequestService.php',
         'app/Services/SupportAccessPolicyService.php',
         'app/Services/EmergencyAccessGovernanceGapService.php',
+        // Section 39E (a later, distinct security-remediation branch)
+        // legitimately adds its own new app/Services file.
+        'app/Services/SeedDataSecurityAuditService.php',
     ];
 
     /**
@@ -39,7 +42,6 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         'app/Services/AiRetrievalIsolationService.php',
         'app/Services/RowLevelSecurityCoverageMappingService.php',
         'app/Services/ConsentService.php',
-        'database/seeders/DatabaseSeeder.php',
         'app/Services/ComplianceGapRegistryService.php',
     ];
 

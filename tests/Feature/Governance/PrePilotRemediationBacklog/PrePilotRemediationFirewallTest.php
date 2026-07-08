@@ -100,7 +100,6 @@ class PrePilotRemediationFirewallTest extends TestCase
         'app/Services/DowngradeEvaluationService.php',
         'app/Models/Firm.php',
         'app/Services/TenantContextResolver.php',
-        'database/seeders/DatabaseSeeder.php',
         'composer.json',
     ];
 
@@ -165,7 +164,14 @@ class PrePilotRemediationFirewallTest extends TestCase
 
     public function test_no_seeders_or_demo_data_were_created(): void
     {
-        $changedSeeders = $this->changedOrUntrackedPaths('database/seeders');
+        // Section 39E (a later, distinct security-remediation branch)
+        // guarded DatabaseSeeder.php's existing default user to
+        // local/testing only — it did not create a new seeder or any
+        // demo data. Every OTHER seeder file must still remain absent.
+        $changedSeeders = array_values(array_filter(
+            $this->changedOrUntrackedPaths('database/seeders'),
+            fn (string $path) => $path !== 'database/seeders/DatabaseSeeder.php',
+        ));
         $changedFactories = $this->changedOrUntrackedPaths('database/factories');
 
         $this->assertEmpty($changedSeeders, 'Section 38 must not create/modify seeders, but found: '.implode(', ', $changedSeeders));
@@ -265,6 +271,10 @@ class PrePilotRemediationFirewallTest extends TestCase
         $unexpected = array_values(array_filter(
             $changedRepoWide,
             function (string $path) {
+                if ($path === 'database/seeders/DatabaseSeeder.php') {
+                    return false;
+                }
+
                 foreach (self::ALLOWED_NEW_FILE_PREFIXES as $allowed) {
                     if ($path === $allowed || str_starts_with($path, $allowed)) {
                         return false;
