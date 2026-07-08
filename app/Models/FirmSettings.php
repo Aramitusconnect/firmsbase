@@ -16,6 +16,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * branding_settings_json/security_settings_json default to '{}' at the
  * application layer (see $attributes below) rather than via a raw SQL
  * column default, for portability.
+ *
+ * Section 39B: firm_user_2fa_mode mirrors client_2fa_mode exactly
+ * (same TwoFactorMode enum, same 'optional' default) — governs whether
+ * FirmUser2faPolicyService requires every active firm user's
+ * User.two_factor_confirmed_at to be set. Defaulting to 'optional'
+ * means adding this column never locks out an existing dev/test user;
+ * only a firm explicitly switched to 'required' is subject to the
+ * compliance check.
  */
 class FirmSettings extends Model
 {
@@ -29,6 +37,7 @@ class FirmSettings extends Model
         'trust_iolta_protection',
         'ai_mode',
         'client_2fa_mode',
+        'firm_user_2fa_mode',
         'portal_frontend_mode',
         'state_jurisdiction',
         'default_language',
@@ -48,6 +57,7 @@ class FirmSettings extends Model
             'trust_iolta_protection' => 'boolean',
             'ai_mode' => AiMode::class,
             'client_2fa_mode' => TwoFactorMode::class,
+            'firm_user_2fa_mode' => TwoFactorMode::class,
             'branding_settings_json' => 'array',
             'security_settings_json' => 'array',
         ];

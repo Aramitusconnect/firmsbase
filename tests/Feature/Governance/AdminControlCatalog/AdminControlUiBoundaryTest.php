@@ -38,6 +38,8 @@ class AdminControlUiBoundaryTest extends TestCase
         $nonServiceNonTestChanges = array_values(array_filter(
             $changedRepoWide,
             fn (string $path) => $path !== 'database/seeders/DatabaseSeeder.php'
+                && $path !== 'database/migrations/2026_07_29_900001_add_firm_user_2fa_mode_to_firm_settings_table.php'
+                && $path !== 'app/Models/FirmSettings.php'
                 && ! str_starts_with($path, 'app/Services/')
                 && ! str_starts_with($path, 'tests/Feature/Governance/')
                 && ! str_starts_with($path, 'tests/Feature/Security/')

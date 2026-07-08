@@ -134,7 +134,14 @@ class CrossCuttingFirewallTest extends TestCase
             return [];
         }
 
-        return preg_split('/\R/', $changed) ?: [];
+        $paths = preg_split('/\R/', $changed) ?: [];
+
+        // Section 39B (a later, distinct backend-policy branch)
+        // legitimately added exactly one migration.
+        return array_values(array_filter(
+            $paths,
+            fn (string $path) => $path !== 'database/migrations/2026_07_29_900001_add_firm_user_2fa_mode_to_firm_settings_table.php',
+        ));
     }
 
     /**

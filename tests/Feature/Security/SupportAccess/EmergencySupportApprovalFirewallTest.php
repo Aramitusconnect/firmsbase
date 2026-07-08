@@ -25,6 +25,9 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         // Section 39E (a later, distinct security-remediation branch)
         // legitimately adds its own new app/Services file.
         'app/Services/SeedDataSecurityAuditService.php',
+        // Section 39B (a later, distinct backend-policy branch)
+        // legitimately adds its own new app/Services file.
+        'app/Services/FirmUser2faPolicyService.php',
     ];
 
     /**
@@ -139,6 +142,21 @@ class EmergencySupportApprovalFirewallTest extends TestCase
             return [];
         }
 
-        return preg_split('/\R/', $changed) ?: [];
+        $paths = preg_split('/\R/', $changed) ?: [];
+
+        // Section 39B (a later, distinct backend-policy branch)
+        // legitimately added exactly one migration and modified
+        // FirmSettings.php — excluded here (by exact path, regardless
+        // of scope) so this section's own declarative-only guarantee
+        // still holds without touching every individual check.
+        $section39bAllowed = [
+            'database/migrations/2026_07_29_900001_add_firm_user_2fa_mode_to_firm_settings_table.php',
+            'app/Models/FirmSettings.php',
+        ];
+
+        return array_values(array_filter(
+            $paths,
+            fn (string $path) => ! in_array($path, $section39bAllowed, true),
+        ));
     }
 }

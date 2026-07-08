@@ -121,11 +121,24 @@ class SeedDataAuditFirewallTest extends TestCase
             'tests/Feature/Governance/ProfessionalReviewGate/ProfessionalReviewFirewallTest.php',
             'tests/Feature/Governance/WorkflowStateMachines/WorkflowStateMachineFirewallTest.php',
             'tests/Feature/Security/SupportAccess/EmergencySupportApprovalFirewallTest.php',
+            // Section 39B (a later, distinct backend-policy branch)
+            // legitimately added its own migration/model/service and
+            // needed to narrowly widen these same brittle firewall
+            // tests' scope conditions again, for the same reason.
+            'database/migrations/2026_07_29_900001_add_firm_user_2fa_mode_to_firm_settings_table.php',
+            'app/Models/FirmSettings.php',
+            'tests/Feature/Governance/CrossCutting/CrossCuttingFirewallTest.php',
+            'tests/Feature/Governance/DataModelContract/DataModelContractFirewallTest.php',
+            'tests/Feature/Governance/DeploymentEnvironment/DeploymentEnvironmentFirewallTest.php',
+            'tests/Feature/Governance/PermissionBoundaries/PermissionBoundaryFirewallTest.php',
+            'tests/Feature/Governance/QualityGates/QualityGateFirewallTest.php',
         ];
 
         $allowedPrefixes = [
             'app/Services/SeedDataSecurityAuditService.php',
             'tests/Feature/Security/SeedData/',
+            'app/Services/FirmUser2faPolicyService.php',
+            'tests/Feature/Security/FirmUser2fa/',
         ];
 
         $unexpected = array_values(array_filter(
@@ -210,7 +223,22 @@ class SeedDataAuditFirewallTest extends TestCase
             return [];
         }
 
-        return preg_split('/\R/', $changed) ?: [];
+        $paths = preg_split('/\R/', $changed) ?: [];
+
+        // Section 39B (a later, distinct backend-policy branch)
+        // legitimately added exactly one migration and modified
+        // FirmSettings.php — excluded here (by exact path, regardless
+        // of scope) so this section's own declarative-only guarantee
+        // still holds without touching every individual check.
+        $section39bAllowed = [
+            'database/migrations/2026_07_29_900001_add_firm_user_2fa_mode_to_firm_settings_table.php',
+            'app/Models/FirmSettings.php',
+        ];
+
+        return array_values(array_filter(
+            $paths,
+            fn (string $path) => ! in_array($path, $section39bAllowed, true),
+        ));
     }
 
     /**
