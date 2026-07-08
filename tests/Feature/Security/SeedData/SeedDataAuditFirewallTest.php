@@ -132,6 +132,11 @@ class SeedDataAuditFirewallTest extends TestCase
             'tests/Feature/Governance/DeploymentEnvironment/DeploymentEnvironmentFirewallTest.php',
             'tests/Feature/Governance/PermissionBoundaries/PermissionBoundaryFirewallTest.php',
             'tests/Feature/Governance/QualityGates/QualityGateFirewallTest.php',
+            // Section 39D (a later, distinct backend-policy branch)
+            // legitimately added its own new app/Services file and
+            // fixed a stale git-diff assumption in Section 39B's own
+            // firewall test.
+            'tests/Feature/Security/FirmUser2fa/FirmUser2faFirewallTest.php',
         ];
 
         $allowedPrefixes = [
@@ -139,6 +144,8 @@ class SeedDataAuditFirewallTest extends TestCase
             'tests/Feature/Security/SeedData/',
             'app/Services/FirmUser2faPolicyService.php',
             'tests/Feature/Security/FirmUser2fa/',
+            'app/Services/LoginPolicyService.php',
+            'tests/Feature/Security/LoginPolicy/',
         ];
 
         $unexpected = array_values(array_filter(

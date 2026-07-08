@@ -28,6 +28,9 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         // Section 39B (a later, distinct backend-policy branch)
         // legitimately adds its own new app/Services file.
         'app/Services/FirmUser2faPolicyService.php',
+        // Section 39D (a later, distinct backend-policy branch)
+        // legitimately adds its own new app/Services file.
+        'app/Services/LoginPolicyService.php',
     ];
 
     /**

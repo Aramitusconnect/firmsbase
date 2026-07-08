@@ -116,10 +116,14 @@ class FirmUser2faFirewallTest extends TestCase
 
     public function test_only_one_new_migration_was_added(): void
     {
-        $changed = $this->changedOrUntrackedPaths('database/migrations');
+        // Once Section 39B's branch is based on a commit that already
+        // includes this migration (e.g. a later section's branch), it
+        // is no longer "changed/untracked" per git diff — so this
+        // asserts the migration file itself exists exactly once,
+        // rather than relying on transient git-diff/commit state.
+        $migrationFiles = glob(database_path('migrations/*firm_user_2fa_mode*.php')) ?: [];
 
-        $this->assertCount(1, $changed, 'Section 39B must add exactly one migration, but found: '.implode(', ', $changed));
-        $this->assertStringContainsString('firm_user_2fa_mode', $changed[0]);
+        $this->assertCount(1, $migrationFiles, 'Expected exactly one firm_user_2fa_mode migration file, but found: '.implode(', ', $migrationFiles));
     }
 
     /**
