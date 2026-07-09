@@ -60,15 +60,15 @@ class RlsForceActivationFirewallTest extends TestCase
         }
     }
 
-    public function test_only_one_new_migration_file_was_added(): void
+    public function test_the_clients_force_rls_migration_file_exists(): void
     {
-        $changed = $this->changedOrUntrackedPaths('database/migrations');
-
-        $this->assertSame(
-            ['database/migrations/2026_07_30_900001_force_rls_on_clients_table.php'],
-            $changed,
-            'Section 39A-3A must add exactly one migration — the clients-only FORCE RLS activation.'
-        );
+        // Deliberately a file-existence check, not a git-diff/
+        // untracked-state check like this project's other firewall
+        // tests: this section's migration is expected to be committed
+        // and merged (unlike every prior "do not commit" section), so
+        // checking uncommitted/untracked state here would report
+        // "missing" forever once merged.
+        $this->assertFileExists(base_path('database/migrations/2026_07_30_900001_force_rls_on_clients_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void
