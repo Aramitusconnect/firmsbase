@@ -230,10 +230,15 @@ class ConflictCheckService
      */
     private function searchMatterParties(array $firmIds, array $terms, int $excludeMatterId): Collection
     {
-        $matterIds = Matter::withoutTenantScope()
-            ->whereIn('firm_id', $firmIds)
-            ->where('id', '!=', $excludeMatterId)
-            ->pluck('id');
+        $service = new TenantContextService();
+
+        $matterIds = collect($firmIds)->flatMap(fn (int $firmId) => $service->runWithFirmContext(
+            $firmId,
+            fn () => Matter::withoutTenantScope()
+                ->where('firm_id', $firmId)
+                ->where('id', '!=', $excludeMatterId)
+                ->pluck('id')
+        ));
 
         if ($matterIds->isEmpty()) {
             return collect();
@@ -251,7 +256,7 @@ class ConflictCheckService
         return MatterParty::query()
             ->whereIn('matter_id', $matterIds)
             ->whereIn('party_id', $partyIds)
-            ->with(['party', 'matter'])
+            ->with('party')
             ->get()
             ->map(fn (MatterParty $mp) => [
                 'type' => 'matter_party',
@@ -262,6 +267,21 @@ class ConflictCheckService
 
     private function applyTermMatching($query, array $terms, array $columns): void
     {
+        if (empty($terms)) {
+            // No search terms provided: match nothing, rather than
+            // leaving the closure below empty (which Eloquent/Postgres
+            // would otherwise treat as an unconditional match — every
+            // row "matches" zero given terms). This mattered in
+            // practice once matters is forced (Section 39A-3F):
+            // MatterFactory now ties a matter's own client to the same
+            // firm, so an empty-terms search would otherwise flag the
+            // matter's own freshly-created client as a false conflict
+            // match against itself.
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+
         $query->where(function ($outer) use ($terms, $columns) {
             foreach ($terms as $term) {
                 $outer->orWhere(function ($inner) use ($term, $columns) {

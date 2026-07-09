@@ -147,7 +147,8 @@ class CrossCuttingFirewallTest extends TestCase
                 && $path !== 'database/migrations/2026_07_31_900001_force_rls_on_firm_users_table.php'
                 && $path !== 'database/migrations/2026_08_01_900001_force_rls_on_documents_table.php'
                 && $path !== 'database/migrations/2026_08_02_900001_force_rls_on_deadlines_table.php'
-                && $path !== 'database/migrations/2026_08_03_900001_force_rls_on_tasks_table.php',
+                && $path !== 'database/migrations/2026_08_03_900001_force_rls_on_tasks_table.php'
+                && $path !== 'database/migrations/2026_08_04_900001_force_rls_on_matters_table.php',
         ));
     }
 

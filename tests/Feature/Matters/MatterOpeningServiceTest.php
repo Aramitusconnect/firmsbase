@@ -41,7 +41,7 @@ class MatterOpeningServiceTest extends TestCase
 
         $this->service->requestConflictCheck($matter, ['Jane Doe']);
 
-        $this->assertSame(MatterStatus::ConflictReview, $matter->fresh()->status);
+        $this->assertSame(MatterStatus::ConflictReview, $this->runWithFirmContext($matter->firm, fn () => $matter->fresh())->status);
     }
 
     public function test_open_matter_succeeds_when_conflict_check_is_clear(): void
@@ -50,7 +50,7 @@ class MatterOpeningServiceTest extends TestCase
 
         $run = $this->service->requestConflictCheck($matter, ['no_such_name_anywhere_xyz']);
 
-        $opened = $this->service->openMatter($matter->fresh(), $run);
+        $opened = $this->service->openMatter($this->runWithFirmContext($matter->firm, fn () => $matter->fresh()), $run);
 
         $this->assertSame(MatterStatus::Open, $opened->status);
         $this->assertNotNull($opened->opened_at);
@@ -65,7 +65,7 @@ class MatterOpeningServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
 
-        $this->service->openMatter($matter->fresh(), $run);
+        $this->service->openMatter($this->runWithFirmContext($matter->firm, fn () => $matter->fresh()), $run);
     }
 
     public function test_open_matter_succeeds_after_possible_matches_are_dismissed(): void
@@ -80,7 +80,7 @@ class MatterOpeningServiceTest extends TestCase
             $this->conflictCheckService->resolveResult($result, ConflictCheckResultStatus::Dismissed, $reviewer, 'Different person, common name');
         }
 
-        $opened = $this->service->openMatter($matter->fresh(), $run->fresh(), $reviewer);
+        $opened = $this->service->openMatter($this->runWithFirmContext($matter->firm, fn () => $matter->fresh()), $run->fresh(), $reviewer);
 
         $this->assertSame(MatterStatus::Open, $opened->status);
     }
@@ -99,7 +99,7 @@ class MatterOpeningServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
 
-        $this->service->openMatter($matter->fresh(), $run->fresh(), $reviewer);
+        $this->service->openMatter($this->runWithFirmContext($matter->firm, fn () => $matter->fresh()), $run->fresh(), $reviewer);
     }
 
     public function test_open_matter_throws_when_matter_is_not_in_conflict_review(): void
@@ -123,6 +123,6 @@ class MatterOpeningServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
 
-        $this->service->openMatter($matterA->fresh(), $runForB);
+        $this->service->openMatter($this->runWithFirmContext($matterA->firm, fn () => $matterA->fresh()), $runForB);
     }
 }

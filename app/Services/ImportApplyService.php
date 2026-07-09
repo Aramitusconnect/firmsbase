@@ -197,13 +197,13 @@ class ImportApplyService
                 'email' => $data['email'] ?? null,
                 'phone' => $data['phone'] ?? null,
             ]),
-            ImportEntityType::Matter => Matter::create([
+            ImportEntityType::Matter => (new TenantContextService())->runWithFirmContext($firm, fn () => Matter::create([
                 'firm_id' => $firm->id,
                 'client_id' => $data['client_id'] ?? throw new \InvalidArgumentException('client_id is required'),
                 'primary_practice_area_id' => $data['primary_practice_area_id'] ?? throw new \InvalidArgumentException('primary_practice_area_id is required'),
                 'matter_type_id' => $data['matter_type_id'] ?? throw new \InvalidArgumentException('matter_type_id is required'),
                 'status' => $data['status'] ?? 'draft',
-            ]),
+            ])),
             ImportEntityType::Party => Party::create([
                 'firm_id' => $firm->id,
                 'name' => $data['name'] ?? throw new \InvalidArgumentException('name is required'),

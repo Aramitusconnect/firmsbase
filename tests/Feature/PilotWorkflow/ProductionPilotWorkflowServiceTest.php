@@ -195,7 +195,7 @@ class ProductionPilotWorkflowServiceTest extends TestCase
         // Step 12: readiness score
         ReadinessScorecardComponent::factory()->create(['component_key' => 'documents_approved', 'status' => ReadinessComponentStatus::Active]);
 
-        $score = $this->pilot->computeReadinessScore($matter->fresh());
+        $score = $this->pilot->computeReadinessScore($this->runWithFirmContext($firm, fn () => $matter->fresh()));
 
         $this->assertSame($matter->id, $score->matter_id);
         $this->assertNotNull($score->computed_at);

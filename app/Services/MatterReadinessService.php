@@ -63,7 +63,7 @@ class MatterReadinessService
             'computed_at' => now(),
         ])->save();
 
-        $score->matter()->first(); // ensure relation loadable, no-op otherwise
+        (new TenantContextService())->runWithFirmContext($matter->firm_id, fn () => $score->matter()->first()); // ensure relation loadable, no-op otherwise
 
         \App\Models\ReadinessScoreEvent::create([
             'firm_id' => $matter->firm_id,

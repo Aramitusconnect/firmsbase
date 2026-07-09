@@ -67,7 +67,7 @@ class MatterReadinessChangedWiringTest extends TestCase
         $this->assertDatabaseCount('webhook_events', 1);
 
         // Second call with nothing changed: not_ready -> not_ready, must not fire again.
-        $this->service->recompute($matter->fresh());
+        $this->service->recompute($this->runWithFirmContext($firm, fn () => $matter->fresh()));
 
         $this->assertDatabaseCount('webhook_events', 1);
     }
@@ -81,7 +81,7 @@ class MatterReadinessChangedWiringTest extends TestCase
         $this->assertDatabaseCount('webhook_events', 1);
 
         $this->activateAllDefaultComponents(); // will make every component satisfied for a fresh matter
-        $this->service->recompute($matter->fresh()); // not_ready -> ready
+        $this->service->recompute($this->runWithFirmContext($firm, fn () => $matter->fresh())); // not_ready -> ready
 
         $this->assertDatabaseCount('webhook_events', 2);
         $this->assertDatabaseHas('webhook_events', ['event_type' => WebhookEventType::MatterReadinessChanged->value]);

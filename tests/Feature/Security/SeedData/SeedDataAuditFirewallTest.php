@@ -192,6 +192,44 @@ class SeedDataAuditFirewallTest extends TestCase
             'tests/Feature/Identity/UserFirmRelationshipsTest.php',
             'tests/Feature/Tenancy/RowLevelSecurityPreparationTest.php',
             'tests/Feature/Security/RlsForceRollout/',
+            // Section 39A-3C/39A-3D/39A-3E/39A-3F (later, distinct
+            // staged-FORCE-activation branches) legitimately added
+            // documents-only, deadlines-only, tasks-only, and
+            // matters-only FORCE RLS migrations, factory context
+            // fixes, explicit tenant-context wiring in real services,
+            // and updated the tests each affected.
+            'database/migrations/2026_08_01_900001_force_rls_on_documents_table.php',
+            'database/factories/DocumentFactory.php',
+            'app/Services/DocumentReplacementService.php',
+            'app/Services/DocumentSecurityService.php',
+            'app/Services/EmailAttachmentPromotionService.php',
+            'app/Services/SignatureCertificateService.php',
+            'tests/Feature/Documents/DocumentReplacementServiceTest.php',
+            'tests/Feature/Webhooks/Wiring/DocumentUploadedWiringTest.php',
+            'tests/Feature/Signature/Certificates/SignatureCertificateOnePerRequestTest.php',
+            'tests/Feature/Signature/Certificates/SignatureCertificateRequiresHashAndEventTrailTest.php',
+            'tests/Feature/Signature/Certificates/SignatureCertificateServiceTest.php',
+            'database/migrations/2026_08_02_900001_force_rls_on_deadlines_table.php',
+            'database/factories/DeadlineFactory.php',
+            'app/Services/DeadlineService.php',
+            'database/migrations/2026_08_03_900001_force_rls_on_tasks_table.php',
+            'database/factories/TaskFactory.php',
+            'app/Services/TaskService.php',
+            'app/Services/TaskDependencyService.php',
+            'app/Services/ReadinessScorecardRegistry.php',
+            'tests/Feature/Tasks/TaskDependencyServiceTest.php',
+            'tests/Feature/Webhooks/Wiring/TaskCompletedWiringTest.php',
+            'database/migrations/2026_08_04_900001_force_rls_on_matters_table.php',
+            'database/factories/MatterFactory.php',
+            'app/Services/MatterOpeningService.php',
+            'app/Services/MatterReadinessService.php',
+            'app/Services/ProductionPilotWorkflowService.php',
+            'app/Services/WebhookEventRecorderService.php',
+            'tests/Feature/Matters/MatterOpeningServiceTest.php',
+            'tests/Feature/MobilePortal/MobilePortalReadinessServiceTest.php',
+            'tests/Feature/PilotWorkflow/ProductionPilotWorkflowServiceTest.php',
+            'tests/Feature/Webhooks/Wiring/MatterCreatedWiringTest.php',
+            'tests/Feature/Webhooks/Wiring/MatterReadinessChangedWiringTest.php',
         ];
 
         $unexpected = array_values(array_filter(
@@ -350,6 +388,25 @@ class SeedDataAuditFirewallTest extends TestCase
             'database/factories/TaskFactory.php',
             'app/Services/TaskService.php',
             'app/Services/TaskDependencyService.php',
+            // Section 39A-3F (a later, distinct staged-FORCE-
+            // activation branch) legitimately added a matters-only
+            // FORCE RLS migration, a MatterFactory root-cause
+            // firm/client consistency fix, explicit tenant-context
+            // wiring in MatterOpeningService, MatterReadinessService,
+            // ProductionPilotWorkflowService, and
+            // WebhookEventRecorderService, plus updated the tests it
+            // affected.
+            'database/migrations/2026_08_04_900001_force_rls_on_matters_table.php',
+            'database/factories/MatterFactory.php',
+            'app/Services/MatterOpeningService.php',
+            'app/Services/MatterReadinessService.php',
+            'app/Services/ProductionPilotWorkflowService.php',
+            'app/Services/WebhookEventRecorderService.php',
+            'tests/Feature/Matters/MatterOpeningServiceTest.php',
+            'tests/Feature/MobilePortal/MobilePortalReadinessServiceTest.php',
+            'tests/Feature/PilotWorkflow/ProductionPilotWorkflowServiceTest.php',
+            'tests/Feature/Webhooks/Wiring/MatterCreatedWiringTest.php',
+            'tests/Feature/Webhooks/Wiring/MatterReadinessChangedWiringTest.php',
             'app/Services/ReadinessScorecardRegistry.php',
             'tests/Feature/Tasks/TaskDependencyServiceTest.php',
             'tests/Feature/Webhooks/Wiring/TaskCompletedWiringTest.php',

@@ -52,14 +52,14 @@ class FirmCommandCenterAggregationService
                 ->whereNull('held_at')
                 ->where('scheduled_at', '>=', $asOf)
                 ->count(),
-            mattersWaitingOnClientCount: Matter::query()
+            mattersWaitingOnClientCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Matter::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', MatterStatus::WaitingOnClient)
-                ->count(),
-            mattersReadyForReviewCount: Matter::query()
+                ->count()),
+            mattersReadyForReviewCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Matter::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', MatterStatus::ReadyForReview)
-                ->count(),
+                ->count()),
             documentsNeedingApprovalCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Document::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', DocumentStatus::PendingReview)

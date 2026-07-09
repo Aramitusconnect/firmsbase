@@ -64,7 +64,7 @@ class MatterCreatedWiringTest extends TestCase
         $this->assertDatabaseCount('webhook_events', 1);
         $this->assertDatabaseHas('webhook_events', ['event_type' => WebhookEventType::MatterCreated->value]);
 
-        $matter = Matter::query()->where('client_id', $client->id)->firstOrFail();
+        $matter = $this->runWithFirmContext($firm, fn () => Matter::query()->where('client_id', $client->id)->firstOrFail());
         $this->assertDatabaseHas('webhook_events', ['subject_type' => Matter::class, 'subject_id' => $matter->id]);
     }
 

@@ -41,12 +41,12 @@ class MatterOpeningService
         }
 
         if ($matter->status === MatterStatus::Draft) {
-            $matter->update(['status' => MatterStatus::ConflictCheckRequired]);
+            (new TenantContextService())->runWithFirmContext($matter->firm_id, fn () => $matter->update(['status' => MatterStatus::ConflictCheckRequired]));
         }
 
         $this->conflictCheckService->run($matter, $searchTerms, $freeTextNames, $actor);
 
-        $matter->update(['status' => MatterStatus::ConflictReview]);
+        (new TenantContextService())->runWithFirmContext($matter->firm_id, fn () => $matter->update(['status' => MatterStatus::ConflictReview]));
 
         return $matter->conflictCheckRuns()->latest('id')->firstOrFail();
     }
@@ -73,13 +73,15 @@ class MatterOpeningService
             );
         }
 
-        $matter->update([
-            'status' => MatterStatus::Open,
-            'opened_at' => now(),
-        ]);
+        return (new TenantContextService())->runWithFirmContext($matter->firm_id, function () use ($matter, $actor) {
+            $matter->update([
+                'status' => MatterStatus::Open,
+                'opened_at' => now(),
+            ]);
 
-        $this->timeline->record($matter->firm, 'matter_opened', $matter, $actor);
+            $this->timeline->record($matter->firm, 'matter_opened', $matter, $actor);
 
-        return $matter->fresh();
+            return $matter->fresh();
+        });
     }
 }

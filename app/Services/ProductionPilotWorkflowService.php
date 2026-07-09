@@ -80,17 +80,19 @@ class ProductionPilotWorkflowService
         array $conflictSearchTerms,
         ?User $actor = null,
     ): Matter {
-        $matter = Matter::create([
+        $matter = (new TenantContextService())->runWithFirmContext($firm, fn () => Matter::create([
             'firm_id' => $firm->id,
             'client_id' => $client->id,
             'primary_practice_area_id' => $practiceAreaId,
             'matter_type_id' => $matterTypeId,
             'status' => MatterStatus::Draft,
-        ]);
+        ]));
 
         $conflictCheckRun = $this->matterOpening->requestConflictCheck($matter, $conflictSearchTerms, actor: $actor);
 
-        return $this->matterOpening->openMatter($matter->fresh(), $conflictCheckRun, $actor);
+        $freshMatter = (new TenantContextService())->runWithFirmContext($firm, fn () => $matter->fresh());
+
+        return $this->matterOpening->openMatter($freshMatter, $conflictCheckRun, $actor);
     }
 
     /**

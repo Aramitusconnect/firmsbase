@@ -41,7 +41,13 @@ class WebhookEventRecorderService
                 return null;
             }
 
-            $payload = $this->payloadBuilder->build($type, $subject);
+            // Wrapped in the recording firm's own context: build() may
+            // lazily load a subject's tenant-owned relations (e.g. a
+            // Task or MatterReadinessScore's ->matter), and record() is
+            // routinely called from inside a DB::afterCommit() closure
+            // after the caller's own runWithFirmContext() has already
+            // cleared context in its finally block.
+            $payload = (new TenantContextService())->runWithFirmContext($firm, fn () => $this->payloadBuilder->build($type, $subject));
 
             $event = WebhookEvent::create([
                 'firm_id' => $firm->id,

@@ -45,7 +45,7 @@ class MobilePortalReadinessServiceTest extends TestCase
 
         DocumentRequest::factory()->create(['matter_id' => $matter->id]);
 
-        $this->assertTrue($this->service->documentChecklistAvailable($matter->fresh()));
+        $this->assertTrue($this->service->documentChecklistAvailable($this->runWithFirmContext($matter->firm, fn () => $matter->fresh())));
     }
 
     public function test_payment_link_readiness_true_for_a_sent_invoice_with_an_outstanding_balance(): void

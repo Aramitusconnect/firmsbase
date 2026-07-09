@@ -143,25 +143,27 @@ class ImportDuplicateDetectionService
             return DuplicateDetectionResult::noMatch();
         }
 
-        $query = Matter::query()
-            ->where('firm_id', $firmId)
-            ->where('client_id', $data['client_id']);
+        return (new TenantContextService())->runWithFirmContext($firmId, function () use ($firmId, $data) {
+            $query = Matter::query()
+                ->where('firm_id', $firmId)
+                ->where('client_id', $data['client_id']);
 
-        if (! empty($data['primary_practice_area_id'])) {
-            $query->where('primary_practice_area_id', $data['primary_practice_area_id']);
-        }
+            if (! empty($data['primary_practice_area_id'])) {
+                $query->where('primary_practice_area_id', $data['primary_practice_area_id']);
+            }
 
-        if (! empty($data['matter_type_id'])) {
-            $query->where('matter_type_id', $data['matter_type_id']);
-        }
+            if (! empty($data['matter_type_id'])) {
+                $query->where('matter_type_id', $data['matter_type_id']);
+            }
 
-        $match = $query->first();
+            $match = $query->first();
 
-        if ($match) {
-            return DuplicateDetectionResult::match(Matter::class, $match->id, 'client + practice area + matter type match (best effort)');
-        }
+            if ($match) {
+                return DuplicateDetectionResult::match(Matter::class, $match->id, 'client + practice area + matter type match (best effort)');
+            }
 
-        return DuplicateDetectionResult::noMatch();
+            return DuplicateDetectionResult::noMatch();
+        });
     }
 
     private function detectDocument(int $firmId, array $data): DuplicateDetectionResult

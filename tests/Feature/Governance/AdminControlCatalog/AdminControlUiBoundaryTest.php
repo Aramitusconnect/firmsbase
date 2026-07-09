@@ -99,7 +99,22 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== 'database/migrations/2026_08_03_900001_force_rls_on_tasks_table.php'
                 && $path !== 'database/factories/TaskFactory.php'
                 && $path !== 'tests/Feature/Tasks/TaskDependencyServiceTest.php'
-                && $path !== 'tests/Feature/Webhooks/Wiring/TaskCompletedWiringTest.php',
+                && $path !== 'tests/Feature/Webhooks/Wiring/TaskCompletedWiringTest.php'
+                // Section 39A-3F (a later, distinct staged-FORCE-
+                // activation branch) legitimately added a matters-only
+                // FORCE RLS migration, a MatterFactory root-cause
+                // firm/client consistency fix, explicit tenant-context
+                // wiring in real services (app/Services/ is already
+                // excluded above, so only the migration/factory/
+                // affected tests need listing here), and updated the
+                // tests it affected.
+                && $path !== 'database/migrations/2026_08_04_900001_force_rls_on_matters_table.php'
+                && $path !== 'database/factories/MatterFactory.php'
+                && $path !== 'tests/Feature/Matters/MatterOpeningServiceTest.php'
+                && $path !== 'tests/Feature/MobilePortal/MobilePortalReadinessServiceTest.php'
+                && $path !== 'tests/Feature/PilotWorkflow/ProductionPilotWorkflowServiceTest.php'
+                && $path !== 'tests/Feature/Webhooks/Wiring/MatterCreatedWiringTest.php'
+                && $path !== 'tests/Feature/Webhooks/Wiring/MatterReadinessChangedWiringTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));
