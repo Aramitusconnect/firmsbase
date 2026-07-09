@@ -332,6 +332,23 @@ class FinalExecutiveRecommendationFirewallTest extends TestCase
             'tests/Feature/Identity/FirmUserTest.php',
             'tests/Feature/Identity/UserFirmRelationshipsTest.php',
             'tests/Feature/Tenancy/RowLevelSecurityPreparationTest.php',
+            // Section 39A-3C (a later, distinct staged-FORCE-
+            // activation branch) legitimately added a documents-only
+            // FORCE RLS migration, a DocumentFactory context fix, and
+            // explicit tenant-context wiring in several real services
+            // that write/read documents directly, plus updated the
+            // tests it affected.
+            'database/migrations/2026_08_01_900001_force_rls_on_documents_table.php',
+            'database/factories/DocumentFactory.php',
+            'app/Services/DocumentReplacementService.php',
+            'app/Services/DocumentSecurityService.php',
+            'app/Services/EmailAttachmentPromotionService.php',
+            'app/Services/SignatureCertificateService.php',
+            'tests/Feature/Documents/DocumentReplacementServiceTest.php',
+            'tests/Feature/Webhooks/Wiring/DocumentUploadedWiringTest.php',
+            'tests/Feature/Signature/Certificates/SignatureCertificateOnePerRequestTest.php',
+            'tests/Feature/Signature/Certificates/SignatureCertificateRequiresHashAndEventTrailTest.php',
+            'tests/Feature/Signature/Certificates/SignatureCertificateServiceTest.php',
         ];
 
         return array_values(array_filter(

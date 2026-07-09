@@ -166,30 +166,32 @@ class ImportDuplicateDetectionService
 
     private function detectDocument(int $firmId, array $data): DuplicateDetectionResult
     {
-        $query = Document::query()->where('firm_id', $firmId);
+        return (new TenantContextService())->runWithFirmContext($firmId, function () use ($firmId, $data) {
+            $query = Document::query()->where('firm_id', $firmId);
 
-        if (! empty($data['file_hash'])) {
-            $match = (clone $query)->where('file_hash', $data['file_hash'])->first();
-            if ($match) {
-                return DuplicateDetectionResult::match(Document::class, $match->id, 'file hash match');
+            if (! empty($data['file_hash'])) {
+                $match = (clone $query)->where('file_hash', $data['file_hash'])->first();
+                if ($match) {
+                    return DuplicateDetectionResult::match(Document::class, $match->id, 'file hash match');
+                }
             }
-        }
 
-        if (! empty($data['original_filename'])) {
-            $match = (clone $query)->where('original_filename', $data['original_filename'])->first();
-            if ($match) {
-                return DuplicateDetectionResult::match(Document::class, $match->id, 'filename match');
+            if (! empty($data['original_filename'])) {
+                $match = (clone $query)->where('original_filename', $data['original_filename'])->first();
+                if ($match) {
+                    return DuplicateDetectionResult::match(Document::class, $match->id, 'filename match');
+                }
             }
-        }
 
-        if (! empty($data['storage_path'])) {
-            $match = (clone $query)->where('storage_path', $data['storage_path'])->first();
-            if ($match) {
-                return DuplicateDetectionResult::match(Document::class, $match->id, 'source path match');
+            if (! empty($data['storage_path'])) {
+                $match = (clone $query)->where('storage_path', $data['storage_path'])->first();
+                if ($match) {
+                    return DuplicateDetectionResult::match(Document::class, $match->id, 'source path match');
+                }
             }
-        }
 
-        return DuplicateDetectionResult::noMatch();
+            return DuplicateDetectionResult::noMatch();
+        });
     }
 
     private function detectParty(int $firmId, array $data): DuplicateDetectionResult

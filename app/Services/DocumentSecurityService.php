@@ -56,7 +56,15 @@ class DocumentSecurityService
     ): Document {
         $this->uploadPolicy->assertUploadIsAllowed($originalFilename, $sizeBytes);
 
-        $document = Document::create([
+        // Wrapped only around the create() call, not the
+        // DB::afterCommit() below — runWithFirmContext()'s own
+        // transaction commits (or, inside an already-open ambient
+        // transaction such as a test's, releases as a savepoint)
+        // before this method continues, so transactionLevel() is back
+        // to whatever it was beforehand by the time afterCommit() is
+        // reached, preserving the "runs immediately outside a real
+        // transaction" behavior this method's own docblock documents.
+        $document = (new TenantContextService())->runWithFirmContext($firm, fn () => Document::create([
             'firm_id' => $firm->id,
             'matter_id' => $matter?->id,
             'client_id' => $client?->id,
@@ -71,7 +79,7 @@ class DocumentSecurityService
             'file_hash' => $fileHash,
             'encryption_key_id' => $encryptionKey?->id,
             'uploaded_by' => $uploadedBy?->id,
-        ]);
+        ]));
 
         DB::afterCommit(function () use ($firm, $document) {
             try {
@@ -91,20 +99,22 @@ class DocumentSecurityService
      */
     public function applyScanResult(Document $document, VirusScanResult $result): Document
     {
-        $document->update([
-            'scan_status' => $result->status,
-            'scan_result_detail' => $result->detail,
-            'scanned_at' => now(),
-        ]);
-
-        if ($result->status === DocumentScanStatus::Infected) {
+        return (new TenantContextService())->runWithFirmContext($document->firm_id, function () use ($document, $result) {
             $document->update([
-                'status' => DocumentStatus::Rejected,
-                'rejected_reason' => 'Virus scan detected malware: '.($result->threatName ?? 'unknown signature'),
+                'scan_status' => $result->status,
+                'scan_result_detail' => $result->detail,
+                'scanned_at' => now(),
             ]);
-        }
 
-        return $document->fresh();
+            if ($result->status === DocumentScanStatus::Infected) {
+                $document->update([
+                    'status' => DocumentStatus::Rejected,
+                    'rejected_reason' => 'Virus scan detected malware: '.($result->threatName ?? 'unknown signature'),
+                ]);
+            }
+
+            return $document->fresh();
+        });
     }
 
     public function approve(Document $document, User $approver): Document
@@ -113,25 +123,29 @@ class DocumentSecurityService
             throw new \RuntimeException('Only a document with a clean scan result can be approved.');
         }
 
-        $document->update([
-            'status' => DocumentStatus::Approved,
-            'approved_by' => $approver->id,
-            'approved_at' => now(),
-        ]);
+        return (new TenantContextService())->runWithFirmContext($document->firm_id, function () use ($document, $approver) {
+            $document->update([
+                'status' => DocumentStatus::Approved,
+                'approved_by' => $approver->id,
+                'approved_at' => now(),
+            ]);
 
-        return $document->fresh();
+            return $document->fresh();
+        });
     }
 
     public function reject(Document $document, User $approver, string $reason): Document
     {
-        $document->update([
-            'status' => DocumentStatus::Rejected,
-            'approved_by' => $approver->id,
-            'approved_at' => now(),
-            'rejected_reason' => $reason,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($document->firm_id, function () use ($document, $approver, $reason) {
+            $document->update([
+                'status' => DocumentStatus::Rejected,
+                'approved_by' => $approver->id,
+                'approved_at' => now(),
+                'rejected_reason' => $reason,
+            ]);
 
-        return $document->fresh();
+            return $document->fresh();
+        });
     }
 
     /**

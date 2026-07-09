@@ -73,7 +73,7 @@ class DocumentReplacementService
         string $fileHash,
         ?User $uploadedBy = null,
     ): Document {
-        return DB::transaction(function () use ($original, $storageDisk, $storagePath, $originalFilename, $mimeType, $sizeBytes, $fileHash, $uploadedBy) {
+        return (new TenantContextService())->runWithFirmContext($original->firm_id, function () use ($original, $storageDisk, $storagePath, $originalFilename, $mimeType, $sizeBytes, $fileHash, $uploadedBy) {
             $this->captureCurrentAsVersion($original);
 
             $replacement = Document::create([

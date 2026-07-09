@@ -5,6 +5,7 @@ namespace Tests\Feature\Signature\Certificates;
 use App\Enums\SignatureRequestStatus;
 use App\Models\Document;
 use App\Models\DocumentHash;
+use App\Models\Firm;
 use App\Models\SignatureRequest;
 use App\Services\DocumentHashService;
 use App\Services\SignatureCertificateService;
@@ -46,8 +47,13 @@ class SignatureCertificateRequiresHashAndEventTrailTest extends TestCase
 
     public function test_generate_throws_when_no_document_hash_exists(): void
     {
-        $document = Document::factory()->create();
-        $request = SignatureRequest::factory()->status(SignatureRequestStatus::Signed)->create(['document_id' => $document->id]);
+        // documents has permanent FORCE ROW LEVEL SECURITY (Section
+        // 39A-3C) — the document and its owning request must share
+        // the same firm_id, or the request's own firm context won't
+        // resolve the document at all.
+        $firm = Firm::factory()->create();
+        $document = Document::factory()->create(['firm_id' => $firm->id]);
+        $request = SignatureRequest::factory()->status(SignatureRequestStatus::Signed)->create(['firm_id' => $firm->id, 'document_id' => $document->id]);
         \App\Models\SignatureEvent::factory()->forRequest($request)->create();
 
         $this->expectException(\RuntimeException::class);
@@ -56,8 +62,9 @@ class SignatureCertificateRequiresHashAndEventTrailTest extends TestCase
 
     public function test_generate_throws_when_no_event_trail_exists(): void
     {
-        $document = Document::factory()->create();
-        $request = SignatureRequest::factory()->status(SignatureRequestStatus::Signed)->create(['document_id' => $document->id]);
+        $firm = Firm::factory()->create();
+        $document = Document::factory()->create(['firm_id' => $firm->id]);
+        $request = SignatureRequest::factory()->status(SignatureRequestStatus::Signed)->create(['firm_id' => $firm->id, 'document_id' => $document->id]);
         DocumentHash::factory()->forDocument($document)->create();
 
         $this->expectException(\RuntimeException::class);
@@ -66,8 +73,9 @@ class SignatureCertificateRequiresHashAndEventTrailTest extends TestCase
 
     public function test_generate_succeeds_once_all_three_preconditions_are_met(): void
     {
-        $document = Document::factory()->create();
-        $request = SignatureRequest::factory()->status(SignatureRequestStatus::Signed)->create(['document_id' => $document->id]);
+        $firm = Firm::factory()->create();
+        $document = Document::factory()->create(['firm_id' => $firm->id]);
+        $request = SignatureRequest::factory()->status(SignatureRequestStatus::Signed)->create(['firm_id' => $firm->id, 'document_id' => $document->id]);
         DocumentHash::factory()->forDocument($document)->create();
         \App\Models\SignatureEvent::factory()->forRequest($request)->create();
 

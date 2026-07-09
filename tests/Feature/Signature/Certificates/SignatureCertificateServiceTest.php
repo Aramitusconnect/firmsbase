@@ -6,6 +6,7 @@ use App\Enums\SignatureEventType;
 use App\Enums\SignatureRequestStatus;
 use App\Models\Document;
 use App\Models\DocumentHash;
+use App\Models\Firm;
 use App\Models\SignatureCertificate;
 use App\Models\SignatureEvent;
 use App\Models\SignatureRequest;
@@ -37,8 +38,13 @@ class SignatureCertificateServiceTest extends TestCase
 
     public function test_certificate_data_json_includes_hash_value_and_recipient_evidence(): void
     {
-        $document = Document::factory()->create();
-        $request = SignatureRequest::factory()->status(SignatureRequestStatus::Signed)->create(['document_id' => $document->id]);
+        // documents has permanent FORCE ROW LEVEL SECURITY (Section
+        // 39A-3C) — the document and its owning request must share
+        // the same firm_id, or the request's own firm context won't
+        // resolve the document at all.
+        $firm = Firm::factory()->create();
+        $document = Document::factory()->create(['firm_id' => $firm->id]);
+        $request = SignatureRequest::factory()->status(SignatureRequestStatus::Signed)->create(['firm_id' => $firm->id, 'document_id' => $document->id]);
         $recipient = SignatureRequestRecipient::factory()
             ->forRequest($request)
             ->status(SignatureRequestStatus::Signed)
@@ -59,8 +65,9 @@ class SignatureCertificateServiceTest extends TestCase
 
     public function test_generate_logs_certificate_generated_and_request_completed_events(): void
     {
-        $document = Document::factory()->create();
-        $request = SignatureRequest::factory()->status(SignatureRequestStatus::Signed)->create(['document_id' => $document->id]);
+        $firm = Firm::factory()->create();
+        $document = Document::factory()->create(['firm_id' => $firm->id]);
+        $request = SignatureRequest::factory()->status(SignatureRequestStatus::Signed)->create(['firm_id' => $firm->id, 'document_id' => $document->id]);
         DocumentHash::factory()->forDocument($document)->create();
         SignatureEvent::factory()->forRequest($request)->create();
 

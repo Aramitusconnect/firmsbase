@@ -243,7 +243,7 @@ class ImportApplyService
     {
         $this->documentSafetyService->assertSafeToAccept($firm, $row);
 
-        $document = Document::create([
+        $document = (new TenantContextService())->runWithFirmContext($firm, fn () => Document::create([
             'firm_id' => $firm->id,
             'matter_id' => $data['matter_id'] ?? null,
             'client_id' => $data['client_id'] ?? null,
@@ -253,7 +253,7 @@ class ImportApplyService
             'mime_type' => $data['mime_type'] ?? 'application/octet-stream',
             'size_bytes' => $data['size_bytes'] ?? 0,
             'file_hash' => $data['file_hash'] ?? hash('sha256', $data['storage_path'] ?? uniqid('', true)),
-        ]);
+        ]));
 
         $this->documentSafetyService->assertDocumentBelongsToFirm($document, $firm);
 

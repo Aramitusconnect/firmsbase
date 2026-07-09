@@ -69,8 +69,10 @@ class DocumentReplacementServiceTest extends TestCase
             hash('sha256', 'replacement'),
         );
 
-        $this->assertSame(DocumentStatus::Replaced, $original->fresh()->status);
-        $this->assertNotNull(Document::query()->find($original->id)); // never deleted
+        $this->runWithFirmContext($original->firm_id, function () use ($original) {
+            $this->assertSame(DocumentStatus::Replaced, $original->fresh()->status);
+            $this->assertNotNull(Document::query()->find($original->id)); // never deleted
+        });
         $this->assertSame($original->id, $replacement->replaces_document_id);
         $this->assertSame(DocumentStatus::Uploaded, $replacement->status);
         $this->assertSame(DocumentScanStatus::Pending, $replacement->scan_status);

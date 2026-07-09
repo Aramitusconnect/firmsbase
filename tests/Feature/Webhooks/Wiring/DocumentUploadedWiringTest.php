@@ -104,7 +104,7 @@ class DocumentUploadedWiringTest extends TestCase
             fileHash: hash('sha256', 'still-uploaded'),
         );
 
-        $this->assertDatabaseHas('documents', ['id' => $document->id, 'original_filename' => 'still-uploaded.pdf']);
+        $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('documents', ['id' => $document->id, 'original_filename' => 'still-uploaded.pdf']));
     }
 
     public function test_document_uploaded_fires_exactly_once_from_email_attachment_promotion(): void

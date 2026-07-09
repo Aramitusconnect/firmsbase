@@ -60,10 +60,10 @@ class FirmCommandCenterAggregationService
                 ->where('firm_id', $firm->id)
                 ->where('status', MatterStatus::ReadyForReview)
                 ->count(),
-            documentsNeedingApprovalCount: Document::query()
+            documentsNeedingApprovalCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Document::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', DocumentStatus::PendingReview)
-                ->count(),
+                ->count()),
             deadlinesThisWeekCount: Deadline::query()
                 ->where('firm_id', $firm->id)
                 ->whereNotIn('status', [DeadlineStatus::Completed, DeadlineStatus::Cancelled])

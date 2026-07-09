@@ -57,8 +57,13 @@ class SignatureCertificateService
             throw new \RuntimeException('A certificate has already been generated for this request.');
         }
 
+        // documents has permanent FORCE ROW LEVEL SECURITY (Section
+        // 39A-3C) — $request->document is only touched when the
+        // source type is Document, so context is only needed on that
+        // branch; generatedDocument reads the (not yet forced)
+        // generated_documents table.
         $hash = $request->source_document_type === SignatureSourceDocumentType::Document
-            ? $this->hashService->latestForDocument($request->document)
+            ? (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $this->hashService->latestForDocument($request->document))
             : $this->hashService->latestForGeneratedDocument($request->generatedDocument);
 
         if ($hash === null) {

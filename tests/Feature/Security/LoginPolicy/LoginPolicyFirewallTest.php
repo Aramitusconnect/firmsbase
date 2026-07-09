@@ -38,7 +38,8 @@ class LoginPolicyFirewallTest extends TestCase
         $changed = array_values(array_filter(
             $this->changedOrUntrackedPaths('database/migrations'),
             fn (string $path) => $path !== 'database/migrations/2026_07_30_900001_force_rls_on_clients_table.php'
-                && $path !== 'database/migrations/2026_07_31_900001_force_rls_on_firm_users_table.php',
+                && $path !== 'database/migrations/2026_07_31_900001_force_rls_on_firm_users_table.php'
+                && $path !== 'database/migrations/2026_08_01_900001_force_rls_on_documents_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39D must add no migrations, but found: '.implode(', ', $changed));

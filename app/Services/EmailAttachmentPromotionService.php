@@ -78,7 +78,7 @@ class EmailAttachmentPromotionService
         // firm_id is derived exclusively from the message's own account — never from provider data.
         $firmId = $message->emailAccount->firm_id;
 
-        $document = Document::create([
+        $document = (new TenantContextService())->runWithFirmContext($firmId, fn () => Document::create([
             'firm_id' => $firmId,
             'matter_id' => null,
             'client_id' => null,
@@ -91,7 +91,7 @@ class EmailAttachmentPromotionService
             'mime_type' => $attachment->mime_type,
             'size_bytes' => $attachment->size_bytes,
             'file_hash' => hash('sha256', $attachment->simulated_storage_path),
-        ]);
+        ]));
 
         if ($document->firm_id !== $firmId) {
             throw new \RuntimeException('Promoted document must not cross firms.');
