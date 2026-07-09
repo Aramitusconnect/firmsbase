@@ -73,7 +73,7 @@ class ClientCreatedWiringTest extends TestCase
 
         $client = $service->convert($lead, ['display_name' => 'Still Converted']);
 
-        $this->assertDatabaseHas('clients', ['id' => $client->id, 'display_name' => 'Still Converted']);
+        $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('clients', ['id' => $client->id, 'display_name' => 'Still Converted']));
         $this->assertTrue($lead->fresh()->isConverted());
     }
 

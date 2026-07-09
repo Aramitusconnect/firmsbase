@@ -177,16 +177,32 @@ class ConflictCheckService
     }
 
     /**
+     * clients has permanent FORCE ROW LEVEL SECURITY (Section 39A-3A),
+     * whose policy matches against a single app.current_firm_id value
+     * — it cannot satisfy a single whereIn('firm_id', $firmIds) query
+     * spanning multiple firms. Org-wide conflict search legitimately
+     * needs to reach every sibling firm, so this iterates $firmIds
+     * explicitly, running each firm's search under its own tenant
+     * context and merging the results — the same "iterate firms
+     * explicitly rather than bypass RLS" pattern used for queue/
+     * console maintenance in Section 39A-2, applied here to a search
+     * across firms instead of a batch job across firms.
+     *
      * @param  array<int, int>  $firmIds
      * @param  array<int, string>  $terms
      */
     private function searchClients(array $firmIds, array $terms): Collection
     {
-        return Client::withoutTenantScope()
-            ->whereIn('firm_id', $firmIds)
-            ->where(fn ($q) => $this->applyTermMatching($q, $terms, ['display_name', 'legal_name', 'email', 'phone']))
-            ->get()
-            ->map(fn (Client $c) => ['type' => 'client', 'id' => $c->id, 'value' => $c->display_name]);
+        $service = new TenantContextService();
+
+        return collect($firmIds)->flatMap(fn (int $firmId) => $service->runWithFirmContext(
+            $firmId,
+            fn () => Client::withoutTenantScope()
+                ->where('firm_id', $firmId)
+                ->where(fn ($q) => $this->applyTermMatching($q, $terms, ['display_name', 'legal_name', 'email', 'phone']))
+                ->get()
+                ->map(fn (Client $c) => ['type' => 'client', 'id' => $c->id, 'value' => $c->display_name])
+        ));
     }
 
     private function searchContacts(array $firmIds, array $terms): Collection

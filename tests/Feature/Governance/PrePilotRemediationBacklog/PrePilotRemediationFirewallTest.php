@@ -344,6 +344,23 @@ class PrePilotRemediationFirewallTest extends TestCase
         $section39bAllowed = [
             'database/migrations/2026_07_29_900001_add_firm_user_2fa_mode_to_firm_settings_table.php',
             'app/Models/FirmSettings.php',
+            // Section 39A-3A (a later, distinct staged-FORCE-
+            // activation branch) legitimately added a clients-only
+            // FORCE RLS migration, a ClientFactory context fix, and
+            // explicit tenant-context wiring in several real services
+            // that write/read clients directly.
+            'database/migrations/2026_07_30_900001_force_rls_on_clients_table.php',
+            'database/factories/ClientFactory.php',
+            'app/Services/ClientPortalService.php',
+            'app/Services/ConflictCheckService.php',
+            'app/Services/FirmCommandCenterAggregationService.php',
+            'app/Services/ImportApplyService.php',
+            'app/Services/ImportDuplicateDetectionService.php',
+            'app/Services/ImportRollbackService.php',
+            'app/Services/LeadConversionService.php',
+            'tests/Feature/Imports/ImportApplyServiceTest.php',
+            'tests/Feature/Imports/ImportRollbackServiceTest.php',
+            'tests/Feature/Webhooks/Wiring/ClientCreatedWiringTest.php',
         ];
 
         return array_values(array_filter(

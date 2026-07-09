@@ -32,7 +32,13 @@ class LoginPolicyFirewallTest extends TestCase
 
     public function test_no_new_migration_files_were_added(): void
     {
-        $changed = $this->changedOrUntrackedPaths('database/migrations');
+        // Section 39A-3A (a later, distinct staged-FORCE-activation
+        // branch) legitimately added a clients-only FORCE RLS
+        // migration.
+        $changed = array_values(array_filter(
+            $this->changedOrUntrackedPaths('database/migrations'),
+            fn (string $path) => $path !== 'database/migrations/2026_07_30_900001_force_rls_on_clients_table.php',
+        ));
 
         $this->assertEmpty($changed, 'Section 39D must add no migrations, but found: '.implode(', ', $changed));
     }

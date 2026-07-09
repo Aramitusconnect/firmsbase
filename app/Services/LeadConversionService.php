@@ -48,7 +48,7 @@ class LeadConversionService
             throw new \RuntimeException('This lead has already been converted.');
         }
 
-        return DB::transaction(function () use ($lead, $clientAttributes, $actor, $consultation) {
+        return (new TenantContextService())->runWithFirmContext($lead->firm_id, function () use ($lead, $clientAttributes, $actor, $consultation) {
             $client = Client::create(array_merge([
                 'firm_id' => $lead->firm_id,
                 'created_by' => $actor?->id,

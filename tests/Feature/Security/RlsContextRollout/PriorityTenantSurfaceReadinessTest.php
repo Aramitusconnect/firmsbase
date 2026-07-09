@@ -11,6 +11,7 @@ use App\Models\Invoice;
 use App\Models\Matter;
 use App\Models\Payment;
 use App\Models\Task;
+use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -43,30 +44,36 @@ class PriorityTenantSurfaceReadinessTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * @return array<int, array{0: string}>
+     * Section 39A-3A activated permanent FORCE ROW LEVEL SECURITY on
+     * clients (see database/migrations/2026_07_30_900001_force_rls_on_clients_table.php)
+     * — the first of these 8 priority tables to move from "prepared"
+     * to "enforced." The other 7 remain prepared-but-not-forced,
+     * pending their own later batches.
+     *
+     * @return array<int, array{0: string, 1: bool}>
      */
     public static function priorityTableProvider(): array
     {
         return [
-            ['firm_users'],
-            ['clients'],
-            ['matters'],
-            ['documents'],
-            ['invoices'],
-            ['payments'],
-            ['tasks'],
-            ['deadlines'],
+            ['firm_users', false],
+            ['clients', true],
+            ['matters', false],
+            ['documents', false],
+            ['invoices', false],
+            ['payments', false],
+            ['tasks', false],
+            ['deadlines', false],
         ];
     }
 
     #[DataProvider('priorityTableProvider')]
-    public function test_priority_table_has_rls_prepared_and_ready_for_force_activation(string $table): void
+    public function test_priority_table_has_rls_prepared_and_ready_for_force_activation(string $table, bool $expectedForce): void
     {
         $row = DB::selectOne('select relrowsecurity, relforcerowsecurity from pg_class where relname = ?', [$table]);
 
         $this->assertNotNull($row, "Table {$table} not found in pg_class.");
         $this->assertTrue((bool) $row->relrowsecurity, "RLS is not enabled on priority table {$table}.");
-        $this->assertFalse((bool) $row->relforcerowsecurity, "FORCE must remain unset in this branch for {$table}.");
+        $this->assertSame($expectedForce, (bool) $row->relforcerowsecurity, "Unexpected FORCE state for {$table}.");
     }
 
     public function test_firm_user_can_be_created_and_read_under_explicit_context(): void
@@ -100,6 +107,13 @@ class PriorityTenantSurfaceReadinessTest extends TestCase
         $firm = Firm::factory()->create();
         $matter = Matter::factory()->forFirm($firm)->create();
 
+        // MatterFactory::forFirm() ties its own nested Client to $firm
+        // too, and clients has permanent FORCE RLS — ClientFactory
+        // leaves DB tenant context set to $firm afterward (Section
+        // 39A-3A), which must be cleared before this test's own
+        // "nothing visible without context" check on matters.
+        (new TenantContextService())->clearDatabaseTenantContext();
+
         DB::statement('ALTER TABLE matters FORCE ROW LEVEL SECURITY');
 
         $this->assertSame(0, Matter::withoutGlobalScopes()->count());
@@ -126,6 +140,11 @@ class PriorityTenantSurfaceReadinessTest extends TestCase
         $firm = Firm::factory()->create();
         $invoice = Invoice::factory()->forFirm($firm)->create();
 
+        // InvoiceFactory::forFirm() ties its own nested Client to
+        // $firm too — see the matching comment on the matter test
+        // above.
+        (new TenantContextService())->clearDatabaseTenantContext();
+
         DB::statement('ALTER TABLE invoices FORCE ROW LEVEL SECURITY');
 
         $this->assertSame(0, Invoice::withoutGlobalScopes()->count());
@@ -138,6 +157,11 @@ class PriorityTenantSurfaceReadinessTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $payment = Payment::factory()->forFirm($firm)->create();
+
+        // PaymentFactory::forFirm() ties its own nested Client to
+        // $firm too — see the matching comment on the matter test
+        // above.
+        (new TenantContextService())->clearDatabaseTenantContext();
 
         DB::statement('ALTER TABLE payments FORCE ROW LEVEL SECURITY');
 
@@ -178,6 +202,11 @@ class PriorityTenantSurfaceReadinessTest extends TestCase
         $firm = Firm::factory()->create();
         Client::factory()->forFirm($firm)->create();
         Matter::factory()->forFirm($firm)->create();
+
+        // Both factories leave DB tenant context set to $firm
+        // afterward (clients has permanent FORCE RLS) — clear it so
+        // this test's own "no context at all" check starts clean.
+        (new TenantContextService())->clearDatabaseTenantContext();
 
         DB::statement('ALTER TABLE clients FORCE ROW LEVEL SECURITY');
         DB::statement('ALTER TABLE matters FORCE ROW LEVEL SECURITY');

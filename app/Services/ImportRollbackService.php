@@ -25,9 +25,13 @@ class ImportRollbackService
 
     public function rollbackBatch(ImportBatch $batch): ImportBatch
     {
-        foreach ($batch->rollbackRecords()->where('status', RollbackRecordStatus::Pending->value)->get() as $record) {
-            $this->rollbackRecord($record);
-        }
+        $records = $batch->rollbackRecords()->where('status', RollbackRecordStatus::Pending->value)->get();
+
+        (new TenantContextService())->runWithFirmContext($batch->firm_id, function () use ($records) {
+            foreach ($records as $record) {
+                $this->rollbackRecord($record);
+            }
+        });
 
         $batch->rows()->where('status', ImportRowStatus::Applied->value)->update(['status' => ImportRowStatus::RolledBack->value]);
 

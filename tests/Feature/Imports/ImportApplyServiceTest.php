@@ -43,7 +43,7 @@ class ImportApplyServiceTest extends TestCase
         $applied = $this->service->apply($batch->fresh());
 
         $this->assertSame(ImportBatchStatus::Applied, $applied->status);
-        $this->assertDatabaseHas('clients', ['firm_id' => $firm->id, 'display_name' => 'Applied Client']);
+        $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('clients', ['firm_id' => $firm->id, 'display_name' => 'Applied Client']));
 
         $row = $batch->rows()->first();
         $this->assertSame(ImportRowStatus::Applied, $row->status);

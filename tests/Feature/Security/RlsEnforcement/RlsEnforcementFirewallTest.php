@@ -32,8 +32,13 @@ class RlsEnforcementFirewallTest extends TestCase
         // the live schema — see TenantContextService's docblock and
         // the final report for why (flipping FORCE RLS on today would
         // break ~120+ existing tests with no context-setting
-        // mechanism wired into them yet).
-        $changed = $this->changedOrUntrackedPaths('database/migrations');
+        // mechanism wired into them yet). Section 39A-3A (a later,
+        // distinct staged-FORCE-activation branch) legitimately added
+        // a clients-only FORCE RLS migration.
+        $changed = array_values(array_filter(
+            $this->changedOrUntrackedPaths('database/migrations'),
+            fn (string $path) => $path !== 'database/migrations/2026_07_30_900001_force_rls_on_clients_table.php',
+        ));
 
         $this->assertEmpty($changed, 'Section 39A must add no migrations in this pass, but found: '.implode(', ', $changed));
     }

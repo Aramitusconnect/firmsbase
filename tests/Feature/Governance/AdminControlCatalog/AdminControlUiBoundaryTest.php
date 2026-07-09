@@ -48,7 +48,17 @@ class AdminControlUiBoundaryTest extends TestCase
                 && ! str_starts_with($path, 'app/Support/')
                 // Section 39A-2 legitimately added test helper methods
                 // to tests/TestCase.php.
-                && $path !== 'tests/TestCase.php',
+                && $path !== 'tests/TestCase.php'
+                // Section 39A-3A (a later, distinct staged-FORCE-
+                // activation branch) legitimately added a clients-only
+                // FORCE RLS migration, a ClientFactory context fix,
+                // and updated tests for the real services it also
+                // wired with explicit tenant context.
+                && $path !== 'database/migrations/2026_07_30_900001_force_rls_on_clients_table.php'
+                && $path !== 'database/factories/ClientFactory.php'
+                && $path !== 'tests/Feature/Imports/ImportApplyServiceTest.php'
+                && $path !== 'tests/Feature/Imports/ImportRollbackServiceTest.php'
+                && $path !== 'tests/Feature/Webhooks/Wiring/ClientCreatedWiringTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

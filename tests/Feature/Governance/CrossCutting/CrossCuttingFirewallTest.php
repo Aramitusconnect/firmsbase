@@ -137,10 +137,13 @@ class CrossCuttingFirewallTest extends TestCase
         $paths = preg_split('/\R/', $changed) ?: [];
 
         // Section 39B (a later, distinct backend-policy branch)
-        // legitimately added exactly one migration.
+        // legitimately added exactly one migration. Section 39A-3A (a
+        // later, distinct staged-FORCE-activation branch) legitimately
+        // added a clients-only FORCE RLS migration.
         return array_values(array_filter(
             $paths,
-            fn (string $path) => $path !== 'database/migrations/2026_07_29_900001_add_firm_user_2fa_mode_to_firm_settings_table.php',
+            fn (string $path) => $path !== 'database/migrations/2026_07_29_900001_add_firm_user_2fa_mode_to_firm_settings_table.php'
+                && $path !== 'database/migrations/2026_07_30_900001_force_rls_on_clients_table.php',
         ));
     }
 

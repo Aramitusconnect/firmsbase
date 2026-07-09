@@ -45,11 +45,11 @@ class ImportRollbackServiceTest extends TestCase
         $this->applyService->confirmBatch($batch->fresh());
         $this->applyService->apply($batch->fresh());
 
-        $this->assertDatabaseHas('clients', ['firm_id' => $firm->id, 'display_name' => 'To Roll Back']);
+        $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('clients', ['firm_id' => $firm->id, 'display_name' => 'To Roll Back']));
 
         $this->rollbackService->rollbackBatch($batch->fresh());
 
-        $this->assertDatabaseMissing('clients', ['firm_id' => $firm->id, 'display_name' => 'To Roll Back']);
+        $this->runWithFirmContext($firm, fn () => $this->assertDatabaseMissing('clients', ['firm_id' => $firm->id, 'display_name' => 'To Roll Back']));
         $this->assertSame(ImportBatchStatus::RolledBack, $batch->fresh()->status);
     }
 

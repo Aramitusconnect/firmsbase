@@ -127,6 +127,25 @@ class TenantContextService
         DB::select('select set_config(?, ?, ?)', [self::SESSION_SETTING_NAME, '', $this->isLocalScoped()]);
     }
 
+    /**
+     * Section 39A-3A — pushes the PostgreSQL session setting for a
+     * KNOWN firm id WITHOUT touching PHP-memory context
+     * (TenantContextResolver). Deliberately decoupled from
+     * setFirmContext()/setDatabaseTenantContext(): those two also
+     * activate the app-level "current tenant" that
+     * BelongsToTenant's global scope reads, which would silently
+     * narrow every OTHER tenant-owned model's queries for the rest of
+     * the caller's request/test if left active — a much bigger,
+     * cross-cutting behavior change than "make this one write/read
+     * against an RLS-protected table visible." This method affects
+     * only what PostgreSQL's row security policies see, never what
+     * Eloquent's own scoping decides to query.
+     */
+    public function setDatabaseTenantContextForFirmId(int $firmId): void
+    {
+        DB::select('select set_config(?, ?, ?)', [self::SESSION_SETTING_NAME, (string) $firmId, $this->isLocalScoped()]);
+    }
+
     private function isLocalScoped(): bool
     {
         return DB::transactionLevel() > 0;

@@ -85,10 +85,10 @@ class FirmCommandCenterAggregationService
                 ->where('firm_id', $firm->id)
                 ->where('status', PaymentStatus::Failed)
                 ->count(),
-            inactiveClientsCount: Client::query()
+            inactiveClientsCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Client::query()
                 ->where('firm_id', $firm->id)
                 ->where('updated_at', '<=', $asOf->copy()->subDays($inactiveClientDays))
-                ->count(),
+                ->count()),
             overdueTasksCount: Task::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', TaskStatus::Overdue)
