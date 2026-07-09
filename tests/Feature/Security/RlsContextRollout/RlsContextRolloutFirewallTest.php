@@ -24,13 +24,14 @@ class RlsContextRolloutFirewallTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        // Section 39A-3A (a later, distinct staged-FORCE-activation
-        // branch) legitimately activated permanent FORCE ROW LEVEL
-        // SECURITY on clients — the first of the 52 prepared tables to
-        // move from "prepared" to "enforced." This test's own scope
-        // (Section 39A-2) never touched FORCE state; the other 51
-        // prepared tables must still be unforced.
-        $forcedByLaterBranch = ['clients'];
+        // Section 39A-3A/39A-3B (later, distinct staged-FORCE-
+        // activation branches) legitimately activated permanent FORCE
+        // ROW LEVEL SECURITY on clients and firm_users — the first two
+        // of the 52 prepared tables to move from "prepared" to
+        // "enforced." This test's own scope (Section 39A-2) never
+        // touched FORCE state; the other 50 prepared tables must still
+        // be unforced.
+        $forcedByLaterBranch = ['clients', 'firm_users'];
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forcedByLaterBranch, true)) {
@@ -67,12 +68,13 @@ class RlsContextRolloutFirewallTest extends TestCase
 
     public function test_no_new_migration_files_were_added(): void
     {
-        // Section 39A-3A (a later, distinct staged-FORCE-activation
-        // branch) legitimately added a clients-only FORCE RLS
-        // migration.
+        // Section 39A-3A/39A-3B (later, distinct staged-FORCE-
+        // activation branches) legitimately added clients-only and
+        // firm_users-only FORCE RLS migrations.
         $changed = array_values(array_filter(
             $this->changedOrUntrackedPaths('database/migrations'),
-            fn (string $path) => $path !== 'database/migrations/2026_07_30_900001_force_rls_on_clients_table.php',
+            fn (string $path) => $path !== 'database/migrations/2026_07_30_900001_force_rls_on_clients_table.php'
+                && $path !== 'database/migrations/2026_07_31_900001_force_rls_on_firm_users_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));
@@ -111,7 +113,12 @@ class RlsContextRolloutFirewallTest extends TestCase
             'app/Services/EmergencyAccessGovernanceGapService.php',
             'app/Services/SeedDataSecurityAuditService.php',
             'app/Services/FirmUser2faPolicyService.php',
-            'app/Services/LoginPolicyService.php',
+            // LoginPolicyService.php is deliberately NOT in this list
+            // any more — Section 39A-3B (a later, distinct staged-
+            // FORCE-activation branch) found a genuine need to wire
+            // canAttemptFirmLogin()'s FirmUser read with explicit
+            // tenant context, since firm_users now has permanent
+            // FORCE ROW LEVEL SECURITY.
             'app/Services/RowLevelSecurityCoverageMappingService.php',
             'app/Http/Middleware/ApplyTenantDatabaseContext.php',
             'app/Services/TenantContextResolver.php',

@@ -143,7 +143,8 @@ class CrossCuttingFirewallTest extends TestCase
         return array_values(array_filter(
             $paths,
             fn (string $path) => $path !== 'database/migrations/2026_07_29_900001_add_firm_user_2fa_mode_to_firm_settings_table.php'
-                && $path !== 'database/migrations/2026_07_30_900001_force_rls_on_clients_table.php',
+                && $path !== 'database/migrations/2026_07_30_900001_force_rls_on_clients_table.php'
+                && $path !== 'database/migrations/2026_07_31_900001_force_rls_on_firm_users_table.php',
         ));
     }
 

@@ -56,6 +56,17 @@ class RowLevelSecurityPreparationTest extends TestCase
         $this->assertNotNull($row, "Table {$table} not found in pg_class.");
         $this->assertTrue((bool) $row->relrowsecurity, "RLS is not enabled on {$table}.");
 
+        // Section 39A-3B (a later, distinct staged-FORCE-activation
+        // branch) legitimately activated permanent FORCE ROW LEVEL
+        // SECURITY on firm_users — see
+        // database/migrations/2026_07_31_900001_force_rls_on_firm_users_table.php.
+        // Every other Phase 1 table here remains prepared-but-not-forced.
+        if ($table === 'firm_users') {
+            $this->assertTrue((bool) $row->relforcerowsecurity, 'firm_users must have permanent FORCE ROW LEVEL SECURITY active.');
+
+            return;
+        }
+
         $this->assertFalse(
             (bool) $row->relforcerowsecurity,
             "FORCE ROW LEVEL SECURITY unexpectedly enabled on {$table} — this must only happen "

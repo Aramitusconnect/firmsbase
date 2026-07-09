@@ -45,17 +45,19 @@ class PriorityTenantSurfaceReadinessTest extends TestCase
 
     /**
      * Section 39A-3A activated permanent FORCE ROW LEVEL SECURITY on
-     * clients (see database/migrations/2026_07_30_900001_force_rls_on_clients_table.php)
-     * — the first of these 8 priority tables to move from "prepared"
-     * to "enforced." The other 7 remain prepared-but-not-forced,
-     * pending their own later batches.
+     * clients (see database/migrations/2026_07_30_900001_force_rls_on_clients_table.php),
+     * and Section 39A-3B activated it for firm_users (see
+     * database/migrations/2026_07_31_900001_force_rls_on_firm_users_table.php)
+     * — the first two of these 8 priority tables to move from
+     * "prepared" to "enforced." The other 6 remain
+     * prepared-but-not-forced, pending their own later batches.
      *
      * @return array<int, array{0: string, 1: bool}>
      */
     public static function priorityTableProvider(): array
     {
         return [
-            ['firm_users', false],
+            ['firm_users', true],
             ['clients', true],
             ['matters', false],
             ['documents', false],
@@ -80,6 +82,12 @@ class PriorityTenantSurfaceReadinessTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $firmUser = FirmUser::factory()->forFirm($firm)->create();
+
+        // FirmUserFactory leaves DB tenant context set to $firm
+        // afterward (Section 39A-3B, same pattern as ClientFactory) —
+        // clear it before this test's own "nothing visible without
+        // context" check.
+        (new TenantContextService())->clearDatabaseTenantContext();
 
         DB::statement('ALTER TABLE firm_users FORCE ROW LEVEL SECURITY');
 

@@ -32,12 +32,14 @@ class RlsEnforcementFirewallTest extends TestCase
         // the live schema — see TenantContextService's docblock and
         // the final report for why (flipping FORCE RLS on today would
         // break ~120+ existing tests with no context-setting
-        // mechanism wired into them yet). Section 39A-3A (a later,
-        // distinct staged-FORCE-activation branch) legitimately added
-        // a clients-only FORCE RLS migration.
+        // mechanism wired into them yet). Section 39A-3A/39A-3B
+        // (later, distinct staged-FORCE-activation branches)
+        // legitimately added clients-only and firm_users-only FORCE
+        // RLS migrations.
         $changed = array_values(array_filter(
             $this->changedOrUntrackedPaths('database/migrations'),
-            fn (string $path) => $path !== 'database/migrations/2026_07_30_900001_force_rls_on_clients_table.php',
+            fn (string $path) => $path !== 'database/migrations/2026_07_30_900001_force_rls_on_clients_table.php'
+                && $path !== 'database/migrations/2026_07_31_900001_force_rls_on_firm_users_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A must add no migrations in this pass, but found: '.implode(', ', $changed));
@@ -128,7 +130,12 @@ class RlsEnforcementFirewallTest extends TestCase
             'app/Services/EmergencyAccessGovernanceGapService.php',
             'app/Services/SeedDataSecurityAuditService.php',
             'app/Services/FirmUser2faPolicyService.php',
-            'app/Services/LoginPolicyService.php',
+            // LoginPolicyService.php is deliberately NOT in this list
+            // any more — Section 39A-3B (a later, distinct staged-
+            // FORCE-activation branch) found a genuine need to wire
+            // canAttemptFirmLogin()'s FirmUser read with explicit
+            // tenant context, since firm_users now has permanent
+            // FORCE ROW LEVEL SECURITY.
             'database/seeders/DatabaseSeeder.php',
             'app/Services/PaymentClassificationService.php',
             'app/Services/TrustEligibilityService.php',

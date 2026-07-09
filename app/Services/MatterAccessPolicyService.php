@@ -36,10 +36,13 @@ class MatterAccessPolicyService
 
     public function canAccessMatter(User $user, Matter $matter): bool
     {
-        $firmUser = FirmUser::query()
-            ->where('user_id', $user->id)
-            ->where('firm_id', $matter->firm_id)
-            ->first();
+        $firmUser = (new TenantContextService())->runWithFirmContext(
+            $matter->firm_id,
+            fn () => FirmUser::query()
+                ->where('user_id', $user->id)
+                ->where('firm_id', $matter->firm_id)
+                ->first(),
+        );
 
         if (! $firmUser) {
             // No firm_users row for this user in the matter's firm —

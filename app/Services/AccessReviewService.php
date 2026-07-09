@@ -53,9 +53,20 @@ class AccessReviewService
             AccessReviewScope::SupportAgents => PlatformAdmin::query()
                 ->whereIn('id', SupportAccessRequest::query()->whereNotNull('requested_by')->distinct()->pluck('requested_by'))
                 ->get(),
-            AccessReviewScope::FirmAdmins, AccessReviewScope::EmployeeRoles => FirmUser::query()
-                ->where('firm_id', $review->firm_id)
-                ->get(),
+            // firm_users has permanent FORCE ROW LEVEL SECURITY
+            // (Section 39A-3B). $review->firm_id is nullable at the
+            // model level (platform-scope reviews), but FirmAdmins/
+            // EmployeeRoles reviews are always firm-scoped in
+            // practice; when it is null here, the query already
+            // returned nothing before FORCE existed (firm_id = null
+            // never matches), so preserving that exact no-op behavior
+            // is correct rather than guessing a firm.
+            AccessReviewScope::FirmAdmins, AccessReviewScope::EmployeeRoles => $review->firm_id !== null
+                ? (new TenantContextService())->runWithFirmContext(
+                    $review->firm_id,
+                    fn () => FirmUser::query()->where('firm_id', $review->firm_id)->get(),
+                )
+                : FirmUser::query()->where('firm_id', $review->firm_id)->get(),
             AccessReviewScope::ApiKeys => ApiKey::query()
                 ->when($review->firm_id, fn ($q) => $q->where('firm_id', $review->firm_id))
                 ->get(),

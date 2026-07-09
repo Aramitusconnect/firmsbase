@@ -54,6 +54,19 @@ class FirmUserTest extends TestCase
         FirmUser::factory()->forUser($user)->forFirm($firmA)->create();
         FirmUser::factory()->forUser($user)->forFirm($firmB)->create();
 
-        $this->assertSame(2, FirmUser::where('user_id', $user->id)->count());
+        // firm_users has permanent FORCE ROW LEVEL SECURITY (Section
+        // 39A-3B), whose policy matches a single app.current_firm_id
+        // value — a user's own cross-firm memberships are a legitimate
+        // exception to per-firm isolation, so this reads each firm's
+        // row under its own context and merges them, the same
+        // "iterate firms explicitly" pattern used for
+        // ConflictCheckService's org-wide search (Section 39A-3A).
+        $count = collect([$firmA->id, $firmB->id])
+            ->sum(fn (int $firmId) => $this->runWithFirmContext(
+                $firmId,
+                fn () => FirmUser::where('user_id', $user->id)->where('firm_id', $firmId)->count(),
+            ));
+
+        $this->assertSame(2, $count);
     }
 }

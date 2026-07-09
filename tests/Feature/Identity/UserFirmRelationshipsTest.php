@@ -48,9 +48,22 @@ class UserFirmRelationshipsTest extends TestCase
     public function test_user_has_many_firm_users(): void
     {
         $user = User::factory()->create();
-        FirmUser::factory()->forUser($user)->count(2)->create();
+        $created = FirmUser::factory()->forUser($user)->count(2)->create();
 
-        $this->assertCount(2, $user->firmUsers);
+        // firm_users has permanent FORCE ROW LEVEL SECURITY (Section
+        // 39A-3B) — a user's own cross-firm memberships are a
+        // legitimate exception to per-firm isolation, so this reads
+        // each firm's row under its own context and merges them
+        // rather than reading the unscoped $user->firmUsers relation
+        // directly.
+        $visible = $created->pluck('firm_id')->unique()->flatMap(
+            fn (int $firmId) => $this->runWithFirmContext(
+                $firmId,
+                fn () => FirmUser::where('user_id', $user->id)->where('firm_id', $firmId)->get(),
+            ),
+        );
+
+        $this->assertCount(2, $visible);
     }
 
     public function test_user_firms_belongs_to_many_through_firm_users(): void
@@ -62,9 +75,22 @@ class UserFirmRelationshipsTest extends TestCase
         FirmUser::factory()->forUser($user)->forFirm($firmA)->role(FirmUserRole::Attorney)->create();
         FirmUser::factory()->forUser($user)->forFirm($firmB)->role(FirmUserRole::Paralegal)->create();
 
-        $this->assertCount(2, $user->firms);
-        $this->assertTrue($user->firms->contains('id', $firmA->id));
-        $this->assertTrue($user->firms->contains('id', $firmB->id));
+        // The firms() BelongsToMany joins through firm_users, which
+        // has permanent FORCE ROW LEVEL SECURITY (Section 39A-3B) — a
+        // user's own cross-firm memberships are a legitimate exception
+        // to per-firm isolation, so this reads each firm's membership
+        // under its own context rather than the unscoped $user->firms
+        // relation directly.
+        $memberFirmIds = collect([$firmA->id, $firmB->id])->filter(
+            fn (int $firmId) => $this->runWithFirmContext(
+                $firmId,
+                fn () => FirmUser::where('user_id', $user->id)->where('firm_id', $firmId)->exists(),
+            ),
+        );
+
+        $this->assertCount(2, $memberFirmIds);
+        $this->assertTrue($memberFirmIds->contains($firmA->id));
+        $this->assertTrue($memberFirmIds->contains($firmB->id));
     }
 
     public function test_two_factor_fields_are_encrypted_at_rest(): void

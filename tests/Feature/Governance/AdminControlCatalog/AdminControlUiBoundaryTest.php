@@ -58,7 +58,18 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== 'database/factories/ClientFactory.php'
                 && $path !== 'tests/Feature/Imports/ImportApplyServiceTest.php'
                 && $path !== 'tests/Feature/Imports/ImportRollbackServiceTest.php'
-                && $path !== 'tests/Feature/Webhooks/Wiring/ClientCreatedWiringTest.php',
+                && $path !== 'tests/Feature/Webhooks/Wiring/ClientCreatedWiringTest.php'
+                // Section 39A-3B (a later, distinct staged-FORCE-
+                // activation branch) legitimately added a
+                // firm_users-only FORCE RLS migration, a
+                // FirmUserFactory context fix, and updated the
+                // legitimately cross-firm relationship tests it
+                // affected.
+                && $path !== 'database/migrations/2026_07_31_900001_force_rls_on_firm_users_table.php'
+                && $path !== 'database/factories/FirmUserFactory.php'
+                && $path !== 'tests/Feature/Identity/FirmUserTest.php'
+                && $path !== 'tests/Feature/Identity/UserFirmRelationshipsTest.php'
+                && $path !== 'tests/Feature/Tenancy/RowLevelSecurityPreparationTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

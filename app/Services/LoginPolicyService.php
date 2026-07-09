@@ -155,10 +155,10 @@ class LoginPolicyService
      */
     public function canAttemptFirmLogin(User $user, Firm $firm): bool
     {
-        return $user->firmUsers()
+        return (new TenantContextService())->runWithFirmContext($firm, fn () => $user->firmUsers()
             ->where('firm_id', $firm->id)
             ->where('status', FirmUserStatus::Active->value)
-            ->exists();
+            ->exists());
     }
 
     /**

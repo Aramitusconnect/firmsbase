@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Feature\Security\RlsForceActivation;
+namespace Tests\Feature\Security\RlsForceRollout;
 
 use App\Services\ComplianceGapRegistryService;
 use App\Services\RowLevelSecurityCoverageMappingService;
@@ -9,44 +9,37 @@ use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
- * RlsForceActivationFirewallTest — Section 39A-3A. Proves this staged
+ * RlsForceRolloutFirewallTest — Section 39A-3B. Proves this staged
  * activation batch stayed inside its declared boundary: FORCE ROW
- * LEVEL SECURITY was activated for clients only (not the other 51
- * prepared tables, not the 43 still-uncovered tenant-owned tables), no
- * new RLS policy was added, no UI/routes/controllers were introduced,
- * and ComplianceGapRegistryService was not deleted/rewritten.
+ * LEVEL SECURITY was activated for firm_users only in THIS branch
+ * (clients was already forced by Section 39A-3A and stays that way,
+ * but this branch did not touch it) — not the other 50 prepared
+ * tables, not the 43 still-uncovered tenant-owned tables — no new RLS
+ * policy was added, no UI/routes/controllers were introduced, and
+ * ComplianceGapRegistryService was not deleted/rewritten.
  */
-class RlsForceActivationFirewallTest extends TestCase
+class RlsForceRolloutFirewallTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_only_clients_has_permanent_force_row_level_security_among_prepared_tables(): void
+    public function test_only_clients_and_firm_users_have_permanent_force_row_level_security_among_prepared_tables(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-
-        // Section 39A-3B (a later, distinct staged-FORCE-activation
-        // branch) legitimately activated FORCE for firm_users too —
-        // this test's own scope (39A-3A) only asserts clients here.
-        $forcedByLaterBranch = ['firm_users'];
+        $expectedForced = ['clients', 'firm_users'];
 
         foreach ($coverage->preparedTables() as $table) {
-            if (in_array($table, $forcedByLaterBranch, true)) {
-                continue;
-            }
-
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);
 
             $this->assertNotNull($row, "Table {$table} not found in pg_class.");
 
-            if ($table === 'clients') {
-                $this->assertTrue((bool) $row->relforcerowsecurity, 'clients must have permanent FORCE ROW LEVEL SECURITY active.');
+            $shouldBeForced = in_array($table, $expectedForced, true);
 
-                continue;
-            }
-
-            $this->assertFalse(
+            $this->assertSame(
+                $shouldBeForced,
                 (bool) $row->relforcerowsecurity,
-                "{$table} must not have permanent FORCE ROW LEVEL SECURITY — Section 39A-3A activates clients only."
+                $shouldBeForced
+                    ? "{$table} must have permanent FORCE ROW LEVEL SECURITY active."
+                    : "{$table} must not have permanent FORCE ROW LEVEL SECURITY — Section 39A-3B activates firm_users only (clients was already forced by 39A-3A)."
             );
         }
     }
@@ -64,20 +57,19 @@ class RlsForceActivationFirewallTest extends TestCase
 
             $this->assertFalse(
                 (bool) $row->relrowsecurity,
-                "{$table} was reported as missing RLS preparation, but RLS is now enabled — Section 39A-3A must not add new policies for uncovered tables."
+                "{$table} was reported as missing RLS preparation, but RLS is now enabled — Section 39A-3B must not add new policies for uncovered tables."
             );
         }
     }
 
-    public function test_the_clients_force_rls_migration_file_exists(): void
+    public function test_the_firm_users_force_rls_migration_file_exists(): void
     {
-        // Deliberately a file-existence check, not a git-diff/
-        // untracked-state check like this project's other firewall
-        // tests: this section's migration is expected to be committed
-        // and merged (unlike every prior "do not commit" section), so
-        // checking uncommitted/untracked state here would report
-        // "missing" forever once merged.
-        $this->assertFileExists(base_path('database/migrations/2026_07_30_900001_force_rls_on_clients_table.php'));
+        // File-existence check, not a git-diff/untracked-state check:
+        // this branch's own instructions say "do not commit," but this
+        // test file itself must still work correctly if a future
+        // section commits/merges it (matching the lesson learned from
+        // Section 39A-3A's own equivalent test).
+        $this->assertFileExists(base_path('database/migrations/2026_07_31_900001_force_rls_on_firm_users_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void
@@ -85,7 +77,7 @@ class RlsForceActivationFirewallTest extends TestCase
         foreach (['routes', 'app/Http/Controllers', 'app/Filament', 'resources/views', 'app/Livewire'] as $relativeDir) {
             $changed = $this->changedOrUntrackedPaths($relativeDir);
 
-            $this->assertEmpty($changed, "Section 39A-3A must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
+            $this->assertEmpty($changed, "Section 39A-3B must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
         }
 
         $this->assertDirectoryDoesNotExist(base_path('app/Filament'));

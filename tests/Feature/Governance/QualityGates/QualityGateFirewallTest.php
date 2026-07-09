@@ -218,6 +218,20 @@ class QualityGateFirewallTest extends TestCase
             'tests/Feature/Imports/ImportApplyServiceTest.php',
             'tests/Feature/Imports/ImportRollbackServiceTest.php',
             'tests/Feature/Webhooks/Wiring/ClientCreatedWiringTest.php',
+            // Section 39A-3B (a later, distinct staged-FORCE-
+            // activation branch) legitimately added a firm_users-only
+            // FORCE RLS migration, a FirmUserFactory context fix, and
+            // explicit tenant-context wiring in real services that
+            // read firm_users directly, plus updated the legitimately
+            // cross-firm relationship tests it affected.
+            'database/migrations/2026_07_31_900001_force_rls_on_firm_users_table.php',
+            'database/factories/FirmUserFactory.php',
+            'app/Services/LoginPolicyService.php',
+            'app/Services/MatterAccessPolicyService.php',
+            'app/Services/AccessReviewService.php',
+            'tests/Feature/Identity/FirmUserTest.php',
+            'tests/Feature/Identity/UserFirmRelationshipsTest.php',
+            'tests/Feature/Tenancy/RowLevelSecurityPreparationTest.php',
         ];
 
         return array_values(array_filter(
