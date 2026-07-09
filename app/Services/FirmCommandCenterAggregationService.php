@@ -64,11 +64,11 @@ class FirmCommandCenterAggregationService
                 ->where('firm_id', $firm->id)
                 ->where('status', DocumentStatus::PendingReview)
                 ->count()),
-            deadlinesThisWeekCount: Deadline::query()
+            deadlinesThisWeekCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Deadline::query()
                 ->where('firm_id', $firm->id)
                 ->whereNotIn('status', [DeadlineStatus::Completed, DeadlineStatus::Cancelled])
                 ->whereBetween('due_at', [$asOf->copy()->startOfDay(), $asOf->copy()->addDays(7)->endOfDay()])
-                ->count(),
+                ->count()),
             unpaidInvoicesCount: Invoice::query()
                 ->where('firm_id', $firm->id)
                 ->whereIn('status', [InvoiceStatus::Sent, InvoiceStatus::PartiallyPaid])

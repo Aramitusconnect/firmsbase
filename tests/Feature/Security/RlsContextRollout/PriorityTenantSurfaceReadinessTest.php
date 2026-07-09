@@ -48,10 +48,12 @@ class PriorityTenantSurfaceReadinessTest extends TestCase
      * clients (see database/migrations/2026_07_30_900001_force_rls_on_clients_table.php),
      * Section 39A-3B activated it for firm_users (see
      * database/migrations/2026_07_31_900001_force_rls_on_firm_users_table.php),
-     * and Section 39A-3C activated it for documents (see
-     * database/migrations/2026_08_01_900001_force_rls_on_documents_table.php)
-     * — the first three of these 8 priority tables to move from
-     * "prepared" to "enforced." The other 5 remain
+     * Section 39A-3C activated it for documents (see
+     * database/migrations/2026_08_01_900001_force_rls_on_documents_table.php),
+     * and Section 39A-3D activated it for deadlines (see
+     * database/migrations/2026_08_02_900001_force_rls_on_deadlines_table.php)
+     * — the first four of these 8 priority tables to move from
+     * "prepared" to "enforced." The other 4 remain
      * prepared-but-not-forced, pending their own later batches.
      *
      * @return array<int, array{0: string, 1: bool}>
@@ -66,7 +68,7 @@ class PriorityTenantSurfaceReadinessTest extends TestCase
             ['invoices', false],
             ['payments', false],
             ['tasks', false],
-            ['deadlines', false],
+            ['deadlines', true],
         ];
     }
 
@@ -204,6 +206,12 @@ class PriorityTenantSurfaceReadinessTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $deadline = Deadline::factory()->create(['firm_id' => $firm->id]);
+
+        // DeadlineFactory leaves DB tenant context set to $firm
+        // afterward (Section 39A-3D, same pattern as ClientFactory) —
+        // clear it before this test's own "nothing visible without
+        // context" check.
+        (new TenantContextService())->clearDatabaseTenantContext();
 
         DB::statement('ALTER TABLE deadlines FORCE ROW LEVEL SECURITY');
 

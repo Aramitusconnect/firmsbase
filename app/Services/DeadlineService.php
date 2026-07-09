@@ -38,7 +38,7 @@ class DeadlineService
         ?array $reminderOffsetsDays = null,
         ?User $createdBy = null,
     ): Deadline {
-        return DB::transaction(function () use ($firm, $matter, $title, $deadlineType, $dueAt, $jurisdiction, $source, $reminderOffsetsDays, $createdBy) {
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $matter, $title, $deadlineType, $dueAt, $jurisdiction, $source, $reminderOffsetsDays, $createdBy) {
             $deadline = Deadline::create([
                 'firm_id' => $firm->id,
                 'matter_id' => $matter?->id,
@@ -60,16 +60,20 @@ class DeadlineService
 
     public function complete(Deadline $deadline): Deadline
     {
-        $deadline->update(['status' => DeadlineStatus::Completed, 'completed_at' => now()]);
+        return (new TenantContextService())->runWithFirmContext($deadline->firm_id, function () use ($deadline) {
+            $deadline->update(['status' => DeadlineStatus::Completed, 'completed_at' => now()]);
 
-        return $deadline->fresh();
+            return $deadline->fresh();
+        });
     }
 
     public function cancel(Deadline $deadline): Deadline
     {
-        $deadline->update(['status' => DeadlineStatus::Cancelled, 'cancelled_at' => now()]);
+        return (new TenantContextService())->runWithFirmContext($deadline->firm_id, function () use ($deadline) {
+            $deadline->update(['status' => DeadlineStatus::Cancelled, 'cancelled_at' => now()]);
 
-        return $deadline->fresh();
+            return $deadline->fresh();
+        });
     }
 
     /**
@@ -82,11 +86,13 @@ class DeadlineService
             return $deadline;
         }
 
-        if ($deadline->due_at->isPast()) {
-            $deadline->update(['status' => DeadlineStatus::Missed]);
-        }
+        return (new TenantContextService())->runWithFirmContext($deadline->firm_id, function () use ($deadline) {
+            if ($deadline->due_at->isPast()) {
+                $deadline->update(['status' => DeadlineStatus::Missed]);
+            }
 
-        return $deadline->fresh();
+            return $deadline->fresh();
+        });
     }
 
     /**

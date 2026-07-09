@@ -80,7 +80,14 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== 'tests/Feature/Webhooks/Wiring/DocumentUploadedWiringTest.php'
                 && $path !== 'tests/Feature/Signature/Certificates/SignatureCertificateOnePerRequestTest.php'
                 && $path !== 'tests/Feature/Signature/Certificates/SignatureCertificateRequiresHashAndEventTrailTest.php'
-                && $path !== 'tests/Feature/Signature/Certificates/SignatureCertificateServiceTest.php',
+                && $path !== 'tests/Feature/Signature/Certificates/SignatureCertificateServiceTest.php'
+                // Section 39A-3D (a later, distinct staged-FORCE-
+                // activation branch) legitimately added a
+                // deadlines-only FORCE RLS migration, a DeadlineFactory
+                // context fix, and explicit tenant-context wiring in
+                // DeadlineService.
+                && $path !== 'database/migrations/2026_08_02_900001_force_rls_on_deadlines_table.php'
+                && $path !== 'database/factories/DeadlineFactory.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));
