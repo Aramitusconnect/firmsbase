@@ -1,0 +1,195 @@
+<?php
+
+namespace Tests\Feature\Security\RlsEnforcement;
+
+use App\Services\ComplianceGapRegistryService;
+use Tests\TestCase;
+
+/**
+ * RlsEnforcementFirewallTest — Section 39A. Proves the fix stayed
+ * inside its declared boundary: no UI/routes/controllers were
+ * introduced, no unsafe/global admin bypass was added, the new
+ * middleware is not wired to bootstrap/app.php or any route, no
+ * migrations/schema changes were made (this section deliberately adds
+ * none — see the final report), and ComplianceGapRegistryService was
+ * not deleted/rewritten to hide the historical rls_prepared_not_enforced
+ * gap.
+ */
+class RlsEnforcementFirewallTest extends TestCase
+{
+    private const FORBIDDEN_TOKENS = [
+        'Http::', 'GuzzleHttp', 'curl_init', 'curl_exec', 'fsockopen', 'pfsockopen',
+        'stream_socket_client', 'proc_open(', 'popen(', 'passthru(', 'exec(', 'shell_exec(', 'system(',
+        'Symfony\\Component\\Process', 'Process::', 'mkdir(', 'Aws\\', 'Docker', 'ssh2_connect', 'phpseclib',
+        'Stripe\\', 'dns_get_record', 'gethostbyname', 'checkdnsrr',
+        'Route::', 'extends Controller', 'Livewire\\Component', 'Filament\\Resources',
+        'Mail::', 'Notification::send', 'file_put_contents(', 'fopen(', 'unlink(',
+    ];
+
+    public function test_no_new_migration_files_were_added(): void
+    {
+        // Section 39A's approved scope deliberately does not modify
+        // the live schema — see TenantContextService's docblock and
+        // the final report for why (flipping FORCE RLS on today would
+        // break ~120+ existing tests with no context-setting
+        // mechanism wired into them yet).
+        $changed = $this->changedOrUntrackedPaths('database/migrations');
+
+        $this->assertEmpty($changed, 'Section 39A must add no migrations in this pass, but found: '.implode(', ', $changed));
+    }
+
+    public function test_no_models_were_modified(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('app/Models');
+
+        $this->assertEmpty($changed, 'Section 39A must not modify any model, but found changes to: '.implode(', ', $changed));
+    }
+
+    public function test_no_ui_routes_or_controllers_were_introduced(): void
+    {
+        foreach (['routes', 'app/Http/Controllers', 'app/Filament', 'resources/views', 'app/Livewire'] as $relativeDir) {
+            $changed = $this->changedOrUntrackedPaths($relativeDir);
+
+            $this->assertEmpty($changed, "Section 39A must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
+        }
+
+        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
+        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
+    }
+
+    public function test_new_middleware_is_not_registered_in_bootstrap_or_any_route(): void
+    {
+        $this->assertEmpty($this->changedOrUntrackedPaths('bootstrap/app.php'));
+        $this->assertEmpty($this->changedOrUntrackedPaths('bootstrap/providers.php'));
+
+        $bootstrapSource = file_get_contents(base_path('bootstrap/app.php'));
+        $this->assertStringNotContainsString('ApplyTenantDatabaseContext', $bootstrapSource);
+
+        $webRoutesSource = file_get_contents(base_path('routes/web.php'));
+        $this->assertStringNotContainsString('ApplyTenantDatabaseContext', $webRoutesSource);
+    }
+
+    public function test_no_unsafe_global_or_superadmin_rls_bypass_was_introduced(): void
+    {
+        $newFiles = [
+            app_path('Services/TenantContextService.php'),
+            app_path('Http/Middleware/ApplyTenantDatabaseContext.php'),
+            app_path('Support/TenantAwareJobContext.php'),
+        ];
+
+        foreach ($newFiles as $path) {
+            $this->assertFileExists($path);
+            $source = file_get_contents($path);
+
+            $this->assertStringNotContainsStringIgnoringCase('bypassrls', $source);
+            $this->assertStringNotContainsStringIgnoringCase('withoutTenantScope', $source);
+            $this->assertStringNotContainsString('COALESCE(current_setting', $source);
+        }
+    }
+
+    public function test_new_files_contain_no_forbidden_network_process_or_write_tokens(): void
+    {
+        $newFiles = [
+            'TenantContextService.php' => app_path('Services/TenantContextService.php'),
+            'ApplyTenantDatabaseContext.php' => app_path('Http/Middleware/ApplyTenantDatabaseContext.php'),
+            'TenantAwareJobContext.php' => app_path('Support/TenantAwareJobContext.php'),
+        ];
+
+        $violations = [];
+
+        foreach ($newFiles as $label => $path) {
+            $this->assertFileExists($path, "Expected Section 39A file missing: {$label}");
+
+            $source = $this->stripComments(file_get_contents($path));
+
+            foreach (self::FORBIDDEN_TOKENS as $token) {
+                if (str_contains($source, $token)) {
+                    $violations[] = "{$label} contains forbidden token: {$token}";
+                }
+            }
+        }
+
+        $this->assertEmpty($violations, implode("\n", $violations));
+    }
+
+    public function test_no_protected_domain_behavior_files_were_modified(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('.');
+
+        $protected = [
+            'app/Services/HighRiskPlatformChangePolicyService.php',
+            'app/Services/SupportAccessPolicyService.php',
+            'app/Services/SupportAccessRequestService.php',
+            'app/Services/EmergencyAccessGovernanceGapService.php',
+            'app/Services/SeedDataSecurityAuditService.php',
+            'app/Services/FirmUser2faPolicyService.php',
+            'app/Services/LoginPolicyService.php',
+            'database/seeders/DatabaseSeeder.php',
+            'app/Services/PaymentClassificationService.php',
+            'app/Services/TrustEligibilityService.php',
+            'app/Services/AiRetrievalIsolationService.php',
+            'app/Services/ConsentService.php',
+            'app/Models/User.php',
+            'app/Models/FirmUser.php',
+            'app/Models/FirmSettings.php',
+            'app/Models/Firm.php',
+            'app/Services/TenantContextResolver.php',
+            'app/Models/Concerns/BelongsToTenant.php',
+        ];
+
+        $touched = array_values(array_intersect($protected, $changed));
+
+        $this->assertEmpty($touched, 'Section 39A must not modify unrelated protected files, but found changes to: '.implode(', ', $touched));
+    }
+
+    public function test_compliance_gap_registry_service_was_not_deleted_or_rewritten(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('app/Services/ComplianceGapRegistryService.php');
+
+        $this->assertEmpty($changed, 'ComplianceGapRegistryService.php must remain untouched — no resolved-state lifecycle exists to safely mark the gap resolved.');
+    }
+
+    public function test_gap_registry_still_tracks_the_rls_gap_and_count_remains_twenty_one(): void
+    {
+        $registry = new ComplianceGapRegistryService();
+
+        $this->assertTrue($registry->isTracked('rls_prepared_not_enforced'));
+        $this->assertCount(21, $registry->all());
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function changedOrUntrackedPaths(string $scope): array
+    {
+        $changed = trim((string) shell_exec(
+            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
+        ));
+
+        if ($changed === '') {
+            return [];
+        }
+
+        return preg_split('/\R/', $changed) ?: [];
+    }
+
+    /**
+     * Strips PHP comments so forbidden-token checks only ever see
+     * executable code — a token merely mentioned in prose must never
+     * fail a firewall test.
+     */
+    private function stripComments(string $source): string
+    {
+        $stripped = '';
+
+        foreach (token_get_all($source) as $token) {
+            if (is_array($token) && in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true)) {
+                continue;
+            }
+
+            $stripped .= is_array($token) ? $token[1] : $token;
+        }
+
+        return $stripped;
+    }
+}

@@ -46,15 +46,26 @@ class LoginPolicyFirewallTest extends TestCase
 
     public function test_no_ui_routes_controllers_filament_blade_or_livewire_changes(): void
     {
-        foreach (['routes', 'app/Http/Controllers', 'app/Http/Middleware', 'app/Filament', 'resources/views', 'app/Livewire'] as $relativeDir) {
+        foreach (['routes', 'app/Http/Controllers', 'app/Filament', 'resources/views', 'app/Livewire'] as $relativeDir) {
             $changed = $this->changedOrUntrackedPaths($relativeDir);
 
-            $this->assertEmpty($changed, "Section 39D must introduce no UI/route/middleware surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
+            $this->assertEmpty($changed, "Section 39D must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
         }
+
+        // Section 39A (a later, distinct RLS-activation branch)
+        // legitimately added one route-independent middleware file
+        // (App\Http\Middleware\ApplyTenantDatabaseContext, not wired to
+        // any route or bootstrap/app.php) — narrowly excluded here so
+        // Section 39D's own "no middleware" guarantee still holds for
+        // everything else.
+        $middlewareChanges = array_values(array_filter(
+            $this->changedOrUntrackedPaths('app/Http/Middleware'),
+            fn (string $path) => $path !== 'app/Http/Middleware/ApplyTenantDatabaseContext.php',
+        ));
+        $this->assertEmpty($middlewareChanges, 'Section 39D must introduce no middleware surface, but found changes under app/Http/Middleware: '.implode(', ', $middlewareChanges));
 
         $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
         $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Http/Middleware'));
     }
 
     public function test_no_fortify_or_breeze_was_installed(): void

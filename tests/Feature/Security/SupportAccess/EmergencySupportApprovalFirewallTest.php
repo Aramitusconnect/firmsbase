@@ -31,6 +31,9 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         // Section 39D (a later, distinct backend-policy branch)
         // legitimately adds its own new app/Services file.
         'app/Services/LoginPolicyService.php',
+        // Section 39A (a later, distinct RLS-activation branch)
+        // legitimately adds its own new app/Services file.
+        'app/Services/TenantContextService.php',
     ];
 
     /**

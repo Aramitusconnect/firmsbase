@@ -146,6 +146,14 @@ class SeedDataAuditFirewallTest extends TestCase
             'tests/Feature/Security/FirmUser2fa/',
             'app/Services/LoginPolicyService.php',
             'tests/Feature/Security/LoginPolicy/',
+            // Section 39A (a later, distinct RLS-activation branch)
+            // legitimately added its own new app/Services file, a
+            // route-independent middleware file, a queue-job
+            // tenant-context trait, and its own test directory.
+            'app/Services/TenantContextService.php',
+            'app/Http/Middleware/',
+            'app/Support/',
+            'tests/Feature/Security/RlsEnforcement/',
         ];
 
         $unexpected = array_values(array_filter(

@@ -104,6 +104,11 @@ class AdminControlFirewallTest extends TestCase
         'tests/Feature/Governance/',
         'tests/Feature/Security/',
         'tests/Feature/SupportAccess/',
+        // Section 39A (a later, distinct RLS-activation branch)
+        // legitimately added a route-independent middleware file and a
+        // queue-job tenant-context trait.
+        'app/Http/Middleware/',
+        'app/Support/',
     ];
 
     public function test_no_new_migration_files_were_added(): void
