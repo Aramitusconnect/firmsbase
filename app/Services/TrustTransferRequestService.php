@@ -145,7 +145,7 @@ class TrustTransferRequestService
 
         $ledger = $request->trustLedger;
         $matter = $request->matter;
-        $invoice = $request->invoice;
+        $invoice = (new TenantContextService())->runWithFirmContext($firm, fn () => $request->invoice);
 
         $this->tenantSafePolicy->assertTrustLedgerBelongsToFirm($ledger, $firm);
         $this->crossMatterProtection->assertMatterEligibleForLedger($matter, $ledger);
@@ -202,7 +202,7 @@ class TrustTransferRequestService
 
             // $entry is never updated or deleted from here on — it is
             // handed back purely for the caller's/tests' inspection.
-            $this->application->applyToInvoice($payment, $invoice->fresh());
+            $this->application->applyToInvoice($payment, (new TenantContextService())->runWithFirmContext($firm, fn () => $invoice->fresh()));
 
             $request->update([
                 'status' => TrustTransferRequestStatus::Applied,

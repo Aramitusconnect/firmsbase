@@ -115,8 +115,9 @@ class PaymentApplicationServiceTest extends TestCase
 
         $this->service->applyToInvoice($payment, $invoice);
 
-        $this->assertSame(InvoiceStatus::Paid, $invoice->fresh()->status);
-        $this->assertSame(10000, $invoice->fresh()->amount_paid_cents);
+        $reFetched = $this->runWithFirmContext($firm, fn () => $invoice->fresh());
+        $this->assertSame(InvoiceStatus::Paid, $reFetched->status);
+        $this->assertSame(10000, $reFetched->amount_paid_cents);
     }
 
     public function test_apply_to_invoice_throws_when_invoice_is_still_a_draft(): void

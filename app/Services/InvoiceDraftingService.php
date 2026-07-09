@@ -67,14 +67,14 @@ class InvoiceDraftingService
         }
 
         return DB::transaction(function () use ($firm, $client, $matter, $timeEntries, $createdBy) {
-            $invoice = Invoice::create([
+            $invoice = (new TenantContextService())->runWithFirmContext($firm, fn () => Invoice::create([
                 'firm_id' => $firm->id,
                 'client_id' => $client->id,
                 'matter_id' => $matter?->id,
                 'invoice_type' => InvoiceType::TimeAndExpense,
                 'status' => InvoiceStatus::Draft,
                 'created_by' => $createdBy?->id,
-            ]);
+            ]));
 
             $sortOrder = 0;
 
@@ -104,7 +104,7 @@ class InvoiceDraftingService
                 'invoice_type' => InvoiceType::TimeAndExpense->value,
             ]);
 
-            $invoice = $invoice->fresh('lines');
+            $invoice = (new TenantContextService())->runWithFirmContext($firm, fn () => $invoice->fresh('lines'));
 
             DB::afterCommit(function () use ($firm, $invoice) {
                 try {
@@ -127,14 +127,14 @@ class InvoiceDraftingService
         ?User $createdBy = null,
     ): Invoice {
         return DB::transaction(function () use ($firm, $client, $matter, $description, $amountCents, $createdBy) {
-            $invoice = Invoice::create([
+            $invoice = (new TenantContextService())->runWithFirmContext($firm, fn () => Invoice::create([
                 'firm_id' => $firm->id,
                 'client_id' => $client->id,
                 'matter_id' => $matter?->id,
                 'invoice_type' => InvoiceType::FlatFee,
                 'status' => InvoiceStatus::Draft,
                 'created_by' => $createdBy?->id,
-            ]);
+            ]));
 
             InvoiceLine::create([
                 'invoice_id' => $invoice->id,
@@ -153,7 +153,7 @@ class InvoiceDraftingService
                 'invoice_type' => InvoiceType::FlatFee->value,
             ]);
 
-            $invoice = $invoice->fresh('lines');
+            $invoice = (new TenantContextService())->runWithFirmContext($firm, fn () => $invoice->fresh('lines'));
 
             DB::afterCommit(function () use ($firm, $invoice) {
                 try {
@@ -198,9 +198,11 @@ class InvoiceDraftingService
             throw new \RuntimeException('Only a draft invoice can be submitted for review.');
         }
 
-        $invoice->update(['status' => InvoiceStatus::PendingReview]);
+        return (new TenantContextService())->runWithFirmContext($invoice->firm_id, function () use ($invoice) {
+            $invoice->update(['status' => InvoiceStatus::PendingReview]);
 
-        return $invoice->fresh();
+            return $invoice->fresh();
+        });
     }
 
     public function approve(Invoice $invoice): Invoice
@@ -209,9 +211,11 @@ class InvoiceDraftingService
             throw new \RuntimeException('Only a pending-review invoice can be approved.');
         }
 
-        $invoice->update(['status' => InvoiceStatus::Approved, 'issued_at' => now()]);
+        return (new TenantContextService())->runWithFirmContext($invoice->firm_id, function () use ($invoice) {
+            $invoice->update(['status' => InvoiceStatus::Approved, 'issued_at' => now()]);
 
-        return $invoice->fresh();
+            return $invoice->fresh();
+        });
     }
 
     public function send(Invoice $invoice): Invoice
@@ -220,13 +224,15 @@ class InvoiceDraftingService
             throw new \RuntimeException('Only an approved invoice can be sent.');
         }
 
-        $invoice->update(['status' => InvoiceStatus::Sent, 'sent_at' => now()]);
+        return (new TenantContextService())->runWithFirmContext($invoice->firm_id, function () use ($invoice) {
+            $invoice->update(['status' => InvoiceStatus::Sent, 'sent_at' => now()]);
 
-        $this->timeline->record($invoice->firm, 'invoice_sent', $invoice, null, [
-            'invoice_id' => $invoice->id,
-        ]);
+            $this->timeline->record($invoice->firm, 'invoice_sent', $invoice, null, [
+                'invoice_id' => $invoice->id,
+            ]);
 
-        return $invoice->fresh();
+            return $invoice->fresh();
+        });
     }
 
     public function void(Invoice $invoice, ?string $reason = null): Invoice
@@ -235,9 +241,11 @@ class InvoiceDraftingService
             throw new \RuntimeException('This invoice cannot be voided from its current status.');
         }
 
-        $invoice->update(['status' => InvoiceStatus::Void, 'voided_at' => now()]);
+        return (new TenantContextService())->runWithFirmContext($invoice->firm_id, function () use ($invoice) {
+            $invoice->update(['status' => InvoiceStatus::Void, 'voided_at' => now()]);
 
-        return $invoice->fresh();
+            return $invoice->fresh();
+        });
     }
 
     /**
@@ -250,9 +258,9 @@ class InvoiceDraftingService
     {
         $subtotal = (int) $invoice->lines()->sum('amount_cents');
 
-        $invoice->update([
+        (new TenantContextService())->runWithFirmContext($invoice->firm_id, fn () => $invoice->update([
             'subtotal_cents' => $subtotal,
             'total_cents' => $subtotal,
-        ]);
+        ]));
     }
 }

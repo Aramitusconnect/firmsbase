@@ -89,11 +89,11 @@ class AccountingExportLineBuilderService
 
     private function eligibleInvoices(AccountingExportBatch $batch): Collection
     {
-        return Invoice::query()
+        return (new TenantContextService())->runWithFirmContext($batch->firm_id, fn () => Invoice::query()
             ->where('firm_id', $batch->firm_id)
             ->whereNotIn('status', [InvoiceStatus::Draft->value, InvoiceStatus::Void->value])
             ->whereBetween('issued_at', [$this->windowStart($batch), $this->windowEnd($batch)])
-            ->get();
+            ->get());
     }
 
     /**

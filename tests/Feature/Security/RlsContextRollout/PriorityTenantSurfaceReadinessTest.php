@@ -54,12 +54,14 @@ class PriorityTenantSurfaceReadinessTest extends TestCase
      * database/migrations/2026_08_02_900001_force_rls_on_deadlines_table.php),
      * Section 39A-3E activated it for tasks (see
      * database/migrations/2026_08_03_900001_force_rls_on_tasks_table.php),
-     * and Section 39A-3F activated it for matters (see
-     * database/migrations/2026_08_04_900001_force_rls_on_matters_table.php)
-     * — the first six of these 8 priority tables to move from
-     * "prepared" to "enforced." The other 2 (invoices, payments) remain
-     * prepared-but-not-forced, pending their own later batches — their
-     * factories still nest Client::factory() directly.
+     * Section 39A-3F activated it for matters (see
+     * database/migrations/2026_08_04_900001_force_rls_on_matters_table.php),
+     * and Section 39A-3G activated it for invoices (see
+     * database/migrations/2026_08_05_900001_force_rls_on_invoices_table.php)
+     * — the first seven of these 8 priority tables to move from
+     * "prepared" to "enforced." The other 1 (payments) remains
+     * prepared-but-not-forced, pending its own later batch — its
+     * factory still nests Client::factory() directly.
      *
      * @return array<int, array{0: string, 1: bool}>
      */
@@ -70,7 +72,7 @@ class PriorityTenantSurfaceReadinessTest extends TestCase
             ['clients', true],
             ['matters', true],
             ['documents', true],
-            ['invoices', false],
+            ['invoices', true],
             ['payments', false],
             ['tasks', true],
             ['deadlines', true],

@@ -105,12 +105,12 @@ class InvoiceDraftingServiceTest extends TestCase
         $invoice = $this->service->createFlatFee($firm, $client, 'Flat fee', 100000);
 
         $this->service->addManualCharge($invoice, 'Filing fee reimbursement', 6000);
-        $this->assertSame(106000, $invoice->fresh()->total_cents);
+        $this->assertSame(106000, $this->runWithFirmContext($firm, fn () => $invoice->fresh())->total_cents);
 
-        $this->service->submitForReview($invoice->fresh());
+        $this->service->submitForReview($this->runWithFirmContext($firm, fn () => $invoice->fresh()));
 
         $this->expectException(\RuntimeException::class);
-        $this->service->addManualCharge($invoice->fresh(), 'Too late', 1000);
+        $this->service->addManualCharge($this->runWithFirmContext($firm, fn () => $invoice->fresh()), 'Too late', 1000);
     }
 
     public function test_full_status_lifecycle_draft_to_sent(): void

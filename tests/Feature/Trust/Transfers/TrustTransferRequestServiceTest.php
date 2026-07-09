@@ -68,8 +68,9 @@ class TrustTransferRequestServiceTest extends TestCase
 
         $this->assertSame(PaymentClassification::OperatingPayment, $payment->payment_classification);
         $this->assertSame(TrustTransferRequestStatus::Applied, $request->fresh()->status);
-        $this->assertSame(InvoiceStatus::PartiallyPaid, $invoice->fresh()->status);
-        $this->assertSame(15000, $invoice->fresh()->amount_paid_cents);
+        $reFetchedInvoice = $this->runWithFirmContext($firm, fn () => $invoice->fresh());
+        $this->assertSame(InvoiceStatus::PartiallyPaid, $reFetchedInvoice->status);
+        $this->assertSame(15000, $reFetchedInvoice->amount_paid_cents);
         $this->assertSame(5000, $ledger->balance->fresh()->balance_cents);
         $this->assertDatabaseHas('trust_ledger_entries', [
             'trust_transfer_request_id' => $request->id,

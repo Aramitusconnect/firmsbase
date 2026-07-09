@@ -42,7 +42,8 @@ class LoginPolicyFirewallTest extends TestCase
                 && $path !== 'database/migrations/2026_08_01_900001_force_rls_on_documents_table.php'
                 && $path !== 'database/migrations/2026_08_02_900001_force_rls_on_deadlines_table.php'
                 && $path !== 'database/migrations/2026_08_03_900001_force_rls_on_tasks_table.php'
-                && $path !== 'database/migrations/2026_08_04_900001_force_rls_on_matters_table.php',
+                && $path !== 'database/migrations/2026_08_04_900001_force_rls_on_matters_table.php'
+                && $path !== 'database/migrations/2026_08_05_900001_force_rls_on_invoices_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39D must add no migrations, but found: '.implode(', ', $changed));

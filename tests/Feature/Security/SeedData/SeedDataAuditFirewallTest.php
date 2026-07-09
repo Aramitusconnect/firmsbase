@@ -230,6 +230,26 @@ class SeedDataAuditFirewallTest extends TestCase
             'tests/Feature/PilotWorkflow/ProductionPilotWorkflowServiceTest.php',
             'tests/Feature/Webhooks/Wiring/MatterCreatedWiringTest.php',
             'tests/Feature/Webhooks/Wiring/MatterReadinessChangedWiringTest.php',
+            // Section 39A-3G (a later, distinct staged-FORCE-
+            // activation branch) legitimately added an invoices-only
+            // FORCE RLS migration, an InvoiceFactory root-cause
+            // firm/client consistency fix, explicit tenant-context
+            // wiring in InvoiceDraftingService, ImportApplyService,
+            // ManualPaymentService, PaymentApplicationService,
+            // TrustTransferRequestService,
+            // AccountingExportLineBuilderService, and
+            // FirmCommandCenterAggregationService, plus updated the
+            // tests it affected.
+            'database/migrations/2026_08_05_900001_force_rls_on_invoices_table.php',
+            'database/factories/InvoiceFactory.php',
+            'app/Services/InvoiceDraftingService.php',
+            'app/Services/ManualPaymentService.php',
+            'app/Services/PaymentApplicationService.php',
+            'app/Services/TrustTransferRequestService.php',
+            'app/Services/AccountingExportLineBuilderService.php',
+            'tests/Feature/Invoicing/InvoiceDraftingServiceTest.php',
+            'tests/Feature/Payments/PaymentApplicationServiceTest.php',
+            'tests/Feature/Trust/Transfers/TrustTransferRequestServiceTest.php',
         ];
 
         $unexpected = array_values(array_filter(
@@ -410,6 +430,26 @@ class SeedDataAuditFirewallTest extends TestCase
             'app/Services/ReadinessScorecardRegistry.php',
             'tests/Feature/Tasks/TaskDependencyServiceTest.php',
             'tests/Feature/Webhooks/Wiring/TaskCompletedWiringTest.php',
+            // Section 39A-3G (a later, distinct staged-FORCE-
+            // activation branch) legitimately added an invoices-only
+            // FORCE RLS migration, an InvoiceFactory root-cause
+            // firm/client consistency fix, explicit tenant-context
+            // wiring in InvoiceDraftingService, ImportApplyService,
+            // ManualPaymentService, PaymentApplicationService,
+            // TrustTransferRequestService,
+            // AccountingExportLineBuilderService, and
+            // FirmCommandCenterAggregationService, plus updated the
+            // tests it affected.
+            'database/migrations/2026_08_05_900001_force_rls_on_invoices_table.php',
+            'database/factories/InvoiceFactory.php',
+            'app/Services/InvoiceDraftingService.php',
+            'app/Services/ManualPaymentService.php',
+            'app/Services/PaymentApplicationService.php',
+            'app/Services/TrustTransferRequestService.php',
+            'app/Services/AccountingExportLineBuilderService.php',
+            'tests/Feature/Invoicing/InvoiceDraftingServiceTest.php',
+            'tests/Feature/Payments/PaymentApplicationServiceTest.php',
+            'tests/Feature/Trust/Transfers/TrustTransferRequestServiceTest.php',
         ];
 
         return array_values(array_filter(

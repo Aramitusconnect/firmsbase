@@ -182,15 +182,15 @@ class ProductionPilotWorkflowServiceTest extends TestCase
         // rule) — this is normal invoice lifecycle, not a pilot-workflow
         // shortcut.
         $this->invoices->submitForReview($invoice);
-        $this->invoices->approve($invoice->fresh());
-        $this->invoices->send($invoice->fresh());
+        $this->invoices->approve($this->runWithFirmContext($firm, fn () => $invoice->fresh()));
+        $this->invoices->send($this->runWithFirmContext($firm, fn () => $invoice->fresh()));
 
         // Step 11: manual payment (accepted operating payment, applied
         // to the invoice)
-        $payment = $this->pilot->recordManualPayment($firm, $client, 75000, $matter, $invoice->fresh());
+        $payment = $this->pilot->recordManualPayment($firm, $client, 75000, $matter, $this->runWithFirmContext($firm, fn () => $invoice->fresh()));
 
         $this->assertSame(PaymentStatus::Succeeded, $payment->status);
-        $this->assertSame(75000, $invoice->fresh()->amount_paid_cents);
+        $this->assertSame(75000, $this->runWithFirmContext($firm, fn () => $invoice->fresh())->amount_paid_cents);
 
         // Step 12: readiness score
         ReadinessScorecardComponent::factory()->create(['component_key' => 'documents_approved', 'status' => ReadinessComponentStatus::Active]);

@@ -220,13 +220,13 @@ class ImportApplyService
                 'seconds' => $data['seconds'] ?? throw new \InvalidArgumentException('seconds is required'),
                 'worked_on' => $data['worked_on'] ?? throw new \InvalidArgumentException('worked_on is required'),
             ]),
-            ImportEntityType::Invoice => Invoice::create([
+            ImportEntityType::Invoice => (new TenantContextService())->runWithFirmContext($firm, fn () => Invoice::create([
                 'firm_id' => $firm->id,
                 'client_id' => $data['client_id'] ?? throw new \InvalidArgumentException('client_id is required'),
                 'matter_id' => $data['matter_id'] ?? null,
                 'total_cents' => $data['total_cents'] ?? 0,
                 'subtotal_cents' => $data['subtotal_cents'] ?? ($data['total_cents'] ?? 0),
-            ]),
+            ])),
             ImportEntityType::PaymentPlan => PaymentPlan::create([
                 'firm_id' => $firm->id,
                 'client_id' => $data['client_id'] ?? throw new \InvalidArgumentException('client_id is required'),

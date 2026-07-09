@@ -85,10 +85,10 @@ class PaymentApplicationService
         $paidAmount = $invoice->amount_paid_cents + $payment->amount_cents;
         $status = $paidAmount >= $invoice->total_cents ? InvoiceStatus::Paid : InvoiceStatus::PartiallyPaid;
 
-        $invoice->update([
+        (new TenantContextService())->runWithFirmContext($invoice->firm_id, fn () => $invoice->update([
             'amount_paid_cents' => $paidAmount,
             'status' => $status,
-        ]);
+        ]));
 
         $this->timeline->record($invoice->firm, 'invoice_payment_applied', $invoice, null, [
             'payment_id' => $payment->id,

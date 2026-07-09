@@ -26,11 +26,12 @@ class RlsForceRolloutFirewallTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        // Section 39A-3C/39A-3D/39A-3E/39A-3F (later, distinct staged-
-        // FORCE-activation branches) legitimately activated FORCE for
-        // documents, deadlines, tasks, and matters too — this test's
-        // own scope (39A-3B) only asserts clients and firm_users here.
-        $expectedForced = ['clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters'];
+        // Section 39A-3C/39A-3D/39A-3E/39A-3F/39A-3G (later, distinct
+        // staged-FORCE-activation branches) legitimately activated
+        // FORCE for documents, deadlines, tasks, matters, and invoices
+        // too — this test's own scope (39A-3B) only asserts clients
+        // and firm_users here.
+        $expectedForced = ['clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices'];
 
         foreach ($coverage->preparedTables() as $table) {
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);
@@ -104,6 +105,14 @@ class RlsForceRolloutFirewallTest extends TestCase
         // reasoning as the firm_users/documents/deadlines/tasks checks
         // above.
         $this->assertFileExists(base_path('database/migrations/2026_08_04_900001_force_rls_on_matters_table.php'));
+    }
+
+    public function test_the_invoices_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3G's own migration — same file-existence
+        // reasoning as the firm_users/documents/deadlines/tasks/
+        // matters checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_05_900001_force_rls_on_invoices_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

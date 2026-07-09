@@ -69,10 +69,10 @@ class FirmCommandCenterAggregationService
                 ->whereNotIn('status', [DeadlineStatus::Completed, DeadlineStatus::Cancelled])
                 ->whereBetween('due_at', [$asOf->copy()->startOfDay(), $asOf->copy()->addDays(7)->endOfDay()])
                 ->count()),
-            unpaidInvoicesCount: Invoice::query()
+            unpaidInvoicesCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Invoice::query()
                 ->where('firm_id', $firm->id)
                 ->whereIn('status', [InvoiceStatus::Sent, InvoiceStatus::PartiallyPaid])
-                ->count(),
+                ->count()),
             installmentsDueCount: PaymentPlanInstallment::query()
                 ->whereHas('paymentPlan', fn ($query) => $query->where('firm_id', $firm->id))
                 ->where('status', PaymentPlanInstallmentStatus::Due)

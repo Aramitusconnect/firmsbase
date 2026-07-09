@@ -111,7 +111,7 @@ class ManualPaymentService
                 if ($installment) {
                     $this->application->applyToInstallment($payment, $installment);
                 } elseif ($invoice) {
-                    $this->application->applyToInvoice($payment, $invoice->fresh());
+                    $this->application->applyToInvoice($payment, (new TenantContextService())->runWithFirmContext($firm, fn () => $invoice->fresh()));
                 }
 
                 $this->timeline->record($firm, 'payment_recorded', $payment, $recordedBy, [
