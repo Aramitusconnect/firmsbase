@@ -130,7 +130,10 @@ class MarketReadyFirewallTest extends TestCase
             $this->changedOrUntrackedPaths('tests'),
             fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/')
                 && ! str_starts_with($path, 'tests/Feature/Security/')
-                && ! str_starts_with($path, 'tests/Feature/SupportAccess/'),
+                && ! str_starts_with($path, 'tests/Feature/SupportAccess/')
+                // Section 39A-2 legitimately added test helper methods
+                // to tests/TestCase.php.
+                && $path !== 'tests/TestCase.php',
         );
 
         $this->assertEmpty(

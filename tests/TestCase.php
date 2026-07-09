@@ -2,9 +2,80 @@
 
 namespace Tests;
 
+use App\Models\Firm;
+use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Illuminate\Support\Facades\DB;
 
 abstract class TestCase extends BaseTestCase
 {
-    //
+    /**
+     * Section 39A-2 — RLS context rollout test helpers. Pure additions
+     * (no setUp/tearDown hook, no global behavior change for any
+     * existing test that does not call them) so any test can opt in to
+     * running its tenant-owned reads/writes under the real PostgreSQL
+     * app.current_firm_id setting the RLS policies read, in
+     * preparation for a future FORCE ROW LEVEL SECURITY activation
+     * branch. All four delegate to (or directly verify) the existing
+     * TenantContextService — no second context mechanism is
+     * introduced here.
+     */
+
+    /**
+     * Runs $callback with the given firm's tenant context active for
+     * both the PHP-memory layer and the PostgreSQL session/transaction
+     * setting — context is always cleared afterward, even if the
+     * callback throws (see TenantContextService::runWithFirmContext()).
+     */
+    protected function runWithFirmContext(Firm|int|string $firm, callable $callback): mixed
+    {
+        return (new TenantContextService())->runWithFirmContext($firm, $callback);
+    }
+
+    /**
+     * Semantically the same mechanism as runWithFirmContext() — named
+     * separately for the common "create a tenant-owned fixture row
+     * under explicit context" pattern, so test code reads as intent
+     * rather than mechanism.
+     */
+    protected function createWithFirmContext(Firm|int|string $firm, callable $callback): mixed
+    {
+        return $this->runWithFirmContext($firm, $callback);
+    }
+
+    /**
+     * Asserts no PostgreSQL tenant context is currently active —
+     * app.current_firm_id evaluates to NULL/empty, exactly the state
+     * the RLS policies treat as "fail closed, no rows match."
+     */
+    protected function assertNoDatabaseTenantContext(string $message = ''): void
+    {
+        $value = $this->currentDatabaseTenantContextValue();
+
+        $this->assertTrue(
+            $value === null || $value === '',
+            $message !== '' ? $message : 'Expected no PostgreSQL tenant context to be active, but app.current_firm_id is set to \''.$value.'\'.'
+        );
+    }
+
+    /**
+     * Asserts the currently active PostgreSQL tenant context matches
+     * the given firm exactly.
+     */
+    protected function assertDatabaseTenantContextIs(Firm|int $firm, string $message = ''): void
+    {
+        $expectedFirmId = $firm instanceof Firm ? $firm->id : $firm;
+        $value = $this->currentDatabaseTenantContextValue();
+
+        $this->assertSame(
+            (string) $expectedFirmId,
+            $value,
+            $message !== '' ? $message : "Expected PostgreSQL tenant context to be '{$expectedFirmId}', but found '{$value}'."
+        );
+    }
+
+    private function currentDatabaseTenantContextValue(): ?string
+    {
+        return DB::selectOne("select current_setting('app.current_firm_id', true) as value")->value;
+    }
 }

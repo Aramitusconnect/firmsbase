@@ -154,6 +154,11 @@ class SeedDataAuditFirewallTest extends TestCase
             'app/Http/Middleware/',
             'app/Support/',
             'tests/Feature/Security/RlsEnforcement/',
+            // Section 39A-2 (a later, distinct RLS-context-rollout
+            // branch) legitimately added its own test directory and
+            // test helper methods to tests/TestCase.php.
+            'tests/Feature/Security/RlsContextRollout/',
+            'tests/TestCase.php',
         ];
 
         $unexpected = array_values(array_filter(

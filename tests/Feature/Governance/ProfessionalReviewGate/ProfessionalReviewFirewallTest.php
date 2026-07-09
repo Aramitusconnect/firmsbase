@@ -120,6 +120,9 @@ class ProfessionalReviewFirewallTest extends TestCase
         // queue-job tenant-context trait.
         'app/Http/Middleware/',
         'app/Support/',
+        // Section 39A-2 (a later, distinct RLS-context-rollout branch)
+        // legitimately added test helper methods to tests/TestCase.php.
+        'tests/TestCase.php',
     ];
 
     public function test_no_new_migration_files_were_added(): void
@@ -247,7 +250,10 @@ class ProfessionalReviewFirewallTest extends TestCase
             $this->changedOrUntrackedPaths('tests'),
             fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/')
                 && ! str_starts_with($path, 'tests/Feature/Security/')
-                && ! str_starts_with($path, 'tests/Feature/SupportAccess/'),
+                && ! str_starts_with($path, 'tests/Feature/SupportAccess/')
+                // Section 39A-2 legitimately added test helper methods
+                // to tests/TestCase.php.
+                && $path !== 'tests/TestCase.php',
         );
 
         $this->assertEmpty(
