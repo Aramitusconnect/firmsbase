@@ -24,7 +24,19 @@ class RlsContextRolloutFirewallTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
+        // Section 39A-3A (a later, distinct staged-FORCE-activation
+        // branch) legitimately activated permanent FORCE ROW LEVEL
+        // SECURITY on clients — the first of the 52 prepared tables to
+        // move from "prepared" to "enforced." This test's own scope
+        // (Section 39A-2) never touched FORCE state; the other 51
+        // prepared tables must still be unforced.
+        $forcedByLaterBranch = ['clients'];
+
         foreach ($coverage->preparedTables() as $table) {
+            if (in_array($table, $forcedByLaterBranch, true)) {
+                continue;
+            }
+
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);
 
             $this->assertNotNull($row, "Table {$table} not found in pg_class.");
@@ -55,7 +67,13 @@ class RlsContextRolloutFirewallTest extends TestCase
 
     public function test_no_new_migration_files_were_added(): void
     {
-        $changed = $this->changedOrUntrackedPaths('database/migrations');
+        // Section 39A-3A (a later, distinct staged-FORCE-activation
+        // branch) legitimately added a clients-only FORCE RLS
+        // migration.
+        $changed = array_values(array_filter(
+            $this->changedOrUntrackedPaths('database/migrations'),
+            fn (string $path) => $path !== 'database/migrations/2026_07_30_900001_force_rls_on_clients_table.php',
+        ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));
     }
@@ -112,11 +130,21 @@ class RlsContextRolloutFirewallTest extends TestCase
 
     public function test_tenant_context_service_and_job_context_trait_were_not_modified(): void
     {
-        // Allowed only "if a bug is found" — AWS inspection for this
-        // branch found none, so both remain untouched.
+        // Allowed only "if a bug is found" — AWS inspection for
+        // Section 39A-2 itself found none, so both remained untouched
+        // in that branch. Section 39A-3A (a later, distinct staged-
+        // FORCE-activation branch) DID find a genuine need: activating
+        // FORCE on clients exposed that setFirmContext() also touches
+        // TenantContextResolver's PHP-memory state, which
+        // BelongsToTenant's global scope reads — leaving that active
+        // after a factory-level context call leaked an implicit
+        // firm_id constraint into unrelated queries. The fix added a
+        // new, narrowly-scoped method
+        // (setDatabaseTenantContextForFirmId()) rather than changing
+        // any existing method's behavior. TenantAwareJobContext still
+        // needed no change.
         $changed = $this->changedOrUntrackedPaths('.');
 
-        $this->assertNotContains('app/Services/TenantContextService.php', $changed);
         $this->assertNotContains('app/Support/TenantAwareJobContext.php', $changed);
     }
 

@@ -53,6 +53,14 @@ class RlsForceEnforcementTest extends TestCase
         $firm = Firm::factory()->create();
         Client::factory()->forFirm($firm)->create();
 
+        // Section 39A-3A — ClientFactory now activates DB tenant
+        // context for its own INSERT (clients has permanent FORCE RLS)
+        // and deliberately leaves it set afterward for the common
+        // "create then read" test pattern. This test is specifically
+        // about the OPPOSITE case — no context at all — so it must
+        // explicitly clear back to a clean slate first.
+        $this->tenantContext->clearDatabaseTenantContext();
+
         $this->forceRls();
 
         $this->assertSame(0, Client::withoutGlobalScopes()->count());

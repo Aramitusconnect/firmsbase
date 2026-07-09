@@ -83,31 +83,33 @@ class ImportDuplicateDetectionService
 
     private function detectClient(int $firmId, array $data): DuplicateDetectionResult
     {
-        $query = Client::query()->where('firm_id', $firmId);
+        return (new TenantContextService())->runWithFirmContext($firmId, function () use ($firmId, $data) {
+            $query = Client::query()->where('firm_id', $firmId);
 
-        if (! empty($data['email'])) {
-            $match = (clone $query)->where('email', $data['email'])->first();
-            if ($match) {
-                return DuplicateDetectionResult::match(Client::class, $match->id, 'email match');
+            if (! empty($data['email'])) {
+                $match = (clone $query)->where('email', $data['email'])->first();
+                if ($match) {
+                    return DuplicateDetectionResult::match(Client::class, $match->id, 'email match');
+                }
             }
-        }
 
-        if (! empty($data['phone'])) {
-            $match = (clone $query)->where('phone', $data['phone'])->first();
-            if ($match) {
-                return DuplicateDetectionResult::match(Client::class, $match->id, 'phone match');
+            if (! empty($data['phone'])) {
+                $match = (clone $query)->where('phone', $data['phone'])->first();
+                if ($match) {
+                    return DuplicateDetectionResult::match(Client::class, $match->id, 'phone match');
+                }
             }
-        }
 
-        if (! empty($data['display_name']) || ! empty($data['name'])) {
-            $name = $data['display_name'] ?? $data['name'];
-            $match = (clone $query)->where('display_name', $name)->first();
-            if ($match) {
-                return DuplicateDetectionResult::match(Client::class, $match->id, 'name match');
+            if (! empty($data['display_name']) || ! empty($data['name'])) {
+                $name = $data['display_name'] ?? $data['name'];
+                $match = (clone $query)->where('display_name', $name)->first();
+                if ($match) {
+                    return DuplicateDetectionResult::match(Client::class, $match->id, 'name match');
+                }
             }
-        }
 
-        return DuplicateDetectionResult::noMatch();
+            return DuplicateDetectionResult::noMatch();
+        });
     }
 
     private function detectContact(int $firmId, array $data): DuplicateDetectionResult

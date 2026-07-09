@@ -33,13 +33,15 @@ class ClientPortalService
             );
         }
 
-        $client->update([
-            'portal_status' => ClientPortalStatus::Invited,
-            'portal_invitation_token' => (string) Str::uuid7(),
-            'portal_invitation_sent_at' => now(),
-        ]);
+        return (new TenantContextService())->runWithFirmContext($client->firm_id, function () use ($client) {
+            $client->update([
+                'portal_status' => ClientPortalStatus::Invited,
+                'portal_invitation_token' => (string) Str::uuid7(),
+                'portal_invitation_sent_at' => now(),
+            ]);
 
-        return $client->fresh();
+            return $client->fresh();
+        });
     }
 
     /**
@@ -51,17 +53,22 @@ class ClientPortalService
             throw new \RuntimeException('Invalid or expired portal invitation token.');
         }
 
-        $client->update([
-            'portal_status' => ClientPortalStatus::Active,
-            'portal_invitation_accepted_at' => now(),
-            'portal_invitation_token' => null,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($client->firm_id, function () use ($client) {
+            $client->update([
+                'portal_status' => ClientPortalStatus::Active,
+                'portal_invitation_accepted_at' => now(),
+                'portal_invitation_token' => null,
+            ]);
 
-        return $client->fresh();
+            return $client->fresh();
+        });
     }
 
     public function disable(Client $client): Client
     {
-        return tap($client)->update(['portal_status' => ClientPortalStatus::Disabled]);
+        return (new TenantContextService())->runWithFirmContext(
+            $client->firm_id,
+            fn () => tap($client)->update(['portal_status' => ClientPortalStatus::Disabled])
+        );
     }
 }

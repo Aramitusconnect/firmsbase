@@ -183,13 +183,13 @@ class ImportApplyService
                 'phone' => $data['phone'] ?? null,
                 'status' => 'new',
             ]),
-            ImportEntityType::Client => Client::create([
+            ImportEntityType::Client => (new TenantContextService())->runWithFirmContext($firm, fn () => Client::create([
                 'firm_id' => $firm->id,
                 'display_name' => $data['display_name'] ?? $data['name'] ?? throw new \InvalidArgumentException('display_name is required'),
                 'legal_name' => $data['legal_name'] ?? null,
                 'email' => $data['email'] ?? null,
                 'phone' => $data['phone'] ?? null,
-            ]),
+            ])),
             ImportEntityType::Contact => Contact::create([
                 'firm_id' => $firm->id,
                 'client_id' => $data['client_id'] ?? null,
