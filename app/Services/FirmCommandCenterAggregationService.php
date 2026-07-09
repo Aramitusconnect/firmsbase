@@ -89,14 +89,14 @@ class FirmCommandCenterAggregationService
                 ->where('firm_id', $firm->id)
                 ->where('updated_at', '<=', $asOf->copy()->subDays($inactiveClientDays))
                 ->count()),
-            overdueTasksCount: Task::query()
+            overdueTasksCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Task::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', TaskStatus::Overdue)
-                ->count(),
-            blockedTasksCount: Task::query()
+                ->count()),
+            blockedTasksCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Task::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', TaskStatus::Blocked)
-                ->count(),
+                ->count()),
             formsReadyForReviewCount: FormDraft::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', FormDraftStatus::ReadyForReview)

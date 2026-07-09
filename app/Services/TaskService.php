@@ -40,7 +40,7 @@ class TaskService
         ?string $description = null,
         ?User $createdBy = null,
     ): Task {
-        return Task::create([
+        return (new TenantContextService())->runWithFirmContext($firm, fn () => Task::create([
             'firm_id' => $firm->id,
             'matter_id' => $matter?->id,
             'client_id' => $client?->id,
@@ -51,14 +51,16 @@ class TaskService
             'priority' => $priority,
             'due_at' => $dueAt,
             'created_by' => $createdBy?->id,
-        ]);
+        ]));
     }
 
     public function assign(Task $task, User $assignee): Task
     {
-        $task->update(['assigned_to' => $assignee->id]);
+        return (new TenantContextService())->runWithFirmContext($task->firm_id, function () use ($task, $assignee) {
+            $task->update(['assigned_to' => $assignee->id]);
 
-        return $task->fresh();
+            return $task->fresh();
+        });
     }
 
     public function start(Task $task): Task
@@ -67,9 +69,11 @@ class TaskService
             throw new \RuntimeException('Only an open task can be started.');
         }
 
-        $task->update(['status' => TaskStatus::InProgress]);
+        return (new TenantContextService())->runWithFirmContext($task->firm_id, function () use ($task) {
+            $task->update(['status' => TaskStatus::InProgress]);
 
-        return $task->fresh();
+            return $task->fresh();
+        });
     }
 
     public function complete(Task $task): Task
@@ -78,9 +82,11 @@ class TaskService
             throw new \RuntimeException('A blocked task cannot be completed until its dependencies are resolved.');
         }
 
-        $task->update(['status' => TaskStatus::Completed, 'completed_at' => now()]);
+        $task = (new TenantContextService())->runWithFirmContext($task->firm_id, function () use ($task) {
+            $task->update(['status' => TaskStatus::Completed, 'completed_at' => now()]);
 
-        $task = $task->fresh();
+            return $task->fresh();
+        });
 
         DB::afterCommit(function () use ($task) {
             try {
@@ -95,9 +101,11 @@ class TaskService
 
     public function cancel(Task $task): Task
     {
-        $task->update(['status' => TaskStatus::Cancelled, 'cancelled_at' => now()]);
+        return (new TenantContextService())->runWithFirmContext($task->firm_id, function () use ($task) {
+            $task->update(['status' => TaskStatus::Cancelled, 'cancelled_at' => now()]);
 
-        return $task->fresh();
+            return $task->fresh();
+        });
     }
 
     /**
@@ -112,10 +120,12 @@ class TaskService
             return $task;
         }
 
-        if ($task->due_at && $task->due_at->isPast()) {
-            $task->update(['status' => TaskStatus::Overdue]);
-        }
+        return (new TenantContextService())->runWithFirmContext($task->firm_id, function () use ($task) {
+            if ($task->due_at && $task->due_at->isPast()) {
+                $task->update(['status' => TaskStatus::Overdue]);
+            }
 
-        return $task->fresh();
+            return $task->fresh();
+        });
     }
 }

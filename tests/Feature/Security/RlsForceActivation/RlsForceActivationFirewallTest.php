@@ -24,11 +24,11 @@ class RlsForceActivationFirewallTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        // Section 39A-3B/39A-3C/39A-3D (later, distinct staged-FORCE-
-        // activation branches) legitimately activated FORCE for
-        // firm_users, documents, and deadlines too — this test's own
-        // scope (39A-3A) only asserts clients here.
-        $forcedByLaterBranch = ['firm_users', 'documents', 'deadlines'];
+        // Section 39A-3B/39A-3C/39A-3D/39A-3E (later, distinct staged-
+        // FORCE-activation branches) legitimately activated FORCE for
+        // firm_users, documents, deadlines, and tasks too — this test's
+        // own scope (39A-3A) only asserts clients here.
+        $forcedByLaterBranch = ['firm_users', 'documents', 'deadlines', 'tasks'];
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forcedByLaterBranch, true)) {

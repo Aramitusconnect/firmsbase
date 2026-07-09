@@ -87,7 +87,19 @@ class AdminControlUiBoundaryTest extends TestCase
                 // context fix, and explicit tenant-context wiring in
                 // DeadlineService.
                 && $path !== 'database/migrations/2026_08_02_900001_force_rls_on_deadlines_table.php'
-                && $path !== 'database/factories/DeadlineFactory.php',
+                && $path !== 'database/factories/DeadlineFactory.php'
+                // Section 39A-3E (a later, distinct staged-FORCE-
+                // activation branch) legitimately added a tasks-only
+                // FORCE RLS migration, a TaskFactory context fix, and
+                // explicit tenant-context wiring in TaskService,
+                // TaskDependencyService, and MatterReadinessService
+                // (app/Services/ is already excluded above, so only
+                // the migration/factory/affected tests need listing
+                // here).
+                && $path !== 'database/migrations/2026_08_03_900001_force_rls_on_tasks_table.php'
+                && $path !== 'database/factories/TaskFactory.php'
+                && $path !== 'tests/Feature/Tasks/TaskDependencyServiceTest.php'
+                && $path !== 'tests/Feature/Webhooks/Wiring/TaskCompletedWiringTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

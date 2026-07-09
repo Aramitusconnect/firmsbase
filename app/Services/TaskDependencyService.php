@@ -31,26 +31,30 @@ class TaskDependencyService
             );
         }
 
-        return DB::transaction(function () use ($task, $blockedByTask) {
-            $dependency = TaskDependency::firstOrCreate([
-                'task_id' => $task->id,
-                'blocked_by_task_id' => $blockedByTask->id,
-            ]);
+        return (new TenantContextService())->runWithFirmContext($task->firm_id, function () use ($task, $blockedByTask) {
+            return DB::transaction(function () use ($task, $blockedByTask) {
+                $dependency = TaskDependency::firstOrCreate([
+                    'task_id' => $task->id,
+                    'blocked_by_task_id' => $blockedByTask->id,
+                ]);
 
-            $this->refreshBlockedStatus($task);
+                $this->refreshBlockedStatus($task);
 
-            return $dependency;
+                return $dependency;
+            });
         });
     }
 
     public function removeDependency(Task $task, Task $blockedByTask): void
     {
-        TaskDependency::query()
-            ->where('task_id', $task->id)
-            ->where('blocked_by_task_id', $blockedByTask->id)
-            ->delete();
+        (new TenantContextService())->runWithFirmContext($task->firm_id, function () use ($task, $blockedByTask) {
+            TaskDependency::query()
+                ->where('task_id', $task->id)
+                ->where('blocked_by_task_id', $blockedByTask->id)
+                ->delete();
 
-        $this->refreshBlockedStatus($task->fresh());
+            $this->refreshBlockedStatus($task->fresh());
+        });
     }
 
     /**
@@ -99,20 +103,22 @@ class TaskDependencyService
             return $task;
         }
 
-        $hasUnresolvedDependency = $task->dependencies()
-            ->whereHas('blockedByTask', fn ($q) => $q->whereNotIn('status', [
-                TaskStatus::Completed->value,
-                TaskStatus::Cancelled->value,
-            ]))
-            ->exists();
+        return (new TenantContextService())->runWithFirmContext($task->firm_id, function () use ($task) {
+            $hasUnresolvedDependency = $task->dependencies()
+                ->whereHas('blockedByTask', fn ($q) => $q->whereNotIn('status', [
+                    TaskStatus::Completed->value,
+                    TaskStatus::Cancelled->value,
+                ]))
+                ->exists();
 
-        if ($hasUnresolvedDependency) {
-            $task->update(['status' => TaskStatus::Blocked]);
-        } elseif ($task->status === TaskStatus::Blocked) {
-            $task->update(['status' => TaskStatus::Open]);
-        }
+            if ($hasUnresolvedDependency) {
+                $task->update(['status' => TaskStatus::Blocked]);
+            } elseif ($task->status === TaskStatus::Blocked) {
+                $task->update(['status' => TaskStatus::Open]);
+            }
 
-        return $task->fresh();
+            return $task->fresh();
+        });
     }
 
     public function isBlocked(Task $task): bool

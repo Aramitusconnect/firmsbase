@@ -37,7 +37,7 @@ class TaskDependencyServiceTest extends TestCase
 
         $this->service->addDependency($a, $b);
 
-        $this->assertSame(TaskStatus::Blocked, $a->fresh()->status);
+        $this->assertSame(TaskStatus::Blocked, $this->runWithFirmContext($firm, fn () => $a->fresh()->status));
     }
 
     /**
@@ -90,12 +90,12 @@ class TaskDependencyServiceTest extends TestCase
         $b = Task::factory()->create(['firm_id' => $firm->id]);
 
         $this->service->addDependency($a, $b);
-        $this->assertSame(TaskStatus::Blocked, $a->fresh()->status);
+        $this->assertSame(TaskStatus::Blocked, $this->runWithFirmContext($firm, fn () => $a->fresh()->status));
 
-        $b->update(['status' => TaskStatus::Completed, 'completed_at' => now()]);
-        $this->service->refreshBlockedStatus($a->fresh());
+        $this->runWithFirmContext($firm, fn () => $b->update(['status' => TaskStatus::Completed, 'completed_at' => now()]));
+        $this->service->refreshBlockedStatus($this->runWithFirmContext($firm, fn () => $a->fresh()));
 
-        $this->assertSame(TaskStatus::Open, $a->fresh()->status);
+        $this->assertSame(TaskStatus::Open, $this->runWithFirmContext($firm, fn () => $a->fresh()->status));
     }
 
     public function test_remove_dependency_recomputes_blocked_status(): void
@@ -107,7 +107,7 @@ class TaskDependencyServiceTest extends TestCase
         $this->service->addDependency($a, $b);
         $this->service->removeDependency($a, $b);
 
-        $this->assertSame(TaskStatus::Open, $a->fresh()->status);
+        $this->assertSame(TaskStatus::Open, $this->runWithFirmContext($firm, fn () => $a->fresh()->status));
     }
 
     public function test_blocked_status_never_overrides_a_completed_task(): void
@@ -118,8 +118,8 @@ class TaskDependencyServiceTest extends TestCase
 
         \App\Models\TaskDependency::factory()->between($a, $b)->create();
 
-        $this->service->refreshBlockedStatus($a->fresh());
+        $this->service->refreshBlockedStatus($this->runWithFirmContext($firm, fn () => $a->fresh()));
 
-        $this->assertSame(TaskStatus::Completed, $a->fresh()->status);
+        $this->assertSame(TaskStatus::Completed, $this->runWithFirmContext($firm, fn () => $a->fresh()->status));
     }
 }

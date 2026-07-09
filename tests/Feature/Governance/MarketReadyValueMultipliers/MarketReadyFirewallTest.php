@@ -42,7 +42,12 @@ class MarketReadyFirewallTest extends TestCase
         'app/Services/TemplatePackCommercialService.php',
         'app/Services/TemplatePackInstallationService.php',
         'app/Services/MatterReadinessService.php',
-        'app/Services/ReadinessScorecardRegistry.php',
+        // ReadinessScorecardRegistry.php is deliberately NOT in this
+        // list any more — Section 39A-3E (a later, distinct staged-
+        // FORCE-activation branch) found a genuine need to wire the
+        // tasks_dependencies_ready evaluator's Task query with
+        // explicit tenant context, since tasks now has permanent
+        // FORCE ROW LEVEL SECURITY.
         'app/Services/LegalSpecialistBoundaryPolicyService.php',
         'composer.json',
     ];
@@ -279,6 +284,18 @@ class MarketReadyFirewallTest extends TestCase
             'database/migrations/2026_08_02_900001_force_rls_on_deadlines_table.php',
             'database/factories/DeadlineFactory.php',
             'app/Services/DeadlineService.php',
+            // Section 39A-3E (a later, distinct staged-FORCE-
+            // activation branch) legitimately added a tasks-only
+            // FORCE RLS migration, a TaskFactory context fix, and
+            // explicit tenant-context wiring in TaskService,
+            // TaskDependencyService, and MatterReadinessService.
+            'database/migrations/2026_08_03_900001_force_rls_on_tasks_table.php',
+            'database/factories/TaskFactory.php',
+            'app/Services/TaskService.php',
+            'app/Services/TaskDependencyService.php',
+            'app/Services/ReadinessScorecardRegistry.php',
+            'tests/Feature/Tasks/TaskDependencyServiceTest.php',
+            'tests/Feature/Webhooks/Wiring/TaskCompletedWiringTest.php',
         ];
 
         return array_values(array_filter(

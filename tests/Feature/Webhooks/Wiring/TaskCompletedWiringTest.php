@@ -65,6 +65,6 @@ class TaskCompletedWiringTest extends TestCase
 
         $service->complete($task);
 
-        $this->assertSame(TaskStatus::Completed, $task->fresh()->status);
+        $this->assertSame(TaskStatus::Completed, $this->runWithFirmContext($firm, fn () => $task->fresh()->status));
     }
 }

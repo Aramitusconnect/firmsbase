@@ -111,10 +111,10 @@ class ReadinessScorecardRegistry
         });
 
         $this->register('tasks_dependencies_ready', function (Matter $matter): ReadinessComponentResult {
-            $unresolved = \App\Models\Task::query()
+            $unresolved = (new TenantContextService())->runWithFirmContext($matter->firm_id, fn () => \App\Models\Task::query()
                 ->where('matter_id', $matter->id)
                 ->whereNotIn('status', [TaskStatus::Completed->value, TaskStatus::Cancelled->value])
-                ->count();
+                ->count());
 
             return new ReadinessComponentResult(
                 'tasks_dependencies_ready',

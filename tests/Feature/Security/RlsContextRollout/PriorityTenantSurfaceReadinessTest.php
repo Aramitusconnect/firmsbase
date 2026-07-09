@@ -50,11 +50,14 @@ class PriorityTenantSurfaceReadinessTest extends TestCase
      * database/migrations/2026_07_31_900001_force_rls_on_firm_users_table.php),
      * Section 39A-3C activated it for documents (see
      * database/migrations/2026_08_01_900001_force_rls_on_documents_table.php),
-     * and Section 39A-3D activated it for deadlines (see
-     * database/migrations/2026_08_02_900001_force_rls_on_deadlines_table.php)
-     * — the first four of these 8 priority tables to move from
-     * "prepared" to "enforced." The other 4 remain
-     * prepared-but-not-forced, pending their own later batches.
+     * Section 39A-3D activated it for deadlines (see
+     * database/migrations/2026_08_02_900001_force_rls_on_deadlines_table.php),
+     * and Section 39A-3E activated it for tasks (see
+     * database/migrations/2026_08_03_900001_force_rls_on_tasks_table.php)
+     * — the first five of these 8 priority tables to move from
+     * "prepared" to "enforced." The other 3 (matters, invoices,
+     * payments) remain prepared-but-not-forced, pending their own later
+     * batches — their factories still nest Client::factory() directly.
      *
      * @return array<int, array{0: string, 1: bool}>
      */
@@ -67,7 +70,7 @@ class PriorityTenantSurfaceReadinessTest extends TestCase
             ['documents', true],
             ['invoices', false],
             ['payments', false],
-            ['tasks', false],
+            ['tasks', true],
             ['deadlines', true],
         ];
     }
@@ -193,6 +196,12 @@ class PriorityTenantSurfaceReadinessTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $task = Task::factory()->create(['firm_id' => $firm->id]);
+
+        // TaskFactory leaves DB tenant context set to $firm afterward
+        // (Section 39A-3E, same pattern as ClientFactory) — clear it
+        // before this test's own "nothing visible without context"
+        // check.
+        (new TenantContextService())->clearDatabaseTenantContext();
 
         DB::statement('ALTER TABLE tasks FORCE ROW LEVEL SECURITY');
 

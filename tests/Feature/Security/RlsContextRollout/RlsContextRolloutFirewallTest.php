@@ -24,14 +24,14 @@ class RlsContextRolloutFirewallTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        // Section 39A-3A/39A-3B/39A-3C/39A-3D (later, distinct staged-
-        // FORCE-activation branches) legitimately activated permanent
-        // FORCE ROW LEVEL SECURITY on clients, firm_users, documents,
-        // and deadlines — the first four of the 52 prepared tables to
-        // move from "prepared" to "enforced." This test's own scope
-        // (Section 39A-2) never touched FORCE state; the other 48
-        // prepared tables must still be unforced.
-        $forcedByLaterBranch = ['clients', 'firm_users', 'documents', 'deadlines'];
+        // Section 39A-3A/39A-3B/39A-3C/39A-3D/39A-3E (later, distinct
+        // staged-FORCE-activation branches) legitimately activated
+        // permanent FORCE ROW LEVEL SECURITY on clients, firm_users,
+        // documents, deadlines, and tasks — the first five of the 52
+        // prepared tables to move from "prepared" to "enforced." This
+        // test's own scope (Section 39A-2) never touched FORCE state;
+        // the other 47 prepared tables must still be unforced.
+        $forcedByLaterBranch = ['clients', 'firm_users', 'documents', 'deadlines', 'tasks'];
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forcedByLaterBranch, true)) {
@@ -76,7 +76,8 @@ class RlsContextRolloutFirewallTest extends TestCase
             fn (string $path) => $path !== 'database/migrations/2026_07_30_900001_force_rls_on_clients_table.php'
                 && $path !== 'database/migrations/2026_07_31_900001_force_rls_on_firm_users_table.php'
                 && $path !== 'database/migrations/2026_08_01_900001_force_rls_on_documents_table.php'
-                && $path !== 'database/migrations/2026_08_02_900001_force_rls_on_deadlines_table.php',
+                && $path !== 'database/migrations/2026_08_02_900001_force_rls_on_deadlines_table.php'
+                && $path !== 'database/migrations/2026_08_03_900001_force_rls_on_tasks_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));

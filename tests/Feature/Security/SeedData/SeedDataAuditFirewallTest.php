@@ -341,6 +341,18 @@ class SeedDataAuditFirewallTest extends TestCase
             'database/migrations/2026_08_02_900001_force_rls_on_deadlines_table.php',
             'database/factories/DeadlineFactory.php',
             'app/Services/DeadlineService.php',
+            // Section 39A-3E (a later, distinct staged-FORCE-
+            // activation branch) legitimately added a tasks-only
+            // FORCE RLS migration, a TaskFactory context fix, and
+            // explicit tenant-context wiring in TaskService,
+            // TaskDependencyService, and MatterReadinessService.
+            'database/migrations/2026_08_03_900001_force_rls_on_tasks_table.php',
+            'database/factories/TaskFactory.php',
+            'app/Services/TaskService.php',
+            'app/Services/TaskDependencyService.php',
+            'app/Services/ReadinessScorecardRegistry.php',
+            'tests/Feature/Tasks/TaskDependencyServiceTest.php',
+            'tests/Feature/Webhooks/Wiring/TaskCompletedWiringTest.php',
         ];
 
         return array_values(array_filter(
