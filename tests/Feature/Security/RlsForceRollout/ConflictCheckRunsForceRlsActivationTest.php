@@ -111,9 +111,23 @@ class ConflictCheckRunsForceRlsActivationTest extends TestCase
         );
     }
 
-    public function test_exactly_nine_intended_tables_are_force_enabled(): void
+    /**
+     * Narrowly updated by Section 39A-3J (the next staged batch after
+     * this file's own 39A-3I, forcing lead_sources,
+     * consultation_outcomes, firm_leads, and consultations together):
+     * this was the newest activation-proof file's own "exactly N
+     * forced" boundary check before that batch landed, and it is the
+     * one place in THIS file that must track the real count going
+     * forward — same reasoning as RlsForceRolloutFirewallTest's own
+     * narrowly-updated expected-forced list. No other assertion in
+     * this file was touched.
+     */
+    public function test_exactly_thirteen_intended_tables_are_force_enabled(): void
     {
-        $expectedForced = ['clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs'];
+        $expectedForced = [
+            'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
+            'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
+        ];
 
         $rows = DB::select(
             "select relname from pg_class where relkind = 'r' and relnamespace = 'public'::regnamespace and relforcerowsecurity = true"
@@ -123,13 +137,18 @@ class ConflictCheckRunsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the nine intended tables must be FORCE RLS enabled — no more, no fewer.');
+        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the thirteen intended tables must be FORCE RLS enabled — no more, no fewer.');
     }
 
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new \App\Services\RowLevelSecurityCoverageMappingService();
-        $forced = ['clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs'];
+        // Narrowly updated alongside the count test above for the same
+        // Section 39A-3J reason.
+        $forced = [
+            'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
+            'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
+        ];
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

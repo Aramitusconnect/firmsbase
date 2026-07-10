@@ -58,7 +58,11 @@ class ClientCreatedWiringTest extends TestCase
         $service->convert($lead, ['display_name' => 'First Conversion']);
 
         $this->expectException(\RuntimeException::class);
-        $service->convert($lead->fresh(), ['display_name' => 'Second Conversion Attempt']);
+        // firm_leads has permanent FORCE ROW LEVEL SECURITY (Section
+        // 39A-3J) — the first convert() call above already cleared
+        // tenant context in its finally block, so re-reading $lead
+        // needs explicit tenant context re-established.
+        $service->convert($this->runWithFirmContext($firm, fn () => $lead->fresh()), ['display_name' => 'Second Conversion Attempt']);
     }
 
     public function test_recorder_exception_does_not_break_lead_conversion(): void
@@ -74,7 +78,11 @@ class ClientCreatedWiringTest extends TestCase
         $client = $service->convert($lead, ['display_name' => 'Still Converted']);
 
         $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('clients', ['id' => $client->id, 'display_name' => 'Still Converted']));
-        $this->assertTrue($lead->fresh()->isConverted());
+        // firm_leads has permanent FORCE ROW LEVEL SECURITY (Section
+        // 39A-3J) — convert() clears its own tenant context in a
+        // finally block before returning, so this post-call read
+        // needs explicit tenant context re-established.
+        $this->assertTrue($this->runWithFirmContext($firm, fn () => $lead->fresh())->isConverted());
     }
 
     public function test_client_created_fires_exactly_once_on_successful_bulk_import(): void

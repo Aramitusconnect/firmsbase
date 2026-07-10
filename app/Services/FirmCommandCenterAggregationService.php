@@ -43,15 +43,15 @@ class FirmCommandCenterAggregationService
         $asOf = $asOf ?? now();
 
         return new CommandCenterSnapshot(
-            newLeadsCount: FirmLead::query()
+            newLeadsCount: (new TenantContextService())->runWithFirmContext($firm, fn () => FirmLead::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', FirmLeadStatus::New)
-                ->count(),
-            consultationsCount: Consultation::query()
+                ->count()),
+            consultationsCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Consultation::query()
                 ->where('firm_id', $firm->id)
                 ->whereNull('held_at')
                 ->where('scheduled_at', '>=', $asOf)
-                ->count(),
+                ->count()),
             mattersWaitingOnClientCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Matter::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', MatterStatus::WaitingOnClient)

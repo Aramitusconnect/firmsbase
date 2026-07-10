@@ -6,6 +6,7 @@ use App\Enums\ImportEntityType;
 use App\Enums\ImportRowStatus;
 use App\Enums\ImportSourceType;
 use App\Enums\WebhookEventType;
+use App\Models\Firm;
 use App\Models\FirmLead;
 use App\Models\WebhookEvent;
 use App\Services\ImportApplyService;
@@ -50,7 +51,7 @@ class LeadCreatedWiringTest extends TestCase
         $this->service = new ImportApplyService($documentSafetyService, $auditService);
     }
 
-    private function applyOneLeadRow(array $rowData): void
+    private function applyOneLeadRow(array $rowData): Firm
     {
         $firm = $this->makeWebhookEntitledFirm();
         $batch = $this->batchService->create($firm, ImportEntityType::FirmLead, ImportSourceType::CsvUpload);
@@ -58,16 +59,23 @@ class LeadCreatedWiringTest extends TestCase
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
         $this->service->confirmBatch($batch->fresh());
         $this->service->apply($batch->fresh());
+
+        return $firm;
     }
 
     public function test_lead_created_fires_exactly_once_on_successful_import_apply(): void
     {
-        $this->applyOneLeadRow(['name' => 'Imported Lead', 'email' => 'lead@example.com']);
+        $firm = $this->applyOneLeadRow(['name' => 'Imported Lead', 'email' => 'lead@example.com']);
 
         $this->assertDatabaseCount('webhook_events', 1);
         $this->assertDatabaseHas('webhook_events', ['event_type' => WebhookEventType::LeadCreated->value]);
 
-        $lead = FirmLead::query()->where('name', 'Imported Lead')->firstOrFail();
+        // firm_leads has permanent FORCE ROW LEVEL SECURITY (Section
+        // 39A-3J) — ImportApplyService::createRecordFor()'s FirmLead
+        // branch clears its own tenant context in a finally block
+        // before returning, so this post-call read needs explicit
+        // tenant context re-established.
+        $lead = $this->runWithFirmContext($firm, fn () => FirmLead::query()->where('name', 'Imported Lead')->firstOrFail());
         $event = WebhookEvent::query()->where('event_type', WebhookEventType::LeadCreated->value)->firstOrFail();
         $this->assertSame($lead->id, $event->subject_id);
         $this->assertSame(FirmLead::class, $event->subject_type);
@@ -89,11 +97,16 @@ class LeadCreatedWiringTest extends TestCase
             $mock->shouldReceive('record')->andThrow(new \RuntimeException('simulated recorder failure'));
         });
 
-        $this->applyOneLeadRow(['name' => 'Still Applied Lead']);
+        $firm = $this->applyOneLeadRow(['name' => 'Still Applied Lead']);
 
         // The business outcome (a real, Applied FirmLead row) must be
         // unaffected even though the mocked recorder throws.
-        $this->assertDatabaseHas('firm_leads', ['name' => 'Still Applied Lead']);
+        // firm_leads has permanent FORCE ROW LEVEL SECURITY (Section
+        // 39A-3J) — ImportApplyService::createRecordFor()'s FirmLead
+        // branch clears its own tenant context in a finally block
+        // before returning, so this post-call read needs explicit
+        // tenant context re-established.
+        $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('firm_leads', ['name' => 'Still Applied Lead']));
         $this->assertDatabaseHas('import_rows', ['status' => ImportRowStatus::Applied->value]);
     }
 }

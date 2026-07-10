@@ -282,6 +282,22 @@ class PermissionBoundaryFirewallTest extends TestCase
                 // activation branch) legitimately added a
                 // conflict_check_runs-only FORCE RLS migration.
                 'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php',
+                // Section 39A-3J (a later, distinct staged-FORCE-
+                // activation branch) legitimately added FORCE RLS
+                // migrations for lead_sources, consultation_outcomes,
+                // firm_leads, and consultations together, their
+                // factory context-hold fixes, and updated the tests
+                // it affected.
+                'database/migrations/2026_08_12_900001_force_rls_on_lead_sources_table.php',
+                'database/migrations/2026_08_13_900001_force_rls_on_consultation_outcomes_table.php',
+                'database/migrations/2026_08_14_900001_force_rls_on_firm_leads_table.php',
+                'database/migrations/2026_08_15_900001_force_rls_on_consultations_table.php',
+                'database/factories/LeadSourceFactory.php',
+                'database/factories/ConsultationOutcomeFactory.php',
+                'database/factories/FirmLeadFactory.php',
+                'database/factories/ConsultationFactory.php',
+                'tests/Feature/Leads/LeadConversionServiceTest.php',
+                'tests/Feature/Webhooks/Wiring/LeadCreatedWiringTest.php',
             'config/auth.php',
             'app/Models/User.php',
             'app/Models/PlatformAdmin.php',

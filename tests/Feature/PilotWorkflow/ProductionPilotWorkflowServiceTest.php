@@ -101,7 +101,13 @@ class ProductionPilotWorkflowServiceTest extends TestCase
         ]);
 
         $this->assertNotNull($client->id);
-        $this->assertTrue($lead->fresh()->isConverted());
+        // firm_leads has permanent FORCE ROW LEVEL SECURITY (Section
+        // 39A-3J) — LeadConversionService::convert() (reached via
+        // ProductionPilotWorkflowService::convertLeadToClient())
+        // clears its own tenant context in a finally block before
+        // returning, so this post-call read needs explicit tenant
+        // context re-established.
+        $this->assertTrue($this->runWithFirmContext($firm, fn () => $lead->fresh())->isConverted());
 
         // Step 3-4: matter opening + conflict check (search terms
         // deliberately unrelated to any existing record so the check
