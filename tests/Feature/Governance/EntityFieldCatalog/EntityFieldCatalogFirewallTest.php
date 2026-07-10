@@ -89,6 +89,10 @@ class EntityFieldCatalogFirewallTest extends TestCase
         // Section 39A-2 (a later, distinct RLS-context-rollout branch)
         // legitimately added test helper methods to tests/TestCase.php.
         'tests/TestCase.php',
+        // Section 40 (a later, distinct limited-pilot-safety-gate
+        // branch) legitimately added its own markdown report under
+        // docs/governance/.
+        'docs/',
     ];
 
     /**

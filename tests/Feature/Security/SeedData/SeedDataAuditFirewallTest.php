@@ -269,6 +269,13 @@ class SeedDataAuditFirewallTest extends TestCase
             'app/Services/PaymentClassificationService.php',
             'tests/Feature/Payments/ManualPaymentServiceTest.php',
             'tests/Feature/Webhooks/Wiring/PaymentRecordedWiringTest.php',
+            // Section 40 (a later, distinct limited-pilot-safety-gate
+            // branch) legitimately added its own read-only gate service
+            // and its own test directory — inspection/reporting only,
+            // no migrations, no UI, no routes.
+            'app/Services/Section40LimitedPilotSafetyGateService.php',
+            'tests/Feature/Governance/Section40/',
+            'docs/governance/',
         ];
 
         $unexpected = array_values(array_filter(
@@ -483,6 +490,15 @@ class SeedDataAuditFirewallTest extends TestCase
             'app/Services/PaymentClassificationService.php',
             'tests/Feature/Payments/ManualPaymentServiceTest.php',
             'tests/Feature/Webhooks/Wiring/PaymentRecordedWiringTest.php',
+            // Section 40 (a later, distinct limited-pilot-safety-gate
+            // branch) legitimately added its own read-only gate service
+            // and its own test file — inspection/reporting only, no
+            // migrations, no UI, no routes. This list is exact-path
+            // matched (not prefix), so the test file itself is listed
+            // here rather than its containing directory.
+            'app/Services/Section40LimitedPilotSafetyGateService.php',
+            'tests/Feature/Governance/Section40/Section40LimitedPilotSafetyGateTest.php',
+            'docs/governance/section-40-limited-pilot-safety-gate.md',
         ];
 
         return array_values(array_filter(
