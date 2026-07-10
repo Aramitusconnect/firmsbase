@@ -48,6 +48,11 @@ class QualityGateFirewallTest extends TestCase
         'tests/Feature/Governance/CrossCutting/ComplianceGapRegistryServiceTest.php',
         'tests/Feature/Governance/DataModelContract/DataModelContractGapRegistryTest.php',
         'tests/Feature/Governance/PermissionBoundaries/PermissionBoundaryGapRegistryTest.php',
+        // Section 39A-3I (a later, distinct staged-FORCE-activation
+        // branch) legitimately updated this test to wrap post-call
+        // reads in explicit tenant context, once conflict_check_runs
+        // gained permanent FORCE ROW LEVEL SECURITY.
+        'tests/Feature/Conflicts/ConflictCheckServiceTest.php',
     ];
 
     public function test_no_new_migration_files_were_added(): void
@@ -326,6 +331,10 @@ class QualityGateFirewallTest extends TestCase
             // platform_admin/web guard + Filament panel wiring, and
             // its own test files.
             'database/migrations/2026_08_10_900001_add_self_lookup_clause_to_firm_users_rls_policy.php',
+                // Section 39A-3I (a later, distinct staged-FORCE-
+                // activation branch) legitimately added a
+                // conflict_check_runs-only FORCE RLS migration.
+                'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php',
             'config/auth.php',
             'app/Models/User.php',
             'app/Models/PlatformAdmin.php',

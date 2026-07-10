@@ -93,6 +93,14 @@ class EntityFieldCatalogFirewallTest extends TestCase
         // branch) legitimately added its own markdown report under
         // docs/governance/.
         'docs/',
+        // Section 39A-3I (a later, distinct staged-FORCE-activation
+        // branch) legitimately added a reusable Claude Code subagent
+        // team under .claude/agents/ for the RLS backlog effort, a
+        // conflict_check_runs-only FORCE RLS migration, a
+        // ConflictCheckRunFactory fix, and its own test files.
+        '.claude/agents/',
+        'database/factories/ConflictCheckRunFactory.php',
+        'tests/Feature/Conflicts/ConflictCheckServiceTest.php',
     ];
 
     /**
@@ -211,7 +219,13 @@ class EntityFieldCatalogFirewallTest extends TestCase
                 && ! str_starts_with($path, 'tests/Feature/SupportAccess/')
                 // Section 39A-2 legitimately added test helper methods
                 // to tests/TestCase.php.
-                && $path !== 'tests/TestCase.php',
+                && $path !== 'tests/TestCase.php'
+                // Section 39A-3I (a later, distinct staged-FORCE-
+                // activation branch) legitimately updated this test to
+                // wrap post-call reads in explicit tenant context, once
+                // conflict_check_runs gained permanent FORCE ROW LEVEL
+                // SECURITY.
+                && $path !== 'tests/Feature/Conflicts/ConflictCheckServiceTest.php',
         );
 
         $this->assertEmpty(
@@ -401,6 +415,10 @@ class EntityFieldCatalogFirewallTest extends TestCase
             // platform_admin/web guard + Filament panel wiring, and
             // its own test files.
             'database/migrations/2026_08_10_900001_add_self_lookup_clause_to_firm_users_rls_policy.php',
+                // Section 39A-3I (a later, distinct staged-FORCE-
+                // activation branch) legitimately added a
+                // conflict_check_runs-only FORCE RLS migration.
+                'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php',
             'config/auth.php',
             'app/Models/User.php',
             'app/Models/PlatformAdmin.php',

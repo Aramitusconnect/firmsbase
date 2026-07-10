@@ -46,9 +46,14 @@ class MatterOpeningService
 
         $this->conflictCheckService->run($matter, $searchTerms, $freeTextNames, $actor);
 
-        (new TenantContextService())->runWithFirmContext($matter->firm_id, fn () => $matter->update(['status' => MatterStatus::ConflictReview]));
+        return (new TenantContextService())->runWithFirmContext($matter->firm_id, function () use ($matter) {
+            $matter->update(['status' => MatterStatus::ConflictReview]);
 
-        return $matter->conflictCheckRuns()->latest('id')->firstOrFail();
+            // conflict_check_runs has permanent FORCE ROW LEVEL SECURITY
+            // (Section 39A-3I) — this read needs the same active
+            // context as the status update just above.
+            return $matter->conflictCheckRuns()->latest('id')->firstOrFail();
+        });
     }
 
     /**
@@ -65,7 +70,14 @@ class MatterOpeningService
             throw new \RuntimeException('Conflict check run does not belong to this matter.');
         }
 
-        $summary = $this->conflictCheckService->summarize($conflictCheckRun->fresh('results'));
+        // conflict_check_runs has permanent FORCE ROW LEVEL SECURITY
+        // (Section 39A-3I) — fresh() re-reads the run row itself, so it
+        // needs its own narrow context wrap here, independent of the
+        // later status-update wrap below.
+        $summary = (new TenantContextService())->runWithFirmContext(
+            $matter->firm_id,
+            fn () => $this->conflictCheckService->summarize($conflictCheckRun->fresh('results')),
+        );
 
         if (! $summary->isClearToProceed()) {
             throw new \RuntimeException(

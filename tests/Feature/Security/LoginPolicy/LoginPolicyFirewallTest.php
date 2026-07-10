@@ -50,7 +50,11 @@ class LoginPolicyFirewallTest extends TestCase
                 // firm_users' RLS policy with a narrow self-lookup
                 // clause needed to bootstrap-resolve an authenticated
                 // user's own firm from firm_users itself.
-                && $path !== 'database/migrations/2026_08_10_900001_add_self_lookup_clause_to_firm_users_rls_policy.php',
+                && $path !== 'database/migrations/2026_08_10_900001_add_self_lookup_clause_to_firm_users_rls_policy.php'
+                // Section 39A-3I (a later, distinct staged-FORCE-
+                // activation branch) legitimately added a
+                // conflict_check_runs-only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39D must add no migrations, but found: '.implode(', ', $changed));

@@ -25,14 +25,15 @@ class RlsContextRolloutFirewallTest extends TestCase
         $coverage = new RowLevelSecurityCoverageMappingService();
 
         // Section 39A-3A/39A-3B/39A-3C/39A-3D/39A-3E/39A-3F/39A-3G/
-        // 39A-3H (later, distinct staged-FORCE-activation branches)
-        // legitimately activated permanent FORCE ROW LEVEL SECURITY on
-        // clients, firm_users, documents, deadlines, tasks, matters,
-        // invoices, and payments — all 8 pilot-critical prepared
-        // tables named in this arc. This test's own scope (Section
-        // 39A-2) never touched FORCE state; the other 44 prepared
-        // tables must still be unforced.
-        $forcedByLaterBranch = ['clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments'];
+        // 39A-3H/39A-3I (later, distinct staged-FORCE-activation
+        // branches) legitimately activated permanent FORCE ROW LEVEL
+        // SECURITY on clients, firm_users, documents, deadlines, tasks,
+        // matters, invoices, payments, and conflict_check_runs — the 8
+        // pilot-critical prepared tables plus the first HIGH-risk-tier
+        // batch after them. This test's own scope (Section 39A-2) never
+        // touched FORCE state; the other 43 prepared tables must still
+        // be unforced.
+        $forcedByLaterBranch = ['clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs'];
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forcedByLaterBranch, true)) {
@@ -87,7 +88,11 @@ class RlsContextRolloutFirewallTest extends TestCase
                 // firm_users' RLS policy with a narrow self-lookup
                 // clause needed to bootstrap-resolve an authenticated
                 // user's own firm from firm_users itself.
-                && $path !== 'database/migrations/2026_08_10_900001_add_self_lookup_clause_to_firm_users_rls_policy.php',
+                && $path !== 'database/migrations/2026_08_10_900001_add_self_lookup_clause_to_firm_users_rls_policy.php'
+                // Section 39A-3I (a later, distinct staged-FORCE-
+                // activation branch) legitimately added a
+                // conflict_check_runs-only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));

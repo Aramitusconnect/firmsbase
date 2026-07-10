@@ -297,6 +297,21 @@ class SeedDataAuditFirewallTest extends TestCase
             'app/Providers/AppServiceProvider.php',
             'bootstrap/providers.php',
             'tests/Feature/Security/Login/',
+            // Section 39A-3I (a later, distinct staged-FORCE-activation
+            // branch) legitimately added a conflict_check_runs-only
+            // FORCE RLS migration, a ConflictCheckRunFactory root-cause
+            // firm/matter consistency fix, explicit tenant-context
+            // wiring in ConflictCheckService and MatterOpeningService,
+            // and updated the tests it affected.
+            'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php',
+            'database/factories/ConflictCheckRunFactory.php',
+            'app/Services/ConflictCheckService.php',
+            'app/Services/MatterOpeningService.php',
+            'tests/Feature/Conflicts/ConflictCheckServiceTest.php',
+            'tests/Feature/Matters/MatterOpeningServiceTest.php',
+            // Reusable Claude Code subagent team for the RLS backlog
+            // effort.
+            '.claude/agents/',
         ];
 
         $unexpected = array_values(array_filter(
@@ -541,6 +556,18 @@ class SeedDataAuditFirewallTest extends TestCase
             'tests/Feature/Security/Login/TenantContextMiddlewareTest.php',
             'tests/Feature/Security/FirmUser2fa/FirmUser2faLoginEnforcementTest.php',
             'tests/Feature/Security/LoginPolicy/LoginPolicyEnforcementTest.php',
+            // Section 39A-3I (a later, distinct staged-FORCE-activation
+            // branch) legitimately added a conflict_check_runs-only
+            // FORCE RLS migration, a ConflictCheckRunFactory root-cause
+            // firm/matter consistency fix, explicit tenant-context
+            // wiring in ConflictCheckService and MatterOpeningService,
+            // and updated the tests it affected.
+            'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php',
+            'database/factories/ConflictCheckRunFactory.php',
+            'app/Services/ConflictCheckService.php',
+            'app/Services/MatterOpeningService.php',
+            'tests/Feature/Conflicts/ConflictCheckServiceTest.php',
+            'tests/Feature/Matters/MatterOpeningServiceTest.php',
         ];
 
         return array_values(array_filter(

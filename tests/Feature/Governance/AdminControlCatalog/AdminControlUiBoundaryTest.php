@@ -162,7 +162,23 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== 'app/Providers/Filament/AdminPanelProvider.php'
                 && $path !== 'app/Providers/Filament/FirmPanelProvider.php'
                 && $path !== 'app/Providers/AppServiceProvider.php'
-                && $path !== 'bootstrap/providers.php',
+                && $path !== 'bootstrap/providers.php'
+                // Section 39A-3I (a later, distinct staged-FORCE-
+                // activation branch) legitimately added a reusable
+                // Claude Code subagent team under .claude/agents/ for
+                // the RLS backlog effort, a conflict_check_runs-only
+                // FORCE RLS migration, a ConflictCheckRunFactory fix,
+                // and its own test file.
+                && $path !== 'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php'
+                && $path !== 'database/factories/ConflictCheckRunFactory.php'
+                && $path !== 'tests/Feature/Conflicts/ConflictCheckServiceTest.php'
+                && $path !== '.claude/agents/rls-coordinator.md'
+                && $path !== '.claude/agents/rls-inventory-analyst.md'
+                && $path !== '.claude/agents/rls-force-implementer.md'
+                && $path !== '.claude/agents/rls-policy-designer.md'
+                && $path !== '.claude/agents/tenant-context-auditor.md'
+                && $path !== '.claude/agents/rls-test-verifier.md'
+                && $path !== '.claude/agents/security-reviewer.md',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

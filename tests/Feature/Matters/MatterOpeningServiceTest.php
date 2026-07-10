@@ -80,7 +80,11 @@ class MatterOpeningServiceTest extends TestCase
             $this->conflictCheckService->resolveResult($result, ConflictCheckResultStatus::Dismissed, $reviewer, 'Different person, common name');
         }
 
-        $opened = $this->service->openMatter($this->runWithFirmContext($matter->firm, fn () => $matter->fresh()), $run->fresh(), $reviewer);
+        $opened = $this->service->openMatter(
+            $this->runWithFirmContext($matter->firm, fn () => $matter->fresh()),
+            $this->runWithFirmContext($matter->firm, fn () => $run->fresh()),
+            $reviewer,
+        );
 
         $this->assertSame(MatterStatus::Open, $opened->status);
     }
@@ -99,7 +103,11 @@ class MatterOpeningServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
 
-        $this->service->openMatter($this->runWithFirmContext($matter->firm, fn () => $matter->fresh()), $run->fresh(), $reviewer);
+        $this->service->openMatter(
+            $this->runWithFirmContext($matter->firm, fn () => $matter->fresh()),
+            $this->runWithFirmContext($matter->firm, fn () => $run->fresh()),
+            $reviewer,
+        );
     }
 
     public function test_open_matter_throws_when_matter_is_not_in_conflict_review(): void

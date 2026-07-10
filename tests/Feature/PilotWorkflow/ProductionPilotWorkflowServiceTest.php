@@ -115,9 +115,12 @@ class ProductionPilotWorkflowServiceTest extends TestCase
         );
 
         $this->assertSame(MatterStatus::Open, $matter->status);
+        // conflict_check_runs has permanent FORCE ROW LEVEL SECURITY
+        // (Section 39A-3I) — this post-call read needs explicit tenant
+        // context re-established.
         $this->assertSame(
             ConflictCheckRunStatus::Completed,
-            $matter->conflictCheckRuns()->latest('id')->first()->status
+            $this->runWithFirmContext($firm, fn () => $matter->conflictCheckRuns()->latest('id')->first())->status
         );
 
         // Step 5: intake
