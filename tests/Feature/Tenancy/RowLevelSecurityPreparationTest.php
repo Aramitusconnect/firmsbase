@@ -78,10 +78,15 @@ class RowLevelSecurityPreparationTest extends TestCase
     #[DataProvider('tableProvider')]
     public function test_tenant_isolation_policy_exists(string $table): void
     {
+        // firm_users now carries a second policy (firm_users_self_lookup,
+        // added by the 2026_08_10_900001 migration) alongside the
+        // tenant-isolation one, and pg_policy has no default row order —
+        // filter by polname explicitly rather than relying on which row
+        // Postgres happens to return first.
         $policy = DB::selectOne(
             'select polname, pg_get_expr(polqual, polrelid) as using_expression '
-            .'from pg_policy where polrelid = ?::regclass',
-            [$table]
+            .'from pg_policy where polrelid = ?::regclass and polname = ?',
+            [$table, "{$table}_tenant_isolation"]
         );
 
         $this->assertNotNull($policy, "No RLS policy found on {$table}.");
