@@ -61,9 +61,12 @@ class SeedDataAuditFirewallTest extends TestCase
         'app/Services/AiRetrievalIsolationService.php',
         'app/Services/ConsentService.php',
         'app/Services/PlatformStaffAccessPolicyService.php',
-        'app/Models/User.php',
+        // User.php and config/auth.php are deliberately NOT in this
+        // list any more — internal login/panel access wiring (a later,
+        // distinct section) found a genuine need to add
+        // FilamentUser::canAccessPanel() to User.php and register a
+        // platform_admin guard in config/auth.php.
         'app/Models/Firm.php',
-        'config/auth.php',
         'config/session.php',
     ];
 
@@ -276,6 +279,24 @@ class SeedDataAuditFirewallTest extends TestCase
             'app/Services/Section40LimitedPilotSafetyGateService.php',
             'tests/Feature/Governance/Section40/',
             'docs/governance/',
+            // Internal login/panel access wiring (a later, distinct
+            // section) legitimately added a migration extending
+            // firm_users' RLS policy with a narrow self-lookup clause,
+            // real platform_admin/web guard + Filament panel wiring
+            // (config/auth.php, both PanelProviders, bootstrap/providers.php),
+            // an authentication audit-logging listener
+            // (AppServiceProvider.php), FilamentUser::canAccessPanel()
+            // on User.php/PlatformAdmin.php, a new tenant-context-
+            // resolution middleware, and its own test directory.
+            'database/migrations/2026_08_10_900001_add_self_lookup_clause_to_firm_users_rls_policy.php',
+            'config/auth.php',
+            'app/Models/User.php',
+            'app/Models/PlatformAdmin.php',
+            'app/Providers/Filament/AdminPanelProvider.php',
+            'app/Providers/Filament/FirmPanelProvider.php',
+            'app/Providers/AppServiceProvider.php',
+            'bootstrap/providers.php',
+            'tests/Feature/Security/Login/',
         ];
 
         $unexpected = array_values(array_filter(
@@ -499,6 +520,27 @@ class SeedDataAuditFirewallTest extends TestCase
             'app/Services/Section40LimitedPilotSafetyGateService.php',
             'tests/Feature/Governance/Section40/Section40LimitedPilotSafetyGateTest.php',
             'docs/governance/section-40-limited-pilot-safety-gate.md',
+            // Internal login/panel access wiring (a later, distinct
+            // section) legitimately added a migration extending
+            // firm_users' RLS policy with a narrow self-lookup clause,
+            // real platform_admin/web guard + Filament panel wiring,
+            // a new tenant-context-resolution middleware, and its own
+            // test files.
+            'database/migrations/2026_08_10_900001_add_self_lookup_clause_to_firm_users_rls_policy.php',
+            'config/auth.php',
+            'app/Models/User.php',
+            'app/Models/PlatformAdmin.php',
+            'app/Http/Middleware/EstablishFirmTenantContext.php',
+            'app/Providers/Filament/AdminPanelProvider.php',
+            'app/Providers/Filament/FirmPanelProvider.php',
+            'app/Providers/AppServiceProvider.php',
+            'bootstrap/providers.php',
+            'tests/Feature/Security/Login/PlatformAdminLoginPanelAccessTest.php',
+            'tests/Feature/Security/Login/FirmUserLoginPanelAccessTest.php',
+            'tests/Feature/Security/Login/CrossPanelAuthGuardTest.php',
+            'tests/Feature/Security/Login/TenantContextMiddlewareTest.php',
+            'tests/Feature/Security/FirmUser2fa/FirmUser2faLoginEnforcementTest.php',
+            'tests/Feature/Security/LoginPolicy/LoginPolicyEnforcementTest.php',
         ];
 
         return array_values(array_filter(

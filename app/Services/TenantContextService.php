@@ -47,6 +47,17 @@ class TenantContextService
 {
     private const SESSION_SETTING_NAME = 'app.current_firm_id';
 
+    /**
+     * Internal login/panel access wiring — see the
+     * 2026_08_10_900001_add_self_lookup_clause_to_firm_users_rls_policy
+     * migration's own docblock for the exact bootstrap problem this
+     * solves (an authenticated user's own firm_users row is otherwise
+     * unreadable before any firm context is known). Set ONLY from a
+     * genuinely authenticated user's own id — never from arbitrary
+     * request input.
+     */
+    private const USER_SESSION_SETTING_NAME = 'app.current_user_id';
+
     public function setFirmContext(Firm|int|string $firm): void
     {
         (new TenantContextResolver())->activateForFirm($this->resolveFirm($firm));
@@ -144,6 +155,36 @@ class TenantContextService
     public function setDatabaseTenantContextForFirmId(int $firmId): void
     {
         DB::select('select set_config(?, ?, ?)', [self::SESSION_SETTING_NAME, (string) $firmId, $this->isLocalScoped()]);
+    }
+
+    /**
+     * Bootstrap helper: activates ONLY the narrow self-lookup session
+     * setting (app.current_user_id) the firm_users_self_lookup RLS
+     * policy reads, runs the callback, and always clears it afterward —
+     * never touches app.current_firm_id or PHP-memory firm context at
+     * all. Used exclusively to let an authenticated user discover their
+     * own firm_users row(s) before any firm context can be known.
+     *
+     * Wrapped in DB::transaction() for the same reason
+     * runWithFirmContext() is: if the callback raises a real SQL-level
+     * error (e.g. an RLS policy violation), PostgreSQL aborts the
+     * CURRENT transaction until it is rolled back — without this
+     * wrapper (a savepoint, when nested inside RefreshDatabase's own
+     * transaction), the finally block's own cleanup set_config() call
+     * would itself fail against the poisoned transaction, masking the
+     * original exception entirely.
+     */
+    public function withUserContext(int $userId, callable $callback): mixed
+    {
+        try {
+            return DB::transaction(function () use ($userId, $callback) {
+                DB::select('select set_config(?, ?, ?)', [self::USER_SESSION_SETTING_NAME, (string) $userId, $this->isLocalScoped()]);
+
+                return $callback();
+            });
+        } finally {
+            DB::select('select set_config(?, ?, ?)', [self::USER_SESSION_SETTING_NAME, '', $this->isLocalScoped()]);
+        }
     }
 
     private function isLocalScoped(): bool

@@ -7,15 +7,13 @@ use Closure;
 use Illuminate\Http\Request;
 
 /**
- * ApplyTenantDatabaseContext — Section 39A. Route-independent:
- * deliberately NOT registered in bootstrap/app.php and NOT attached to
- * any route (confirmed by direct inspection — routes/web.php has only
- * the default welcome route, routes/api.php does not exist, no
- * Fortify/Breeze/auth scaffolding exists). Wiring this into a real
- * request pipeline is deferred to whichever future auth/routing
- * section establishes how a request resolves "which firm is the
- * authenticated user acting as" — that resolution does not exist yet,
- * and this middleware must never guess it from raw user input.
+ * ApplyTenantDatabaseContext — Section 39A. Internal login/panel access
+ * wiring now attaches this to the firm Filament panel's authMiddleware
+ * (app/Providers/Filament/FirmPanelProvider.php), always AFTER
+ * EstablishFirmTenantContext — that middleware is what legitimately
+ * resolves "which firm is the authenticated user acting as" from the
+ * user's active FirmUser membership; this middleware never resolves
+ * the firm itself.
  *
  * It only bridges an ALREADY-RESOLVED PHP-memory tenant context
  * (TenantContextService::hasFirmContext() — set by whatever upstream
