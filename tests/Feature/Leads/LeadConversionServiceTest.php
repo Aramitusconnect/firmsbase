@@ -35,7 +35,11 @@ class LeadConversionServiceTest extends TestCase
         $this->assertSame('Jane Doe', $client->display_name);
         $this->assertSame($actor->id, $client->created_by);
 
-        $fresh = $lead->fresh();
+        // firm_leads has permanent FORCE ROW LEVEL SECURITY (Section
+        // 39A-3J) — LeadConversionService::convert() clears its own
+        // tenant context in a finally block before returning, so this
+        // post-call read needs explicit tenant context re-established.
+        $fresh = $this->runWithFirmContext($firm, fn () => $lead->fresh());
         $this->assertSame(FirmLeadStatus::Converted, $fresh->status);
         $this->assertSame($client->id, $fresh->converted_client_id);
         $this->assertNotNull($fresh->converted_at);
@@ -49,7 +53,11 @@ class LeadConversionServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
 
-        $this->service->convert($lead->fresh(), ['display_name' => 'Second Client']);
+        // firm_leads has permanent FORCE ROW LEVEL SECURITY (Section
+        // 39A-3J) — the first convert() call above already cleared
+        // tenant context in its finally block, so re-reading $lead
+        // needs explicit tenant context re-established.
+        $this->service->convert($this->runWithFirmContext($lead->firm_id, fn () => $lead->fresh()), ['display_name' => 'Second Client']);
     }
 
     public function test_convert_marks_consultation_converted_when_provided(): void
@@ -59,7 +67,11 @@ class LeadConversionServiceTest extends TestCase
 
         $this->service->convert($lead, ['display_name' => 'Jane Doe'], null, $consultation);
 
-        $this->assertTrue($consultation->fresh()->converted);
+        // consultations has permanent FORCE ROW LEVEL SECURITY
+        // (Section 39A-3J) — convert() clears its own tenant context
+        // in a finally block before returning, so this post-call read
+        // needs explicit tenant context re-established.
+        $this->assertTrue($this->runWithFirmContext($lead->firm_id, fn () => $consultation->fresh())->converted);
     }
 
     public function test_convert_writes_timeline_events(): void

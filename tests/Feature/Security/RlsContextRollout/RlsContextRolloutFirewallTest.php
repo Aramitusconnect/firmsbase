@@ -25,15 +25,20 @@ class RlsContextRolloutFirewallTest extends TestCase
         $coverage = new RowLevelSecurityCoverageMappingService();
 
         // Section 39A-3A/39A-3B/39A-3C/39A-3D/39A-3E/39A-3F/39A-3G/
-        // 39A-3H/39A-3I (later, distinct staged-FORCE-activation
+        // 39A-3H/39A-3I/39A-3J (later, distinct staged-FORCE-activation
         // branches) legitimately activated permanent FORCE ROW LEVEL
         // SECURITY on clients, firm_users, documents, deadlines, tasks,
-        // matters, invoices, payments, and conflict_check_runs — the 8
-        // pilot-critical prepared tables plus the first HIGH-risk-tier
-        // batch after them. This test's own scope (Section 39A-2) never
-        // touched FORCE state; the other 43 prepared tables must still
-        // be unforced.
-        $forcedByLaterBranch = ['clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs'];
+        // matters, invoices, payments, conflict_check_runs, and (Section
+        // 39A-3J, this batch) lead_sources, consultation_outcomes,
+        // firm_leads, consultations — the 8 pilot-critical prepared
+        // tables plus the first HIGH-risk-tier batch after them plus
+        // this batch's four. This test's own scope (Section 39A-2)
+        // never touched FORCE state; the other 39 prepared tables must
+        // still be unforced.
+        $forcedByLaterBranch = [
+            'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
+            'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
+        ];
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forcedByLaterBranch, true)) {
@@ -92,7 +97,15 @@ class RlsContextRolloutFirewallTest extends TestCase
                 // Section 39A-3I (a later, distinct staged-FORCE-
                 // activation branch) legitimately added a
                 // conflict_check_runs-only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php',
+                && $path !== 'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php'
+                // Section 39A-3J (this batch, a later, distinct staged-
+                // FORCE-activation branch) legitimately added FORCE RLS
+                // migrations for lead_sources, consultation_outcomes,
+                // firm_leads, and consultations together.
+                && $path !== 'database/migrations/2026_08_12_900001_force_rls_on_lead_sources_table.php'
+                && $path !== 'database/migrations/2026_08_13_900001_force_rls_on_consultation_outcomes_table.php'
+                && $path !== 'database/migrations/2026_08_14_900001_force_rls_on_firm_leads_table.php'
+                && $path !== 'database/migrations/2026_08_15_900001_force_rls_on_consultations_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));

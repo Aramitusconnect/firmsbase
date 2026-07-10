@@ -54,7 +54,16 @@ class LoginPolicyFirewallTest extends TestCase
                 // Section 39A-3I (a later, distinct staged-FORCE-
                 // activation branch) legitimately added a
                 // conflict_check_runs-only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php',
+                && $path !== 'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php'
+                // Section 39A-3J (this batch, a later, distinct
+                // staged-FORCE-activation branch) legitimately added
+                // FORCE RLS migrations for lead_sources,
+                // consultation_outcomes, firm_leads, and consultations
+                // together.
+                && $path !== 'database/migrations/2026_08_12_900001_force_rls_on_lead_sources_table.php'
+                && $path !== 'database/migrations/2026_08_13_900001_force_rls_on_consultation_outcomes_table.php'
+                && $path !== 'database/migrations/2026_08_14_900001_force_rls_on_firm_leads_table.php'
+                && $path !== 'database/migrations/2026_08_15_900001_force_rls_on_consultations_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39D must add no migrations, but found: '.implode(', ', $changed));

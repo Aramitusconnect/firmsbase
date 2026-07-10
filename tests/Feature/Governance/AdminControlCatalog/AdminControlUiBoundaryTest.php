@@ -178,7 +178,23 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== '.claude/agents/rls-policy-designer.md'
                 && $path !== '.claude/agents/tenant-context-auditor.md'
                 && $path !== '.claude/agents/rls-test-verifier.md'
-                && $path !== '.claude/agents/security-reviewer.md',
+                && $path !== '.claude/agents/security-reviewer.md'
+                // Section 39A-3J (a later, distinct staged-FORCE-
+                // activation branch) legitimately added FORCE RLS
+                // migrations for lead_sources, consultation_outcomes,
+                // firm_leads, and consultations together, their
+                // factory context-hold fixes, and updated the tests
+                // it affected.
+                && $path !== 'database/migrations/2026_08_12_900001_force_rls_on_lead_sources_table.php'
+                && $path !== 'database/migrations/2026_08_13_900001_force_rls_on_consultation_outcomes_table.php'
+                && $path !== 'database/migrations/2026_08_14_900001_force_rls_on_firm_leads_table.php'
+                && $path !== 'database/migrations/2026_08_15_900001_force_rls_on_consultations_table.php'
+                && $path !== 'database/factories/LeadSourceFactory.php'
+                && $path !== 'database/factories/ConsultationOutcomeFactory.php'
+                && $path !== 'database/factories/FirmLeadFactory.php'
+                && $path !== 'database/factories/ConsultationFactory.php'
+                && $path !== 'tests/Feature/Leads/LeadConversionServiceTest.php'
+                && $path !== 'tests/Feature/Webhooks/Wiring/LeadCreatedWiringTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

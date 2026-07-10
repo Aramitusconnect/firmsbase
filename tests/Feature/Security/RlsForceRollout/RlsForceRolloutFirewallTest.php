@@ -17,6 +17,14 @@ use Tests\TestCase;
  * tables, not the 43 still-uncovered tenant-owned tables — no new RLS
  * policy was added, no UI/routes/controllers were introduced, and
  * ComplianceGapRegistryService was not deleted/rewritten.
+ *
+ * Narrowly updated by Section 39A-3J (this repo's thirteenth staged
+ * FORCE activation batch, covering lead_sources,
+ * consultation_outcomes, firm_leads, and consultations together) to
+ * extend the "exactly these tables are forced" firewall list and add
+ * this batch's own four migration-existence checks — following the
+ * exact same pattern every prior 39A-3C..39A-3I section already used
+ * here, not a restructure of this test's own original scope/assertions.
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -26,13 +34,17 @@ class RlsForceRolloutFirewallTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        // Section 39A-3C/39A-3D/39A-3E/39A-3F/39A-3G/39A-3H/39A-3I
+        // Section 39A-3C/39A-3D/39A-3E/39A-3F/39A-3G/39A-3H/39A-3I/39A-3J
         // (later, distinct staged-FORCE-activation branches)
         // legitimately activated FORCE for documents, deadlines, tasks,
-        // matters, invoices, payments, and conflict_check_runs too —
-        // this test's own scope (39A-3B) only asserts clients and
-        // firm_users here.
-        $expectedForced = ['clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs'];
+        // matters, invoices, payments, conflict_check_runs, and (Section
+        // 39A-3J, this batch) lead_sources, consultation_outcomes,
+        // firm_leads, consultations too — this test's own scope (39A-3B)
+        // only asserts clients and firm_users here.
+        $expectedForced = [
+            'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
+            'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
+        ];
 
         foreach ($coverage->preparedTables() as $table) {
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);
@@ -130,6 +142,36 @@ class RlsForceRolloutFirewallTest extends TestCase
         // reasoning as the firm_users/documents/deadlines/tasks/
         // matters/invoices/payments checks above.
         $this->assertFileExists(base_path('database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php'));
+    }
+
+    public function test_the_lead_sources_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3J's own migration (this batch, table 1 of 4) —
+        // same file-existence reasoning as the firm_users/documents/
+        // deadlines/tasks/matters/invoices/payments/conflict_check_runs
+        // checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_12_900001_force_rls_on_lead_sources_table.php'));
+    }
+
+    public function test_the_consultation_outcomes_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3J's own migration (this batch, table 2 of 4) —
+        // same file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_13_900001_force_rls_on_consultation_outcomes_table.php'));
+    }
+
+    public function test_the_firm_leads_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3J's own migration (this batch, table 3 of 4) —
+        // same file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_14_900001_force_rls_on_firm_leads_table.php'));
+    }
+
+    public function test_the_consultations_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3J's own migration (this batch, table 4 of 4) —
+        // same file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_15_900001_force_rls_on_consultations_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void
