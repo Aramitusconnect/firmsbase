@@ -34,6 +34,9 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         // Section 39A (a later, distinct RLS-activation branch)
         // legitimately adds its own new app/Services file.
         'app/Services/TenantContextService.php',
+        // Section 40 (a later, distinct limited-pilot-safety-gate
+        // branch) legitimately adds its own read-only gate service.
+        'app/Services/Section40LimitedPilotSafetyGateService.php',
     ];
 
     /**

@@ -139,7 +139,14 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== 'database/migrations/2026_08_06_900001_force_rls_on_payments_table.php'
                 && $path !== 'database/factories/PaymentFactory.php'
                 && $path !== 'tests/Feature/Payments/ManualPaymentServiceTest.php'
-                && $path !== 'tests/Feature/Webhooks/Wiring/PaymentRecordedWiringTest.php',
+                && $path !== 'tests/Feature/Webhooks/Wiring/PaymentRecordedWiringTest.php'
+                // Section 40 (a later, distinct limited-pilot-safety-
+                // gate branch) legitimately added its own read-only
+                // gate service (app/Services/ is already excluded
+                // above), its own test directory (tests/Feature/
+                // Governance/ is already excluded above), and a
+                // markdown report under docs/governance/.
+                && $path !== 'docs/governance/section-40-limited-pilot-safety-gate.md',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));
