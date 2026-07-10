@@ -19,6 +19,16 @@ use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 
+/**
+ * AdminPanelProvider — the platform-admin panel. Internal login/panel
+ * access wiring added authGuard('platform_admin') so this panel is
+ * gated by the platform_admins identity table (PlatformAdmin model),
+ * never the firm-facing `users` table — PlatformAdmin::canAccessPanel()
+ * is the sole access gate (checks is_active only; no tenant context
+ * middleware is applied here, so this panel has zero standing access
+ * to any firm's tenant data, by omission rather than an explicit
+ * bypass check).
+ */
 class AdminPanelProvider extends PanelProvider
 {
     public function panel(Panel $panel): Panel
@@ -28,6 +38,7 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
+            ->authGuard('platform_admin')
             ->colors([
                 'primary' => Color::Amber,
             ])

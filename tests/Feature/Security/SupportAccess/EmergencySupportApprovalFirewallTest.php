@@ -283,6 +283,28 @@ class EmergencySupportApprovalFirewallTest extends TestCase
             'app/Services/PaymentClassificationService.php',
             'tests/Feature/Payments/ManualPaymentServiceTest.php',
             'tests/Feature/Webhooks/Wiring/PaymentRecordedWiringTest.php',
+            // Internal login/panel access wiring (a later, distinct
+            // section) legitimately added a migration extending
+            // firm_users' RLS policy with a narrow self-lookup
+            // clause needed to bootstrap-resolve an authenticated
+            // user's own firm from firm_users itself, real
+            // platform_admin/web guard + Filament panel wiring, and
+            // its own test files.
+            'database/migrations/2026_08_10_900001_add_self_lookup_clause_to_firm_users_rls_policy.php',
+            'config/auth.php',
+            'app/Models/User.php',
+            'app/Models/PlatformAdmin.php',
+            'app/Http/Middleware/EstablishFirmTenantContext.php',
+            'app/Providers/Filament/AdminPanelProvider.php',
+            'app/Providers/Filament/FirmPanelProvider.php',
+            'app/Providers/AppServiceProvider.php',
+            'bootstrap/providers.php',
+            'tests/Feature/Security/Login/PlatformAdminLoginPanelAccessTest.php',
+            'tests/Feature/Security/Login/FirmUserLoginPanelAccessTest.php',
+            'tests/Feature/Security/Login/CrossPanelAuthGuardTest.php',
+            'tests/Feature/Security/Login/TenantContextMiddlewareTest.php',
+            'tests/Feature/Security/FirmUser2fa/FirmUser2faLoginEnforcementTest.php',
+            'tests/Feature/Security/LoginPolicy/LoginPolicyEnforcementTest.php',
             'app/Services/ReadinessScorecardRegistry.php',
             'tests/Feature/Tasks/TaskDependencyServiceTest.php',
             'tests/Feature/Webhooks/Wiring/TaskCompletedWiringTest.php',

@@ -46,15 +46,27 @@ class RlsPreparationCoverageTest extends TestCase
     public function test_every_prepared_table_has_a_firm_id_matching_tenant_isolation_policy(): void
     {
         foreach ($this->coverage->preparedTables() as $table) {
-            $policy = DB::selectOne(
+            // Queried as a set, not selectOne(), and asserted via "at
+            // least one policy matches" rather than "the only policy
+            // matches": firm_users legitimately carries a SECOND,
+            // narrower, FOR SELECT-only policy (firm_users_self_lookup
+            // — internal login/panel access wiring's bootstrap fix)
+            // in addition to its original firm_id-matching policy.
+            // Every other prepared table still has exactly one policy.
+            $policies = DB::select(
                 'select polname, pg_get_expr(polqual, polrelid) as using_expression '
                 .'from pg_policy where polrelid = ?::regclass',
                 [$table]
             );
 
-            $this->assertNotNull($policy, "No RLS policy found on prepared table {$table}.");
-            $this->assertStringContainsString('firm_id', $policy->using_expression, "Policy on {$table} must reference firm_id.");
-            $this->assertStringContainsString('app.current_firm_id', $policy->using_expression, "Policy on {$table} must reference app.current_firm_id.");
+            $this->assertNotEmpty($policies, "No RLS policy found on prepared table {$table}.");
+
+            $hasFirmIdMatchingPolicy = collect($policies)->contains(
+                fn ($policy) => str_contains($policy->using_expression, 'firm_id')
+                    && str_contains($policy->using_expression, 'app.current_firm_id')
+            );
+
+            $this->assertTrue($hasFirmIdMatchingPolicy, "Table {$table} must have at least one policy referencing firm_id and app.current_firm_id.");
         }
     }
 

@@ -81,7 +81,13 @@ class RlsContextRolloutFirewallTest extends TestCase
                 && $path !== 'database/migrations/2026_08_03_900001_force_rls_on_tasks_table.php'
                 && $path !== 'database/migrations/2026_08_04_900001_force_rls_on_matters_table.php'
                 && $path !== 'database/migrations/2026_08_05_900001_force_rls_on_invoices_table.php'
-                && $path !== 'database/migrations/2026_08_06_900001_force_rls_on_payments_table.php',
+                && $path !== 'database/migrations/2026_08_06_900001_force_rls_on_payments_table.php'
+                // Internal login/panel access wiring (a later, distinct
+                // section) legitimately added a migration extending
+                // firm_users' RLS policy with a narrow self-lookup
+                // clause needed to bootstrap-resolve an authenticated
+                // user's own firm from firm_users itself.
+                && $path !== 'database/migrations/2026_08_10_900001_add_self_lookup_clause_to_firm_users_rls_policy.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));
@@ -127,9 +133,15 @@ class RlsContextRolloutFirewallTest extends TestCase
             // tenant context, since firm_users now has permanent
             // FORCE ROW LEVEL SECURITY.
             'app/Services/RowLevelSecurityCoverageMappingService.php',
-            'app/Http/Middleware/ApplyTenantDatabaseContext.php',
+            // ApplyTenantDatabaseContext.php and User.php are
+            // deliberately NOT in this list any more — internal
+            // login/panel access wiring (a later, distinct section)
+            // found a genuine need to attach ApplyTenantDatabaseContext
+            // to the real firm panel's authMiddleware (its docblock
+            // previously said it was intentionally unattached to any
+            // route), and to add FilamentUser::canAccessPanel() to
+            // User.php — the real Filament panel access gate.
             'app/Services/TenantContextResolver.php',
-            'app/Models/User.php',
             'app/Models/FirmUser.php',
             'app/Models/FirmSettings.php',
             'app/Models/Firm.php',
