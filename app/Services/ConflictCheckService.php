@@ -61,15 +61,27 @@ class ConflictCheckService
             ? $this->siblingFirmIds($firm)
             : [$firm->id];
 
-        return DB::transaction(function () use ($matter, $firm, $scope, $firmIds, $searchTerms, $freeTextNames, $actor) {
-            $run = ConflictCheckRun::create([
+        $tenantContext = new TenantContextService();
+
+        return DB::transaction(function () use ($matter, $firm, $scope, $firmIds, $searchTerms, $freeTextNames, $actor, $tenantContext) {
+            // conflict_check_runs has permanent FORCE ROW LEVEL SECURITY
+            // (Section 39A-3I) — create() and the later update()/fresh()
+            // below each need their own narrow tenant-context wrap.
+            // Deliberately NOT wrapping this entire method body: searchClients()/
+            // searchMatterParties() below already self-wrap per firm id
+            // (needed for organization-wide scope spanning multiple
+            // firms) — an outer wrap here would have its context cleared
+            // early by their own inner finally blocks, breaking the
+            // update() call further down (the exact nested-context bug
+            // class first found in Section 39A-3H).
+            $run = $tenantContext->runWithFirmContext($firm, fn () => ConflictCheckRun::create([
                 'firm_id' => $firm->id,
                 'matter_id' => $matter->id,
                 'requested_by' => $actor?->id,
                 'status' => ConflictCheckRunStatus::Running,
                 'scope' => $scope,
                 'searched_terms_json' => $searchTerms,
-            ]);
+            ]));
 
             $matches = $this->searchClients($firmIds, $searchTerms)
                 ->concat($this->searchContacts($firmIds, $searchTerms))
@@ -98,18 +110,22 @@ class ConflictCheckService
 
             $resultCount = $run->results()->count();
 
-            $run->update([
-                'status' => ConflictCheckRunStatus::Completed,
-                'result_count' => $resultCount,
-                'completed_at' => now(),
-            ]);
+            $run = $tenantContext->runWithFirmContext($firm, function () use ($run, $resultCount) {
+                $run->update([
+                    'status' => ConflictCheckRunStatus::Completed,
+                    'result_count' => $resultCount,
+                    'completed_at' => now(),
+                ]);
+
+                return $run->fresh('results');
+            });
 
             $this->timeline->record($firm, 'conflict_check_completed', $matter, $actor, [
                 'conflict_check_run_id' => $run->id,
                 'result_count' => $resultCount,
             ]);
 
-            return $this->summarize($run->fresh('results'));
+            return $this->summarize($run);
         });
     }
 

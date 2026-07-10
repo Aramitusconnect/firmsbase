@@ -54,10 +54,26 @@ class Section40LimitedPilotSafetyGateTest extends TestCase
 
         $remaining = $gate->remainingPreparedUnforcedTables();
 
-        $this->assertSame(
-            count($coverage->preparedTables()) - count($gate->pilotCriticalTables()),
-            count($remaining),
-        );
+        // Deliberately NOT asserted as preparedTables() count minus
+        // pilotCriticalTables() count: Section 39A-3I (a later,
+        // distinct staged-FORCE-activation branch) forced
+        // conflict_check_runs too, which is a real, live FORCE table
+        // but was never one of Section 40's hardcoded 8
+        // "pilot-critical" tables — that static formula would silently
+        // drift stale every time a non-pilot-critical table is forced.
+        // remainingPreparedUnforcedTables() queries live pg_class
+        // state directly, so the correct expectation is derived the
+        // same way here: every prepared table minus however many are
+        // ACTUALLY forced right now.
+        $actuallyForcedCount = count(array_filter(
+            $coverage->preparedTables(),
+            fn (string $table) => \Illuminate\Support\Facades\DB::selectOne(
+                'select relforcerowsecurity from pg_class where relname = ?',
+                [$table]
+            )->relforcerowsecurity,
+        ));
+
+        $this->assertSame(count($coverage->preparedTables()) - $actuallyForcedCount, count($remaining));
 
         foreach ($gate->pilotCriticalTables() as $table) {
             $this->assertNotContains($table, $remaining, "{$table} is forced and must not appear in the remaining-unforced list.");

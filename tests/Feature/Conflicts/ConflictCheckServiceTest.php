@@ -112,7 +112,11 @@ class ConflictCheckServiceTest extends TestCase
 
         $summary = $this->service->run($matter, ['irrelevant']);
 
-        $run = \App\Models\ConflictCheckRun::find($summary->conflictCheckRunId);
+        // conflict_check_runs has permanent FORCE ROW LEVEL SECURITY
+        // (Section 39A-3I) — service::run() correctly clears tenant
+        // context after it returns, so this post-call read must
+        // re-establish it explicitly.
+        $run = $this->runWithFirmContext($matter->firm, fn () => \App\Models\ConflictCheckRun::find($summary->conflictCheckRunId));
         $this->assertSame(ConflictCheckScope::Firm, $run->scope);
     }
 
@@ -124,7 +128,7 @@ class ConflictCheckServiceTest extends TestCase
 
         $summary = $this->service->run($matter, ['irrelevant']);
 
-        $run = \App\Models\ConflictCheckRun::find($summary->conflictCheckRunId);
+        $run = $this->runWithFirmContext($firm, fn () => \App\Models\ConflictCheckRun::find($summary->conflictCheckRunId));
         $this->assertSame(ConflictCheckScope::Organization, $run->scope);
     }
 
@@ -155,7 +159,7 @@ class ConflictCheckServiceTest extends TestCase
         $reviewer = User::factory()->create();
 
         $summary = $this->service->run($matter, ['Match Me']);
-        $result = \App\Models\ConflictCheckRun::find($summary->conflictCheckRunId)->results()->first();
+        $result = $this->runWithFirmContext($matter->firm, fn () => \App\Models\ConflictCheckRun::find($summary->conflictCheckRunId)->results()->first());
 
         $this->expectException(\InvalidArgumentException::class);
 
@@ -169,12 +173,12 @@ class ConflictCheckServiceTest extends TestCase
         $reviewer = User::factory()->create();
 
         $summary = $this->service->run($matter, ['Match Me']);
-        $run = \App\Models\ConflictCheckRun::find($summary->conflictCheckRunId);
+        $run = $this->runWithFirmContext($matter->firm, fn () => \App\Models\ConflictCheckRun::find($summary->conflictCheckRunId));
         $result = $run->results()->first();
 
         $this->service->resolveResult($result, ConflictCheckResultStatus::Dismissed, $reviewer, 'not the same person');
 
-        $newSummary = $this->service->summarize($run->fresh('results'));
+        $newSummary = $this->runWithFirmContext($matter->firm, fn () => $this->service->summarize($run->fresh('results')));
         $this->assertTrue($newSummary->isClearToProceed());
     }
 }
