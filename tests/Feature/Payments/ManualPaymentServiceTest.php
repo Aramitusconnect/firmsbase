@@ -156,8 +156,10 @@ class ManualPaymentServiceTest extends TestCase
         );
 
         $this->assertSame($first->id, $second->id);
-        $this->assertSame(1, Payment::where('firm_id', $firm->id)->where('idempotency_key', $key)->count());
-        $this->assertSame(1, \App\Models\ManualPaymentRecord::whereHas('payment', fn ($q) => $q->where('idempotency_key', $key))->count());
+        $this->runWithFirmContext($firm, function () use ($firm, $key) {
+            $this->assertSame(1, Payment::where('firm_id', $firm->id)->where('idempotency_key', $key)->count());
+            $this->assertSame(1, \App\Models\ManualPaymentRecord::whereHas('payment', fn ($q) => $q->where('idempotency_key', $key))->count());
+        });
     }
 
     public function test_double_submission_replays_the_original_blocked_outcome_rather_than_retrying(): void
@@ -186,7 +188,7 @@ class ManualPaymentServiceTest extends TestCase
             PaymentClassification::TrustIoltaPayment, $key,
         );
 
-        $this->assertSame(1, Payment::where('firm_id', $firm->id)->where('idempotency_key', $key)->count());
+        $this->assertSame(1, $this->runWithFirmContext($firm, fn () => Payment::where('firm_id', $firm->id)->where('idempotency_key', $key)->count()));
     }
 
     public function test_the_database_unique_index_prevents_two_payments_sharing_an_idempotency_key_for_the_same_firm(): void

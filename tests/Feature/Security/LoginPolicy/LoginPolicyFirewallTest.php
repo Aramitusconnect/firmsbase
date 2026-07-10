@@ -43,7 +43,8 @@ class LoginPolicyFirewallTest extends TestCase
                 && $path !== 'database/migrations/2026_08_02_900001_force_rls_on_deadlines_table.php'
                 && $path !== 'database/migrations/2026_08_03_900001_force_rls_on_tasks_table.php'
                 && $path !== 'database/migrations/2026_08_04_900001_force_rls_on_matters_table.php'
-                && $path !== 'database/migrations/2026_08_05_900001_force_rls_on_invoices_table.php',
+                && $path !== 'database/migrations/2026_08_05_900001_force_rls_on_invoices_table.php'
+                && $path !== 'database/migrations/2026_08_06_900001_force_rls_on_payments_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39D must add no migrations, but found: '.implode(', ', $changed));
@@ -117,7 +118,12 @@ class LoginPolicyFirewallTest extends TestCase
             'app/Services/FirmUser2faPolicyService.php',
             'database/seeders/DatabaseSeeder.php',
             'app/Services/RowLevelSecurityCoverageMappingService.php',
-            'app/Services/PaymentClassificationService.php',
+            // PaymentClassificationService.php is deliberately NOT in
+            // this list any more — Section 39A-3H (a later, distinct
+            // staged-FORCE-activation branch) found a genuine need to
+            // wire recordDecision()'s $payment->update() call with
+            // explicit tenant context, since payments now has
+            // permanent FORCE ROW LEVEL SECURITY.
             'app/Services/TrustEligibilityService.php',
             'app/Services/AiRetrievalIsolationService.php',
             'app/Services/ConsentService.php',

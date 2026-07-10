@@ -63,7 +63,7 @@ class ManualPaymentService
         ?string $methodReference = null,
         ?string $notes = null,
     ): Payment {
-        $payment = DB::transaction(function () use (
+        $payment = (new TenantContextService())->runWithFirmContext($firm, function () use (
             $firm, $client, $matter, $invoice, $installment, $amountCents, $method,
             $requestedClassification, $idempotencyKey, $recordedBy, $externalReference,
             $methodReference, $notes,
@@ -111,7 +111,9 @@ class ManualPaymentService
                 if ($installment) {
                     $this->application->applyToInstallment($payment, $installment);
                 } elseif ($invoice) {
-                    $this->application->applyToInvoice($payment, (new TenantContextService())->runWithFirmContext($firm, fn () => $invoice->fresh()));
+                    // Already inside this method's own runWithFirmContext
+                    // wrap (see above), so a plain fresh() here is safe.
+                    $this->application->applyToInvoice($payment, $invoice->fresh());
                 }
 
                 $this->timeline->record($firm, 'payment_recorded', $payment, $recordedBy, [

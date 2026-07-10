@@ -106,15 +106,19 @@ class MattersForceRlsActivationTest extends TestCase
         $this->assertTrue((bool) $row->relforcerowsecurity);
     }
 
-    public function test_payments_remains_not_forced(): void
+    public function test_payments_is_now_forced_by_a_later_section(): void
     {
+        // Section 39A-3H (a later, distinct staged-FORCE-activation
+        // branch) legitimately activated FORCE for payments after
+        // fixing PaymentFactory's own root-cause firm/client
+        // consistency issue — this test's own scope (39A-3F) never
+        // touched payments, but the assertion here must reflect
+        // present reality rather than this branch's own point-in-time
+        // snapshot.
         $row = DB::selectOne("select relforcerowsecurity from pg_class where relname = 'payments'");
 
         $this->assertNotNull($row);
-        $this->assertFalse(
-            (bool) $row->relforcerowsecurity,
-            'payments must remain unforced — its factory still nests Client::factory() directly, masking its true blast radius.'
-        );
+        $this->assertTrue((bool) $row->relforcerowsecurity);
     }
 
     public function test_missing_tenant_context_cannot_read_matters(): void

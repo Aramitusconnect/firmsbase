@@ -127,7 +127,19 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== 'database/factories/InvoiceFactory.php'
                 && $path !== 'tests/Feature/Invoicing/InvoiceDraftingServiceTest.php'
                 && $path !== 'tests/Feature/Payments/PaymentApplicationServiceTest.php'
-                && $path !== 'tests/Feature/Trust/Transfers/TrustTransferRequestServiceTest.php',
+                && $path !== 'tests/Feature/Trust/Transfers/TrustTransferRequestServiceTest.php'
+                // Section 39A-3H (a later, distinct staged-FORCE-
+                // activation branch) legitimately added a
+                // payments-only FORCE RLS migration, a PaymentFactory
+                // root-cause firm/client consistency fix, explicit
+                // tenant-context wiring in real services
+                // (app/Services/ is already excluded above, so only
+                // the migration/factory/affected tests need listing
+                // here), and updated the tests it affected.
+                && $path !== 'database/migrations/2026_08_06_900001_force_rls_on_payments_table.php'
+                && $path !== 'database/factories/PaymentFactory.php'
+                && $path !== 'tests/Feature/Payments/ManualPaymentServiceTest.php'
+                && $path !== 'tests/Feature/Webhooks/Wiring/PaymentRecordedWiringTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

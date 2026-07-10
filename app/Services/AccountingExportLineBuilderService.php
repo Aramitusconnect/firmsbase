@@ -102,12 +102,12 @@ class AccountingExportLineBuilderService
      */
     private function eligibleOperatingPayments(AccountingExportBatch $batch): Collection
     {
-        return Payment::query()
+        return (new TenantContextService())->runWithFirmContext($batch->firm_id, fn () => Payment::query()
             ->where('firm_id', $batch->firm_id)
             ->where('payment_classification', PaymentClassification::OperatingPayment->value)
             ->where('status', PaymentStatus::Succeeded->value)
             ->whereBetween('created_at', [$this->windowStart($batch), $this->windowEnd($batch)])
-            ->get();
+            ->get());
     }
 
     private function windowStart(AccountingExportBatch $batch): \Carbon\CarbonImmutable

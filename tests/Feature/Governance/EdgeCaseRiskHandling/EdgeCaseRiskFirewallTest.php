@@ -51,7 +51,12 @@ class EdgeCaseRiskFirewallTest extends TestCase
         'app/Services/KeyDestructionApprovalService.php',
         'app/Services/FleetMigrationOrchestrationService.php',
         'app/Services/LicenseFileValidationService.php',
-        'app/Services/PaymentClassificationService.php',
+        // PaymentClassificationService.php is deliberately NOT in this
+        // list any more — Section 39A-3H (a later, distinct staged-
+        // FORCE-activation branch) found a genuine need to wire
+        // recordDecision()'s $payment->update() call with explicit
+        // tenant context, since payments now has permanent FORCE ROW
+        // LEVEL SECURITY.
         'app/Services/PaymentApplicationService.php',
         'app/Services/PaymentPlanService.php',
         'app/Services/TrustTransferRequestService.php',
@@ -386,6 +391,20 @@ class EdgeCaseRiskFirewallTest extends TestCase
             'tests/Feature/Invoicing/InvoiceDraftingServiceTest.php',
             'tests/Feature/Payments/PaymentApplicationServiceTest.php',
             'tests/Feature/Trust/Transfers/TrustTransferRequestServiceTest.php',
+            // Section 39A-3H (a later, distinct staged-FORCE-
+            // activation branch) legitimately added a payments-only
+            // FORCE RLS migration, a PaymentFactory root-cause
+            // firm/client consistency fix, explicit tenant-context
+            // wiring in ManualPaymentService, PaymentClassificationService,
+            // TrustTransferRequestService,
+            // AccountingExportLineBuilderService, and
+            // FirmCommandCenterAggregationService, plus updated the
+            // tests it affected.
+            'database/migrations/2026_08_06_900001_force_rls_on_payments_table.php',
+            'database/factories/PaymentFactory.php',
+            'app/Services/PaymentClassificationService.php',
+            'tests/Feature/Payments/ManualPaymentServiceTest.php',
+            'tests/Feature/Webhooks/Wiring/PaymentRecordedWiringTest.php',
             'app/Services/ReadinessScorecardRegistry.php',
             'tests/Feature/Tasks/TaskDependencyServiceTest.php',
             'tests/Feature/Webhooks/Wiring/TaskCompletedWiringTest.php',

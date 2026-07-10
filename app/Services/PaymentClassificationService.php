@@ -84,6 +84,13 @@ class PaymentClassificationService
         PaymentClassificationResult $result,
         ?User $actor = null,
     ): PaymentClassificationEvent {
+        // Deliberately NOT self-wrapped in runWithFirmContext(): this
+        // method is always called from within a caller that has
+        // already established firm context for the whole operation
+        // (ManualPaymentService::submit(), TrustTransferRequestService
+        // ::apply()) — a nested runWithFirmContext() call here would
+        // clear that context in its own finally block the moment this
+        // method returns, breaking the caller's own subsequent reads.
         $payment->update([
             'payment_classification' => $result->resolvedClassification,
             'status' => $result->status,

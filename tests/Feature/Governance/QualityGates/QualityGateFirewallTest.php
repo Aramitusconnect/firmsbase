@@ -304,6 +304,20 @@ class QualityGateFirewallTest extends TestCase
             'tests/Feature/Invoicing/InvoiceDraftingServiceTest.php',
             'tests/Feature/Payments/PaymentApplicationServiceTest.php',
             'tests/Feature/Trust/Transfers/TrustTransferRequestServiceTest.php',
+            // Section 39A-3H (a later, distinct staged-FORCE-
+            // activation branch) legitimately added a payments-only
+            // FORCE RLS migration, a PaymentFactory root-cause
+            // firm/client consistency fix, explicit tenant-context
+            // wiring in ManualPaymentService, PaymentClassificationService,
+            // TrustTransferRequestService,
+            // AccountingExportLineBuilderService, and
+            // FirmCommandCenterAggregationService, plus updated the
+            // tests it affected.
+            'database/migrations/2026_08_06_900001_force_rls_on_payments_table.php',
+            'database/factories/PaymentFactory.php',
+            'app/Services/PaymentClassificationService.php',
+            'tests/Feature/Payments/ManualPaymentServiceTest.php',
+            'tests/Feature/Webhooks/Wiring/PaymentRecordedWiringTest.php',
             'app/Services/ReadinessScorecardRegistry.php',
             'tests/Feature/Tasks/TaskDependencyServiceTest.php',
             'tests/Feature/Webhooks/Wiring/TaskCompletedWiringTest.php',
