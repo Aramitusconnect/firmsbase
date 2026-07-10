@@ -114,7 +114,7 @@ class PaymentRecordedWiringTest extends TestCase
             idempotencyKey: $idempotencyKey,
         );
 
-        $this->assertDatabaseCount('payments', 1);
+        $this->runWithFirmContext($firm, fn () => $this->assertDatabaseCount('payments', 1));
         $this->assertDatabaseCount('webhook_events', 1);
     }
 
@@ -137,7 +137,7 @@ class PaymentRecordedWiringTest extends TestCase
             idempotencyKey: (string) Str::uuid(),
         );
 
-        $this->assertDatabaseHas('payments', ['id' => $payment->id, 'amount_cents' => 20000]);
+        $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('payments', ['id' => $payment->id, 'amount_cents' => 20000]));
         $this->assertNotNull($payment->manualPaymentRecord);
     }
 }

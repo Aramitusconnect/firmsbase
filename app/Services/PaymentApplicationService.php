@@ -85,10 +85,18 @@ class PaymentApplicationService
         $paidAmount = $invoice->amount_paid_cents + $payment->amount_cents;
         $status = $paidAmount >= $invoice->total_cents ? InvoiceStatus::Paid : InvoiceStatus::PartiallyPaid;
 
-        (new TenantContextService())->runWithFirmContext($invoice->firm_id, fn () => $invoice->update([
+        // Deliberately NOT self-wrapped in runWithFirmContext(): this
+        // method is always called from within a caller that has
+        // already established firm context for the whole operation
+        // (ManualPaymentService::submit(), TrustTransferRequestService
+        // ::apply()) — a nested runWithFirmContext() call here would
+        // clear that context in its own finally block the moment this
+        // method returns, breaking the caller's own subsequent reads
+        // (Section 39A-3H finding).
+        $invoice->update([
             'amount_paid_cents' => $paidAmount,
             'status' => $status,
-        ]));
+        ]);
 
         $this->timeline->record($invoice->firm, 'invoice_payment_applied', $invoice, null, [
             'payment_id' => $payment->id,

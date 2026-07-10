@@ -178,7 +178,7 @@ class TrustTransferRequestService
             $this->balanceService->recomputeForLedger($ledger, $lockedBalance);
             $this->balanceService->recomputeForMatter($ledger, $matter, $lockedMatterBalance);
 
-            $payment = Payment::create([
+            $payment = (new TenantContextService())->runWithFirmContext($firm, fn () => Payment::create([
                 'firm_id' => $firm->id,
                 'client_id' => $ledger->client_id,
                 'matter_id' => $matter->id,
@@ -190,11 +190,14 @@ class TrustTransferRequestService
                 'external_reference' => "trust_transfer_request:{$request->id}",
                 'idempotency_key' => "trust-transfer-{$request->id}",
                 'recorded_by' => $appliedBy->user_id,
-            ]);
+            ]));
 
             $result = $this->classification->classify($firm, PaymentClassification::OperatingPayment);
-            $this->classification->recordDecision($payment, PaymentClassification::OperatingPayment, $result, $appliedBy->user);
-            $payment = $payment->fresh();
+            $payment = (new TenantContextService())->runWithFirmContext($firm, function () use ($payment, $result, $appliedBy) {
+                $this->classification->recordDecision($payment, PaymentClassification::OperatingPayment, $result, $appliedBy->user);
+
+                return $payment->fresh();
+            });
 
             if (! $payment->isAcceptedOperatingPayment()) {
                 throw new \RuntimeException('The trust-funded payment was not accepted as an operating payment.');
@@ -202,7 +205,9 @@ class TrustTransferRequestService
 
             // $entry is never updated or deleted from here on — it is
             // handed back purely for the caller's/tests' inspection.
-            $this->application->applyToInvoice($payment, (new TenantContextService())->runWithFirmContext($firm, fn () => $invoice->fresh()));
+            (new TenantContextService())->runWithFirmContext($firm, function () use ($payment, $invoice) {
+                $this->application->applyToInvoice($payment, $invoice->fresh());
+            });
 
             $request->update([
                 'status' => TrustTransferRequestStatus::Applied,

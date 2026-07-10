@@ -88,7 +88,12 @@ class FirmUser2faFirewallTest extends TestCase
             'app/Services/SeedDataSecurityAuditService.php',
             'database/seeders/DatabaseSeeder.php',
             'app/Services/RowLevelSecurityCoverageMappingService.php',
-            'app/Services/PaymentClassificationService.php',
+            // PaymentClassificationService.php is deliberately NOT in
+            // this list any more — Section 39A-3H (a later, distinct
+            // staged-FORCE-activation branch) found a genuine need to
+            // wire recordDecision()'s $payment->update() call with
+            // explicit tenant context, since payments now has
+            // permanent FORCE ROW LEVEL SECURITY.
             'app/Services/TrustEligibilityService.php',
             'app/Services/AiRetrievalIsolationService.php',
             'app/Services/ConsentService.php',

@@ -7,8 +7,13 @@ use App\Enums\PaymentClassification;
 use App\Enums\PaymentStatus;
 use App\Models\Client;
 use App\Models\Firm;
+use App\Models\Invoice;
+use App\Models\Matter;
 use App\Models\Payment;
+use App\Services\TenantContextService;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
 
 /**
  * @extends Factory<Payment>
@@ -17,11 +22,43 @@ class PaymentFactory extends Factory
 {
     protected $model = Payment::class;
 
+    public function create($attributes = [], ?Model $parent = null)
+    {
+        if (! empty($attributes)) {
+            return $this->state($attributes)->create([], $parent);
+        }
+
+        $results = $this->make($attributes, $parent);
+        $models = $results instanceof Model ? new Collection([$results]) : $results;
+        $service = new TenantContextService();
+
+        $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
+            $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
+            $this->store($group);
+        });
+
+        $this->callAfterCreating($models, $parent);
+
+        return $results;
+    }
+
+    /**
+     * The payment and its nested client are always tied to the SAME
+     * firm — generating one firm here up front (rather than letting
+     * firm_id and client_id resolve as two independent
+     * Firm::factory()/Client::factory() calls) is deliberate: a bare
+     * Payment::factory()->create() with no state must never produce a
+     * payment whose client belongs to an unrelated firm, matching the
+     * root-cause fix already applied to MatterFactory/InvoiceFactory in
+     * Sections 39A-3F/39A-3G.
+     */
     public function definition(): array
     {
+        $firm = Firm::factory()->create();
+
         return [
-            'firm_id' => Firm::factory(),
-            'client_id' => Client::factory(),
+            'firm_id' => $firm->id,
+            'client_id' => Client::factory()->forFirm($firm),
             'matter_id' => null,
             'invoice_id' => null,
             'payment_plan_installment_id' => null,
@@ -37,6 +74,12 @@ class PaymentFactory extends Factory
         ];
     }
 
+    /**
+     * Ties both the payment AND its nested client to the given firm —
+     * used when the caller already has a specific pre-existing firm to
+     * attach to, rather than the fresh random one definition() would
+     * otherwise generate.
+     */
     public function forFirm(Firm $firm): static
     {
         return $this->state(fn () => [
@@ -50,6 +93,36 @@ class PaymentFactory extends Factory
         return $this->state(fn () => [
             'firm_id' => $client->firm_id,
             'client_id' => $client->id,
+        ]);
+    }
+
+    /**
+     * Ties the payment's firm_id AND client_id to the given matter's
+     * own firm/client, and sets matter_id — mirrors InvoiceFactory's
+     * forMatter() so a caller who wants a matter-linked payment never
+     * has to assemble a consistent firm/client/matter triple by hand.
+     */
+    public function forMatter(Matter $matter): static
+    {
+        return $this->state(fn () => [
+            'firm_id' => $matter->firm_id,
+            'client_id' => $matter->client_id,
+            'matter_id' => $matter->id,
+        ]);
+    }
+
+    /**
+     * Ties the payment's firm_id AND client_id to the given invoice's
+     * own firm/client, and sets invoice_id (plus matter_id when the
+     * invoice itself is matter-linked) — mirrors forMatter() above.
+     */
+    public function forInvoice(Invoice $invoice): static
+    {
+        return $this->state(fn () => [
+            'firm_id' => $invoice->firm_id,
+            'client_id' => $invoice->client_id,
+            'matter_id' => $invoice->matter_id,
+            'invoice_id' => $invoice->id,
         ]);
     }
 

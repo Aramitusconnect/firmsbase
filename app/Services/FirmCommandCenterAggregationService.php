@@ -81,10 +81,10 @@ class FirmCommandCenterAggregationService
                 ->whereHas('paymentPlan', fn ($query) => $query->where('firm_id', $firm->id))
                 ->where('status', PaymentPlanInstallmentStatus::Missed)
                 ->count(),
-            failedPaymentsCount: Payment::query()
+            failedPaymentsCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Payment::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', PaymentStatus::Failed)
-                ->count(),
+                ->count()),
             inactiveClientsCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Client::query()
                 ->where('firm_id', $firm->id)
                 ->where('updated_at', '<=', $asOf->copy()->subDays($inactiveClientDays))
