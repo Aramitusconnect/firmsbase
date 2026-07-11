@@ -100,7 +100,7 @@ class CommunicationConsentEventsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consent_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consent_events', 'intake_submissions']);
 
         $actuallyForced = [];
 
@@ -117,7 +117,7 @@ class CommunicationConsentEventsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(30, count($actuallyForced), 'Exactly thirty prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 12 — no more, no less.');
+        $this->assertSame(31, count($actuallyForced), 'Exactly thirty-one prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 (intake_submissions added on top of this batch\'s own communication_consent_events) — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -127,7 +127,7 @@ class CommunicationConsentEventsForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consent_events']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consent_events', 'intake_submissions']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

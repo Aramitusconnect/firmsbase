@@ -139,7 +139,7 @@ class CommunicationConsentsForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 12, Table
         // Phase C (communication_consent_events) for the same reason —
         // additive only, no existing assertion removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents', 'communication_consent_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents', 'communication_consent_events', 'intake_submissions']);
 
         $actuallyForced = [];
 
@@ -156,7 +156,7 @@ class CommunicationConsentsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(30, count($actuallyForced), 'Exactly thirty prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 12 — no more, no less (communication_consent_events added on top of this batch\'s own communication_consents).');
+        $this->assertSame(31, count($actuallyForced), 'Exactly thirty-one prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (communication_consent_events added on top of this batch\'s own communication_consents, plus intake_submissions from Checkpoint 13).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -180,7 +180,7 @@ class CommunicationConsentsForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 12, Table
         // Phase C (communication_consent_events) for the same reason —
         // additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents', 'communication_consent_events']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents', 'communication_consent_events', 'intake_submissions']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

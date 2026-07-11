@@ -384,6 +384,13 @@ class EmergencySupportApprovalFirewallTest extends TestCase
                 // ConsentServiceTest.php (already allowed above).
                 'database/migrations/2026_08_25_930012_force_rls_on_communication_consent_events_table.php',
                 'database/factories/CommunicationConsentEventFactory.php',
+                // Section 39A-3L, Checkpoint 13, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added an intake_submissions-only
+                // FORCE RLS migration and an IntakeSubmissionFactory
+                // firm/client consistency + context-hold fix.
+                'database/migrations/2026_08_25_930013_force_rls_on_intake_submissions_table.php',
+                'database/factories/IntakeSubmissionFactory.php',
             'config/auth.php',
             'app/Models/User.php',
             'app/Models/PlatformAdmin.php',

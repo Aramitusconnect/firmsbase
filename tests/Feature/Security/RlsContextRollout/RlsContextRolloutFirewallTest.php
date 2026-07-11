@@ -48,16 +48,17 @@ class RlsContextRolloutFirewallTest extends TestCase
         // Checkpoint 10, Table Phase C) document_requests, and (Section
         // 39A-3L, Checkpoint 11, Table Phase C) communication_consents,
         // and (Section 39A-3L, Checkpoint 12, Table Phase C)
-        // communication_consent_events. This test's own scope (Section
-        // 39A-2) never touched FORCE state; the remaining prepared
-        // tables must still be unforced.
+        // communication_consent_events, and (Section 39A-3L, Checkpoint
+        // 13, Table Phase C) intake_submissions. This test's own scope
+        // (Section 39A-2) never touched FORCE state; the remaining
+        // prepared tables must still be unforced.
         $forcedByLaterBranch = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
             'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
             'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests',
-            'communication_consents', 'communication_consent_events',
+            'communication_consents', 'communication_consent_events', 'intake_submissions',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -196,7 +197,12 @@ class RlsContextRolloutFirewallTest extends TestCase
                 // batch, a later, distinct staged-FORCE-activation
                 // branch) legitimately added a
                 // communication_consent_events-only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930012_force_rls_on_communication_consent_events_table.php',
+                && $path !== 'database/migrations/2026_08_25_930012_force_rls_on_communication_consent_events_table.php'
+                // Section 39A-3L, Checkpoint 13, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added an intake_submissions-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930013_force_rls_on_intake_submissions_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));

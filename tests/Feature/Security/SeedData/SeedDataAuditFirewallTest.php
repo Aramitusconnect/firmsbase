@@ -399,6 +399,15 @@ class SeedDataAuditFirewallTest extends TestCase
             // ConsentServiceTest.php (already allowed above).
             'database/migrations/2026_08_25_930012_force_rls_on_communication_consent_events_table.php',
             'database/factories/CommunicationConsentEventFactory.php',
+            // Section 39A-3L, Checkpoint 13, Table Phase C (this batch,
+            // a later, distinct staged-FORCE-activation branch)
+            // legitimately added an intake_submissions-only FORCE RLS
+            // migration and an IntakeSubmissionFactory firm/client
+            // consistency + context-hold fix.
+            // ProductionPilotWorkflowService.php is already allowed
+            // above (Section 39A-3F's matters batch).
+            'database/migrations/2026_08_25_930013_force_rls_on_intake_submissions_table.php',
+            'database/factories/IntakeSubmissionFactory.php',
         ];
 
         $unexpected = array_values(array_filter(
@@ -737,6 +746,13 @@ class SeedDataAuditFirewallTest extends TestCase
             // ConsentServiceTest.php (already allowed above).
             'database/migrations/2026_08_25_930012_force_rls_on_communication_consent_events_table.php',
             'database/factories/CommunicationConsentEventFactory.php',
+            // Section 39A-3L, Checkpoint 13, Table Phase C (this batch,
+            // a later, distinct staged-FORCE-activation branch)
+            // legitimately added an intake_submissions-only FORCE RLS
+            // migration and an IntakeSubmissionFactory firm/client
+            // consistency + context-hold fix.
+            'database/migrations/2026_08_25_930013_force_rls_on_intake_submissions_table.php',
+            'database/factories/IntakeSubmissionFactory.php',
         ];
 
         return array_values(array_filter(

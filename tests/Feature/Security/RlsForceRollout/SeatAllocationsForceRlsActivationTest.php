@@ -131,7 +131,7 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 12, Table
         // Phase C (communication_consent_events) for the same reason —
         // additive only, no existing assertion removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions']);
 
         $actuallyForced = [];
 
@@ -154,7 +154,7 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 11, Table
         // Phase C (communication_consents) for the same reason —
         // additive only, no existing assertion removed or weakened.
-        $this->assertSame(30, count($actuallyForced), 'Exactly thirty prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 12 — no more, no less (document_requests and communication_consents added on top of this batch\'s own seat_allocations, plus communication_consent_events from Checkpoint 12).');
+        $this->assertSame(31, count($actuallyForced), 'Exactly thirty-one prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (document_requests and communication_consents added on top of this batch\'s own seat_allocations, plus communication_consent_events from Checkpoint 12, plus intake_submissions from Checkpoint 13).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -173,7 +173,7 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 12, Table
         // Phase C (communication_consent_events) for the same reason —
         // additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

@@ -212,7 +212,12 @@ class ConsultationsForceRlsActivationTest extends TestCase
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
             'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
             'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests',
-            'communication_consents', 'communication_consent_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 13,
+            // Table Phase C (this repo's thirty-first staged FORCE
+            // activation batch, covering intake_submissions) for the
+            // same reason — additive only, no existing assertion
+            // removed or weakened.
+            'communication_consents', 'communication_consent_events', 'intake_submissions',
         ];
 
         $rows = DB::select(
@@ -223,7 +228,7 @@ class ConsultationsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the eighteen tables introduced by 39A-3A..39A-3K, plus payment_classification_events (39A-3L Checkpoint 1), activation_checklists (39A-3L Checkpoint 2), and firm_activation_events (39A-3L Checkpoint 3), and firm_entitlements (39A-3L Checkpoint 4), and firm_entitlement_events (39A-3L Checkpoint 5), and installed_template_packs (39A-3L Checkpoint 6), and template_upgrade_logs (39A-3L Checkpoint 7), and template_upgrade_previews (39A-3L Checkpoint 8), and seat_allocations (39A-3L Checkpoint 9), and document_requests (39A-3L Checkpoint 10), and communication_consents (39A-3L Checkpoint 11), and communication_consent_events (39A-3L Checkpoint 12), must be FORCE RLS enabled — no more, no fewer.');
+        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the eighteen tables introduced by 39A-3A..39A-3K, plus payment_classification_events (39A-3L Checkpoint 1), activation_checklists (39A-3L Checkpoint 2), and firm_activation_events (39A-3L Checkpoint 3), and firm_entitlements (39A-3L Checkpoint 4), and firm_entitlement_events (39A-3L Checkpoint 5), and installed_template_packs (39A-3L Checkpoint 6), and template_upgrade_logs (39A-3L Checkpoint 7), and template_upgrade_previews (39A-3L Checkpoint 8), and seat_allocations (39A-3L Checkpoint 9), and document_requests (39A-3L Checkpoint 10), and communication_consents (39A-3L Checkpoint 11), and communication_consent_events (39A-3L Checkpoint 12), and intake_submissions (39A-3L Checkpoint 13), must be FORCE RLS enabled — no more, no fewer.');
     }
 
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
@@ -254,7 +259,12 @@ class ConsultationsForceRlsActivationTest extends TestCase
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
             'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
             'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests',
-            'communication_consents', 'communication_consent_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 13,
+            // Table Phase C (this repo's thirty-first staged FORCE
+            // activation batch, covering intake_submissions) for the
+            // same reason — additive only, no existing assertion
+            // removed or weakened.
+            'communication_consents', 'communication_consent_events', 'intake_submissions',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

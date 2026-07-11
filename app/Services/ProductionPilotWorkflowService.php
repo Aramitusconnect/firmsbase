@@ -100,25 +100,38 @@ class ProductionPilotWorkflowService
      * IntakeSubmission's only lifecycle is Draft -> Submitted -> ->
      * Reviewed with no gating service, so this step performs the same
      * two writes any caller would.
+     *
+     * Section 39A-3L, Checkpoint 13 — the entire method body is wrapped
+     * in a single runWithFirmContext() call now that intake_submissions
+     * is FORCE RLS-enabled. A partial wrap (create() only) was
+     * confirmed to fail: update() would silently no-op (0 rows
+     * affected, no exception) outside an active tenant context, and the
+     * subsequent fresh() would then return null, violating this
+     * method's non-nullable return type. submitIntake() does not call
+     * any other already-self-wrapping method and is only ever called
+     * from outside any active context, so wrapping the whole call here
+     * carries no nested-wrap risk.
      */
     public function submitIntake(Firm $firm, Client $client, IntakeTemplate $template, array $responses, ?Matter $matter = null): IntakeSubmission
     {
-        $submission = IntakeSubmission::create([
-            'firm_id' => $firm->id,
-            'client_id' => $client->id,
-            'matter_id' => $matter?->id,
-            'intake_template_id' => $template->id,
-            'status' => IntakeSubmissionStatus::Draft,
-            'responses_json' => [],
-        ]);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $client, $template, $responses, $matter) {
+            $submission = IntakeSubmission::create([
+                'firm_id' => $firm->id,
+                'client_id' => $client->id,
+                'matter_id' => $matter?->id,
+                'intake_template_id' => $template->id,
+                'status' => IntakeSubmissionStatus::Draft,
+                'responses_json' => [],
+            ]);
 
-        $submission->update([
-            'status' => IntakeSubmissionStatus::Submitted,
-            'responses_json' => $responses,
-            'submitted_at' => now(),
-        ]);
+            $submission->update([
+                'status' => IntakeSubmissionStatus::Submitted,
+                'responses_json' => $responses,
+                'submitted_at' => now(),
+            ]);
 
-        return $submission->fresh();
+            return $submission->fresh();
+        });
     }
 
     /**
