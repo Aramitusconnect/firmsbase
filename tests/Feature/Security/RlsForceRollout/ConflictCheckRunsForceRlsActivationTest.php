@@ -180,6 +180,12 @@ class ConflictCheckRunsForceRlsActivationTest extends TestCase
             // same reason — additive only, no existing assertion
             // removed or weakened.
             'communication_consents', 'communication_consent_events', 'intake_submissions',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 14,
+            // Table Phase C (this repo's thirty-second staged FORCE
+            // activation batch, covering matter_readiness_scores) for
+            // the same reason — additive only, no existing assertion
+            // removed or weakened.
+            'matter_readiness_scores',
         ];
 
         $rows = DB::select(
@@ -227,6 +233,12 @@ class ConflictCheckRunsForceRlsActivationTest extends TestCase
             // same reason — additive only, no existing assertion
             // removed or weakened.
             'communication_consents', 'communication_consent_events', 'intake_submissions',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 14,
+            // Table Phase C (this repo's thirty-second staged FORCE
+            // activation batch, covering matter_readiness_scores) for
+            // the same reason — additive only, no existing assertion
+            // removed or weakened.
+            'matter_readiness_scores',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

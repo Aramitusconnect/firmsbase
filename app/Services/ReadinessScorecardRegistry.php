@@ -94,14 +94,25 @@ class ReadinessScorecardRegistry
         });
 
         $this->register('documents_approved', function (Matter $matter): ReadinessComponentResult {
-            $outstanding = (new TenantContextService())->runWithFirmContext($matter->firm_id, fn () => \App\Models\DocumentRequestItem::query()
+            // Section 39A-3L, Checkpoint 14: this evaluator used to
+            // self-wrap its query in its own runWithFirmContext() call.
+            // Removed — a self-wrap here is only correct in isolation;
+            // when called from MatterReadinessService::recompute()
+            // (which must ALSO wrap its own, currently-unwrapped
+            // persistence writes around this same evaluate() call), the
+            // inner wrap's finally block clears the outer wrap's
+            // context before recompute()'s writes run. Responsibility
+            // for establishing tenant context now belongs entirely to
+            // the caller of evaluate() — see MatterReadinessService::
+            // recompute().
+            $outstanding = \App\Models\DocumentRequestItem::query()
                 ->whereHas('documentRequest', fn ($q) => $q->where('matter_id', $matter->id))
                 ->where('is_required', true)
                 ->whereNotIn('status', [
                     DocumentRequestItemStatus::Approved->value,
                     DocumentRequestItemStatus::Waived->value,
                 ])
-                ->count());
+                ->count();
 
             return new ReadinessComponentResult(
                 'documents_approved',
@@ -111,10 +122,12 @@ class ReadinessScorecardRegistry
         });
 
         $this->register('tasks_dependencies_ready', function (Matter $matter): ReadinessComponentResult {
-            $unresolved = (new TenantContextService())->runWithFirmContext($matter->firm_id, fn () => \App\Models\Task::query()
+            // Section 39A-3L, Checkpoint 14: same self-wrap removal
+            // and same reasoning as documents_approved above.
+            $unresolved = \App\Models\Task::query()
                 ->where('matter_id', $matter->id)
                 ->whereNotIn('status', [TaskStatus::Completed->value, TaskStatus::Cancelled->value])
-                ->count());
+                ->count();
 
             return new ReadinessComponentResult(
                 'tasks_dependencies_ready',

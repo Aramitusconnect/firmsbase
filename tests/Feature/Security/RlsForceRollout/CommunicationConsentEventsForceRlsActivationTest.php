@@ -100,7 +100,12 @@ class CommunicationConsentEventsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consent_events', 'intake_submissions']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 14,
+        // Table Phase C (this repo's thirty-second staged FORCE
+        // activation batch, covering matter_readiness_scores) for
+        // the same reason — additive only, no existing assertion
+        // removed or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consent_events', 'intake_submissions', 'matter_readiness_scores']);
 
         $actuallyForced = [];
 
@@ -117,7 +122,7 @@ class CommunicationConsentEventsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(31, count($actuallyForced), 'Exactly thirty-one prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 (intake_submissions added on top of this batch\'s own communication_consent_events) — no more, no less.');
+        $this->assertSame(32, count($actuallyForced), 'Exactly thirty-two prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 (intake_submissions added on top of this batch\'s own communication_consent_events) — no more, no less. Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -127,7 +132,12 @@ class CommunicationConsentEventsForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consent_events', 'intake_submissions']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 14,
+        // Table Phase C (this repo's thirty-second staged FORCE
+        // activation batch, covering matter_readiness_scores) for
+        // the same reason — additive only, no existing assertion
+        // removed or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consent_events', 'intake_submissions', 'matter_readiness_scores']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

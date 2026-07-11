@@ -114,7 +114,12 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 12, Table
         // Phase C (communication_consent_events) for the same reason —
         // additive only, no existing assertion removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 14,
+        // Table Phase C (this repo's thirty-second staged FORCE
+        // activation batch, covering matter_readiness_scores) for
+        // the same reason — additive only, no existing assertion
+        // removed or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores']);
 
         $actuallyForced = [];
 
@@ -131,7 +136,7 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(31, count($actuallyForced), 'Exactly thirty-one prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (the twenty-eight from this batch plus communication_consents from Checkpoint 11, plus communication_consent_events from Checkpoint 12, plus intake_submissions from Checkpoint 13).');
+        $this->assertSame(32, count($actuallyForced), 'Exactly thirty-two prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (the twenty-eight from this batch plus communication_consents from Checkpoint 11, plus communication_consent_events from Checkpoint 12, plus intake_submissions from Checkpoint 13). Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -156,7 +161,12 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 12, Table
         // Phase C (communication_consent_events) for the same reason —
         // additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 14,
+        // Table Phase C (this repo's thirty-second staged FORCE
+        // activation batch, covering matter_readiness_scores) for
+        // the same reason — additive only, no existing assertion
+        // removed or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
@@ -600,6 +610,17 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
      * reported as satisfied merely because the query would otherwise
      * return zero rows under a missing/wrong tenant context. This is
      * the exact silent-false-positive failure mode this fix closed.
+     *
+     * Section 39A-3L, Checkpoint 14 regression fix: this test used
+     * to call $registry->evaluate($matter) directly, with NO
+     * surrounding tenant context, relying on documents_approved's
+     * now-removed internal self-wrap to see the outstanding
+     * DocumentRequestItem row seeded above. That self-wrap was
+     * correctly removed (responsibility for establishing context now
+     * belongs to the caller — see ReadinessScorecardRegistry and
+     * MatterReadinessService::recompute()), so evaluate() must now be
+     * called from within the matter's own firm context here, exactly
+     * as MatterReadinessService::recompute() does in production.
      */
     public function test_readiness_scorecard_documents_approved_correctly_detects_an_outstanding_item_under_force_rls(): void
     {
@@ -620,8 +641,8 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
         ]));
 
         $registry = new ReadinessScorecardRegistry();
-        $results = $registry->evaluate($matter);
-        $this->assertNoDatabaseTenantContext('documents_approved must clear its own context wrap before returning.');
+        $results = $this->runWithFirmContext($matter->firm, fn () => $registry->evaluate($matter));
+        $this->assertNoDatabaseTenantContext('the test\'s own runWithFirmContext() wrap must clear context before returning.');
 
         $result = collect($results)->firstWhere('componentKey', 'documents_approved');
         $this->assertNotNull($result);
@@ -637,6 +658,14 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
      * satisfied/waived terminal status, documents_approved must
      * correctly report satisfied — proving the fix did not merely
      * flip the result to always-false.
+     *
+     * Section 39A-3L, Checkpoint 14: also wrapped in the matter's
+     * own firm context now (was previously called bare). Before this
+     * fix, the bare call coincidentally still "passed" because zero
+     * visible rows (no context) looks identical to zero outstanding
+     * items (genuinely satisfied) — masking the exact same loss of
+     * visibility as the sibling test above. Wrapping it proves the
+     * satisfied result is genuine, not a coincidental false positive.
      */
     public function test_readiness_scorecard_documents_approved_correctly_reports_satisfied_once_no_item_is_outstanding(): void
     {
@@ -657,7 +686,7 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
         ]));
 
         $registry = new ReadinessScorecardRegistry();
-        $results = $registry->evaluate($matter);
+        $results = $this->runWithFirmContext($matter->firm, fn () => $registry->evaluate($matter));
         $this->assertNoDatabaseTenantContext();
 
         $result = collect($results)->firstWhere('componentKey', 'documents_approved');

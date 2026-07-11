@@ -104,7 +104,16 @@ class MatterReadinessServiceTest extends TestCase
         $this->service->recompute($matter);
         $this->service->recompute($matter);
 
-        $this->assertSame(1, \App\Models\MatterReadinessScore::query()->where('matter_id', $matter->id)->count());
+        // Section 39A-3L, Checkpoint 14: matter_readiness_scores is now
+        // FORCE RLS. recompute() clears its own context wrap before
+        // returning, so this bare read (outside any context) must be
+        // explicitly wrapped or it would incorrectly see zero rows.
+        $count = $this->runWithFirmContext(
+            $matter->firm,
+            fn () => \App\Models\MatterReadinessScore::query()->where('matter_id', $matter->id)->count(),
+        );
+
+        $this->assertSame(1, $count);
     }
 
     public function test_documents_approved_fails_while_a_required_item_is_still_outstanding(): void
