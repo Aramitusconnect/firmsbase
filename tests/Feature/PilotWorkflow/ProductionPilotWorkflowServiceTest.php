@@ -169,7 +169,19 @@ class ProductionPilotWorkflowServiceTest extends TestCase
         );
 
         $this->assertCount(3, $reminderDates);
-        $this->assertSame(1, \App\Models\CalendarEvent::query()->where('matter_id', $matter->id)->count());
+        // Section 39A-3K follow-up: calendar_events now has permanent
+        // FORCE ROW LEVEL SECURITY (Section 39A-3K). The write above
+        // (via DeadlineService::create() -> CalendarEventService::
+        // createFor(), inside DeadlineService's own runWithFirmContext()
+        // wrap) still succeeds exactly as before, but that context is
+        // always cleared again before scheduleDeadlineWithReminders()
+        // returns — so this post-call raw count read needs its own
+        // explicit, scoped tenant context or it would be fail-closed to
+        // zero rows.
+        $this->assertSame(
+            1,
+            $this->runWithFirmContext($firm, fn () => \App\Models\CalendarEvent::withoutGlobalScopes()->where('matter_id', $matter->id)->count()),
+        );
 
         // Step 9: invoice draft
         $invoice = $this->pilot->draftInvoice($firm, $client, 'Flat fee for representation', 150000, $matter);

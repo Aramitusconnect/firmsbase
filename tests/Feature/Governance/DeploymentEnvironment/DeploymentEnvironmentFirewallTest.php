@@ -328,6 +328,27 @@ class DeploymentEnvironmentFirewallTest extends TestCase
                 'database/factories/ConsultationFactory.php',
                 'tests/Feature/Leads/LeadConversionServiceTest.php',
                 'tests/Feature/Webhooks/Wiring/LeadCreatedWiringTest.php',
+                // Section 39A-3K (this batch, a later, distinct
+                // staged-FORCE-activation branch) legitimately added
+                // FORCE RLS migrations for firm_practice_areas,
+                // document_chase_rules, employee_rates, calendar_events,
+                // and client_communication_preferences together, their
+                // factory context-hold fixes, and updated the tests it
+                // affected.
+                'database/migrations/2026_08_20_920001_force_rls_on_firm_practice_areas_table.php',
+                'database/migrations/2026_08_20_920002_force_rls_on_document_chase_rules_table.php',
+                'database/migrations/2026_08_20_920003_force_rls_on_employee_rates_table.php',
+                'database/migrations/2026_08_20_920004_force_rls_on_calendar_events_table.php',
+                'database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php',
+                'database/factories/CalendarEventFactory.php',
+                'database/factories/ClientCommunicationPreferenceFactory.php',
+                'database/factories/DocumentChaseRuleFactory.php',
+                'database/factories/EmployeeRateFactory.php',
+                'database/factories/FirmPracticeAreaFactory.php',
+                'tests/Feature/Deadlines/CalendarEventServiceTest.php',
+                'tests/Feature/Deadlines/DeadlineServiceTest.php',
+                'tests/Feature/DocumentChase/DocumentChaseSchedulerServiceTest.php',
+                'tests/Feature/Rates/EmployeeRateServiceTest.php',
             'config/auth.php',
             'app/Models/User.php',
             'app/Models/PlatformAdmin.php',

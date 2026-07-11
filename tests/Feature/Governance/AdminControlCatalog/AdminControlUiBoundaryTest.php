@@ -194,7 +194,30 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== 'database/factories/FirmLeadFactory.php'
                 && $path !== 'database/factories/ConsultationFactory.php'
                 && $path !== 'tests/Feature/Leads/LeadConversionServiceTest.php'
-                && $path !== 'tests/Feature/Webhooks/Wiring/LeadCreatedWiringTest.php',
+                && $path !== 'tests/Feature/Webhooks/Wiring/LeadCreatedWiringTest.php'
+                // Section 39A-3K (this batch, a later, distinct
+                // staged-FORCE-activation branch) legitimately added
+                // FORCE RLS migrations for firm_practice_areas,
+                // document_chase_rules, employee_rates, calendar_events,
+                // and client_communication_preferences together, their
+                // factory context-hold fixes (app/Services/ is already
+                // excluded above, so only the migration/factory/
+                // affected tests need listing here), and updated the
+                // tests it affected.
+                && $path !== 'database/migrations/2026_08_20_920001_force_rls_on_firm_practice_areas_table.php'
+                && $path !== 'database/migrations/2026_08_20_920002_force_rls_on_document_chase_rules_table.php'
+                && $path !== 'database/migrations/2026_08_20_920003_force_rls_on_employee_rates_table.php'
+                && $path !== 'database/migrations/2026_08_20_920004_force_rls_on_calendar_events_table.php'
+                && $path !== 'database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php'
+                && $path !== 'database/factories/CalendarEventFactory.php'
+                && $path !== 'database/factories/ClientCommunicationPreferenceFactory.php'
+                && $path !== 'database/factories/DocumentChaseRuleFactory.php'
+                && $path !== 'database/factories/EmployeeRateFactory.php'
+                && $path !== 'database/factories/FirmPracticeAreaFactory.php'
+                && $path !== 'tests/Feature/Deadlines/CalendarEventServiceTest.php'
+                && $path !== 'tests/Feature/Deadlines/DeadlineServiceTest.php'
+                && $path !== 'tests/Feature/DocumentChase/DocumentChaseSchedulerServiceTest.php'
+                && $path !== 'tests/Feature/Rates/EmployeeRateServiceTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

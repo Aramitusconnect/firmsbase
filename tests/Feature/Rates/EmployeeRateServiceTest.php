@@ -34,21 +34,37 @@ class EmployeeRateServiceTest extends TestCase
 
     public function test_setting_a_new_rate_closes_out_the_previous_open_rate(): void
     {
+        // Section 39A-3K follow-up: employee_rates is now FORCE RLS
+        // enabled. EmployeeRateService::setRate() self-wraps in its own
+        // runWithFirmContext() (see the service's own docblock), which
+        // ALWAYS clears the PostgreSQL session/PHP-memory tenant
+        // context again before returning (even on success) — so the
+        // re-reads below (->fresh() and the raw count query), which
+        // happen AFTER setRate() has already returned, would otherwise
+        // run with no context active and be fail-closed to zero rows
+        // under FORCE RLS. Re-querying under an explicit, scoped
+        // runWithFirmContext() (rather than setting context for the
+        // whole test class) is the narrow fix — setRate() itself still
+        // establishes its own context internally exactly as before.
         $firm = Firm::factory()->create();
         $user = User::factory()->create();
 
         $first = $this->service->setRate($firm, $user, 20000, 10000, effectiveFrom: now()->subMonths(2));
         $second = $this->service->setRate($firm, $user, 25000, 12000, effectiveFrom: now());
 
-        $this->assertNotNull($first->fresh()->effective_to);
-        $this->assertNull($second->fresh()->effective_to);
-        $this->assertSame(
-            1,
-            \App\Models\EmployeeRate::where('firm_id', $firm->id)
+        [$firstFresh, $secondFresh, $openCount] = $this->runWithFirmContext($firm, fn () => [
+            $first->fresh(),
+            $second->fresh(),
+            \App\Models\EmployeeRate::withoutGlobalScopes()
+                ->where('firm_id', $firm->id)
                 ->where('user_id', $user->id)
                 ->whereNull('effective_to')
-                ->count()
-        );
+                ->count(),
+        ]);
+
+        $this->assertNotNull($firstFresh->effective_to);
+        $this->assertNull($secondFresh->effective_to);
+        $this->assertSame(1, $openCount);
     }
 
     public function test_current_rate_for_returns_the_rate_active_on_a_historical_date(): void

@@ -60,9 +60,13 @@ class RowLevelSecurityPreparationTest extends TestCase
         // branch) legitimately activated permanent FORCE ROW LEVEL
         // SECURITY on firm_users — see
         // database/migrations/2026_07_31_900001_force_rls_on_firm_users_table.php.
+        // Section 39A-3K (this batch, a later, distinct staged-FORCE-
+        // activation branch) legitimately activated permanent FORCE ROW
+        // LEVEL SECURITY on client_communication_preferences — see
+        // database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php.
         // Every other Phase 1 table here remains prepared-but-not-forced.
-        if ($table === 'firm_users') {
-            $this->assertTrue((bool) $row->relforcerowsecurity, 'firm_users must have permanent FORCE ROW LEVEL SECURITY active.');
+        if ($table === 'firm_users' || $table === 'client_communication_preferences') {
+            $this->assertTrue((bool) $row->relforcerowsecurity, "{$table} must have permanent FORCE ROW LEVEL SECURITY active.");
 
             return;
         }

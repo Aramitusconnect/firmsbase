@@ -36,9 +36,23 @@ class CalendarEventServiceTest extends TestCase
 
     public function test_create_standalone_has_no_subject(): void
     {
+        // Section 39A-3K follow-up: calendar_events is now FORCE RLS
+        // enabled, and CalendarEventService deliberately does NOT
+        // self-wrap in runWithFirmContext() (see the service's own
+        // docblock) — its one production call site
+        // (DeadlineService::create()) already establishes context for
+        // the whole operation, but createStandalone() has no
+        // production caller today, so a caller must establish context
+        // itself, exactly as this test now does. A scoped
+        // runWithFirmContext() around just this call (rather than
+        // context for the whole test class) mirrors what a real future
+        // caller would have to do.
         $firm = Firm::factory()->create();
 
-        $event = $this->service->createStandalone($firm, 'Client meeting', now()->addDay());
+        $event = $this->runWithFirmContext(
+            $firm,
+            fn () => $this->service->createStandalone($firm, 'Client meeting', now()->addDay()),
+        );
 
         $this->assertNull($event->subject_type);
         $this->assertNull($event->subject_id);

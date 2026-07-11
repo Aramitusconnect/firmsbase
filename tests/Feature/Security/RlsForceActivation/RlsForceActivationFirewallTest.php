@@ -25,15 +25,19 @@ class RlsForceActivationFirewallTest extends TestCase
         $coverage = new RowLevelSecurityCoverageMappingService();
 
         // Section 39A-3B/39A-3C/39A-3D/39A-3E/39A-3F/39A-3G/39A-3H/39A-3I/
-        // 39A-3J (later, distinct staged-FORCE-activation branches)
-        // legitimately activated FORCE for firm_users, documents,
-        // deadlines, tasks, matters, invoices, payments,
-        // conflict_check_runs, and (Section 39A-3J, this batch)
-        // lead_sources, consultation_outcomes, firm_leads, consultations
-        // too — this test's own scope (39A-3A) only asserts clients here.
+        // 39A-3J/39A-3K (later, distinct staged-FORCE-activation
+        // branches) legitimately activated FORCE for firm_users,
+        // documents, deadlines, tasks, matters, invoices, payments,
+        // conflict_check_runs, lead_sources, consultation_outcomes,
+        // firm_leads, consultations (Section 39A-3J), and (Section
+        // 39A-3K) firm_practice_areas, document_chase_rules,
+        // employee_rates, calendar_events,
+        // client_communication_preferences too — this test's own scope
+        // (39A-3A) only asserts clients here.
         $forcedByLaterBranch = [
             'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
+            'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

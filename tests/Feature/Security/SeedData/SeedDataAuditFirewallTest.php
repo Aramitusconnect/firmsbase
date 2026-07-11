@@ -327,6 +327,30 @@ class SeedDataAuditFirewallTest extends TestCase
             // Reusable Claude Code subagent team for the RLS backlog
             // effort.
             '.claude/agents/',
+            // Section 39A-3K (this batch, a later, distinct staged-
+            // FORCE-activation branch) legitimately added FORCE RLS
+            // migrations for firm_practice_areas, document_chase_rules,
+            // employee_rates, calendar_events, and
+            // client_communication_preferences together, their factory
+            // context-hold fixes, explicit tenant-context wiring in
+            // CalendarEventService and EmployeeRateService, and updated
+            // the tests it affected.
+            'database/migrations/2026_08_20_920001_force_rls_on_firm_practice_areas_table.php',
+            'database/migrations/2026_08_20_920002_force_rls_on_document_chase_rules_table.php',
+            'database/migrations/2026_08_20_920003_force_rls_on_employee_rates_table.php',
+            'database/migrations/2026_08_20_920004_force_rls_on_calendar_events_table.php',
+            'database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php',
+            'app/Services/CalendarEventService.php',
+            'app/Services/EmployeeRateService.php',
+            'database/factories/CalendarEventFactory.php',
+            'database/factories/ClientCommunicationPreferenceFactory.php',
+            'database/factories/DocumentChaseRuleFactory.php',
+            'database/factories/EmployeeRateFactory.php',
+            'database/factories/FirmPracticeAreaFactory.php',
+            'tests/Feature/Deadlines/CalendarEventServiceTest.php',
+            'tests/Feature/Deadlines/DeadlineServiceTest.php',
+            'tests/Feature/DocumentChase/DocumentChaseSchedulerServiceTest.php',
+            'tests/Feature/Rates/EmployeeRateServiceTest.php',
         ];
 
         $unexpected = array_values(array_filter(
@@ -598,6 +622,30 @@ class SeedDataAuditFirewallTest extends TestCase
             'app/Services/MatterOpeningService.php',
             'tests/Feature/Conflicts/ConflictCheckServiceTest.php',
             'tests/Feature/Matters/MatterOpeningServiceTest.php',
+            // Section 39A-3K (this batch, a later, distinct staged-
+            // FORCE-activation branch) legitimately added FORCE RLS
+            // migrations for firm_practice_areas, document_chase_rules,
+            // employee_rates, calendar_events, and
+            // client_communication_preferences together, their factory
+            // context-hold fixes, explicit tenant-context wiring in
+            // CalendarEventService and EmployeeRateService, and updated
+            // the tests it affected.
+            'database/migrations/2026_08_20_920001_force_rls_on_firm_practice_areas_table.php',
+            'database/migrations/2026_08_20_920002_force_rls_on_document_chase_rules_table.php',
+            'database/migrations/2026_08_20_920003_force_rls_on_employee_rates_table.php',
+            'database/migrations/2026_08_20_920004_force_rls_on_calendar_events_table.php',
+            'database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php',
+            'app/Services/CalendarEventService.php',
+            'app/Services/EmployeeRateService.php',
+            'database/factories/CalendarEventFactory.php',
+            'database/factories/ClientCommunicationPreferenceFactory.php',
+            'database/factories/DocumentChaseRuleFactory.php',
+            'database/factories/EmployeeRateFactory.php',
+            'database/factories/FirmPracticeAreaFactory.php',
+            'tests/Feature/Deadlines/CalendarEventServiceTest.php',
+            'tests/Feature/Deadlines/DeadlineServiceTest.php',
+            'tests/Feature/DocumentChase/DocumentChaseSchedulerServiceTest.php',
+            'tests/Feature/Rates/EmployeeRateServiceTest.php',
         ];
 
         return array_values(array_filter(

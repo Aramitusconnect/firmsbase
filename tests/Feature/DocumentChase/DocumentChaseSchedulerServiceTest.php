@@ -23,23 +23,31 @@ class DocumentChaseSchedulerServiceTest extends TestCase
 
     public function test_applicable_rule_prefers_a_scope_specific_rule_over_the_firm_wide_rule(): void
     {
+        // Section 39A-3K follow-up: document_chase_rules is now FORCE
+        // RLS enabled. DocumentChaseSchedulerService::applicableRule()
+        // was deliberately left un-wrapped (see the migration's own
+        // docblock — this read path was traced and confirmed
+        // unreachable in production today), so a caller must establish
+        // context itself, exactly as this test now does with a scoped
+        // runWithFirmContext() around just the read.
         $firm = Firm::factory()->create();
         $wide = DocumentChaseRule::factory()->forFirm($firm)->create(['applies_to' => null]);
         $specific = DocumentChaseRule::factory()->forFirm($firm)->create(['applies_to' => 'immigration']);
         $item = DocumentRequestItem::factory()->create();
 
-        $resolved = $this->service->applicableRule($firm, $item, 'immigration');
+        $resolved = $this->runWithFirmContext($firm, fn () => $this->service->applicableRule($firm, $item, 'immigration'));
 
         $this->assertTrue($resolved->is($specific));
     }
 
     public function test_applicable_rule_falls_back_to_the_firm_wide_rule(): void
     {
+        // Same reasoning as the test above.
         $firm = Firm::factory()->create();
         $wide = DocumentChaseRule::factory()->forFirm($firm)->create(['applies_to' => null]);
         $item = DocumentRequestItem::factory()->create();
 
-        $resolved = $this->service->applicableRule($firm, $item, 'family_law');
+        $resolved = $this->runWithFirmContext($firm, fn () => $this->service->applicableRule($firm, $item, 'family_law'));
 
         $this->assertTrue($resolved->is($wide));
     }
