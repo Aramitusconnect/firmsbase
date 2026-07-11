@@ -30,6 +30,31 @@ use Illuminate\Support\Facades\DB;
  * checks/blocking reasons/transitions, per project rule) — this is the
  * only write this service performs to firm_activation_events; it never
  * writes to firms itself.
+ *
+ * Section 39A-3L, Checkpoint 3 — firm_activation_events now has FORCE
+ * ROW LEVEL SECURITY active. Tenant-context wiring, one wrap per unit of
+ * work (project convention — see TenantContextService's own docblock on
+ * why a nested self-wrap is unsafe):
+ *   - evaluate() no longer calls its own (previously unwrapped,
+ *     redundant) loadMissing(['activationChecklist.items']) — that call
+ *     was deleted outright rather than wrapped, since it did nothing
+ *     but poison Eloquent's relation cache ahead of
+ *     ActivationChecklistService::unmetRequirements()'s own correct,
+ *     context-wrapped load of the same relation (loadMissing() no-ops
+ *     on a relation already "loaded," even cached as null).
+ *   - recordEvaluation() (private, called from evaluate() after
+ *     unmetRequirements() returns) wraps its entire body in one
+ *     runWithFirmContext() call. This is a second, SEQUENTIAL wrap, not
+ *     a nested one: by the time evaluate() reaches recordEvaluation(),
+ *     unmetRequirements()'s own wrap has already returned and cleared —
+ *     exactly like ActivationChecklistService::activate()'s pattern.
+ *   - autoCompleteVerifiableItems() wraps its entire body in one
+ *     runWithFirmContext() call; it calls no other already-wrapped
+ *     method, so there is no nesting risk. Its existing per-item
+ *     DB::transaction() stays nested inside the new outer wrap as a
+ *     savepoint (safe per TenantContextService's own docblock).
+ *   - isProductionReady() needs no wrap of its own: it does nothing but
+ *     delegate to evaluate().
  */
 class FirmProductionActivationService
 {
@@ -58,8 +83,15 @@ class FirmProductionActivationService
 
     public function evaluate(Firm $firm): ProductionReadinessResult
     {
-        $firm->loadMissing(['activationChecklist.items']);
-
+        // Deliberately no loadMissing() call here: this is fully
+        // redundant with (and, worse, would poison the cache ahead of)
+        // ActivationChecklistService::unmetRequirements()'s own wrapped
+        // loadMissing(['activationChecklist.items', ...]) on the very
+        // next line. loadMissing() no-ops on a relation that is already
+        // "loaded" — even if that load happened outside any tenant
+        // context and cached null — so an unwrapped call here would
+        // silently prevent the correct, context-wrapped load below from
+        // ever running. See this class's docblock.
         $baseUnmet = $this->activationChecklist->unmetRequirements($firm);
         $blockingReasons = $baseUnmet;
 
@@ -113,77 +145,91 @@ class FirmProductionActivationService
      */
     public function autoCompleteVerifiableItems(Firm $firm): array
     {
-        $firm->loadMissing(['activationChecklist.items', 'firmSettings', 'firmPracticeAreas', 'licenses', 'firmUsers']);
+        // Whole-method wrap: this method calls no other method that
+        // already self-wraps (it does not call evaluate() or
+        // unmetRequirements()), so there is no nesting risk here. The
+        // per-item DB::transaction() below stays nested inside this
+        // wrap as a savepoint, per TenantContextService's own docblock.
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm) {
+            $firm->loadMissing(['activationChecklist.items', 'firmSettings', 'firmPracticeAreas', 'licenses', 'firmUsers']);
 
-        $checklist = $firm->activationChecklist;
+            $checklist = $firm->activationChecklist;
 
-        if (! $checklist) {
-            return [];
-        }
-
-        $checks = [
-            'jurisdiction' => fn () => (bool) $firm->firmSettings?->state_jurisdiction,
-            'practice_areas' => fn () => $firm->firmPracticeAreas->contains(fn ($fpa) => $fpa->is_enabled),
-            'plan_license' => fn () => $firm->licenses->contains(
-                fn ($license) => ! in_array($license->license_status, [
-                    \App\Enums\LicenseStatus::Cancelled,
-                    \App\Enums\LicenseStatus::Expired,
-                ], true)
-            ),
-            'payment_mode' => fn () => (bool) $firm->firmSettings?->payment_mode,
-            'ai_mode' => fn () => (bool) $firm->firmSettings?->ai_mode,
-            'users' => fn () => $firm->firmUsers->contains(
-                fn ($fu) => $fu->status === \App\Enums\FirmUserStatus::Active
-            ),
-        ];
-
-        $completed = [];
-
-        foreach ($checks as $itemKey => $isSatisfied) {
-            $item = $checklist->items()->where('item_key', $itemKey)->first();
-
-            if (! $item || $item->is_complete || $item->waived_at) {
-                continue;
+            if (! $checklist) {
+                return [];
             }
 
-            if ($isSatisfied()) {
-                DB::transaction(function () use ($item, $firm, $itemKey, &$completed) {
-                    $item->update(['is_complete' => true, 'completed_at' => now()]);
+            $checks = [
+                'jurisdiction' => fn () => (bool) $firm->firmSettings?->state_jurisdiction,
+                'practice_areas' => fn () => $firm->firmPracticeAreas->contains(fn ($fpa) => $fpa->is_enabled),
+                'plan_license' => fn () => $firm->licenses->contains(
+                    fn ($license) => ! in_array($license->license_status, [
+                        \App\Enums\LicenseStatus::Cancelled,
+                        \App\Enums\LicenseStatus::Expired,
+                    ], true)
+                ),
+                'payment_mode' => fn () => (bool) $firm->firmSettings?->payment_mode,
+                'ai_mode' => fn () => (bool) $firm->firmSettings?->ai_mode,
+                'users' => fn () => $firm->firmUsers->contains(
+                    fn ($fu) => $fu->status === \App\Enums\FirmUserStatus::Active
+                ),
+            ];
 
-                    \App\Models\FirmActivationEvent::create([
-                        'firm_id' => $firm->id,
-                        'event_type' => 'checklist_item_completed',
-                        'status' => FirmActivationEventStatus::Completed,
-                        'checklist_item_key' => $itemKey,
-                    ]);
+            $completed = [];
 
-                    $completed[] = $itemKey;
-                });
+            foreach ($checks as $itemKey => $isSatisfied) {
+                $item = $checklist->items()->where('item_key', $itemKey)->first();
+
+                if (! $item || $item->is_complete || $item->waived_at) {
+                    continue;
+                }
+
+                if ($isSatisfied()) {
+                    DB::transaction(function () use ($item, $firm, $itemKey, &$completed) {
+                        $item->update(['is_complete' => true, 'completed_at' => now()]);
+
+                        \App\Models\FirmActivationEvent::create([
+                            'firm_id' => $firm->id,
+                            'event_type' => 'checklist_item_completed',
+                            'status' => FirmActivationEventStatus::Completed,
+                            'checklist_item_key' => $itemKey,
+                        ]);
+
+                        $completed[] = $itemKey;
+                    });
+                }
             }
-        }
 
-        return $completed;
+            return $completed;
+        });
     }
 
     private function recordEvaluation(Firm $firm, bool $ready, array $unmetItems, array $blockingReasons): void
     {
-        \App\Models\FirmActivationEvent::create([
-            'firm_id' => $firm->id,
-            'event_type' => 'production_readiness_evaluated',
-            'status' => $ready ? FirmActivationEventStatus::Passed : FirmActivationEventStatus::Blocked,
-            'blocking_reason' => $ready ? null : implode('; ', array_merge($blockingReasons, $unmetItems)),
-            'metadata_json' => [
-                'unmet_items' => $unmetItems,
-                'blocking_reasons' => $blockingReasons,
-            ],
-        ]);
-
-        if ($ready) {
+        // Whole-method wrap: this is a second, SEQUENTIAL wrap, not a
+        // nested one — by the time evaluate() calls recordEvaluation(),
+        // unmetRequirements()'s own wrap (invoked earlier in evaluate())
+        // has already returned and cleared its context. Same pattern as
+        // ActivationChecklistService::activate()'s second wrap.
+        (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $ready, $unmetItems, $blockingReasons) {
             \App\Models\FirmActivationEvent::create([
                 'firm_id' => $firm->id,
-                'event_type' => 'production_ready',
-                'status' => FirmActivationEventStatus::Completed,
+                'event_type' => 'production_readiness_evaluated',
+                'status' => $ready ? FirmActivationEventStatus::Passed : FirmActivationEventStatus::Blocked,
+                'blocking_reason' => $ready ? null : implode('; ', array_merge($blockingReasons, $unmetItems)),
+                'metadata_json' => [
+                    'unmet_items' => $unmetItems,
+                    'blocking_reasons' => $blockingReasons,
+                ],
             ]);
-        }
+
+            if ($ready) {
+                \App\Models\FirmActivationEvent::create([
+                    'firm_id' => $firm->id,
+                    'event_type' => 'production_ready',
+                    'status' => FirmActivationEventStatus::Completed,
+                ]);
+            }
+        });
     }
 }

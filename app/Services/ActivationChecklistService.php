@@ -38,9 +38,10 @@ use Illuminate\Support\Facades\DB;
  * docblock on why a nested self-wrap is unsafe):
  *   - unmetRequirements() self-wraps its entire body. It is called
  *     from two unwrapped external sites this batch does not touch -
- *     tests, and FirmProductionActivationService::isEligibleForActivation()
- *     (out of scope for this checkpoint) - so it must establish its
- *     own context to work correctly for those callers.
+ *     tests, and FirmProductionActivationService::evaluate()/
+ *     isProductionReady() (out of scope for this checkpoint) - so it
+ *     must establish its own context to work correctly for those
+ *     callers.
  *   - isEligible() needs no wrap of its own: it does nothing but
  *     delegate to the already self-wrapped unmetRequirements() above.
  *   - activate() deliberately does NOT wrap its call to

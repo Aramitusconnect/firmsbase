@@ -77,7 +77,12 @@ class FirmProductionActivationServiceTest extends TestCase
         $firm = $this->firmWithBaseActivationSatisfied();
         $this->activationChecklist->seedProductionReadinessItems($firm);
 
-        $firm->fresh()->activationChecklist->items()->update(['is_complete' => true, 'completed_at' => now()]);
+        // Section 39A-3L, Checkpoint 3 — activation_checklists now has
+        // FORCE ROW LEVEL SECURITY active, so this bare read (loading
+        // $firm->fresh()->activationChecklist) needs an explicit tenant
+        // context wrap, same as ActivationChecklistServiceTest's own
+        // Checkpoint 2 fix.
+        $this->runWithFirmContext($firm, fn () => $firm->fresh()->activationChecklist->items()->update(['is_complete' => true, 'completed_at' => now()]));
 
         $result = $this->service->evaluate($firm->fresh());
 
@@ -91,11 +96,15 @@ class FirmProductionActivationServiceTest extends TestCase
         $firm = $this->firmWithBaseActivationSatisfied();
         $this->activationChecklist->seedProductionReadinessItems($firm);
 
-        $firm->fresh()->activationChecklist->items()->update([
+        // Section 39A-3L, Checkpoint 3 — same bare-read fix as above:
+        // loading $firm->fresh()->activationChecklist now requires an
+        // explicit tenant context since activation_checklists has FORCE
+        // ROW LEVEL SECURITY active.
+        $this->runWithFirmContext($firm, fn () => $firm->fresh()->activationChecklist->items()->update([
             'is_complete' => false,
             'waived_at' => now(),
             'waiver_reason' => 'Not applicable for this pilot firm',
-        ]);
+        ]));
 
         $result = $this->service->evaluate($firm->fresh());
 
@@ -108,7 +117,16 @@ class FirmProductionActivationServiceTest extends TestCase
 
         $this->service->evaluate($firm);
 
-        $event = \App\Models\FirmActivationEvent::query()->where('firm_id', $firm->id)->first();
+        // Section 39A-3L, Checkpoint 3 — firm_activation_events now has
+        // FORCE ROW LEVEL SECURITY active. evaluate()'s own
+        // runWithFirmContext() wrap (inside recordEvaluation()) has
+        // already returned and cleared context by the time this read
+        // runs, so this genuinely fresh read needs its own explicit
+        // wrap.
+        $event = $this->runWithFirmContext(
+            $firm,
+            fn () => \App\Models\FirmActivationEvent::query()->where('firm_id', $firm->id)->first(),
+        );
 
         $this->assertNotNull($event);
         $this->assertSame('production_readiness_evaluated', $event->event_type);
@@ -119,13 +137,26 @@ class FirmProductionActivationServiceTest extends TestCase
     {
         $firm = $this->firmWithBaseActivationSatisfied();
         $this->activationChecklist->seedProductionReadinessItems($firm);
-        $firm->fresh()->activationChecklist->items()->update(['is_complete' => true, 'completed_at' => now()]);
+
+        // Section 39A-3L, Checkpoint 3 — same bare-read fix as the
+        // other tests in this file: loading
+        // $firm->fresh()->activationChecklist now requires an explicit
+        // tenant context since activation_checklists has FORCE ROW
+        // LEVEL SECURITY active.
+        $this->runWithFirmContext($firm, fn () => $firm->fresh()->activationChecklist->items()->update(['is_complete' => true, 'completed_at' => now()]));
 
         $this->service->evaluate($firm->fresh());
 
+        // Section 39A-3L, Checkpoint 3 — same firm_activation_events
+        // bare-read fix as test_evaluate_writes_a_firm_scoped_audit_event_every_call()
+        // above: this read happens after evaluate() has already
+        // returned and cleared its own context.
         $this->assertSame(
             1,
-            \App\Models\FirmActivationEvent::query()->where('firm_id', $firm->id)->where('event_type', 'production_ready')->count()
+            $this->runWithFirmContext(
+                $firm,
+                fn () => \App\Models\FirmActivationEvent::query()->where('firm_id', $firm->id)->where('event_type', 'production_ready')->count(),
+            )
         );
     }
 
