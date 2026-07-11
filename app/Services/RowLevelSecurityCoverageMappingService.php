@@ -13,18 +13,41 @@ namespace App\Services;
  * the live database, never runs SQL, and never activates RLS itself.
  *
  * RLS enforcement (FORCE ROW LEVEL SECURITY + SET LOCAL
- * app.current_firm_id session middleware) is NOT active anywhere in
- * this repository. Every finding below reflects that: even the
- * "prepared" tables are inert today for the app's own database
- * connection (table-owner role is exempt from non-forced RLS).
+ * app.current_firm_id session middleware) is PARTIALLY active: as of
+ * Sections 39A-3A through 39A-3K, FORCE ROW LEVEL SECURITY has been
+ * activated on 18 of the 52 prepared tables (see FORCED_TABLES below),
+ * and SET LOCAL app.current_firm_id wiring (TenantContextService) is
+ * exercised by every one of those 18 tables' write paths. This is
+ * real, partial enforcement — it is NOT schema-wide: the remaining 34
+ * prepared tables are still inert for the app's own database
+ * connection (table-owner role is exempt from non-forced RLS), and the
+ * 61 tables in MISSING_PREPARED_TABLES have no RLS policy of any kind
+ * yet. Do not read this docblock as "RLS is fully enforced" — it is
+ * not.
  *
  * Source of truth: the 6 RLS-preparation migrations
  * (2026_07_04_500001 through 2026_07_09_900024) cover only Phases 1-6.
  * No RLS-preparation migration exists for anything after Phase 6 —
  * every tenant-owned table introduced from Phase 7 onward (email,
  * forms, e-signature, accounting/expenses, trust accounting, webhooks,
- * AI governance, Phase 16/17 deployment/license/governance tables) has
- * no RLS policy at all.
+ * AI governance, Phase 16/17 deployment/license/governance tables,
+ * plus the 18 tables added to MISSING_PREPARED_TABLES by Section
+ * 39A-4A.1 after an inventory sweep found them absent from this
+ * registry despite meeting the identical direct-firm_id evidentiary
+ * bar as every other entry) has no RLS policy at all.
+ *
+ * Scope boundary: this registry tracks only tables with their own
+ * firm_id column. Indirectly tenant-owned tables (ownership via a
+ * foreign key to a tenant-scoped parent row, e.g. offboarding_exports
+ * -> offboarding_requests.firm_id, deletion_approvals ->
+ * deletion_requests.firm_id, key_destruction_approvals ->
+ * key_destruction_requests.firm_id) are intentionally out of scope for
+ * PREPARED_TABLES/MISSING_PREPARED_TABLES/EXEMPT_TABLES — they cannot
+ * take the standard `firm_id = current_setting(...)` policy template
+ * used throughout this registry and would instead require a
+ * structurally different EXISTS-against-parent policy design, which is
+ * a separate, unaddressed architectural question, not silently folded
+ * in here.
  */
 class RowLevelSecurityCoverageMappingService
 {
@@ -67,22 +90,45 @@ class RowLevelSecurityCoverageMappingService
      * using the trait) — with NO corresponding RLS-preparation
      * migration found anywhere in the repository.
      *
+     * Section 39A-4A.1 added 18 tables to this array
+     * (accounting_export_lines, customer_success_health_scores,
+     * document_hashes, email_sync_events, fleet_migration_instance_status,
+     * form_review_events, generated_document_events,
+     * implementation_projects, matter_expenses, matter_trust_balances,
+     * pdf_view_events, signature_events, support_access_requests,
+     * support_access_sessions, trust_approval_events,
+     * webhook_deliveries, webhook_delivery_attempts, webhook_secrets)
+     * after an inventory sweep confirmed each has its own NOT NULL
+     * firm_id column, relrowsecurity=false live, and zero RLS policies
+     * — the identical evidentiary bar already used for every
+     * pre-existing entry in this array. This is a pure registry-
+     * tracking correction: none of these 18 tables' live RLS state was
+     * changed by that section.
+     *
      * @var array<int, string>
      */
     private const MISSING_PREPARED_TABLES = [
-        'accounting_export_batches', 'ai_approval_events', 'ai_approval_requests',
-        'ai_retrieval_indexes', 'ai_tool_actions', 'ai_usage_events', 'chart_of_accounts',
+        'accounting_export_batches', 'accounting_export_lines', 'ai_approval_events',
+        'ai_approval_requests', 'ai_retrieval_indexes', 'ai_tool_actions',
+        'ai_usage_events', 'chart_of_accounts', 'customer_success_health_scores',
         'deletion_requests', 'deployment_configs', 'deployment_health_checks',
-        'email_accounts', 'email_attachments', 'email_messages', 'email_message_links',
-        'email_visibility_rules', 'expenses', 'expense_approvals', 'expense_categories',
-        'expense_receipts', 'export_jobs', 'firm_ai_provider_keys', 'firm_ai_settings',
-        'form_drafts', 'generated_documents', 'import_batches', 'key_destruction_requests',
-        'legal_holds', 'migration_projects', 'offboarding_requests',
-        'private_enterprise_settings', 'signature_certificates', 'signature_requests',
-        'signature_request_recipients', 'trust_accounts', 'trust_balances',
-        'trust_chargeback_events', 'trust_ledger_entries', 'trust_ledgers',
-        'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests',
-        'webhook_events', 'webhook_subscriptions',
+        'document_hashes', 'email_accounts', 'email_attachments',
+        'email_message_links', 'email_messages', 'email_sync_events',
+        'email_visibility_rules', 'expense_approvals', 'expense_categories',
+        'expense_receipts', 'expenses', 'export_jobs', 'firm_ai_provider_keys',
+        'firm_ai_settings', 'fleet_migration_instance_status', 'form_drafts',
+        'form_review_events', 'generated_document_events', 'generated_documents',
+        'implementation_projects', 'import_batches', 'key_destruction_requests',
+        'legal_holds', 'matter_expenses', 'matter_trust_balances',
+        'migration_projects', 'offboarding_requests', 'pdf_view_events',
+        'private_enterprise_settings', 'signature_certificates', 'signature_events',
+        'signature_request_recipients', 'signature_requests',
+        'support_access_requests', 'support_access_sessions', 'trust_accounts',
+        'trust_approval_events', 'trust_balances', 'trust_chargeback_events',
+        'trust_ledger_entries', 'trust_ledgers', 'trust_reconciliations',
+        'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries',
+        'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets',
+        'webhook_subscriptions',
     ];
 
     /**
@@ -103,6 +149,27 @@ class RowLevelSecurityCoverageMappingService
         'platform_billing_events', 'platform_invoice_lines', 'usage_rollups',
         'practice_areas', 'matter_types', 'template_packs', 'template_pack_versions',
         'intake_templates',
+    ];
+
+    /**
+     * Subset of PREPARED_TABLES that also have FORCE ROW LEVEL
+     * SECURITY active today, per the 18 FORCE-activation migrations
+     * completed across Sections 39A-3A through 39A-3K
+     * (database/migrations/2026_07_30_900001_force_rls_on_clients_table.php
+     * through 2026_08_20_920005_force_rls_on_client_communication_preferences_table.php).
+     * Like PREPARED_TABLES/MISSING_PREPARED_TABLES/EXEMPT_TABLES, this
+     * is built from direct migration inspection, not live introspection
+     * — kept in sync manually whenever a future section forces another
+     * prepared table.
+     *
+     * @var array<int, string>
+     */
+    private const FORCED_TABLES = [
+        'calendar_events', 'client_communication_preferences', 'clients',
+        'conflict_check_runs', 'consultation_outcomes', 'consultations',
+        'deadlines', 'document_chase_rules', 'documents', 'employee_rates',
+        'firm_leads', 'firm_practice_areas', 'firm_users', 'invoices',
+        'lead_sources', 'matters', 'payments', 'tasks',
     ];
 
     /**
@@ -138,7 +205,15 @@ class RowLevelSecurityCoverageMappingService
     }
 
     /**
-     * @return array{prepared_count: int, tenant_owned_count: int, missing_prepared_count: int, enforcement_active: bool}
+     * @return array<int, string>
+     */
+    public function forcedTables(): array
+    {
+        return self::FORCED_TABLES;
+    }
+
+    /**
+     * @return array{prepared_count: int, tenant_owned_count: int, missing_prepared_count: int, forced_count: int, enforcement_active: bool}
      */
     public function coverageSummary(): array
     {
@@ -146,7 +221,15 @@ class RowLevelSecurityCoverageMappingService
             'prepared_count' => count(self::PREPARED_TABLES),
             'tenant_owned_count' => count($this->tenantOwnedTables()),
             'missing_prepared_count' => count(self::MISSING_PREPARED_TABLES),
-            'enforcement_active' => false,
+            // Aggregate FORCE-count so callers are never misled by a
+            // single boolean: 18 of 52 prepared tables are forced
+            // today. 'enforcement_active' below means "FORCE is active
+            // on every prepared table" (schema-wide enforcement) — it
+            // is intentionally still false, since 34 prepared tables
+            // remain unforced. Use forced_count / forcedTables() /
+            // isForced() for partial/per-table enforcement state.
+            'forced_count' => count(self::FORCED_TABLES),
+            'enforcement_active' => count(self::FORCED_TABLES) === count(self::PREPARED_TABLES),
         ];
     }
 
@@ -158,5 +241,10 @@ class RowLevelSecurityCoverageMappingService
     public function isMissing(string $table): bool
     {
         return in_array($table, self::MISSING_PREPARED_TABLES, true);
+    }
+
+    public function isForced(string $table): bool
+    {
+        return in_array($table, self::FORCED_TABLES, true);
     }
 }
