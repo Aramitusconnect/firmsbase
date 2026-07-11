@@ -145,12 +145,17 @@ class PaymentClassificationEventsForceRlsActivationTest extends TestCase
      * Phase C (this repo's twenty-second staged FORCE activation batch,
      * covering firm_entitlements) for the same reason — additive only,
      * no existing assertion removed or weakened.
+     *
+     * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 5, Table
+     * Phase C (this repo's twenty-third staged FORCE activation batch,
+     * covering firm_entitlement_events) for the same reason — additive
+     * only, no existing assertion removed or weakened.
      */
     public function test_exactly_nineteen_prepared_tables_are_force_row_level_security_enabled(): void
     {
         $coverage = new \App\Services\RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events']);
 
         $actuallyForced = [];
 
@@ -167,7 +172,7 @@ class PaymentClassificationEventsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(22, count($actuallyForced), 'Exactly twenty-two prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 4 — no more, no less (nineteen after this batch\'s own Checkpoint 1, plus activation_checklists from Checkpoint 2, plus firm_activation_events from Checkpoint 3, plus firm_entitlements from Checkpoint 4).');
+        $this->assertSame(23, count($actuallyForced), 'Exactly twenty-three prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 5 — no more, no less (nineteen after this batch\'s own Checkpoint 1, plus activation_checklists from Checkpoint 2, plus firm_activation_events from Checkpoint 3, plus firm_entitlements from Checkpoint 4, plus firm_entitlement_events from Checkpoint 5).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 

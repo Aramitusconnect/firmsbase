@@ -62,6 +62,13 @@ use Tests\TestCase;
  * firewall list from twenty-one to twenty-two tables and add this
  * batch's own migration-existence check — same additive-only pattern,
  * no existing assertion removed or weakened.
+ *
+ * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 5, Table Phase C
+ * (this repo's twenty-third staged FORCE activation batch, covering
+ * firm_entitlement_events) to extend the "exactly these tables are
+ * forced" firewall list from twenty-two to twenty-three tables and add
+ * this batch's own migration-existence check — same additive-only
+ * pattern, no existing assertion removed or weakened.
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -82,14 +89,16 @@ class RlsForceRolloutFirewallTest extends TestCase
         // 1, Table Phase C) payment_classification_events, (Section
         // 39A-3L, Checkpoint 2, Table Phase C) activation_checklists,
         // (Section 39A-3L, Checkpoint 3, Table Phase C)
-        // firm_activation_events, and (Section 39A-3L, Checkpoint 4,
-        // Table Phase C) firm_entitlements too — this test's own scope
-        // (39A-3B) only asserts clients and firm_users here.
+        // firm_activation_events, (Section 39A-3L, Checkpoint 4,
+        // Table Phase C) firm_entitlements, and (Section 39A-3L,
+        // Checkpoint 5, Table Phase C) firm_entitlement_events too —
+        // this test's own scope (39A-3B) only asserts clients and
+        // firm_users here.
         $expectedForced = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
-            'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements',
+            'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -281,6 +290,13 @@ class RlsForceRolloutFirewallTest extends TestCase
         // Section 39A-3L, Checkpoint 4, Table Phase C's own migration —
         // same file-existence reasoning as the checks above.
         $this->assertFileExists(base_path('database/migrations/2026_08_25_930004_force_rls_on_firm_entitlements_table.php'));
+    }
+
+    public function test_the_firm_entitlement_events_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3L, Checkpoint 5, Table Phase C's own migration —
+        // same file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_25_930005_force_rls_on_firm_entitlement_events_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

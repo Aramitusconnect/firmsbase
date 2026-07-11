@@ -177,11 +177,15 @@ class LeadSourcesForceRlsActivationTest extends TestCase
         // Phase C (this repo's twenty-second staged FORCE activation
         // batch, covering firm_entitlements) for the same reason —
         // additive only, no existing assertion removed or weakened.
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 5, Table
+        // Phase C (this repo's twenty-third staged FORCE activation
+        // batch, covering firm_entitlement_events) for the same reason —
+        // additive only, no existing assertion removed or weakened.
         $expectedForced = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
-            'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements',
+            'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
         ];
 
         $rows = DB::select(
@@ -192,7 +196,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the eighteen tables introduced by 39A-3A..39A-3K, plus payment_classification_events (39A-3L Checkpoint 1), activation_checklists (39A-3L Checkpoint 2), and firm_activation_events (39A-3L Checkpoint 3), and firm_entitlements (39A-3L Checkpoint 4), must be FORCE RLS enabled — no more, no fewer.');
+        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the eighteen tables introduced by 39A-3A..39A-3K, plus payment_classification_events (39A-3L Checkpoint 1), activation_checklists (39A-3L Checkpoint 2), and firm_activation_events (39A-3L Checkpoint 3), and firm_entitlements (39A-3L Checkpoint 4), and firm_entitlement_events (39A-3L Checkpoint 5), must be FORCE RLS enabled — no more, no fewer.');
     }
 
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
@@ -209,7 +213,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
-            'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements',
+            'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

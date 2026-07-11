@@ -80,8 +80,17 @@ class RowLevelSecurityPreparationTest extends TestCase
         // which is why this fix landed in the same pass as the new
         // table's own checkpoint.
         //
+        // Section 39A-3L, Checkpoint 5, Table Phase C (this repo's
+        // twenty-third staged FORCE activation batch) legitimately
+        // activated permanent FORCE ROW LEVEL SECURITY on
+        // firm_entitlement_events too — see
+        // database/migrations/2026_08_25_930005_force_rls_on_firm_entitlement_events_table.php.
+        // Added to the exception list in the same pass as this
+        // checkpoint's own table, following the exact same pattern as
+        // Checkpoint 4's own fix above.
+        //
         // Every other Phase 1 table here remains prepared-but-not-forced.
-        if (in_array($table, ['firm_users', 'client_communication_preferences', 'activation_checklists', 'firm_entitlements'], true)) {
+        if (in_array($table, ['firm_users', 'client_communication_preferences', 'activation_checklists', 'firm_entitlements', 'firm_entitlement_events'], true)) {
             $this->assertTrue((bool) $row->relforcerowsecurity, "{$table} must have permanent FORCE ROW LEVEL SECURITY active.");
 
             return;
