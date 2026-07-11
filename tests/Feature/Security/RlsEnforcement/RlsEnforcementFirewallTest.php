@@ -211,11 +211,23 @@ class RlsEnforcementFirewallTest extends TestCase
         $this->assertEmpty($touched, 'Section 39A must not modify unrelated protected files, but found changes to: '.implode(', ', $touched));
     }
 
-    public function test_compliance_gap_registry_service_was_not_deleted_or_rewritten(): void
+    public function test_compliance_gap_registry_service_file_still_exists(): void
     {
-        $changed = $this->changedOrUntrackedPaths('app/Services/ComplianceGapRegistryService.php');
-
-        $this->assertEmpty($changed, 'ComplianceGapRegistryService.php must remain untouched — no resolved-state lifecycle exists to safely mark the gap resolved.');
+        // Section 39A-4A.1 (a later, distinct registry-correction
+        // section) legitimately made one narrow, authorized edit to
+        // this file: correcting the rls_prepared_not_enforced entry's
+        // description text, which falsely claimed "no SET LOCAL
+        // app.current_firm_id wiring" exists (TenantContextService
+        // proves it does). The gap's key, severity (High), and status
+        // (open) were explicitly required to remain unchanged — see
+        // test_gap_registry_still_tracks_the_rls_gap_and_count_remains_twenty_one()
+        // and test_rls_gap_severity_and_status_were_not_downgraded()
+        // below, which prove the file was corrected, not rewritten or
+        // used to silently hide/close the gap. This test only proves
+        // the file itself was not deleted — hence the name change from
+        // the original "was_not_deleted_or_rewritten", which no longer
+        // matched what a bare assertFileExists() actually checks.
+        $this->assertFileExists(app_path('Services/ComplianceGapRegistryService.php'));
     }
 
     public function test_gap_registry_still_tracks_the_rls_gap_and_count_remains_twenty_one(): void
@@ -224,6 +236,65 @@ class RlsEnforcementFirewallTest extends TestCase
 
         $this->assertTrue($registry->isTracked('rls_prepared_not_enforced'));
         $this->assertCount(21, $registry->all());
+    }
+
+    public function test_rls_gap_severity_and_status_were_not_downgraded(): void
+    {
+        // Locks in the Section 39A-4A.1 boundary: the description text
+        // was corrected, but the gap itself must remain exactly as
+        // severe and exactly as open as before.
+        $registry = new ComplianceGapRegistryService();
+        $item = $registry->byKey('rls_prepared_not_enforced');
+
+        $this->assertNotNull($item);
+        $this->assertSame(\App\Enums\GovernanceGapSeverity::High, $item->severity);
+        $this->assertSame('open', $item->status);
+    }
+
+    public function test_rls_gap_description_acknowledges_wiring_and_does_not_hardcode_rollout_counts(): void
+    {
+        // Follow-up correction to Section 39A-4A.1: the description
+        // must state the SET LOCAL wiring truthfully, but must never
+        // again hardcode a rollout snapshot (FORCE/prepared-unforced/
+        // uncovered counts or a section range), since every future
+        // FORCE-RLS batch makes hardcoded numbers stale the moment
+        // they're merged. Current counts belong solely in
+        // RowLevelSecurityCoverageMappingService.
+        $registry = new ComplianceGapRegistryService();
+        $item = $registry->byKey('rls_prepared_not_enforced');
+
+        $this->assertNotNull($item);
+
+        $this->assertStringNotContainsString(
+            'no SET LOCAL app.current_firm_id wiring',
+            $item->description,
+            'The description must not regress to falsely claiming tenant-context wiring is missing.'
+        );
+
+        $this->assertStringContainsString(
+            'SET LOCAL app.current_firm_id',
+            $item->description,
+            'The description must still name the wiring mechanism.'
+        );
+        $this->assertMatchesRegularExpression(
+            '/context wiring \(TenantContextService\) does exist/',
+            $item->description,
+            'The description must affirmatively acknowledge that tenant-context wiring exists.'
+        );
+
+        foreach (['18 of the 52', 'other 34', '61 tables total'] as $staleSnapshot) {
+            $this->assertStringNotContainsString(
+                $staleSnapshot,
+                $item->description,
+                "The description must not hardcode the stale rollout string \"{$staleSnapshot}\" — current counts belong in RowLevelSecurityCoverageMappingService."
+            );
+        }
+
+        $this->assertStringContainsString(
+            'RowLevelSecurityCoverageMappingService',
+            $item->description,
+            'The description must direct callers to RowLevelSecurityCoverageMappingService for current counts.'
+        );
     }
 
     /**

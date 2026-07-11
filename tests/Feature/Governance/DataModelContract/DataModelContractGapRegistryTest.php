@@ -45,13 +45,39 @@ class DataModelContractGapRegistryTest extends TestCase
         $this->assertSame(GovernanceGapSeverity::High, $item->severity);
     }
 
-    public function test_rls_gap_notes_mention_missing_preparation_coverage_for_later_phase_tables(): void
+    public function test_rls_gap_description_tracks_incomplete_preparation_without_stale_phase_labels(): void
     {
+        // Follow-up correction to Section 39A-4A.1: the description no
+        // longer hardcodes rollout phases/counts (they go stale the
+        // moment a new FORCE-RLS or inventory batch lands), so this
+        // test proves the *current* contract — incomplete preparation
+        // is still described accurately, current counts are deferred
+        // to RowLevelSecurityCoverageMappingService, and none of the
+        // old phase labels or stale rollout numbers crept back in.
         $item = $this->service->byKey('rls_prepared_not_enforced');
 
-        $this->assertStringContainsString('Phase 6', $item->description);
-        $this->assertStringContainsString('Phase 7', $item->description);
+        $this->assertNotNull($item);
+
         $this->assertStringContainsString('RowLevelSecurityCoverageMappingService', $item->description);
+
+        $this->assertStringContainsString(
+            'still lack FORCE ROW LEVEL SECURITY',
+            $item->description,
+            'The description must state that some prepared tables remain without FORCE RLS.'
+        );
+        $this->assertStringContainsString(
+            'remain without any prepared RLS policy',
+            $item->description,
+            'The description must state that additional tenant-owned tables remain without prepared RLS policies.'
+        );
+
+        foreach (['Phase 6', 'Phase 7', '18 of the 52', 'other 34', '61 tables total'] as $staleLabel) {
+            $this->assertStringNotContainsString(
+                $staleLabel,
+                $item->description,
+                "The description must not reintroduce the stale label \"{$staleLabel}\"."
+            );
+        }
     }
 
     public function test_no_duplicate_rls_gap_exists(): void
