@@ -59,6 +59,30 @@ class Phase6RowLevelSecurityTest extends TestCase
 
         $this->assertNotNull($row, "Table {$table} not found in pg_class.");
         $this->assertTrue((bool) $row->relrowsecurity, "RLS is not enabled on {$table}.");
+
+        // GAP FOUND AND FIXED during Section 39A-3L, Checkpoint 8's own
+        // audit (not caused by Checkpoint 8 — discovered here): Section
+        // 39A-3L, Checkpoint 7, Table Phase B legitimately activated
+        // permanent FORCE ROW LEVEL SECURITY on template_upgrade_logs
+        // (see
+        // database/migrations/2026_08_25_930007_force_rls_on_template_upgrade_logs_table.php)
+        // but this exception list was never updated to reflect that —
+        // meaning this test silently asserted the WRONG expectation for
+        // template_upgrade_logs ever since Checkpoint 7 landed. Fixed
+        // here, in the same pass as Checkpoint 8's own table,
+        // template_upgrade_previews (see
+        // database/migrations/2026_08_25_930008_force_rls_on_template_upgrade_previews_table.php),
+        // following the exact same "exception list" pattern already
+        // established in RowLevelSecurityPreparationTest.
+        //
+        // seat_allocations remains prepared-but-unforced (a future
+        // checkpoint's table) and deliberately is NOT in this list.
+        if (in_array($table, ['template_upgrade_logs', 'template_upgrade_previews'], true)) {
+            $this->assertTrue((bool) $row->relforcerowsecurity, "{$table} must have permanent FORCE ROW LEVEL SECURITY active.");
+
+            return;
+        }
+
         $this->assertFalse((bool) $row->relforcerowsecurity, "FORCE ROW LEVEL SECURITY unexpectedly enabled on {$table}.");
     }
 

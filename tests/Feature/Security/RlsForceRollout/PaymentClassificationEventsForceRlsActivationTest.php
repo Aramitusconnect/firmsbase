@@ -160,12 +160,17 @@ class PaymentClassificationEventsForceRlsActivationTest extends TestCase
      * Phase C (this repo's twenty-fifth staged FORCE activation batch,
      * covering template_upgrade_logs) for the same reason — additive
      * only, no existing assertion removed or weakened.
+     *
+     * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 8, Table
+     * Phase C (this repo's twenty-sixth staged FORCE activation batch,
+     * covering template_upgrade_previews) for the same reason — additive
+     * only, no existing assertion removed or weakened.
      */
     public function test_exactly_nineteen_prepared_tables_are_force_row_level_security_enabled(): void
     {
         $coverage = new \App\Services\RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events', 'installed_template_packs', 'template_upgrade_logs']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events', 'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews']);
 
         $actuallyForced = [];
 
@@ -182,7 +187,7 @@ class PaymentClassificationEventsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(25, count($actuallyForced), 'Exactly twenty-five prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 7 — no more, no less (nineteen after this batch\'s own Checkpoint 1, plus activation_checklists from Checkpoint 2, plus firm_activation_events from Checkpoint 3, plus firm_entitlements from Checkpoint 4, plus firm_entitlement_events from Checkpoint 5, plus installed_template_packs from Checkpoint 6, plus template_upgrade_logs from Checkpoint 7).');
+        $this->assertSame(26, count($actuallyForced), 'Exactly twenty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 8 — no more, no less (nineteen after this batch\'s own Checkpoint 1, plus activation_checklists from Checkpoint 2, plus firm_activation_events from Checkpoint 3, plus firm_entitlements from Checkpoint 4, plus firm_entitlement_events from Checkpoint 5, plus installed_template_packs from Checkpoint 6, plus template_upgrade_logs from Checkpoint 7, plus template_upgrade_previews from Checkpoint 8).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 

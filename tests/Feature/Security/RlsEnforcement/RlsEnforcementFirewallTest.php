@@ -109,7 +109,12 @@ class RlsEnforcementFirewallTest extends TestCase
                 // batch, a later, distinct staged-FORCE-activation
                 // branch) legitimately added a template_upgrade_logs-
                 // only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930007_force_rls_on_template_upgrade_logs_table.php',
+                && $path !== 'database/migrations/2026_08_25_930007_force_rls_on_template_upgrade_logs_table.php'
+                // Section 39A-3L, Checkpoint 8, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a
+                // template_upgrade_previews-only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930008_force_rls_on_template_upgrade_previews_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A must add no migrations in this pass, but found: '.implode(', ', $changed));

@@ -37,7 +37,17 @@ class TemplateUpgradePreviewServiceTest extends TestCase
         $this->assertSame(TemplateUpgradePreviewStatus::Generated, $preview->status);
         $this->assertSame($toVersion->id, $preview->to_version_id);
         $this->assertSame($originalVersionId, $preview->from_version_id);
-        $this->assertSame($originalVersionId, $installed->fresh()->template_pack_version_id, 'A preview must never mutate the installed version.');
+
+        // installed_template_packs is FORCE RLS as of Checkpoint 6 —
+        // preview()'s own runWithFirmContext() wrap clears the context in
+        // its finally block before returning, so this ->fresh() read must
+        // be explicitly (re-)scoped to the firm rather than relying on any
+        // ambient/leaked context.
+        $this->assertSame(
+            $originalVersionId,
+            $this->runWithFirmContext($firm, fn () => $installed->fresh())->template_pack_version_id,
+            'A preview must never mutate the installed version.'
+        );
         $this->assertNotEmpty($preview->diff_summary_json);
     }
 
@@ -49,6 +59,13 @@ class TemplateUpgradePreviewServiceTest extends TestCase
         $preview = $this->service->preview($installed, $toVersion);
 
         $this->assertSame(TemplateUpgradePreviewStatus::Reviewed, $this->service->markReviewed($preview)->status);
-        $this->assertSame(TemplateUpgradePreviewStatus::Discarded, $this->service->discard($preview->fresh())->status);
+
+        // template_upgrade_previews is FORCE RLS as of this checkpoint —
+        // markReviewed()'s own runWithFirmContext() wrap clears the
+        // context in its finally block before returning, so this
+        // ->fresh() read must be explicitly (re-)scoped to the firm
+        // rather than relying on any ambient/leaked context.
+        $reReadPreview = $this->runWithFirmContext($firm, fn () => $preview->fresh());
+        $this->assertSame(TemplateUpgradePreviewStatus::Discarded, $this->service->discard($reReadPreview)->status);
     }
 }

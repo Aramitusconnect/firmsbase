@@ -39,15 +39,17 @@ class RlsForceActivationFirewallTest extends TestCase
         // 39A-3L, Checkpoint 4, Table Phase C) firm_entitlements,
         // (Section 39A-3L, Checkpoint 5, Table Phase C)
         // firm_entitlement_events, (Section 39A-3L, Checkpoint 6,
-        // Table Phase C) installed_template_packs, and (Section 39A-3L,
-        // Checkpoint 7, Table Phase C) template_upgrade_logs too — this
-        // test's own scope (39A-3A) only asserts clients here.
+        // Table Phase C) installed_template_packs, (Section 39A-3L,
+        // Checkpoint 7, Table Phase C) template_upgrade_logs, and
+        // (Section 39A-3L, Checkpoint 8, Table Phase C)
+        // template_upgrade_previews too — this test's own scope
+        // (39A-3A) only asserts clients here.
         $forcedByLaterBranch = [
             'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
             'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
-            'installed_template_packs', 'template_upgrade_logs',
+            'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

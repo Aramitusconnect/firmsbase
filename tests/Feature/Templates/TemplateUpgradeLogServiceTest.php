@@ -49,9 +49,14 @@ class TemplateUpgradeLogServiceTest extends TestCase
         $persistedInstalled = $this->runWithFirmContext($firm, fn () => $installed->fresh());
         $this->assertSame($toVersion->id, $persistedInstalled->template_pack_version_id);
 
-        // template_upgrade_previews is not yet FORCE RLS, so this read
-        // needs no explicit context.
-        $this->assertSame(\App\Enums\TemplateUpgradePreviewStatus::Applied, $preview->fresh()->status);
+        // template_upgrade_previews is FORCE RLS as of Section 39A-3L,
+        // Checkpoint 8 — apply()'s write to the preview row happens
+        // inside its own runWithFirmContext() wrap, which clears the
+        // context in its finally block before apply() returns, so this
+        // ->fresh() read must be explicitly (re-)scoped to the firm
+        // rather than relying on any ambient/leaked context.
+        $persistedPreview = $this->runWithFirmContext($firm, fn () => $preview->fresh());
+        $this->assertSame(\App\Enums\TemplateUpgradePreviewStatus::Applied, $persistedPreview->status);
     }
 
     public function test_rollback_reverts_the_installed_version_and_inserts_a_new_row_never_mutating_the_original(): void
