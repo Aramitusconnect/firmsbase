@@ -153,9 +153,16 @@ class KeyDestructionLifecycleTest extends TestCase
         $this->assertSame(KeyDestructionRequestStatus::Executed, $executed->status);
         $this->assertNotNull($executed->executed_at);
 
-        $key = $firm->tenantEncryptionKeys()->first();
-        $this->assertTrue($key->fresh()->isDestroyed());
-        $this->assertNotNull($key->fresh()->destroyed_at);
+        // Section 39A-3L, Checkpoint 16: tenant_encryption_keys is now
+        // FORCE RLS. execute() clears its own context wrap before
+        // returning, so this bare read (outside any context) must be
+        // explicitly wrapped — including the fresh() reloads, which are
+        // themselves new queries — or it would incorrectly find no key.
+        $this->runWithFirmContext($firm, function () use ($firm) {
+            $key = $firm->tenantEncryptionKeys()->first();
+            $this->assertTrue($key->fresh()->isDestroyed());
+            $this->assertNotNull($key->fresh()->destroyed_at);
+        });
 
         // The sample ciphertext depended on the destroyed inner key; the
         // firm now has no active key at all to decrypt anything with.
@@ -186,11 +193,20 @@ class KeyDestructionLifecycleTest extends TestCase
 
         app(KeyDestructionExecutionService::class)->execute($request->fresh());
 
-        $this->assertTrue($firmA->tenantEncryptionKeys()->first()->fresh()->isDestroyed());
+        // Section 39A-3L, Checkpoint 16: tenant_encryption_keys is now
+        // FORCE RLS. Both bare reads below (outside any context) must
+        // be explicitly wrapped, each under its own firm — including
+        // the fresh() reloads, which are themselves new queries — or
+        // they would incorrectly find no key.
+        $this->runWithFirmContext($firmA, function () use ($firmA) {
+            $this->assertTrue($firmA->tenantEncryptionKeys()->first()->fresh()->isDestroyed());
+        });
 
         // Firm B's key is completely untouched.
-        $keyB = $firmB->tenantEncryptionKeys()->first();
-        $this->assertTrue($keyB->fresh()->isActive());
+        $this->runWithFirmContext($firmB, function () use ($firmB) {
+            $keyB = $firmB->tenantEncryptionKeys()->first();
+            $this->assertTrue($keyB->fresh()->isActive());
+        });
         $this->assertNotNull(app(EncryptionKeyService::class)->decryptActiveKey($firmB));
     }
 

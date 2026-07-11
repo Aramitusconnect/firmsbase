@@ -85,6 +85,15 @@ class WebhookSecretServiceTest extends TestCase
 
         $this->service->generate($firm, $subscription);
 
+        // Section 39A-3L, Checkpoint 16: tenant_encryption_keys is now
+        // FORCE RLS. This bare relationship lookup (outside any
+        // context, after generate() already cleared its own) must be
+        // explicitly wrapped or it would incorrectly resolve to null.
+        $activeEncryptionKeyId = $this->runWithFirmContext(
+            $firm,
+            fn () => $firm->activeTenantEncryptionKey->id,
+        );
+
         // Attempting to insert a SECOND active row directly (bypassing
         // the service) must be rejected by the partial unique index
         // itself, not merely by application logic.
@@ -94,7 +103,7 @@ class WebhookSecretServiceTest extends TestCase
             'firm_id' => $firm->id,
             'webhook_subscription_id' => $subscription->id,
             'encrypted_secret_ciphertext' => 'x',
-            'encryption_key_id' => $firm->activeTenantEncryptionKey->id,
+            'encryption_key_id' => $activeEncryptionKeyId,
             'status' => 'active',
             'created_at' => now(),
         ]);

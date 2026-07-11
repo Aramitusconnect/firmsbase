@@ -228,7 +228,12 @@ class ConsultationsForceRlsActivationTest extends TestCase
             // activation batch, covering readiness_score_events) for
             // the same reason — additive only, no existing assertion
             // removed or weakened.
-            'matter_readiness_scores', 'readiness_score_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 16,
+            // Table Phase C (this repo's thirty-fourth staged FORCE
+            // activation batch, covering tenant_encryption_keys) for
+            // the same reason — additive only, no existing assertion
+            // removed or weakened.
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys',
         ];
 
         $rows = DB::select(
@@ -286,7 +291,12 @@ class ConsultationsForceRlsActivationTest extends TestCase
             // activation batch, covering readiness_score_events) for
             // the same reason — additive only, no existing assertion
             // removed or weakened.
-            'matter_readiness_scores', 'readiness_score_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 16,
+            // Table Phase C (this repo's thirty-fourth staged FORCE
+            // activation batch, covering tenant_encryption_keys) for
+            // the same reason — additive only, no existing assertion
+            // removed or weakened.
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

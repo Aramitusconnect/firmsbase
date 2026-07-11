@@ -105,8 +105,15 @@ class RowLevelSecurityPreparationTest extends TestCase
         // Added to the exception list in the SAME commit as that
         // migration, again per this file's own docblock lesson above.
         //
+        // Section 39A-3L, Checkpoint 16, Table Phase B legitimately
+        // activated permanent FORCE ROW LEVEL SECURITY on
+        // tenant_encryption_keys — see
+        // database/migrations/2026_08_25_930016_force_rls_on_tenant_encryption_keys_table.php.
+        // Added to the exception list in the SAME commit as that
+        // migration, again per this file's own docblock lesson above.
+        //
         // Every other Phase 1 table here remains prepared-but-not-forced.
-        if (in_array($table, ['firm_users', 'client_communication_preferences', 'activation_checklists', 'firm_entitlements', 'firm_entitlement_events', 'communication_consents', 'communication_consent_events'], true)) {
+        if (in_array($table, ['firm_users', 'client_communication_preferences', 'activation_checklists', 'firm_entitlements', 'firm_entitlement_events', 'communication_consents', 'communication_consent_events', 'tenant_encryption_keys'], true)) {
             $this->assertTrue((bool) $row->relforcerowsecurity, "{$table} must have permanent FORCE ROW LEVEL SECURITY active.");
 
             return;

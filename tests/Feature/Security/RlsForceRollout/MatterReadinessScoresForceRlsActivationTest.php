@@ -131,12 +131,19 @@ class MatterReadinessScoresForceRlsActivationTest extends TestCase
      * forced" firewall list from thirty-two to thirty-three tables —
      * same additive-only pattern, no existing assertion removed or
      * weakened.
+     *
+     * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 16 (this
+     * repo's thirty-fourth staged FORCE activation batch, covering
+     * tenant_encryption_keys) to extend the "exactly these tables are
+     * forced" firewall list from thirty-three to thirty-four tables —
+     * same additive-only pattern, no existing assertion removed or
+     * weakened.
      */
     public function test_exactly_thirty_two_prepared_tables_are_force_row_level_security_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores', 'readiness_score_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys']);
 
         $actuallyForced = [];
 
@@ -153,7 +160,7 @@ class MatterReadinessScoresForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(33, count($actuallyForced), 'Exactly thirty-three prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 14 — no more, no less. Narrowly updated again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two).');
+        $this->assertSame(34, count($actuallyForced), 'Exactly thirty-four prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 14 — no more, no less. Narrowly updated again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two), and again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -168,7 +175,7 @@ class MatterReadinessScoresForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores', 'readiness_score_events']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

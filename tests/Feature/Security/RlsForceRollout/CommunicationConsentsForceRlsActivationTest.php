@@ -149,7 +149,12 @@ class CommunicationConsentsForceRlsActivationTest extends TestCase
         // activation batch, covering readiness_score_events) for
         // the same reason — additive only, no existing assertion
         // removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 16,
+        // Table Phase C (this repo's thirty-fourth staged FORCE
+        // activation batch, covering tenant_encryption_keys) for
+        // the same reason — additive only, no existing assertion
+        // removed or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys']);
 
         $actuallyForced = [];
 
@@ -166,7 +171,7 @@ class CommunicationConsentsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(33, count($actuallyForced), 'Exactly thirty-three prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (communication_consent_events added on top of this batch\'s own communication_consents, plus intake_submissions from Checkpoint 13). Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one), and again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two).');
+        $this->assertSame(34, count($actuallyForced), 'Exactly thirty-four prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (communication_consent_events added on top of this batch\'s own communication_consents, plus intake_submissions from Checkpoint 13). Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one), again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two), and again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -200,7 +205,12 @@ class CommunicationConsentsForceRlsActivationTest extends TestCase
         // activation batch, covering readiness_score_events) for
         // the same reason — additive only, no existing assertion
         // removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 16,
+        // Table Phase C (this repo's thirty-fourth staged FORCE
+        // activation batch, covering tenant_encryption_keys) for
+        // the same reason — additive only, no existing assertion
+        // removed or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

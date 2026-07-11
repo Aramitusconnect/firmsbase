@@ -158,7 +158,12 @@ class FirmEntitlementsForceRlsActivationTest extends TestCase
         // activation batch, covering readiness_score_events) for
         // the same reason — additive only, no existing assertion
         // removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_entitlements', 'firm_entitlement_events', 'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 16,
+        // Table Phase C (this repo's thirty-fourth staged FORCE
+        // activation batch, covering tenant_encryption_keys) for
+        // the same reason — additive only, no existing assertion
+        // removed or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_entitlements', 'firm_entitlement_events', 'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys']);
 
         $actuallyForced = [];
 
@@ -178,7 +183,7 @@ class FirmEntitlementsForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 10, Table
         // Phase C (document_requests) for the same reason — additive
         // only, no existing assertion removed or weakened.
-        $this->assertSame(33, count($actuallyForced), 'Exactly thirty-three prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (firm_entitlement_events, installed_template_packs, template_upgrade_logs, template_upgrade_previews, seat_allocations, document_requests, and communication_consents added on top of this batch\'s own firm_entitlements, plus communication_consent_events from Checkpoint 12, plus intake_submissions from Checkpoint 13). Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one), and again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two).');
+        $this->assertSame(34, count($actuallyForced), 'Exactly thirty-four prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (firm_entitlement_events, installed_template_packs, template_upgrade_logs, template_upgrade_previews, seat_allocations, document_requests, and communication_consents added on top of this batch\'s own firm_entitlements, plus communication_consent_events from Checkpoint 12, plus intake_submissions from Checkpoint 13). Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one), again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two), and again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
