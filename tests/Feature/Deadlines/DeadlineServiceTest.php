@@ -24,6 +24,15 @@ class DeadlineServiceTest extends TestCase
 
     public function test_create_also_creates_a_linked_calendar_event(): void
     {
+        // Section 39A-3K follow-up: calendar_events is now FORCE RLS
+        // enabled. DeadlineService::create() already wraps the whole
+        // deadline-create + linked-calendar-event-create operation in
+        // its own runWithFirmContext() (unchanged by this batch), so
+        // the write above still succeeds exactly as before — but that
+        // context is always cleared again once create() returns, so
+        // this test's OWN re-read (a raw query the test performs to
+        // verify the linked row) must now run under its own scoped
+        // context too, or it would be fail-closed to zero rows.
         $firm = Firm::factory()->create();
 
         $deadline = $this->service->create(
@@ -34,7 +43,10 @@ class DeadlineServiceTest extends TestCase
             reminderOffsetsDays: [7, 3, 1],
         );
 
-        $calendarEvent = \App\Models\CalendarEvent::query()->where('subject_id', $deadline->id)->first();
+        $calendarEvent = $this->runWithFirmContext(
+            $firm,
+            fn () => \App\Models\CalendarEvent::withoutGlobalScopes()->where('subject_id', $deadline->id)->first(),
+        );
 
         $this->assertNotNull($calendarEvent);
         $this->assertSame(\App\Models\Deadline::class, $calendarEvent->subject_type);

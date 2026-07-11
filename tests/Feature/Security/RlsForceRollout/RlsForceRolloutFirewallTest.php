@@ -25,6 +25,15 @@ use Tests\TestCase;
  * this batch's own four migration-existence checks — following the
  * exact same pattern every prior 39A-3C..39A-3I section already used
  * here, not a restructure of this test's own original scope/assertions.
+ *
+ * Narrowly updated AGAIN by Section 39A-3K (this repo's fourteenth
+ * through eighteenth staged FORCE activation batch, covering
+ * firm_practice_areas, document_chase_rules, employee_rates,
+ * calendar_events, and client_communication_preferences together) to
+ * extend the "exactly these tables are forced" firewall list from
+ * thirteen to eighteen tables and add this batch's own five
+ * migration-existence checks — same additive-only pattern, no existing
+ * assertion removed or weakened.
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -34,16 +43,19 @@ class RlsForceRolloutFirewallTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        // Section 39A-3C/39A-3D/39A-3E/39A-3F/39A-3G/39A-3H/39A-3I/39A-3J
-        // (later, distinct staged-FORCE-activation branches)
+        // Section 39A-3C/39A-3D/39A-3E/39A-3F/39A-3G/39A-3H/39A-3I/39A-3J/
+        // 39A-3K (later, distinct staged-FORCE-activation branches)
         // legitimately activated FORCE for documents, deadlines, tasks,
-        // matters, invoices, payments, conflict_check_runs, and (Section
-        // 39A-3J, this batch) lead_sources, consultation_outcomes,
-        // firm_leads, consultations too — this test's own scope (39A-3B)
-        // only asserts clients and firm_users here.
+        // matters, invoices, payments, conflict_check_runs, lead_sources,
+        // consultation_outcomes, firm_leads, consultations (Section
+        // 39A-3J), and (Section 39A-3K) firm_practice_areas,
+        // document_chase_rules, employee_rates, calendar_events,
+        // client_communication_preferences too — this test's own scope
+        // (39A-3B) only asserts clients and firm_users here.
         $expectedForced = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
+            'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -172,6 +184,41 @@ class RlsForceRolloutFirewallTest extends TestCase
         // Section 39A-3J's own migration (this batch, table 4 of 4) —
         // same file-existence reasoning as the checks above.
         $this->assertFileExists(base_path('database/migrations/2026_08_15_900001_force_rls_on_consultations_table.php'));
+    }
+
+    public function test_the_firm_practice_areas_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3K's own migration (this batch, table 1 of 5) —
+        // same file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_20_920001_force_rls_on_firm_practice_areas_table.php'));
+    }
+
+    public function test_the_document_chase_rules_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3K's own migration (this batch, table 2 of 5) —
+        // same file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_20_920002_force_rls_on_document_chase_rules_table.php'));
+    }
+
+    public function test_the_employee_rates_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3K's own migration (this batch, table 3 of 5) —
+        // same file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_20_920003_force_rls_on_employee_rates_table.php'));
+    }
+
+    public function test_the_calendar_events_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3K's own migration (this batch, table 4 of 5) —
+        // same file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_20_920004_force_rls_on_calendar_events_table.php'));
+    }
+
+    public function test_the_client_communication_preferences_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3K's own migration (this batch, table 5 of 5) —
+        // same file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

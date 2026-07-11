@@ -121,12 +121,19 @@ class ConflictCheckRunsForceRlsActivationTest extends TestCase
      * forward — same reasoning as RlsForceRolloutFirewallTest's own
      * narrowly-updated expected-forced list. No other assertion in
      * this file was touched.
+     *
+     * Narrowly updated AGAIN by Section 39A-3K (forcing
+     * firm_practice_areas, document_chase_rules, employee_rates,
+     * calendar_events, and client_communication_preferences together):
+     * same reasoning, count now 18. Still the one place in THIS file
+     * that tracks the real total.
      */
-    public function test_exactly_thirteen_intended_tables_are_force_enabled(): void
+    public function test_exactly_eighteen_intended_tables_are_force_enabled(): void
     {
         $expectedForced = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
+            'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
         ];
 
         $rows = DB::select(
@@ -137,17 +144,18 @@ class ConflictCheckRunsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the thirteen intended tables must be FORCE RLS enabled — no more, no fewer.');
+        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the eighteen intended tables must be FORCE RLS enabled — no more, no fewer.');
     }
 
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new \App\Services\RowLevelSecurityCoverageMappingService();
         // Narrowly updated alongside the count test above for the same
-        // Section 39A-3J reason.
+        // Section 39A-3J/39A-3K reasons.
         $forced = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
+            'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

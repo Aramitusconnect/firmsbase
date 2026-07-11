@@ -157,11 +157,12 @@ class LeadSourcesForceRlsActivationTest extends TestCase
      * intermediate count that this working tree can never actually
      * produce.
      */
-    public function test_exactly_thirteen_intended_tables_are_force_enabled(): void
+    public function test_exactly_eighteen_intended_tables_are_force_enabled(): void
     {
         $expectedForced = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
+            'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
         ];
 
         $rows = DB::select(
@@ -172,7 +173,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the thirteen intended tables must be FORCE RLS enabled — no more, no fewer.');
+        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the eighteen intended tables must be FORCE RLS enabled — no more, no fewer.');
     }
 
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
@@ -181,6 +182,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
         $forced = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
+            'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
