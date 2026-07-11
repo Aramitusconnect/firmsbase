@@ -40,7 +40,15 @@ class MarketReadyFirewallTest extends TestCase
         'app/Services/DocumentSecurityService.php',
         'app/Services/DocumentUploadPolicyService.php',
         'app/Services/TemplatePackCommercialService.php',
-        'app/Services/TemplatePackInstallationService.php',
+        // TemplatePackInstallationService.php is deliberately NOT in
+        // this list any more — Section 39A-3L, Checkpoint 6, Table
+        // Phase C (a later, distinct staged-FORCE-activation branch)
+        // found a genuine need to wrap install()/markUpgradeAvailable()/
+        // disable() each in their own runWithFirmContext() call, since
+        // installed_template_packs now has permanent FORCE ROW LEVEL
+        // SECURITY (this closed a silent-no-op bug: tap($model)->
+        // update() previously appeared to succeed while the underlying
+        // UPDATE actually affected zero rows).
         // ReadinessScorecardRegistry.php is deliberately NOT in this
         // list any more — Section 39A-3E (a later, distinct staged-
         // FORCE-activation branch) found a genuine need to wire the
@@ -406,6 +414,19 @@ class MarketReadyFirewallTest extends TestCase
                 'tests/Feature/Deadlines/DeadlineServiceTest.php',
                 'tests/Feature/DocumentChase/DocumentChaseSchedulerServiceTest.php',
                 'tests/Feature/Rates/EmployeeRateServiceTest.php',
+                // Section 39A-3L, Checkpoint 6, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added an
+                // installed_template_packs-only FORCE RLS migration, an
+                // InstalledTemplatePackFactory context-hold fix, wrapped
+                // TemplatePackInstallationService's three public methods
+                // each in their own runWithFirmContext() call, and
+                // updated the tests it affected.
+                'database/migrations/2026_08_25_930006_force_rls_on_installed_template_packs_table.php',
+                'database/factories/InstalledTemplatePackFactory.php',
+                'app/Services/TemplatePackInstallationService.php',
+                'tests/Feature/PracticeTemplates/TemplatePackInstallationServiceTest.php',
+                'tests/Feature/Templates/TemplateUpgradeLogServiceTest.php',
             'config/auth.php',
             'app/Models/User.php',
             'app/Models/PlatformAdmin.php',

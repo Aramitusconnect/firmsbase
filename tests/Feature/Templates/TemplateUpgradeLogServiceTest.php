@@ -39,7 +39,18 @@ class TemplateUpgradeLogServiceTest extends TestCase
         $this->assertSame(TemplateUpgradeLogStatus::Applied, $log->status);
         $this->assertSame($fromVersionId, $log->from_version_id);
         $this->assertSame($toVersion->id, $log->to_version_id);
-        $this->assertSame($toVersion->id, $installed->fresh()->template_pack_version_id);
+
+        // installed_template_packs is FORCE RLS as of this checkpoint —
+        // apply()'s transaction ultimately calls install(), whose own
+        // runWithFirmContext() wrap clears the context in its finally
+        // block before apply() returns, so this ->fresh() read must be
+        // explicitly (re-)scoped to the firm rather than relying on any
+        // ambient/leaked context.
+        $persistedInstalled = $this->runWithFirmContext($firm, fn () => $installed->fresh());
+        $this->assertSame($toVersion->id, $persistedInstalled->template_pack_version_id);
+
+        // template_upgrade_previews is not yet FORCE RLS, so this read
+        // needs no explicit context.
         $this->assertSame(\App\Enums\TemplateUpgradePreviewStatus::Applied, $preview->fresh()->status);
     }
 
@@ -56,7 +67,13 @@ class TemplateUpgradeLogServiceTest extends TestCase
 
         $this->assertSame(TemplateUpgradeLogStatus::RolledBack, $rollbackLog->status);
         $this->assertSame($appliedLog->id, $rollbackLog->rollback_of_id);
-        $this->assertSame($fromVersionId, $installed->fresh()->template_pack_version_id);
+
+        // installed_template_packs is FORCE RLS as of this checkpoint —
+        // rollback()'s transaction ultimately calls install(), whose own
+        // runWithFirmContext() wrap clears context on exit, so this
+        // ->fresh() read must be explicitly (re-)scoped to the firm.
+        $persistedInstalled = $this->runWithFirmContext($firm, fn () => $installed->fresh());
+        $this->assertSame($fromVersionId, $persistedInstalled->template_pack_version_id);
 
         // The original Applied row is never mutated or deleted.
         $this->assertSame(TemplateUpgradeLogStatus::Applied, $appliedLog->fresh()->status);

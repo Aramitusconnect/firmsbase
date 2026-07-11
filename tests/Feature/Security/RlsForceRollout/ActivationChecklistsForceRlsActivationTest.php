@@ -111,12 +111,17 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
      * Phase C (this repo's twenty-third staged FORCE activation batch,
      * covering firm_entitlement_events) for the same reason — additive
      * only, no existing assertion removed or weakened.
+     *
+     * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 6, Table
+     * Phase C (this repo's twenty-fourth staged FORCE activation batch,
+     * covering installed_template_packs) for the same reason — additive
+     * only, no existing assertion removed or weakened.
      */
     public function test_exactly_twenty_prepared_tables_are_force_row_level_security_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events', 'installed_template_packs']);
 
         $actuallyForced = [];
 
@@ -133,7 +138,7 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(23, count($actuallyForced), 'Exactly twenty-three prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 5 — no more, no less (twenty-one after this batch\'s own Checkpoint 2 plus firm_activation_events from Checkpoint 3, plus firm_entitlements from Checkpoint 4, plus firm_entitlement_events from Checkpoint 5).');
+        $this->assertSame(24, count($actuallyForced), 'Exactly twenty-four prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 6 — no more, no less (twenty-one after this batch\'s own Checkpoint 2 plus firm_activation_events from Checkpoint 3, plus firm_entitlements from Checkpoint 4, plus firm_entitlement_events from Checkpoint 5, plus installed_template_packs from Checkpoint 6).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
