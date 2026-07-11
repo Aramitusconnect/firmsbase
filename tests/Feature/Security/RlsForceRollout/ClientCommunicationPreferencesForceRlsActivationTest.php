@@ -167,7 +167,7 @@ class ClientCommunicationPreferencesForceRlsActivationTest extends TestCase
             // activation batch, covering tenant_encryption_keys) for
             // the same reason — additive only, no existing assertion
             // removed or weakened.
-            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys',
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events',
         ];
 
         $rows = DB::select(
@@ -230,7 +230,7 @@ class ClientCommunicationPreferencesForceRlsActivationTest extends TestCase
             // activation batch, covering tenant_encryption_keys) for
             // the same reason — additive only, no existing assertion
             // removed or weakened.
-            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys',
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

@@ -51,7 +51,14 @@ class DocumentChaseServiceTest extends TestCase
         $result = $this->service->checkAndLog($firm, $item);
 
         $this->assertFalse($result->eligible);
-        $this->assertSame(0, $item->chaseEvents()->count());
+
+        // Section 39A-3L, Checkpoint 17: document_chase_events is now
+        // FORCE RLS. checkAndLog() clears its own context wrap before
+        // returning, so this bare read (outside any context) must be
+        // explicitly wrapped or it would incorrectly see zero rows
+        // regardless of correctness.
+        $count = $this->runWithFirmContext($firm, fn () => $item->chaseEvents()->count());
+        $this->assertSame(0, $count);
     }
 
     public function test_reminders_stop_once_waived(): void
@@ -62,7 +69,10 @@ class DocumentChaseServiceTest extends TestCase
 
         $this->service->checkAndLog($firm, $item);
 
-        $this->assertSame(0, $item->chaseEvents()->count());
+        // Section 39A-3L, Checkpoint 17: same bare-read wrap reasoning
+        // as above.
+        $count = $this->runWithFirmContext($firm, fn () => $item->chaseEvents()->count());
+        $this->assertSame(0, $count);
     }
 
     public function test_no_event_is_logged_when_the_rule_is_paused(): void
@@ -76,7 +86,11 @@ class DocumentChaseServiceTest extends TestCase
 
         $this->assertFalse($result->eligible);
         $this->assertSame('chase rule is paused', $result->reason);
-        $this->assertSame(0, $item->chaseEvents()->count());
+
+        // Section 39A-3L, Checkpoint 17: same bare-read wrap reasoning
+        // as above.
+        $count = $this->runWithFirmContext($firm, fn () => $item->chaseEvents()->count());
+        $this->assertSame(0, $count);
     }
 
     public function test_a_reminder_queued_event_is_logged_when_eligible(): void
@@ -94,7 +108,16 @@ class DocumentChaseServiceTest extends TestCase
         $result = $this->service->checkAndLog($firm, $item);
 
         $this->assertTrue($result->eligible);
-        $this->assertSame(1, $item->chaseEvents()->where('event_type', 'reminder_queued')->count());
+
+        // Section 39A-3L, Checkpoint 17: document_chase_events is now
+        // FORCE RLS. checkAndLog() clears its own context wrap before
+        // returning, so this bare read (outside any context) must be
+        // explicitly wrapped or it would incorrectly see zero rows.
+        $count = $this->runWithFirmContext(
+            $firm,
+            fn () => $item->chaseEvents()->where('event_type', 'reminder_queued')->count(),
+        );
+        $this->assertSame(1, $count);
     }
 
     public function test_a_reminder_skipped_event_is_logged_when_not_eligible_but_status_is_chase_eligible(): void
@@ -107,7 +130,14 @@ class DocumentChaseServiceTest extends TestCase
         $result = $this->service->checkAndLog($firm, $item);
 
         $this->assertFalse($result->eligible);
-        $this->assertSame(1, $item->chaseEvents()->where('event_type', 'reminder_skipped')->count());
+
+        // Section 39A-3L, Checkpoint 17: same bare-read wrap reasoning
+        // as above.
+        $count = $this->runWithFirmContext(
+            $firm,
+            fn () => $item->chaseEvents()->where('event_type', 'reminder_skipped')->count(),
+        );
+        $this->assertSame(1, $count);
     }
 
     public function test_needs_replacement_items_remain_chase_eligible(): void

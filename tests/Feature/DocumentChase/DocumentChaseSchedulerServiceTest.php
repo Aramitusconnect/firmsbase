@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\DocumentChase;
 
+use App\Models\Client;
 use App\Models\DocumentChaseRule;
+use App\Models\DocumentRequest;
 use App\Models\DocumentRequestItem;
 use App\Models\Firm;
 use App\Services\DocumentChaseSchedulerService;
@@ -54,12 +56,28 @@ class DocumentChaseSchedulerServiceTest extends TestCase
 
     public function test_is_reminder_due_respects_max_reminders_already_sent(): void
     {
-        $rule = DocumentChaseRule::factory()->create(['reminder_offsets_days' => [7, 3, 1], 'max_reminders' => 1]);
-        $item = DocumentRequestItem::factory()->create();
+        // Section 39A-3L, Checkpoint 17: document_chase_events is now
+        // FORCE RLS. remindersSentCount() (called inside
+        // isReminderDue()) is deliberately left unwrapped in
+        // production, same established precedent as applicableRule()
+        // above, so this test wraps it explicitly. DocumentChaseEvent
+        // Factory::forItem() now takes $firm directly (see the
+        // factory's own docblock) rather than deriving it via a
+        // relation load, so no context needs to be active for that
+        // call specifically — but the item must still genuinely belong
+        // to the given $firm for remindersSentCount()'s later read to
+        // see the row.
+        $firm = Firm::factory()->create();
+        $client = Client::factory()->forFirm($firm)->create();
+        $request = DocumentRequest::factory()->create(['firm_id' => $firm->id, 'client_id' => $client->id]);
+        $item = DocumentRequestItem::factory()->create(['document_request_id' => $request->id]);
+        $rule = DocumentChaseRule::factory()->forFirm($firm)->create(['reminder_offsets_days' => [7, 3, 1], 'max_reminders' => 1]);
 
-        \App\Models\DocumentChaseEvent::factory()->forItem($item, $rule)->create(['event_type' => 'reminder_queued']);
+        \App\Models\DocumentChaseEvent::factory()->forItem($item, $firm, $rule)->create(['event_type' => 'reminder_queued']);
 
-        $this->assertFalse($this->service->isReminderDue($rule, $item, 3));
+        $isDue = $this->runWithFirmContext($firm, fn () => $this->service->isReminderDue($rule, $item, 3));
+
+        $this->assertFalse($isDue);
     }
 
     public function test_is_reminder_due_true_when_days_since_requested_matches_an_offset(): void

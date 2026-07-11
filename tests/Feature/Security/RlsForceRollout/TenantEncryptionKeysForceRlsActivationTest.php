@@ -97,12 +97,19 @@ class TenantEncryptionKeysForceRlsActivationTest extends TestCase
      * Exactly thirty-four tables (the thirty-three previously forced
      * plus tenant_encryption_keys) must be FORCE-enabled among ALL
      * prepared tables — no more, no less.
+     *
+     * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 17 (this
+     * repo's thirty-fifth staged FORCE activation batch, covering
+     * document_chase_events) to extend the "exactly these tables are
+     * forced" firewall list from thirty-four to thirty-five tables —
+     * same additive-only pattern, no existing assertion removed or
+     * weakened.
      */
     public function test_exactly_thirty_four_prepared_tables_are_force_row_level_security_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['tenant_encryption_keys']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['tenant_encryption_keys', 'document_chase_events']);
 
         $actuallyForced = [];
 
@@ -119,7 +126,7 @@ class TenantEncryptionKeysForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(34, count($actuallyForced), 'Exactly thirty-four prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 16 — no more, no less.');
+        $this->assertSame(35, count($actuallyForced), 'Exactly thirty-five prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 16 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -129,7 +136,7 @@ class TenantEncryptionKeysForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['tenant_encryption_keys']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['tenant_encryption_keys', 'document_chase_events']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

@@ -63,7 +63,7 @@ class RlsContextRolloutFirewallTest extends TestCase
             'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
             'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests',
             'communication_consents', 'communication_consent_events', 'intake_submissions',
-            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys',
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -222,7 +222,12 @@ class RlsContextRolloutFirewallTest extends TestCase
                 // batch, a later, distinct staged-FORCE-activation
                 // branch) legitimately added a tenant_encryption_keys-
                 // only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930016_force_rls_on_tenant_encryption_keys_table.php',
+                && $path !== 'database/migrations/2026_08_25_930016_force_rls_on_tenant_encryption_keys_table.php'
+                // Section 39A-3L, Checkpoint 17, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a document_chase_events-
+                // only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930017_force_rls_on_document_chase_events_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));

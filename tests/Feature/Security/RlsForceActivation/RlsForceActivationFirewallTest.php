@@ -61,7 +61,7 @@ class RlsForceActivationFirewallTest extends TestCase
             'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
             'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests',
             'communication_consents', 'communication_consent_events', 'intake_submissions',
-            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys',
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

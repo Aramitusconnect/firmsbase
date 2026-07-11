@@ -101,10 +101,10 @@ class FirmCommandCenterAggregationService
                 ->where('firm_id', $firm->id)
                 ->where('status', FormDraftStatus::ReadyForReview)
                 ->count(),
-            documentChaseEscalationsCount: DocumentChaseEvent::query()
+            documentChaseEscalationsCount: (new TenantContextService())->runWithFirmContext($firm, fn () => DocumentChaseEvent::query()
                 ->where('firm_id', $firm->id)
                 ->where('event_type', 'escalated')
-                ->count(),
+                ->count()),
             generatedAt: $asOf,
         );
     }

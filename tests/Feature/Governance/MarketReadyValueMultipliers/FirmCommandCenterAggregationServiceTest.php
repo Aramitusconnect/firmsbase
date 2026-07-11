@@ -208,8 +208,17 @@ class FirmCommandCenterAggregationServiceTest extends TestCase
         $request = DocumentRequest::factory()->forClient($client)->create();
         $item = DocumentRequestItem::factory()->forRequest($request)->create();
 
-        DocumentChaseEvent::factory()->forItem($item)->create(['firm_id' => $firm->id, 'event_type' => 'escalated']);
-        DocumentChaseEvent::factory()->forItem($item)->create(['firm_id' => $firm->id, 'event_type' => 'reminder_queued']);
+        // Section 39A-3L, Checkpoint 17: document_chase_events is now
+        // FORCE RLS. forItem() now takes $firm explicitly (see the
+        // factory's own docblock) rather than deriving it via a
+        // relation load, so both calls below are wrapped in the item's
+        // real firm context — matching this test's own already-
+        // established convention for document_requests (Checkpoint 10)
+        // above.
+        $this->runWithFirmContext($firm, function () use ($item, $firm) {
+            DocumentChaseEvent::factory()->forItem($item, $firm)->create(['event_type' => 'escalated']);
+            DocumentChaseEvent::factory()->forItem($item, $firm)->create(['event_type' => 'reminder_queued']);
+        });
 
         $snapshot = $this->service->snapshot($firm);
 
