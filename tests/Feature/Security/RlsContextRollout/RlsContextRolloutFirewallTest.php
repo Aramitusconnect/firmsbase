@@ -50,9 +50,11 @@ class RlsContextRolloutFirewallTest extends TestCase
         // and (Section 39A-3L, Checkpoint 12, Table Phase C)
         // communication_consent_events, and (Section 39A-3L, Checkpoint
         // 13, Table Phase C) intake_submissions, and (Section 39A-3L,
-        // Checkpoint 14, Table Phase C) matter_readiness_scores. This
-        // test's own scope (Section 39A-2) never touched FORCE state;
-        // the remaining prepared tables must still be unforced.
+        // Checkpoint 14, Table Phase C) matter_readiness_scores, and
+        // (Section 39A-3L, Checkpoint 15, Table Phase C)
+        // readiness_score_events. This test's own scope (Section 39A-2)
+        // never touched FORCE state; the remaining prepared tables must
+        // still be unforced.
         $forcedByLaterBranch = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
@@ -60,7 +62,7 @@ class RlsContextRolloutFirewallTest extends TestCase
             'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
             'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests',
             'communication_consents', 'communication_consent_events', 'intake_submissions',
-            'matter_readiness_scores',
+            'matter_readiness_scores', 'readiness_score_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -209,7 +211,12 @@ class RlsContextRolloutFirewallTest extends TestCase
                 // batch, a later, distinct staged-FORCE-activation
                 // branch) legitimately added a matter_readiness_scores-
                 // only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930014_force_rls_on_matter_readiness_scores_table.php',
+                && $path !== 'database/migrations/2026_08_25_930014_force_rls_on_matter_readiness_scores_table.php'
+                // Section 39A-3L, Checkpoint 15, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a readiness_score_events-
+                // only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930015_force_rls_on_readiness_score_events_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));

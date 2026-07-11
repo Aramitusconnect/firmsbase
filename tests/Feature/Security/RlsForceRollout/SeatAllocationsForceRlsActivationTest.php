@@ -136,7 +136,12 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
         // activation batch, covering matter_readiness_scores) for
         // the same reason — additive only, no existing assertion
         // removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 15,
+        // Table Phase C (this repo's thirty-third staged FORCE
+        // activation batch, covering readiness_score_events) for
+        // the same reason — additive only, no existing assertion
+        // removed or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events']);
 
         $actuallyForced = [];
 
@@ -159,7 +164,7 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 11, Table
         // Phase C (communication_consents) for the same reason —
         // additive only, no existing assertion removed or weakened.
-        $this->assertSame(32, count($actuallyForced), 'Exactly thirty-two prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (document_requests and communication_consents added on top of this batch\'s own seat_allocations, plus communication_consent_events from Checkpoint 12, plus intake_submissions from Checkpoint 13). Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one).');
+        $this->assertSame(33, count($actuallyForced), 'Exactly thirty-three prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (document_requests and communication_consents added on top of this batch\'s own seat_allocations, plus communication_consent_events from Checkpoint 12, plus intake_submissions from Checkpoint 13). Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one), and again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -183,7 +188,12 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
         // activation batch, covering matter_readiness_scores) for
         // the same reason — additive only, no existing assertion
         // removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 15,
+        // Table Phase C (this repo's thirty-third staged FORCE
+        // activation batch, covering readiness_score_events) for
+        // the same reason — additive only, no existing assertion
+        // removed or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

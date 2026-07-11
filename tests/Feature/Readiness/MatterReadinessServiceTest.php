@@ -93,7 +93,16 @@ class MatterReadinessServiceTest extends TestCase
         $this->service->recompute($matter);
         $this->service->recompute($matter);
 
-        $this->assertSame(2, \App\Models\ReadinessScoreEvent::query()->where('matter_id', $matter->id)->count());
+        // Section 39A-3L, Checkpoint 15: readiness_score_events is now
+        // FORCE RLS. recompute() clears its own context wrap before
+        // returning, so this bare read (outside any context) must be
+        // explicitly wrapped or it would incorrectly see zero rows.
+        $count = $this->runWithFirmContext(
+            $matter->firm,
+            fn () => \App\Models\ReadinessScoreEvent::query()->where('matter_id', $matter->id)->count(),
+        );
+
+        $this->assertSame(2, $count);
     }
 
     public function test_recompute_upserts_a_single_row_per_matter(): void

@@ -46,16 +46,18 @@ class MatterReadinessService
         // empirically failed: registry->evaluate() calls two evaluators
         // that used to self-wrap internally, and each one's own
         // finally-block teardown cleared this outer context before the
-        // write below ran. Those two evaluators no longer self-wrap
+        // writes below ran. Those two evaluators no longer self-wrap
         // (see ReadinessScorecardRegistry), so this single outer wrap
-        // is now the only context established for the score read+write
-        // sequence. The readiness_score_events write below remains
-        // deliberately OUTSIDE this wrap and unchanged from before this
-        // checkpoint — readiness_score_events is not yet FORCE RLS, so
-        // it does not need tenant context for correctness yet; wrapping
-        // it is Checkpoint 15's own incremental change, once that
-        // table's own FORCE migration lands.
-        [$freshScore, $previousStatus, $status, $satisfiedCount, $totalCount] = (new TenantContextService())->runWithFirmContext(
+        // is now the only context established for the whole read+write
+        // sequence.
+        // Section 39A-3L, Checkpoint 15 (incremental): the
+        // readiness_score_events write, previously left outside this
+        // wrap because that table wasn't forced yet, now moves inside
+        // it — readiness_score_events is FORCE RLS as of this
+        // checkpoint's own migration, so an unwrapped insert would now
+        // fail the same way the score's own write would have under
+        // Checkpoint 14.
+        [$freshScore, $previousStatus, $status] = (new TenantContextService())->runWithFirmContext(
             $matter->firm_id,
             function () use ($matter) {
                 $results = $this->registry->evaluate($matter);
@@ -89,18 +91,18 @@ class MatterReadinessService
                     'computed_at' => now(),
                 ])->save();
 
-                return [$score->fresh(), $previousStatus, $status, $satisfiedCount, $totalCount];
+                \App\Models\ReadinessScoreEvent::create([
+                    'firm_id' => $matter->firm_id,
+                    'matter_id' => $matter->id,
+                    'event_type' => 'recomputed',
+                    'previous_status' => $previousStatus,
+                    'new_status' => $status->value,
+                    'metadata_json' => ['satisfied_count' => $satisfiedCount, 'total_count' => $totalCount],
+                ]);
+
+                return [$score->fresh(), $previousStatus, $status];
             }
         );
-
-        \App\Models\ReadinessScoreEvent::create([
-            'firm_id' => $matter->firm_id,
-            'matter_id' => $matter->id,
-            'event_type' => 'recomputed',
-            'previous_status' => $previousStatus,
-            'new_status' => $status->value,
-            'metadata_json' => ['satisfied_count' => $satisfiedCount, 'total_count' => $totalCount],
-        ]);
 
         // Deliberately OUTSIDE the wrap above and UNCHANGED:
         // runWithFirmContext() opens its own internal DB::transaction(),

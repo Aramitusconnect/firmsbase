@@ -124,12 +124,19 @@ class MatterReadinessScoresForceRlsActivationTest extends TestCase
      * matter_readiness_scores) must be FORCE-enabled among ALL prepared
      * tables — no more, no less. readiness_score_events must NOT be
      * forced yet — that is Checkpoint 15's own, separate change.
+     *
+     * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 15 (this
+     * repo's thirty-third staged FORCE activation batch, covering
+     * readiness_score_events) to extend the "exactly these tables are
+     * forced" firewall list from thirty-two to thirty-three tables —
+     * same additive-only pattern, no existing assertion removed or
+     * weakened.
      */
     public function test_exactly_thirty_two_prepared_tables_are_force_row_level_security_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores', 'readiness_score_events']);
 
         $actuallyForced = [];
 
@@ -146,19 +153,22 @@ class MatterReadinessScoresForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(32, count($actuallyForced), 'Exactly thirty-two prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 14 — no more, no less.');
+        $this->assertSame(33, count($actuallyForced), 'Exactly thirty-three prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 14 — no more, no less. Narrowly updated again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
     /**
-     * Uncovered/uninvolved tables must be untouched by this batch —
-     * including readiness_score_events, which is prepared but must
-     * remain unforced until its own Checkpoint 15.
+     * Uncovered/uninvolved tables must be untouched by this batch.
+     *
+     * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 15 for the
+     * same reason as above — readiness_score_events is now forced by
+     * its own checkpoint, so it moves from the "must stay unforced"
+     * set into the "forced" allowlist here too.
      */
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores', 'readiness_score_events']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

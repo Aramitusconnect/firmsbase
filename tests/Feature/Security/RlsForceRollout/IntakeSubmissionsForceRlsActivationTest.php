@@ -121,7 +121,12 @@ class IntakeSubmissionsForceRlsActivationTest extends TestCase
         // activation batch, covering matter_readiness_scores) for
         // the same reason — additive only, no existing assertion
         // removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['intake_submissions', 'matter_readiness_scores']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 15,
+        // Table Phase C (this repo's thirty-third staged FORCE
+        // activation batch, covering readiness_score_events) for
+        // the same reason — additive only, no existing assertion
+        // removed or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['intake_submissions', 'matter_readiness_scores', 'readiness_score_events']);
 
         $actuallyForced = [];
 
@@ -138,7 +143,7 @@ class IntakeSubmissionsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(32, count($actuallyForced), 'Exactly thirty-two prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less. Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one).');
+        $this->assertSame(33, count($actuallyForced), 'Exactly thirty-three prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less. Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one), and again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -153,7 +158,12 @@ class IntakeSubmissionsForceRlsActivationTest extends TestCase
         // activation batch, covering matter_readiness_scores) for
         // the same reason — additive only, no existing assertion
         // removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['intake_submissions', 'matter_readiness_scores']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 15,
+        // Table Phase C (this repo's thirty-third staged FORCE
+        // activation batch, covering readiness_score_events) for
+        // the same reason — additive only, no existing assertion
+        // removed or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['intake_submissions', 'matter_readiness_scores', 'readiness_score_events']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
