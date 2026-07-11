@@ -48,7 +48,7 @@ class DocumentChaseServiceTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $item = $this->itemFor($firm, $client, DocumentRequestItemStatus::Approved);
 
-        $result = $this->service->checkAndLog($item);
+        $result = $this->service->checkAndLog($firm, $item);
 
         $this->assertFalse($result->eligible);
         $this->assertSame(0, $item->chaseEvents()->count());
@@ -60,7 +60,7 @@ class DocumentChaseServiceTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $item = $this->itemFor($firm, $client, DocumentRequestItemStatus::Waived);
 
-        $this->service->checkAndLog($item);
+        $this->service->checkAndLog($firm, $item);
 
         $this->assertSame(0, $item->chaseEvents()->count());
     }
@@ -72,7 +72,7 @@ class DocumentChaseServiceTest extends TestCase
         $item = $this->itemFor($firm, $client, DocumentRequestItemStatus::Requested);
         $rule = DocumentChaseRule::factory()->forFirm($firm)->paused()->create();
 
-        $result = $this->service->checkAndLog($item, $rule);
+        $result = $this->service->checkAndLog($firm, $item, $rule);
 
         $this->assertFalse($result->eligible);
         $this->assertSame('chase rule is paused', $result->reason);
@@ -91,7 +91,7 @@ class DocumentChaseServiceTest extends TestCase
         ]);
         $item = $this->itemFor($firm, $client, DocumentRequestItemStatus::Requested);
 
-        $result = $this->service->checkAndLog($item);
+        $result = $this->service->checkAndLog($firm, $item);
 
         $this->assertTrue($result->eligible);
         $this->assertSame(1, $item->chaseEvents()->where('event_type', 'reminder_queued')->count());
@@ -104,7 +104,7 @@ class DocumentChaseServiceTest extends TestCase
         // no consent granted
         $item = $this->itemFor($firm, $client, DocumentRequestItemStatus::Requested);
 
-        $result = $this->service->checkAndLog($item);
+        $result = $this->service->checkAndLog($firm, $item);
 
         $this->assertFalse($result->eligible);
         $this->assertSame(1, $item->chaseEvents()->where('event_type', 'reminder_skipped')->count());
@@ -122,7 +122,7 @@ class DocumentChaseServiceTest extends TestCase
         ]);
         $item = $this->itemFor($firm, $client, DocumentRequestItemStatus::NeedsReplacement);
 
-        $result = $this->service->checkAndLog($item);
+        $result = $this->service->checkAndLog($firm, $item);
 
         $this->assertTrue($result->eligible);
     }

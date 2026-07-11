@@ -59,9 +59,13 @@ class DocumentRequestServiceTest extends TestCase
             ['label' => 'Birth certificate'],
         ]);
 
-        $this->service->approve($request->items[0], $reviewer);
+        $this->service->approve($firm, $request->items[0], $reviewer);
 
-        $this->assertSame(DocumentRequestStatus::PartiallyFulfilled, $request->fresh()->status);
+        // Section 39A-3L, Checkpoint 10: document_requests is now
+        // FORCE RLS, and approve() clears its own context wrap before
+        // returning — this fresh() read needs its own explicit context.
+        $refreshed = $this->runWithFirmContext($firm, fn () => $request->fresh());
+        $this->assertSame(DocumentRequestStatus::PartiallyFulfilled, $refreshed->status);
     }
 
     public function test_request_status_becomes_fulfilled_only_when_every_item_reaches_a_terminal_status(): void
@@ -75,10 +79,14 @@ class DocumentRequestServiceTest extends TestCase
             ['label' => 'Birth certificate'],
         ]);
 
-        $this->service->approve($request->items[0], $reviewer);
-        $this->service->waive($request->items[1], $reviewer, 'not applicable for this matter type');
+        $this->service->approve($firm, $request->items[0], $reviewer);
+        $this->service->waive($firm, $request->items[1], $reviewer, 'not applicable for this matter type');
 
-        $this->assertSame(DocumentRequestStatus::Fulfilled, $request->fresh()->status);
+        // Section 39A-3L, Checkpoint 10: document_requests is now
+        // FORCE RLS, and waive() clears its own context wrap before
+        // returning — this fresh() read needs its own explicit context.
+        $refreshed = $this->runWithFirmContext($firm, fn () => $request->fresh());
+        $this->assertSame(DocumentRequestStatus::Fulfilled, $refreshed->status);
     }
 
     public function test_needs_replacement_moves_an_item_back_to_a_chase_eligible_status(): void
@@ -88,8 +96,8 @@ class DocumentRequestServiceTest extends TestCase
         $reviewer = User::factory()->create();
 
         $request = $this->service->create($firm, $client, [['label' => 'Passport copy']]);
-        $item = $this->service->markSubmitted($request->items[0]);
-        $item = $this->service->requestReplacement($item, $reviewer, 'photo page is unreadable');
+        $item = $this->service->markSubmitted($firm, $request->items[0]);
+        $item = $this->service->requestReplacement($firm, $item, $reviewer, 'photo page is unreadable');
 
         $this->assertSame(DocumentRequestItemStatus::NeedsReplacement, $item->status);
         $this->assertTrue($item->isChaseEligibleStatus());
@@ -102,9 +110,9 @@ class DocumentRequestServiceTest extends TestCase
         $reviewer = User::factory()->create();
 
         $request = $this->service->create($firm, $client, [['label' => 'Passport copy']]);
-        $item = $this->service->approve($request->items[0], $reviewer);
+        $item = $this->service->approve($firm, $request->items[0], $reviewer);
 
         $this->expectException(\RuntimeException::class);
-        $this->service->markSubmitted($item);
+        $this->service->markSubmitted($firm, $item);
     }
 }

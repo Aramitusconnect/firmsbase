@@ -134,7 +134,7 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 9, Table
         // Phase C (seat_allocations) for the same reason — additive
         // only, no existing assertion removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events', 'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events', 'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests']);
 
         $actuallyForced = [];
 
@@ -151,7 +151,10 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(27, count($actuallyForced), 'Exactly twenty-seven prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 9 — no more, no less (twenty-one after this batch\'s own Checkpoint 2 plus firm_activation_events from Checkpoint 3, plus firm_entitlements from Checkpoint 4, plus firm_entitlement_events from Checkpoint 5, plus installed_template_packs from Checkpoint 6, plus template_upgrade_logs from Checkpoint 7, plus template_upgrade_previews from Checkpoint 8, plus seat_allocations from Checkpoint 9).');
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 10, Table
+        // Phase C (document_requests) for the same reason — additive
+        // only, no existing assertion removed or weakened.
+        $this->assertSame(28, count($actuallyForced), 'Exactly twenty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 10 — no more, no less (twenty-one after this batch\'s own Checkpoint 2 plus firm_activation_events from Checkpoint 3, plus firm_entitlements from Checkpoint 4, plus firm_entitlement_events from Checkpoint 5, plus installed_template_packs from Checkpoint 6, plus template_upgrade_logs from Checkpoint 7, plus template_upgrade_previews from Checkpoint 8, plus seat_allocations from Checkpoint 9, plus document_requests from Checkpoint 10).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 

@@ -217,7 +217,19 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== 'tests/Feature/Deadlines/CalendarEventServiceTest.php'
                 && $path !== 'tests/Feature/Deadlines/DeadlineServiceTest.php'
                 && $path !== 'tests/Feature/DocumentChase/DocumentChaseSchedulerServiceTest.php'
-                && $path !== 'tests/Feature/Rates/EmployeeRateServiceTest.php',
+                && $path !== 'tests/Feature/Rates/EmployeeRateServiceTest.php'
+                // Section 39A-3L, Checkpoint 10, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a document_requests-only
+                // FORCE RLS migration, a DocumentRequestFactory fix
+                // (app/Services/ is already excluded above, so only
+                // the migration/factory/affected tests need listing
+                // here), and updated the tests it affected.
+                && $path !== 'database/migrations/2026_08_25_930010_force_rls_on_document_requests_table.php'
+                && $path !== 'database/factories/DocumentRequestFactory.php'
+                && $path !== 'tests/Feature/Documents/DocumentRequestServiceTest.php'
+                && $path !== 'tests/Feature/DocumentChase/DocumentChaseServiceTest.php'
+                && $path !== 'tests/Feature/Readiness/MatterReadinessServiceTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

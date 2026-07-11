@@ -94,14 +94,14 @@ class ReadinessScorecardRegistry
         });
 
         $this->register('documents_approved', function (Matter $matter): ReadinessComponentResult {
-            $outstanding = \App\Models\DocumentRequestItem::query()
+            $outstanding = (new TenantContextService())->runWithFirmContext($matter->firm_id, fn () => \App\Models\DocumentRequestItem::query()
                 ->whereHas('documentRequest', fn ($q) => $q->where('matter_id', $matter->id))
                 ->where('is_required', true)
                 ->whereNotIn('status', [
                     DocumentRequestItemStatus::Approved->value,
                     DocumentRequestItemStatus::Waived->value,
                 ])
-                ->count();
+                ->count());
 
             return new ReadinessComponentResult(
                 'documents_approved',

@@ -125,7 +125,7 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests']);
 
         $actuallyForced = [];
 
@@ -142,7 +142,10 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(27, count($actuallyForced), 'Exactly twenty-seven prepared tables must be FORCE RLS enabled after this batch — no more, no less.');
+        // Narrowly updated by Section 39A-3L, Checkpoint 10, Table
+        // Phase C (document_requests) for the same reason —
+        // additive only, no existing assertion removed or weakened.
+        $this->assertSame(28, count($actuallyForced), 'Exactly twenty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 10 — no more, no less (document_requests added on top of this batch\'s own seat_allocations).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -155,7 +158,7 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled_and_seat_pools_remains_exempt(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

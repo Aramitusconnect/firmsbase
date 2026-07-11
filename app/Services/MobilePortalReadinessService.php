@@ -48,10 +48,19 @@ class MobilePortalReadinessService
      * items can be rendered as a checklist (Phase 4's
      * DocumentRequest::items() already provides label/status/
      * is_required per item — exactly what a checklist UI needs).
+     *
+     * Section 39A-3L, Checkpoint 10 — wrapped in runWithFirmContext()
+     * now that document_requests is FORCE-protected: without an active
+     * tenant context this query previously silently returned false
+     * (RLS filters the row set to empty) even when a matching request
+     * genuinely existed.
      */
     public function documentChecklistAvailable(Matter $matter): bool
     {
-        return DocumentRequest::query()->where('matter_id', $matter->id)->exists();
+        return (new TenantContextService())->runWithFirmContext(
+            $matter->firm_id,
+            fn () => DocumentRequest::query()->where('matter_id', $matter->id)->exists()
+        );
     }
 
     /**

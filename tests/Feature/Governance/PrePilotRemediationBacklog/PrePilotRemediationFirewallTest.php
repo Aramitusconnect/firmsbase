@@ -556,6 +556,25 @@ class PrePilotRemediationFirewallTest extends TestCase
             // entry above.
             'database/factories/ConflictCheckRunFactory.php',
             'tests/Feature/Conflicts/ConflictCheckServiceTest.php',
+            // Section 39A-3L, Checkpoint 10, Table Phase C (this
+            // batch, a later, distinct staged-FORCE-activation
+            // branch) legitimately added a document_requests-only
+            // FORCE RLS migration, a DocumentRequestFactory
+            // firm/client consistency + context-hold fix, wrapped
+            // DocumentRequestService's create() and its 7
+            // single-item mutators and DocumentChaseService's
+            // checkAndLog()/escalate()/pause()/resume() each in
+            // their own runWithFirmContext() call, and updated the
+            // tests it affected.
+            'database/migrations/2026_08_25_930010_force_rls_on_document_requests_table.php',
+            'database/factories/DocumentRequestFactory.php',
+            'app/Services/DocumentRequestService.php',
+            'app/Services/DocumentChaseService.php',
+            'app/Services/MobilePortalReadinessService.php',
+            'tests/Feature/Documents/DocumentRequestServiceTest.php',
+            'tests/Feature/DocumentChase/DocumentChaseServiceTest.php',
+            'tests/Feature/Readiness/MatterReadinessServiceTest.php',
+            'tests/Feature/Governance/MarketReadyValueMultipliers/FirmCommandCenterAggregationServiceTest.php',
         ];
 
         return array_values(array_filter(

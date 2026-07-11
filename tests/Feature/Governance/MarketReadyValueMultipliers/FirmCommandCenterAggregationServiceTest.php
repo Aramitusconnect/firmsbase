@@ -14,6 +14,7 @@ use App\Models\Client;
 use App\Models\Deadline;
 use App\Models\Document;
 use App\Models\DocumentChaseEvent;
+use App\Models\DocumentRequest;
 use App\Models\DocumentRequestItem;
 use App\Models\Firm;
 use App\Models\FirmLead;
@@ -191,8 +192,21 @@ class FirmCommandCenterAggregationServiceTest extends TestCase
     public function test_document_chase_escalations_count_uses_existing_escalated_event_type(): void
     {
         $firm = Firm::factory()->create();
-        $item = DocumentRequestItem::factory()->create();
-        $item->documentRequest()->update(['firm_id' => $firm->id]);
+        // Section 39A-3L, Checkpoint 10: document_requests is now FORCE
+        // RLS. A bare DocumentRequestItem::factory()->create() derives
+        // its parent DocumentRequest via its own unrelated
+        // firm/client pair (via the context-hold factory, which
+        // deliberately leaves that OTHER firm's context active
+        // afterward, not $firm's). A raw
+        // $item->documentRequest()->update(['firm_id' => $firm->id])
+        // then genuinely violates the FORCE RLS policy's WITH CHECK
+        // clause (the new firm_id would not match whatever context is
+        // active), rather than merely "having no wrap" — so the correct
+        // fix is to create the DocumentRequest already owned by $firm
+        // from the start, not to reassign its ownership afterward.
+        $client = Client::factory()->forFirm($firm)->create();
+        $request = DocumentRequest::factory()->forClient($client)->create();
+        $item = DocumentRequestItem::factory()->forRequest($request)->create();
 
         DocumentChaseEvent::factory()->forItem($item)->create(['firm_id' => $firm->id, 'event_type' => 'escalated']);
         DocumentChaseEvent::factory()->forItem($item)->create(['firm_id' => $firm->id, 'event_type' => 'reminder_queued']);

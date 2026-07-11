@@ -120,7 +120,7 @@ class TemplateUpgradePreviewsForceRlsActivationTest extends TestCase
         // covering seat_allocations) — additive only, no existing
         // assertion removed or weakened. Same reasoning as every prior
         // sibling file's own incremental-count updates in this arc.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['template_upgrade_previews', 'seat_allocations']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['template_upgrade_previews', 'seat_allocations', 'document_requests']);
 
         $actuallyForced = [];
 
@@ -137,7 +137,10 @@ class TemplateUpgradePreviewsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(27, count($actuallyForced), 'Exactly twenty-seven prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 9 — no more, no less (seat_allocations added on top of this batch\'s own template_upgrade_previews).');
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 10, Table
+        // Phase C (document_requests) for the same reason — additive
+        // only, no existing assertion removed or weakened.
+        $this->assertSame(28, count($actuallyForced), 'Exactly twenty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 10 — no more, no less (seat_allocations and document_requests added on top of this batch\'s own template_upgrade_previews).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 

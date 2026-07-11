@@ -119,7 +119,12 @@ class RlsEnforcementFirewallTest extends TestCase
                 // batch, a later, distinct staged-FORCE-activation
                 // branch) legitimately added a seat_allocations-only
                 // FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930009_force_rls_on_seat_allocations_table.php',
+                && $path !== 'database/migrations/2026_08_25_930009_force_rls_on_seat_allocations_table.php'
+                // Section 39A-3L, Checkpoint 10, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a document_requests-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930010_force_rls_on_document_requests_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A must add no migrations in this pass, but found: '.implode(', ', $changed));
