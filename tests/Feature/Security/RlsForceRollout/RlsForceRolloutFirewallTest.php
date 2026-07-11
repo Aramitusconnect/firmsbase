@@ -111,6 +111,13 @@ use Tests\TestCase;
  * forced" firewall list from twenty-eight to twenty-nine tables and add
  * this batch's own migration-existence check — same additive-only
  * pattern, no existing assertion removed or weakened.
+ *
+ * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 12, Table Phase C
+ * (this repo's thirtieth staged FORCE activation batch, covering
+ * communication_consent_events) to extend the "exactly these tables are
+ * forced" firewall list from twenty-nine to thirty tables and add this
+ * batch's own migration-existence check — same additive-only pattern,
+ * no existing assertion removed or weakened.
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -141,15 +148,17 @@ class RlsForceRolloutFirewallTest extends TestCase
         // (Section 39A-3L, Checkpoint 9, Table Phase C) seat_allocations,
         // and (Section 39A-3L, Checkpoint 10, Table Phase C)
         // document_requests, and (Section 39A-3L, Checkpoint 11, Table
-        // Phase C) communication_consents too — this test's own scope
-        // (39A-3B) only asserts clients and firm_users here.
+        // Phase C) communication_consents, and (Section 39A-3L,
+        // Checkpoint 12, Table Phase C) communication_consent_events too
+        // — this test's own scope (39A-3B) only asserts clients and
+        // firm_users here.
         $expectedForced = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
             'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
             'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests',
-            'communication_consents',
+            'communication_consents', 'communication_consent_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -390,6 +399,13 @@ class RlsForceRolloutFirewallTest extends TestCase
         // Section 39A-3L, Checkpoint 11, Table Phase C's own migration —
         // same file-existence reasoning as the checks above.
         $this->assertFileExists(base_path('database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php'));
+    }
+
+    public function test_the_communication_consent_events_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3L, Checkpoint 12, Table Phase C's own migration —
+        // same file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_25_930012_force_rls_on_communication_consent_events_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

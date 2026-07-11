@@ -121,15 +121,25 @@ class CommunicationConsentsForceRlsActivationTest extends TestCase
     }
 
     /**
-     * Exactly twenty-nine tables (the twenty-eight previously forced
-     * plus communication_consents) must be FORCE-enabled among ALL
-     * prepared tables — no more, no less.
+     * Originally: exactly twenty-nine tables (the twenty-eight
+     * previously forced plus communication_consents) had to be
+     * FORCE-enabled among ALL prepared tables — no more, no less.
+     *
+     * Updated by Section 39A-3L, Checkpoint 12, Table Phase C:
+     * communication_consent_events has since also been forced, so the
+     * live, current expectation is now exactly THIRTY — this test's
+     * method name is left unchanged (it names the batch this file is
+     * about, not a permanently-fixed total), but its assertions below
+     * check the true, current count.
      */
     public function test_exactly_twenty_nine_prepared_tables_are_force_row_level_security_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 12, Table
+        // Phase C (communication_consent_events) for the same reason —
+        // additive only, no existing assertion removed or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents', 'communication_consent_events']);
 
         $actuallyForced = [];
 
@@ -146,24 +156,31 @@ class CommunicationConsentsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(29, count($actuallyForced), 'Exactly twenty-nine prepared tables must be FORCE RLS enabled after this batch — no more, no less.');
+        $this->assertSame(30, count($actuallyForced), 'Exactly thirty prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 12 — no more, no less (communication_consent_events added on top of this batch\'s own communication_consents).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
     /**
      * Uncovered/uninvolved tables must be untouched by this batch.
-     * communication_consent_events carries its own firm_id and IS
-     * already a prepared table (RLS enabled, per the Phase 1
-     * preparation migration) — it is simply not part of THIS batch's
-     * forced set (explicitly deferred to Checkpoint 12 per the
-     * migration's own docblock, since its factory still has a latent
-     * cross-firm mismatch), so it must remain RLS-enabled but NOT
-     * forced, exactly like every other still-unforced prepared table.
+     *
+     * Updated by Section 39A-3L, Checkpoint 12, Table Phase C: at the
+     * time this test was originally written (Checkpoint 11),
+     * communication_consent_events was deliberately deferred — RLS
+     * enabled but NOT forced, pending its own factory cross-firm-
+     * mismatch fix. Checkpoint 12 has since landed
+     * (database/migrations/2026_08_25_930012_force_rls_on_communication_consent_events_table.php),
+     * so communication_consent_events is now ALSO force-enabled. This
+     * test is updated to assert the CURRENT true state rather than
+     * continue asserting the now-superseded "deferred" state, which
+     * would otherwise be a false claim about the live schema.
      */
     public function test_no_unrelated_prepared_table_became_force_enabled_and_events_table_remains_correctly_scoped(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 12, Table
+        // Phase C (communication_consent_events) for the same reason —
+        // additive only, no existing assertion removed or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents', 'communication_consent_events']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
@@ -175,12 +192,12 @@ class CommunicationConsentsForceRlsActivationTest extends TestCase
             $this->assertFalse((bool) $row->relforcerowsecurity, "{$table} must not have accidentally become FORCE RLS enabled.");
         }
 
-        $this->assertContains('communication_consent_events', $coverage->preparedTables(), 'communication_consent_events must remain a genuinely prepared (RLS-enabled, not-yet-forced) table, not exempt.');
+        $this->assertContains('communication_consent_events', $coverage->preparedTables(), 'communication_consent_events must remain a genuinely prepared (RLS-enabled) table.');
 
         $eventsRow = DB::selectOne('select relrowsecurity, relforcerowsecurity from pg_class where relname = ?', ['communication_consent_events']);
         $this->assertNotNull($eventsRow, 'Table communication_consent_events not found in pg_class.');
         $this->assertTrue((bool) $eventsRow->relrowsecurity, 'communication_consent_events must remain RLS-enabled (prepared).');
-        $this->assertFalse((bool) $eventsRow->relforcerowsecurity, 'communication_consent_events must NOT be forced yet — deferred to Checkpoint 12.');
+        $this->assertTrue((bool) $eventsRow->relforcerowsecurity, 'communication_consent_events must now be FORCE RLS enabled — Section 39A-3L, Checkpoint 12 landed this activation.');
     }
 
     public function test_the_tenant_isolation_policy_remains_present_and_unchanged_after_up(): void

@@ -373,6 +373,17 @@ class EmergencySupportApprovalFirewallTest extends TestCase
                 'app/Services/ConsentService.php',
                 'tests/Feature/Activation/ConsentServiceTest.php',
                 'tests/Feature/PaymentPlans/PaymentPlanDunningServiceTest.php',
+                // Section 39A-3L, Checkpoint 12, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a
+                // communication_consent_events-only FORCE RLS
+                // migration, a CommunicationConsentEventFactory
+                // firm/consent consistency + context-hold fix, and
+                // fixed pre-existing bare-assertion-after-service-call
+                // gaps this batch's own FORCE activation exposed in
+                // ConsentServiceTest.php (already allowed above).
+                'database/migrations/2026_08_25_930012_force_rls_on_communication_consent_events_table.php',
+                'database/factories/CommunicationConsentEventFactory.php',
             'config/auth.php',
             'app/Models/User.php',
             'app/Models/PlatformAdmin.php',

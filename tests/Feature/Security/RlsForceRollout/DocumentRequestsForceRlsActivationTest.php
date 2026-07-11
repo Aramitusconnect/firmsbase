@@ -111,7 +111,10 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
         // (communication_consents) — additive only, no existing assertion
         // removed or weakened. See CommunicationConsentsForceRlsActivationTest
         // for that batch's own dedicated proof file.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['document_requests', 'communication_consents']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 12, Table
+        // Phase C (communication_consent_events) for the same reason —
+        // additive only, no existing assertion removed or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['document_requests', 'communication_consents', 'communication_consent_events']);
 
         $actuallyForced = [];
 
@@ -128,7 +131,7 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(29, count($actuallyForced), 'Exactly twenty-nine prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 11 — no more, no less (the twenty-eight from this batch plus communication_consents from Checkpoint 11).');
+        $this->assertSame(30, count($actuallyForced), 'Exactly thirty prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 12 — no more, no less (the twenty-eight from this batch plus communication_consents from Checkpoint 11, plus communication_consent_events from Checkpoint 12).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -150,7 +153,10 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
         // Narrowly updated by Section 39A-3L, Checkpoint 11, Table Phase C
         // (communication_consents) for the same reason as the count test
         // above — additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['document_requests', 'communication_consents']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 12, Table
+        // Phase C (communication_consent_events) for the same reason —
+        // additive only, no existing assertion removed or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['document_requests', 'communication_consents', 'communication_consent_events']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

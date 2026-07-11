@@ -129,7 +129,12 @@ class RlsEnforcementFirewallTest extends TestCase
                 // batch, a later, distinct staged-FORCE-activation
                 // branch) legitimately added a communication_consents-
                 // only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php',
+                && $path !== 'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php'
+                // Section 39A-3L, Checkpoint 12, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a
+                // communication_consent_events-only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930012_force_rls_on_communication_consent_events_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A must add no migrations in this pass, but found: '.implode(', ', $changed));

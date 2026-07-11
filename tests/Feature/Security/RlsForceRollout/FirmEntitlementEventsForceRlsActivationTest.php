@@ -144,7 +144,10 @@ class FirmEntitlementEventsForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 11, Table
         // Phase C (communication_consents) for the same reason — additive
         // only, no existing assertion removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_entitlement_events', 'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests', 'communication_consents']);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 12, Table
+        // Phase C (communication_consent_events) for the same reason —
+        // additive only, no existing assertion removed or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_entitlement_events', 'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events']);
 
         $actuallyForced = [];
 
@@ -164,7 +167,7 @@ class FirmEntitlementEventsForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 10, Table
         // Phase C (document_requests) for the same reason — additive
         // only, no existing assertion removed or weakened.
-        $this->assertSame(29, count($actuallyForced), 'Exactly twenty-nine prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 11 — no more, no less (installed_template_packs, template_upgrade_logs, template_upgrade_previews, seat_allocations, document_requests, and communication_consents added on top of this batch\'s own firm_entitlement_events).');
+        $this->assertSame(30, count($actuallyForced), 'Exactly thirty prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 12 — no more, no less (installed_template_packs, template_upgrade_logs, template_upgrade_previews, seat_allocations, document_requests, and communication_consents added on top of this batch\'s own firm_entitlement_events, plus communication_consent_events from Checkpoint 12).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 

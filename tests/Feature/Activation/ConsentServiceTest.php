@@ -43,12 +43,22 @@ class ConsentServiceTest extends TestCase
         $this->assertSame(ConsentStatus::Granted, $consent->status);
         $this->assertNotNull($consent->granted_at);
 
-        $this->assertDatabaseHas('communication_consent_events', [
-            'communication_consent_id' => $consent->id,
-            'action' => 'captured',
-            'new_status' => 'granted',
-            'actor_user_id' => $actor->id,
-        ]);
+        // Section 39A-3L, Checkpoint 12 fallout: communication_consent_events
+        // is now FORCE-RLS protected too, and capture() clears its own
+        // context wrap before returning, so a bare assertDatabaseHas()
+        // here (outside any active context) would find zero rows even
+        // though the event genuinely persisted. Same fix already applied
+        // to the communication_consents assertions in this file at
+        // Checkpoint 11 — this file was never updated to apply the same
+        // fix to the communication_consent_events assertions until now.
+        $this->runWithFirmContext($firm, function () use ($consent, $actor) {
+            $this->assertDatabaseHas('communication_consent_events', [
+                'communication_consent_id' => $consent->id,
+                'action' => 'captured',
+                'new_status' => 'granted',
+                'actor_user_id' => $actor->id,
+            ]);
+        });
     }
 
     public function test_capture_twice_updates_in_place_rather_than_duplicating(): void
@@ -76,10 +86,15 @@ class ConsentServiceTest extends TestCase
                 ->count())
         );
 
-        $this->assertDatabaseHas('communication_consent_events', [
-            'communication_consent_id' => $first->id,
-            'action' => 'recaptured',
-        ]);
+        // Section 39A-3L, Checkpoint 12 fallout: see the identical fix and
+        // explanation in test_capture_creates_granted_consent_and_audit_event
+        // above — communication_consent_events is now FORCE-RLS protected.
+        $this->runWithFirmContext($firm, function () use ($first) {
+            $this->assertDatabaseHas('communication_consent_events', [
+                'communication_consent_id' => $first->id,
+                'action' => 'recaptured',
+            ]);
+        });
     }
 
     public function test_revoke_transitions_status_and_writes_audit_event(): void
@@ -93,12 +108,17 @@ class ConsentServiceTest extends TestCase
         $this->assertSame(ConsentStatus::Revoked, $revoked->status);
         $this->assertNotNull($revoked->revoked_at);
 
-        $this->assertDatabaseHas('communication_consent_events', [
-            'communication_consent_id' => $consent->id,
-            'action' => 'revoked',
-            'previous_status' => 'granted',
-            'new_status' => 'revoked',
-        ]);
+        // Section 39A-3L, Checkpoint 12 fallout: see the identical fix and
+        // explanation in test_capture_creates_granted_consent_and_audit_event
+        // above — communication_consent_events is now FORCE-RLS protected.
+        $this->runWithFirmContext($firm, function () use ($consent) {
+            $this->assertDatabaseHas('communication_consent_events', [
+                'communication_consent_id' => $consent->id,
+                'action' => 'revoked',
+                'previous_status' => 'granted',
+                'new_status' => 'revoked',
+            ]);
+        });
     }
 
     public function test_revoke_throws_when_no_consent_exists(): void
