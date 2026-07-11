@@ -31,6 +31,29 @@ use Illuminate\Support\Facades\DB;
  * on ActivationChecklist needed NO changes to cover these — it already
  * checks every required item on the checklist, whichever phase added
  * it.
+ *
+ * Section 39A-3L, Checkpoint 2 - activation_checklists now has FORCE
+ * ROW LEVEL SECURITY active. Tenant-context wiring, one wrap per unit
+ * of work (project convention - see CalendarEventService's own
+ * docblock on why a nested self-wrap is unsafe):
+ *   - unmetRequirements() self-wraps its entire body. It is called
+ *     from two unwrapped external sites this batch does not touch -
+ *     tests, and FirmProductionActivationService::isEligibleForActivation()
+ *     (out of scope for this checkpoint) - so it must establish its
+ *     own context to work correctly for those callers.
+ *   - isEligible() needs no wrap of its own: it does nothing but
+ *     delegate to the already self-wrapped unmetRequirements() above.
+ *   - activate() deliberately does NOT wrap its call to
+ *     unmetRequirements() (that would nest a second wrap inside this
+ *     method's own and clear context prematurely, breaking the
+ *     checklist update below - the exact "decoy wrap" bug this batch
+ *     was warned about). Instead it wraps ONLY the second part of its
+ *     existing body (the firm/checklist read-and-update), which is the
+ *     part not already covered by unmetRequirements()'s own wrap.
+ *   - createChecklist() and seedProductionReadinessItems() each wrap
+ *     their entire body in one runWithFirmContext() call; neither
+ *     calls another already-wrapped method, so there is no nesting
+ *     risk for either.
  */
 class ActivationChecklistService
 {
@@ -60,46 +83,48 @@ class ActivationChecklistService
      */
     public function unmetRequirements(Firm $firm): array
     {
-        $firm->loadMissing(['firmSettings', 'licenses', 'activationChecklist.items', 'tenantEncryptionKeys']);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm) {
+            $firm->loadMissing(['firmSettings', 'licenses', 'activationChecklist.items', 'tenantEncryptionKeys']);
 
-        $unmet = [];
+            $unmet = [];
 
-        if (is_null($firm->billing_account_id)) {
-            $unmet[] = 'billing_account_missing';
-        }
+            if (is_null($firm->billing_account_id)) {
+                $unmet[] = 'billing_account_missing';
+            }
 
-        if (! $firm->firmSettings) {
-            $unmet[] = 'firm_settings_missing';
-        }
+            if (! $firm->firmSettings) {
+                $unmet[] = 'firm_settings_missing';
+            }
 
-        $hasUsableLicense = $firm->licenses->contains(
-            fn ($license) => ! in_array($license->license_status, [
-                LicenseStatus::Cancelled,
-                LicenseStatus::Expired,
-            ], true)
-        );
+            $hasUsableLicense = $firm->licenses->contains(
+                fn ($license) => ! in_array($license->license_status, [
+                    LicenseStatus::Cancelled,
+                    LicenseStatus::Expired,
+                ], true)
+            );
 
-        if (! $hasUsableLicense) {
-            $unmet[] = 'usable_license_missing';
-        }
+            if (! $hasUsableLicense) {
+                $unmet[] = 'usable_license_missing';
+            }
 
-        $checklist = $firm->activationChecklist;
+            $checklist = $firm->activationChecklist;
 
-        if (! $checklist) {
-            $unmet[] = 'activation_checklist_missing';
-        } elseif (! $checklist->allRequiredItemsSatisfied()) {
-            $unmet[] = 'activation_checklist_incomplete';
-        }
+            if (! $checklist) {
+                $unmet[] = 'activation_checklist_missing';
+            } elseif (! $checklist->allRequiredItemsSatisfied()) {
+                $unmet[] = 'activation_checklist_incomplete';
+            }
 
-        $hasActiveKey = $firm->tenantEncryptionKeys->contains(
-            fn ($key) => $key->status === TenantEncryptionKeyStatus::Active
-        );
+            $hasActiveKey = $firm->tenantEncryptionKeys->contains(
+                fn ($key) => $key->status === TenantEncryptionKeyStatus::Active
+            );
 
-        if (! $hasActiveKey) {
-            $unmet[] = 'tenant_encryption_key_missing';
-        }
+            if (! $hasActiveKey) {
+                $unmet[] = 'tenant_encryption_key_missing';
+            }
 
-        return $unmet;
+            return $unmet;
+        });
     }
 
     public function isEligible(Firm $firm): bool
@@ -112,6 +137,13 @@ class ActivationChecklistService
      */
     public function activate(Firm $firm): Firm
     {
+        // Deliberately NOT wrapped here: unmetRequirements() already
+        // self-wraps its entire body in its own runWithFirmContext()
+        // call (see that method). Wrapping this call a second time
+        // would nest two context wraps, and the inner one's finally
+        // would clear this method's own context before the checklist
+        // read/update below runs — see the class docblock's "decoy
+        // wrap" note.
         $unmet = $this->unmetRequirements($firm);
 
         if (! empty($unmet)) {
@@ -120,18 +152,23 @@ class ActivationChecklistService
             );
         }
 
-        return DB::transaction(function () use ($firm) {
-            $firm->update(['activation_status' => FirmActivationStatus::Activated]);
+        // This second, separate wrap covers the part of activate()'s
+        // work that unmetRequirements()'s own wrap does not: the
+        // firm/checklist read-and-update below.
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm) {
+            return DB::transaction(function () use ($firm) {
+                $firm->update(['activation_status' => FirmActivationStatus::Activated]);
 
-            $checklist = $firm->activationChecklist;
-            if ($checklist->status !== ActivationChecklistStatus::Completed) {
-                $checklist->update([
-                    'status' => ActivationChecklistStatus::Completed,
-                    'completed_at' => now(),
-                ]);
-            }
+                $checklist = $firm->activationChecklist;
+                if ($checklist->status !== ActivationChecklistStatus::Completed) {
+                    $checklist->update([
+                        'status' => ActivationChecklistStatus::Completed,
+                        'completed_at' => now(),
+                    ]);
+                }
 
-            return $firm->fresh();
+                return $firm->fresh();
+            });
         });
     }
 
@@ -142,15 +179,17 @@ class ActivationChecklistService
      */
     public function createChecklist(Firm $firm): ActivationChecklist
     {
-        if ($firm->activationChecklist) {
-            throw new \RuntimeException('Firm already has an activation checklist.');
-        }
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm) {
+            if ($firm->activationChecklist) {
+                throw new \RuntimeException('Firm already has an activation checklist.');
+            }
 
-        return ActivationChecklist::create([
-            'firm_id' => $firm->id,
-            'status' => ActivationChecklistStatus::InProgress,
-            'started_at' => now(),
-        ]);
+            return ActivationChecklist::create([
+                'firm_id' => $firm->id,
+                'status' => ActivationChecklistStatus::InProgress,
+                'started_at' => now(),
+            ]);
+        });
     }
 
     /**
@@ -166,30 +205,32 @@ class ActivationChecklistService
      */
     public function seedProductionReadinessItems(Firm $firm): array
     {
-        $checklist = $firm->activationChecklist;
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm) {
+            $checklist = $firm->activationChecklist;
 
-        if (! $checklist) {
-            throw new \RuntimeException('Firm has no activation checklist to seed production-readiness items onto.');
-        }
-
-        $existingKeys = $checklist->items()->pluck('item_key')->all();
-        $inserted = [];
-
-        foreach (self::PRODUCTION_READINESS_ITEMS as $itemKey => $label) {
-            if (in_array($itemKey, $existingKeys, true)) {
-                continue;
+            if (! $checklist) {
+                throw new \RuntimeException('Firm has no activation checklist to seed production-readiness items onto.');
             }
 
-            $checklist->items()->create([
-                'item_key' => $itemKey,
-                'label' => $label,
-                'is_required' => true,
-                'is_complete' => false,
-            ]);
+            $existingKeys = $checklist->items()->pluck('item_key')->all();
+            $inserted = [];
 
-            $inserted[] = $itemKey;
-        }
+            foreach (self::PRODUCTION_READINESS_ITEMS as $itemKey => $label) {
+                if (in_array($itemKey, $existingKeys, true)) {
+                    continue;
+                }
 
-        return $inserted;
+                $checklist->items()->create([
+                    'item_key' => $itemKey,
+                    'label' => $label,
+                    'is_required' => true,
+                    'is_complete' => false,
+                ]);
+
+                $inserted[] = $itemKey;
+            }
+
+            return $inserted;
+        });
     }
 }

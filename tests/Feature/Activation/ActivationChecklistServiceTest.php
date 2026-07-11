@@ -141,11 +141,18 @@ class ActivationChecklistServiceTest extends TestCase
         $activated = $this->service->activate($firm);
 
         $this->assertSame(FirmActivationStatus::Activated, $activated->activation_status);
-        $this->assertSame(
-            ActivationChecklistStatus::Completed,
-            $activated->activationChecklist->fresh()->status
-        );
-        $this->assertNotNull($activated->activationChecklist->fresh()->completed_at);
+
+        // Section 39A-3L, Checkpoint 2: activate()'s own runWithFirmContext()
+        // wrap has already cleared tenant context by the time it returns
+        // (see ActivationChecklistService's class docblock). Re-reading the
+        // now-force-protected activation_checklists row below is a fresh
+        // query against the database, so it genuinely needs its own explicit
+        // context — it is not the same in-memory relation the service loaded
+        // internally.
+        $checklist = $this->runWithFirmContext($firm, fn () => $activated->activationChecklist->fresh());
+
+        $this->assertSame(ActivationChecklistStatus::Completed, $checklist->status);
+        $this->assertNotNull($checklist->completed_at);
     }
 
     public function test_create_checklist_throws_if_one_already_exists(): void

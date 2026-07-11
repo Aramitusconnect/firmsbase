@@ -41,9 +41,13 @@ class ActivationChecklistServiceSeedTest extends TestCase
         $inserted = $this->service->seedProductionReadinessItems($firm->fresh());
 
         $this->assertCount(12, $inserted);
+        // Section 39A-3L, Checkpoint 2: seedProductionReadinessItems()'s own
+        // runWithFirmContext() wrap has already cleared tenant context by the
+        // time it returns, so this fresh read of the now-force-protected
+        // activation_checklists row genuinely needs its own explicit context.
         $this->assertSame(
             12,
-            $firm->fresh()->activationChecklist->items()->count()
+            $this->runWithFirmContext($firm, fn () => $firm->fresh()->activationChecklist->items()->count())
         );
     }
 
@@ -56,7 +60,13 @@ class ActivationChecklistServiceSeedTest extends TestCase
         $secondCall = $this->service->seedProductionReadinessItems($firm->fresh());
 
         $this->assertEmpty($secondCall);
-        $this->assertSame(12, $firm->fresh()->activationChecklist->items()->count());
+        // See the previous test's comment: a fresh read of activation_checklists
+        // after the service's own context wrap has already cleared needs its
+        // own explicit context now that this table is FORCE RLS-protected.
+        $this->assertSame(
+            12,
+            $this->runWithFirmContext($firm, fn () => $firm->fresh()->activationChecklist->items()->count())
+        );
     }
 
     public function test_seeding_does_not_disturb_pre_existing_phase_1_items(): void
@@ -72,8 +82,21 @@ class ActivationChecklistServiceSeedTest extends TestCase
 
         $this->service->seedProductionReadinessItems($firm->fresh());
 
-        $this->assertSame(13, $firm->fresh()->activationChecklist->items()->count());
-        $this->assertTrue($firm->fresh()->activationChecklist->items()->where('item_key', 'billing_setup')->first()->is_complete);
+        // See test_seeding_inserts_all_twelve_go_live_items_onto_the_existing_checklist's
+        // comment: activation_checklists is now FORCE RLS-protected, so this
+        // fresh read (after the service's own wrap has already cleared
+        // context) genuinely needs its own explicit context.
+        [$itemCount, $billingSetupComplete] = $this->runWithFirmContext($firm, function () use ($firm) {
+            $checklist = $firm->fresh()->activationChecklist;
+
+            return [
+                $checklist->items()->count(),
+                $checklist->items()->where('item_key', 'billing_setup')->first()->is_complete,
+            ];
+        });
+
+        $this->assertSame(13, $itemCount);
+        $this->assertTrue($billingSetupComplete);
     }
 
     public function test_every_seeded_item_key_matches_the_master_plans_phase_5_scope_list(): void
@@ -83,7 +106,14 @@ class ActivationChecklistServiceSeedTest extends TestCase
 
         $this->service->seedProductionReadinessItems($firm->fresh());
 
-        $keys = $firm->fresh()->activationChecklist->items()->pluck('item_key')->sort()->values()->all();
+        // See test_seeding_inserts_all_twelve_go_live_items_onto_the_existing_checklist's
+        // comment: activation_checklists is now FORCE RLS-protected, so this
+        // fresh read (after the service's own wrap has already cleared
+        // context) genuinely needs its own explicit context.
+        $keys = $this->runWithFirmContext(
+            $firm,
+            fn () => $firm->fresh()->activationChecklist->items()->pluck('item_key')->sort()->values()->all()
+        );
 
         $expected = [
             'ai_mode', 'compliance_acknowledgments', 'consents', 'email_domain',
