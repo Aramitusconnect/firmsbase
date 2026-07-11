@@ -190,12 +190,16 @@ class FirmLeadsForceRlsActivationTest extends TestCase
         // Phase C (this repo's twenty-fourth staged FORCE activation
         // batch, covering installed_template_packs) for the same reason
         // — additive only, no existing assertion removed or weakened.
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 9, Table
+        // Phase C (this repo's twenty-seventh staged FORCE activation
+        // batch, covering seat_allocations) for the same reason —
+        // additive only, no existing assertion removed or weakened.
         $expectedForced = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
             'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
-            'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews',
+            'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations',
         ];
 
         $rows = DB::select(
@@ -206,7 +210,7 @@ class FirmLeadsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the eighteen tables introduced by 39A-3A..39A-3K, plus payment_classification_events (39A-3L Checkpoint 1), activation_checklists (39A-3L Checkpoint 2), and firm_activation_events (39A-3L Checkpoint 3), and firm_entitlements (39A-3L Checkpoint 4), and firm_entitlement_events (39A-3L Checkpoint 5), and installed_template_packs (39A-3L Checkpoint 6), and template_upgrade_logs (39A-3L Checkpoint 7), and template_upgrade_previews (39A-3L Checkpoint 8), must be FORCE RLS enabled — no more, no fewer.');
+        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the eighteen tables introduced by 39A-3A..39A-3K, plus payment_classification_events (39A-3L Checkpoint 1), activation_checklists (39A-3L Checkpoint 2), and firm_activation_events (39A-3L Checkpoint 3), and firm_entitlements (39A-3L Checkpoint 4), and firm_entitlement_events (39A-3L Checkpoint 5), and installed_template_packs (39A-3L Checkpoint 6), and template_upgrade_logs (39A-3L Checkpoint 7), and template_upgrade_previews (39A-3L Checkpoint 8), and seat_allocations (39A-3L Checkpoint 9), must be FORCE RLS enabled — no more, no fewer.');
     }
 
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
@@ -219,12 +223,16 @@ class FirmLeadsForceRlsActivationTest extends TestCase
         // activation_checklists, for the same reason. Narrowly updated
         // AGAIN by Section 39A-3L, Checkpoint 3, Table Phase C for
         // firm_activation_events, for the same reason.
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 9, Table
+        // Phase C (this repo's twenty-seventh staged FORCE activation
+        // batch, covering seat_allocations) for the same reason —
+        // additive only, no existing assertion removed or weakened.
         $forced = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
             'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
-            'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews',
+            'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

@@ -60,7 +60,17 @@ class DowngradeEvaluationService
             [SeatClass::Staff, PlanLimitMetric::SeatsStaff],
             [SeatClass::ReadOnly, PlanLimitMetric::SeatsReadOnly],
         ] as [$seatClass, $metric]) {
-            $usage = $this->seatEnforcement->usageFor($firm, $seatClass);
+            // Section 39A-3L, Checkpoint 9 — seat_allocations now has
+            // FORCE ROW LEVEL SECURITY active, and firm_users already
+            // does. SeatEnforcementService::usageFor() is a pure read
+            // with no internal context handling (see that service's own
+            // docblock), so this call site wraps the whole call itself,
+            // matching the ad-hoc local-wrap pattern used below for
+            // currentEntitlements in this same method.
+            $usage = (new TenantContextService())->runWithFirmContext(
+                $firm,
+                fn () => $this->seatEnforcement->usageFor($firm, $seatClass)
+            );
             $newLimit = $this->planLimitService->limitValue($newPlan, $metric);
 
             $seatFindings[$seatClass->value] = [

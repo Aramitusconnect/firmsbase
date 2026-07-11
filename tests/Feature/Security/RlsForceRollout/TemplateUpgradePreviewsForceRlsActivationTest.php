@@ -115,7 +115,12 @@ class TemplateUpgradePreviewsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['template_upgrade_previews']);
+        // Narrowly updated by Section 39A-3L, Checkpoint 9, Table Phase C
+        // (this repo's twenty-seventh staged FORCE activation batch,
+        // covering seat_allocations) — additive only, no existing
+        // assertion removed or weakened. Same reasoning as every prior
+        // sibling file's own incremental-count updates in this arc.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['template_upgrade_previews', 'seat_allocations']);
 
         $actuallyForced = [];
 
@@ -132,7 +137,7 @@ class TemplateUpgradePreviewsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(26, count($actuallyForced), 'Exactly twenty-six prepared tables must be FORCE RLS enabled after this batch — no more, no less.');
+        $this->assertSame(27, count($actuallyForced), 'Exactly twenty-seven prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 9 — no more, no less (seat_allocations added on top of this batch\'s own template_upgrade_previews).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 

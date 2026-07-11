@@ -43,15 +43,16 @@ class RlsContextRolloutFirewallTest extends TestCase
         // Table Phase C) installed_template_packs, (Section 39A-3L,
         // Checkpoint 7, Table Phase C) template_upgrade_logs, and
         // (Section 39A-3L, Checkpoint 8, Table Phase C)
-        // template_upgrade_previews. This test's own scope (Section
-        // 39A-2) never touched FORCE state; the remaining prepared
-        // tables must still be unforced.
+        // template_upgrade_previews, and (Section 39A-3L, Checkpoint 9,
+        // Table Phase C) seat_allocations. This test's own scope
+        // (Section 39A-2) never touched FORCE state; the remaining
+        // prepared tables must still be unforced.
         $forcedByLaterBranch = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
             'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
-            'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews',
+            'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -170,7 +171,12 @@ class RlsContextRolloutFirewallTest extends TestCase
                 // batch, a later, distinct staged-FORCE-activation
                 // branch) legitimately added a
                 // template_upgrade_previews-only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930008_force_rls_on_template_upgrade_previews_table.php',
+                && $path !== 'database/migrations/2026_08_25_930008_force_rls_on_template_upgrade_previews_table.php'
+                // Section 39A-3L, Checkpoint 9, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a seat_allocations-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930009_force_rls_on_seat_allocations_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));
