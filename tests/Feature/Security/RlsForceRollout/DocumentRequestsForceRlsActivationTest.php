@@ -107,7 +107,11 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['document_requests']);
+        // Narrowly updated by Section 39A-3L, Checkpoint 11, Table Phase C
+        // (communication_consents) — additive only, no existing assertion
+        // removed or weakened. See CommunicationConsentsForceRlsActivationTest
+        // for that batch's own dedicated proof file.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['document_requests', 'communication_consents']);
 
         $actuallyForced = [];
 
@@ -124,7 +128,7 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(28, count($actuallyForced), 'Exactly twenty-eight prepared tables must be FORCE RLS enabled after this batch — no more, no less.');
+        $this->assertSame(29, count($actuallyForced), 'Exactly twenty-nine prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 11 — no more, no less (the twenty-eight from this batch plus communication_consents from Checkpoint 11).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -143,7 +147,10 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled_and_child_tables_remain_correctly_scoped(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['document_requests']);
+        // Narrowly updated by Section 39A-3L, Checkpoint 11, Table Phase C
+        // (communication_consents) for the same reason as the count test
+        // above — additive only, no existing assertion removed or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['document_requests', 'communication_consents']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

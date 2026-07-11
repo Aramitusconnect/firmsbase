@@ -8,7 +8,6 @@ use App\Models\CommunicationConsent;
 use App\Models\CommunicationConsentEvent;
 use App\Models\Firm;
 use App\Models\User;
-use Illuminate\Support\Facades\DB;
 
 /**
  * ConsentService — the ONLY place communication_consents rows are
@@ -17,6 +16,22 @@ use Illuminate\Support\Facades\DB;
  * a plain nullable int (deferred FK — no Client model exists yet).
  * isGranted() is the enforcement check any future notification-sending
  * code must call before dispatching to a client on a given channel.
+ *
+ * Section 39A-3L, Checkpoint 11 — capture()/revoke() now wrap their
+ * bodies in runWithFirmContext($firm, ...) instead of a bare
+ * DB::transaction(...), since communication_consents is now FORCE-RLS
+ * protected and this is the sole production write path for the table.
+ * runWithFirmContext() opens its own transaction internally, so no
+ * separate DB::transaction() call is needed. This same wrap also
+ * covers the paired CommunicationConsentEvent::create() call in each
+ * method body (communication_consent_events shares firm_id with its
+ * parent consent row). isGranted() is deliberately left unwrapped — it
+ * is a pure read helper, and DocumentChaseService::checkAndLog() (and
+ * other callers) already invoke it from within their own active
+ * runWithFirmContext() wrap; self-wrapping it here would reintroduce
+ * the nested "decoy wrap" bug this arc has repeatedly avoided, since
+ * the inner wrap's finally would clear the outer wrap's still-needed
+ * context.
  */
 class ConsentService
 {
@@ -30,7 +45,7 @@ class ConsentService
         ?string $capturedIp = null,
         ?\DateTimeInterface $expiresAt = null,
     ): CommunicationConsent {
-        return DB::transaction(function () use (
+        return (new TenantContextService())->runWithFirmContext($firm, function () use (
             $firm, $clientId, $channel, $consentTextVersion, $actor, $capturedVia, $capturedIp, $expiresAt
         ) {
             $existing = CommunicationConsent::query()
@@ -80,7 +95,7 @@ class ConsentService
         ?User $actor = null,
         ?string $reason = null,
     ): CommunicationConsent {
-        return DB::transaction(function () use ($firm, $clientId, $channel, $actor, $reason) {
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $clientId, $channel, $actor, $reason) {
             $consent = CommunicationConsent::query()
                 ->where('firm_id', $firm->id)
                 ->where('client_id', $clientId)

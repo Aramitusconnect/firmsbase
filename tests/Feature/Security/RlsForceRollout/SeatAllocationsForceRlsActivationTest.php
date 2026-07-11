@@ -125,7 +125,10 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests']);
+        // Narrowly updated by Section 39A-3L, Checkpoint 11, Table Phase C
+        // (communication_consents) — additive only, no existing assertion
+        // removed or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests', 'communication_consents']);
 
         $actuallyForced = [];
 
@@ -145,7 +148,10 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
         // Narrowly updated by Section 39A-3L, Checkpoint 10, Table
         // Phase C (document_requests) for the same reason —
         // additive only, no existing assertion removed or weakened.
-        $this->assertSame(28, count($actuallyForced), 'Exactly twenty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 10 — no more, no less (document_requests added on top of this batch\'s own seat_allocations).');
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 11, Table
+        // Phase C (communication_consents) for the same reason —
+        // additive only, no existing assertion removed or weakened.
+        $this->assertSame(29, count($actuallyForced), 'Exactly twenty-nine prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 11 — no more, no less (document_requests and communication_consents added on top of this batch\'s own seat_allocations).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -158,7 +164,10 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled_and_seat_pools_remains_exempt(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests']);
+        // Narrowly updated by Section 39A-3L, Checkpoint 11, Table Phase C
+        // (communication_consents) for the same reason as the count test
+        // above — additive only, no existing assertion removed or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests', 'communication_consents']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

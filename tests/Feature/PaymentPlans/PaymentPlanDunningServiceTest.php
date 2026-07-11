@@ -44,7 +44,19 @@ class PaymentPlanDunningServiceTest extends TestCase
         (new ConsentService())->capture($firm, $client->id, ConsentChannel::Email, 'v1');
         $installment = $this->missedInstallmentFor($firm, $client);
 
-        $result = $this->service->checkAndLog($installment);
+        // Section 39A-3L, Checkpoint 11 fallout: communication_consents is
+        // now FORCE-RLS protected, and ConsentService::capture() (correctly)
+        // clears its own context wrap before returning. That clear also
+        // wipes out the ambient PostgreSQL session context that
+        // Client::factory()->create() above deliberately leaves active for
+        // the rest of the test (the established "context-hold" factory
+        // pattern) — so PaymentPlanDunningService::checkAndLog()'s own bare,
+        // unwrapped `$plan->client` lazy load (clients is also FORCE-RLS
+        // protected) would otherwise resolve to null here.
+        // checkAndLog() itself is deliberately NOT wrapped in
+        // runWithFirmContext() (no production caller invokes it without an
+        // outer context today), so the caller — this test — must supply one.
+        $result = $this->runWithFirmContext($firm, fn () => $this->service->checkAndLog($installment));
 
         $this->assertTrue($result->eligible);
         $this->assertSame($client->preferred_language, $result->clientLanguage);
@@ -88,7 +100,12 @@ class PaymentPlanDunningServiceTest extends TestCase
         $consentService->revoke($firm, $client->id, ConsentChannel::Email);
         $installment = $this->missedInstallmentFor($firm, $client);
 
-        $result = $this->service->checkAndLog($installment);
+        // Same Checkpoint 11 fallout fix as
+        // test_eligible_when_consent_granted_and_no_do_not_contact above —
+        // revoke() also clears the ambient tenant context before
+        // returning, so checkAndLog()'s own unwrapped `$plan->client` read
+        // needs this test to supply its own context.
+        $result = $this->runWithFirmContext($firm, fn () => $this->service->checkAndLog($installment));
 
         $this->assertFalse($result->eligible);
     }

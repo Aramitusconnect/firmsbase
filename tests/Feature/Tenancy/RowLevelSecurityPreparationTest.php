@@ -89,8 +89,17 @@ class RowLevelSecurityPreparationTest extends TestCase
         // checkpoint's own table, following the exact same pattern as
         // Checkpoint 4's own fix above.
         //
+        // Section 39A-3L, Checkpoint 11, Table Phase B legitimately
+        // activated permanent FORCE ROW LEVEL SECURITY on
+        // communication_consents — see
+        // database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php.
+        // Added to the exception list in the SAME commit as that
+        // migration, per this file's own docblock lesson above (a table
+        // forced without updating this list going silently red for a
+        // whole cycle) — not deferred to a later pass.
+        //
         // Every other Phase 1 table here remains prepared-but-not-forced.
-        if (in_array($table, ['firm_users', 'client_communication_preferences', 'activation_checklists', 'firm_entitlements', 'firm_entitlement_events'], true)) {
+        if (in_array($table, ['firm_users', 'client_communication_preferences', 'activation_checklists', 'firm_entitlements', 'firm_entitlement_events', 'communication_consents'], true)) {
             $this->assertTrue((bool) $row->relforcerowsecurity, "{$table} must have permanent FORCE ROW LEVEL SECURITY active.");
 
             return;

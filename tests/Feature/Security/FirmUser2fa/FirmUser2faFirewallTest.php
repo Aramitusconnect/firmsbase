@@ -96,7 +96,12 @@ class FirmUser2faFirewallTest extends TestCase
             // permanent FORCE ROW LEVEL SECURITY.
             'app/Services/TrustEligibilityService.php',
             'app/Services/AiRetrievalIsolationService.php',
-            'app/Services/ConsentService.php',
+            // ConsentService.php is deliberately NOT in this list any
+            // more — Section 39A-3L, Checkpoint 11 (a later, distinct
+            // staged-FORCE-activation branch) found a genuine need to
+            // wrap capture()/revoke()'s bodies in runWithFirmContext(),
+            // since communication_consents now has permanent FORCE ROW
+            // LEVEL SECURITY.
         ];
 
         $touched = array_values(array_intersect($protected, $changed));

@@ -7,7 +7,10 @@ use App\Enums\ConsentStatus;
 use App\Models\Client;
 use App\Models\CommunicationConsent;
 use App\Models\Firm;
+use App\Services\TenantContextService;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
 
 /**
  * @extends Factory<CommunicationConsent>
@@ -15,6 +18,37 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 class CommunicationConsentFactory extends Factory
 {
     protected $model = CommunicationConsent::class;
+
+    /**
+     * Section 39A-3L, Checkpoint 11 — context-hold pattern (matching
+     * every prior FORCE-RLS factory since 39A-3A): groups resolved
+     * models by firm_id and activates the matching PostgreSQL session
+     * context per group before inserting, so a bare
+     * CommunicationConsent::factory()->create() works correctly even
+     * called from outside any already-active tenant context. No
+     * cross-firm mismatch exists in definition() itself (client_id
+     * defaults to null), so this override is purely the context-hold
+     * wrapper — no field-derivation fix needed.
+     */
+    public function create($attributes = [], ?Model $parent = null)
+    {
+        if (! empty($attributes)) {
+            return $this->state($attributes)->create([], $parent);
+        }
+
+        $results = $this->make($attributes, $parent);
+        $models = $results instanceof Model ? new Collection([$results]) : $results;
+        $service = new TenantContextService();
+
+        $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
+            $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
+            $this->store($group);
+        });
+
+        $this->callAfterCreating($models, $parent);
+
+        return $results;
+    }
 
     public function definition(): array
     {

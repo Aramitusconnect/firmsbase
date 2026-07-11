@@ -89,7 +89,12 @@ class WorkflowStateMachineFirewallTest extends TestCase
         // update() previously appeared to succeed while the underlying
         // UPDATE actually affected zero rows).
         'app/Services/PaymentPlanDunningService.php',
-        'app/Services/ConsentService.php',
+        // ConsentService.php is deliberately NOT in this list any
+        // more — Section 39A-3L, Checkpoint 11 (a later, distinct
+        // staged-FORCE-activation branch) found a genuine need to
+        // wrap capture()/revoke()'s bodies in runWithFirmContext(),
+        // since communication_consents now has permanent FORCE ROW
+        // LEVEL SECURITY.
         'app/Services/SignatureCertificateService.php',
         'app/Services/TrustTransferRequestService.php',
         'app/Services/TrustRefundRequestService.php',
@@ -564,6 +569,20 @@ class WorkflowStateMachineFirewallTest extends TestCase
             'app/Services/ReadinessScorecardRegistry.php',
             'tests/Feature/Tasks/TaskDependencyServiceTest.php',
             'tests/Feature/Webhooks/Wiring/TaskCompletedWiringTest.php',
+            // Section 39A-3L, Checkpoint 11, Table Phase C (this batch,
+            // a later, distinct staged-FORCE-activation branch)
+            // legitimately added a communication_consents-only FORCE
+            // RLS migration, wrapped ConsentService's capture()/
+            // revoke() in their own runWithFirmContext() call, moved
+            // ClientPortalService::invite()'s isGranted() precondition
+            // inside its existing runWithFirmContext() wrap, added a
+            // CommunicationConsentFactory context-hold fix, and updated
+            // the tests it affected.
+            'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php',
+            'database/factories/CommunicationConsentFactory.php',
+            'app/Services/ConsentService.php',
+            'tests/Feature/Activation/ConsentServiceTest.php',
+            'tests/Feature/PaymentPlans/PaymentPlanDunningServiceTest.php',
         ];
 
         return array_values(array_filter(

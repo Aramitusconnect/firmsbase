@@ -229,7 +229,18 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== 'database/factories/DocumentRequestFactory.php'
                 && $path !== 'tests/Feature/Documents/DocumentRequestServiceTest.php'
                 && $path !== 'tests/Feature/DocumentChase/DocumentChaseServiceTest.php'
-                && $path !== 'tests/Feature/Readiness/MatterReadinessServiceTest.php',
+                && $path !== 'tests/Feature/Readiness/MatterReadinessServiceTest.php'
+                // Section 39A-3L, Checkpoint 11, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a communication_consents-
+                // only FORCE RLS migration and a CommunicationConsentFactory
+                // context-hold fix (app/Services/ is already excluded
+                // above, so only the migration/factory/affected tests
+                // need listing here), and updated the tests it affected.
+                && $path !== 'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php'
+                && $path !== 'database/factories/CommunicationConsentFactory.php'
+                && $path !== 'tests/Feature/Activation/ConsentServiceTest.php'
+                && $path !== 'tests/Feature/PaymentPlans/PaymentPlanDunningServiceTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

@@ -78,7 +78,12 @@ class LoginPolicyFirewallTest extends TestCase
                 // batch, a later, distinct staged-FORCE-activation
                 // branch) legitimately added a document_requests-only
                 // FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930010_force_rls_on_document_requests_table.php',
+                && $path !== 'database/migrations/2026_08_25_930010_force_rls_on_document_requests_table.php'
+                // Section 39A-3L, Checkpoint 11, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a communication_consents-
+                // only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39D must add no migrations, but found: '.implode(', ', $changed));
@@ -183,7 +188,12 @@ class LoginPolicyFirewallTest extends TestCase
             // permanent FORCE ROW LEVEL SECURITY.
             'app/Services/TrustEligibilityService.php',
             'app/Services/AiRetrievalIsolationService.php',
-            'app/Services/ConsentService.php',
+            // ConsentService.php is deliberately NOT in this list any
+            // more — Section 39A-3L, Checkpoint 11 (a later, distinct
+            // staged-FORCE-activation branch) found a genuine need to
+            // wrap capture()/revoke()'s bodies in runWithFirmContext(),
+            // since communication_consents now has permanent FORCE ROW
+            // LEVEL SECURITY.
             // User.php is deliberately NOT in this list any more —
             // internal login/panel access wiring (a later, distinct
             // section) found a genuine need to add
