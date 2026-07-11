@@ -106,12 +106,18 @@ class InstalledTemplatePacksForceRlsActivationTest extends TestCase
      * Exactly twenty-four tables (the twenty-three previously forced plus
      * installed_template_packs) must be FORCE-enabled among ALL prepared
      * tables — no more, no less.
+     *
+     * Narrowly updated by Section 39A-3L, Checkpoint 7, Table Phase C
+     * (this repo's twenty-fifth staged FORCE activation batch, covering
+     * template_upgrade_logs) to account for that later, legitimate
+     * addition — additive only, no existing assertion removed or
+     * weakened.
      */
     public function test_exactly_twenty_four_prepared_tables_are_force_row_level_security_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['installed_template_packs']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['installed_template_packs', 'template_upgrade_logs']);
 
         $actuallyForced = [];
 
@@ -128,7 +134,7 @@ class InstalledTemplatePacksForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(24, count($actuallyForced), 'Exactly twenty-four prepared tables must be FORCE RLS enabled after this batch — no more, no less.');
+        $this->assertSame(25, count($actuallyForced), 'Exactly twenty-five prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 7 — no more, no less (template_upgrade_logs added on top of this batch\'s own installed_template_packs).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 

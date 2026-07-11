@@ -123,12 +123,17 @@ class FirmEntitlementEventsForceRlsActivationTest extends TestCase
      * this working tree rather than a frozen snapshot of Checkpoint 5
      * alone. Additive only: every originally-asserted table is still
      * asserted forced here.
+     *
+     * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 7, Table
+     * Phase C (this repo's twenty-fifth staged FORCE activation batch,
+     * covering template_upgrade_logs) for the same reason — additive
+     * only, no existing assertion removed or weakened.
      */
     public function test_exactly_twenty_three_prepared_tables_are_force_row_level_security_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_entitlement_events', 'installed_template_packs']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_entitlement_events', 'installed_template_packs', 'template_upgrade_logs']);
 
         $actuallyForced = [];
 
@@ -145,7 +150,7 @@ class FirmEntitlementEventsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(24, count($actuallyForced), 'Exactly twenty-four prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 6 — no more, no less (installed_template_packs added on top of this batch\'s own firm_entitlement_events).');
+        $this->assertSame(25, count($actuallyForced), 'Exactly twenty-five prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 7 — no more, no less (installed_template_packs and template_upgrade_logs added on top of this batch\'s own firm_entitlement_events).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 

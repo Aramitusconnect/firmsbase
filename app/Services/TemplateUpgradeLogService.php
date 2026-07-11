@@ -20,6 +20,18 @@ use Illuminate\Support\Facades\DB;
  * log row with status RolledBack and rollback_of_id pointing back,
  * mirroring Phase 5's MaintenanceWindowService::reschedule() supersede
  * pattern exactly.
+ *
+ * Section 39A-3L, Checkpoint 7 — template_upgrade_logs is now FORCE
+ * RLS-enabled. install() already wraps its own entire body in
+ * TenantContextService::runWithFirmContext() (Checkpoint 6), so it is
+ * deliberately called OUTSIDE of any context here. Once install()
+ * returns, apply()/rollback() open a SECOND, SEPARATE, SEQUENTIAL
+ * runWithFirmContext() covering only their own direct writes
+ * ($preview->update() / TemplateUpgradeLog::create()). Nesting the two
+ * (wrapping install() itself in an outer context here) was tried and
+ * empirically proven NOT to work: the inner wrap's own finally block
+ * clears the PostgreSQL session/PHP-memory context the outer wrap
+ * still expects to be active for its own subsequent writes.
  */
 class TemplateUpgradeLogService
 {
@@ -32,17 +44,21 @@ class TemplateUpgradeLogService
         return DB::transaction(function () use ($preview, $actor) {
             $this->installationService->install($preview->firm, $preview->toVersion);
 
-            $preview->update(['status' => TemplateUpgradePreviewStatus::Applied]);
+            $tenantContext = new TenantContextService();
 
-            return TemplateUpgradeLog::create([
-                'firm_id' => $preview->firm_id,
-                'installed_template_pack_id' => $preview->installed_template_pack_id,
-                'from_version_id' => $preview->from_version_id,
-                'to_version_id' => $preview->to_version_id,
-                'status' => TemplateUpgradeLogStatus::Applied,
-                'applied_at' => now(),
-                'applied_by' => $actor?->id,
-            ]);
+            return $tenantContext->runWithFirmContext($preview->firm, function () use ($preview, $actor) {
+                $preview->update(['status' => TemplateUpgradePreviewStatus::Applied]);
+
+                return TemplateUpgradeLog::create([
+                    'firm_id' => $preview->firm_id,
+                    'installed_template_pack_id' => $preview->installed_template_pack_id,
+                    'from_version_id' => $preview->from_version_id,
+                    'to_version_id' => $preview->to_version_id,
+                    'status' => TemplateUpgradeLogStatus::Applied,
+                    'applied_at' => now(),
+                    'applied_by' => $actor?->id,
+                ]);
+            });
         });
     }
 
@@ -59,16 +75,20 @@ class TemplateUpgradeLogService
         return DB::transaction(function () use ($log, $actor) {
             $this->installationService->install($log->firm, $log->fromVersion);
 
-            return TemplateUpgradeLog::create([
-                'firm_id' => $log->firm_id,
-                'installed_template_pack_id' => $log->installed_template_pack_id,
-                'from_version_id' => $log->to_version_id,
-                'to_version_id' => $log->from_version_id,
-                'status' => TemplateUpgradeLogStatus::RolledBack,
-                'applied_at' => now(),
-                'applied_by' => $actor?->id,
-                'rollback_of_id' => $log->id,
-            ]);
+            $tenantContext = new TenantContextService();
+
+            return $tenantContext->runWithFirmContext($log->firm, function () use ($log, $actor) {
+                return TemplateUpgradeLog::create([
+                    'firm_id' => $log->firm_id,
+                    'installed_template_pack_id' => $log->installed_template_pack_id,
+                    'from_version_id' => $log->to_version_id,
+                    'to_version_id' => $log->from_version_id,
+                    'status' => TemplateUpgradeLogStatus::RolledBack,
+                    'applied_at' => now(),
+                    'applied_by' => $actor?->id,
+                    'rollback_of_id' => $log->id,
+                ]);
+            });
         });
     }
 }

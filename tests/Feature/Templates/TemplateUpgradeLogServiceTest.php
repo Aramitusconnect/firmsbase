@@ -75,9 +75,18 @@ class TemplateUpgradeLogServiceTest extends TestCase
         $persistedInstalled = $this->runWithFirmContext($firm, fn () => $installed->fresh());
         $this->assertSame($fromVersionId, $persistedInstalled->template_pack_version_id);
 
+        // template_upgrade_logs is FORCE RLS as of this checkpoint —
+        // rollback()'s own second, separate runWithFirmContext() wrap
+        // (covering only its direct TemplateUpgradeLog::create() write)
+        // clears the context in its finally block before rollback()
+        // returns, so this ->fresh() read of the original Applied row
+        // must be explicitly (re-)scoped to the firm rather than relying
+        // on any ambient/leaked context.
+        $persistedAppliedLog = $this->runWithFirmContext($firm, fn () => $appliedLog->fresh());
+
         // The original Applied row is never mutated or deleted.
-        $this->assertSame(TemplateUpgradeLogStatus::Applied, $appliedLog->fresh()->status);
-        $this->assertNull($appliedLog->fresh()->rollback_of_id);
+        $this->assertSame(TemplateUpgradeLogStatus::Applied, $persistedAppliedLog->status);
+        $this->assertNull($persistedAppliedLog->rollback_of_id);
     }
 
     public function test_rollback_throws_when_there_is_no_from_version(): void
