@@ -118,8 +118,23 @@ class TrustRefundRequestService
             throw new \RuntimeException('Only an Approved refund request can be completed.');
         }
 
-        $ledger = $request->trustLedger;
-        $matter = $request->matter;
+        // Section 39A-3L, Checkpoint 4 - matters is already a FORCE-RLS
+        // table from an earlier checkpoint (trust_ledgers is not yet
+        // RLS-enabled at all). These two reads used to work only by
+        // accident, relying on ambient database session context left
+        // active by MatterFactory's context-hold create() pattern
+        // earlier in the caller's flow. EntitlementService::resolve()
+        // now correctly clears any such ambient context when the
+        // eligibility check above returns, so these two reads are
+        // combined into one explicit whole-call wrap here rather than
+        // left unwrapped. This matters even more than in the transfer/
+        // adjustment flows: with $matter silently null, the
+        // `if ($matter)` gate below would silently SKIP the real
+        // cross-matter safety check instead of failing closed.
+        [$ledger, $matter] = (new TenantContextService())->runWithFirmContext($firm, fn () => [
+            $request->trustLedger,
+            $request->matter,
+        ]);
 
         $this->tenantSafePolicy->assertTrustLedgerBelongsToFirm($ledger, $firm);
 

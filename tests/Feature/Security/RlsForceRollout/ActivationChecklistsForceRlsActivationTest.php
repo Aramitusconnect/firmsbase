@@ -101,12 +101,17 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
      * the real, current state of this working tree rather than a
      * frozen snapshot of Checkpoint 2 alone. Additive only: every
      * originally-asserted table is still asserted forced here.
+     *
+     * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 4, Table
+     * Phase C (this repo's twenty-second staged FORCE activation
+     * batch, covering firm_entitlements) for the same reason — additive
+     * only, no existing assertion removed or weakened.
      */
     public function test_exactly_twenty_prepared_tables_are_force_row_level_security_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['activation_checklists', 'firm_activation_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['activation_checklists', 'firm_activation_events', 'firm_entitlements']);
 
         $actuallyForced = [];
 
@@ -123,7 +128,7 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(21, count($actuallyForced), 'Exactly twenty-one prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 3 — no more, no less (twenty after this batch\'s own Checkpoint 2, plus firm_activation_events from Checkpoint 3).');
+        $this->assertSame(22, count($actuallyForced), 'Exactly twenty-two prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 4 — no more, no less (twenty-one after this batch\'s own Checkpoint 2 plus firm_activation_events from Checkpoint 3, plus firm_entitlements from Checkpoint 4).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 

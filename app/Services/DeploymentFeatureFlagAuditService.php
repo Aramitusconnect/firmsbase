@@ -45,7 +45,16 @@ class DeploymentFeatureFlagAuditService
      */
     public function isFullyAudited(Firm $firm): bool
     {
-        $entitlementCount = \App\Models\FirmEntitlement::query()->where('firm_id', $firm->id)->count();
+        // Section 39A-3L, Checkpoint 4 - firm_entitlements now has FORCE
+        // ROW LEVEL SECURITY active. This is a direct read against
+        // firm_entitlements independent of EntitlementService::resolve(),
+        // so it needs its own whole-call wrap. firm_entitlement_events
+        // is not yet FORCE-enabled (Checkpoint 5's table), so the
+        // $eventCount query below is left as-is.
+        $entitlementCount = (new TenantContextService())->runWithFirmContext(
+            $firm,
+            fn () => \App\Models\FirmEntitlement::query()->where('firm_id', $firm->id)->count()
+        );
         $eventCount = FirmEntitlementEvent::query()->where('firm_id', $firm->id)->count();
 
         return $entitlementCount === 0 || $eventCount > 0;

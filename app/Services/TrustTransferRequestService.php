@@ -143,9 +143,24 @@ class TrustTransferRequestService
             throw new \RuntimeException('Only an Approved transfer request can be applied.');
         }
 
-        $ledger = $request->trustLedger;
-        $matter = $request->matter;
-        $invoice = (new TenantContextService())->runWithFirmContext($firm, fn () => $request->invoice);
+        // Section 39A-3L, Checkpoint 4 - matters/invoices are already
+        // FORCE-RLS tables from earlier checkpoints (trust_ledgers is
+        // not yet RLS-enabled at all — confirmed via pg_class:
+        // relrowsecurity=false, relforcerowsecurity=false — so reading
+        // it here is unaffected either way). These three reads used to
+        // work only by accident, relying on
+        // ambient database session context left active by
+        // MatterFactory's context-hold create() pattern earlier in the
+        // caller's flow. EntitlementService::resolve() now correctly
+        // clears any such ambient context when the eligibility check
+        // above returns, so these three reads are combined into one
+        // explicit whole-call wrap here rather than left unwrapped (and
+        // rather than each getting its own separate wrap).
+        [$ledger, $matter, $invoice] = (new TenantContextService())->runWithFirmContext($firm, fn () => [
+            $request->trustLedger,
+            $request->matter,
+            $request->invoice,
+        ]);
 
         $this->tenantSafePolicy->assertTrustLedgerBelongsToFirm($ledger, $firm);
         $this->crossMatterProtection->assertMatterEligibleForLedger($matter, $ledger);

@@ -107,7 +107,22 @@ class DowngradeEvaluationService
 
         $moduleBlockingReasons = [];
 
-        foreach ($firm->entitlements()->where('enabled', true)->get() as $entitlement) {
+        // Section 39A-3L, Checkpoint 4 - firm_entitlements now has FORCE
+        // ROW LEVEL SECURITY active. This is a direct read against
+        // firm_entitlements independent of EntitlementService::resolve()
+        // (it reads the raw rows to enumerate currently-enabled modules,
+        // not to resolve precedence for one specific module), so it
+        // needs its own whole-call wrap. Materialized here (not left as
+        // a lazy relation query inside the foreach) so the wrap's
+        // runWithFirmContext() call completes and clears before the
+        // loop calls EntitlementService::isEnabled() below, which
+        // self-wraps its own call.
+        $currentEntitlements = (new TenantContextService())->runWithFirmContext(
+            $firm,
+            fn () => $firm->entitlements()->where('enabled', true)->get()
+        );
+
+        foreach ($currentEntitlements as $entitlement) {
             if (! in_array($entitlement->module_code, $newlyGrantedModules, true)
                 && $this->entitlementService->isEnabled($firm->id, $entitlement->module_code)) {
                 $moduleBlockingReasons[] = "module '{$entitlement->module_code}' is currently enabled and in use but is not granted by the new plan";

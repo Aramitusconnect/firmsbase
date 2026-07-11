@@ -113,12 +113,20 @@ class FirmActivationEventsForceRlsActivationTest extends TestCase
      * proof, independent of RlsForceRolloutFirewallTest's own
      * equivalent check, so this file stands alone as proof for this
      * table.
+     *
+     * Narrowly updated by Section 39A-3L, Checkpoint 4, Table Phase C
+     * (this repo's twenty-second staged FORCE activation batch, covering
+     * firm_entitlements) to account for that later, legitimate
+     * addition — the count and expected-table list below now reflect
+     * the real, current state of this working tree rather than a
+     * frozen snapshot of Checkpoint 3 alone. Additive only: every
+     * originally-asserted table is still asserted forced here.
      */
     public function test_exactly_twenty_one_prepared_tables_are_force_row_level_security_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_activation_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_activation_events', 'firm_entitlements']);
 
         $actuallyForced = [];
 
@@ -135,7 +143,7 @@ class FirmActivationEventsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(21, count($actuallyForced), 'Exactly twenty-one prepared tables must be FORCE RLS enabled after this batch — no more, no less.');
+        $this->assertSame(22, count($actuallyForced), 'Exactly twenty-two prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 4 — no more, no less (twenty-one after this batch\'s own Checkpoint 3, plus firm_entitlements from Checkpoint 4).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 

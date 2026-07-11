@@ -120,12 +120,21 @@ class EntitlementServiceTest extends TestCase
             reason: 'manual grant for pilot firm',
         );
 
-        $this->assertDatabaseHas('firm_entitlements', [
-            'id' => $entitlement->id,
-            'firm_id' => $firm->id,
-            'module_code' => $module->module_code,
-            'enabled' => true,
-        ]);
+        // Section 39A-3L, Checkpoint 4 — firm_entitlements now has FORCE
+        // ROW LEVEL SECURITY active. assertDatabaseHas() queries with no
+        // tenant context of its own, so it would now see zero rows.
+        // setForSource() itself already cleared context by the time
+        // control returns here, so this is a genuinely fresh,
+        // explicitly context-wrapped read against this now-force-
+        // protected table — not a weakening of the original assertion.
+        $this->runWithFirmContext($firm, function () use ($entitlement, $firm, $module) {
+            $this->assertDatabaseHas('firm_entitlements', [
+                'id' => $entitlement->id,
+                'firm_id' => $firm->id,
+                'module_code' => $module->module_code,
+                'enabled' => true,
+            ]);
+        });
 
         $this->assertDatabaseHas('firm_entitlement_events', [
             'firm_entitlement_id' => $entitlement->id,
@@ -144,14 +153,20 @@ class EntitlementServiceTest extends TestCase
         $second = $this->service->setForSource($firm, $module->module_code, EntitlementSource::AdminOverride, false);
 
         $this->assertSame($first->id, $second->id);
+
+        // Section 39A-3L, Checkpoint 4 — firm_entitlements now has FORCE
+        // ROW LEVEL SECURITY active. Both setForSource() calls above
+        // already cleared context by the time control returns here, so
+        // this count query is a genuinely fresh, explicitly
+        // context-wrapped read.
         $this->assertSame(
             1,
-            FirmEntitlement::where('firm_id', $firm->id)
+            $this->runWithFirmContext($firm, fn () => FirmEntitlement::where('firm_id', $firm->id)
                 ->where('module_code', $module->module_code)
                 ->where('source', 'admin_override')
-                ->count()
+                ->count())
         );
-        $this->assertFalse($second->fresh()->enabled);
+        $this->assertFalse($this->runWithFirmContext($firm, fn () => $second->fresh())->enabled);
 
         $this->assertDatabaseHas('firm_entitlement_events', [
             'firm_entitlement_id' => $first->id,

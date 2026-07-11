@@ -44,12 +44,20 @@ class FirmLicenseCommercialServiceTest extends TestCase
         $this->assertSame($plan->id, $updated->plan_id);
         $this->assertSame(BillingMode::SelfService, $updated->billing_mode);
 
-        $this->assertDatabaseHas('firm_entitlements', [
-            'firm_id' => $firm->id,
-            'module_code' => 'ai',
-            'source' => EntitlementSource::Plan->value,
-            'enabled' => true,
-        ]);
+        // Section 39A-3L, Checkpoint 4 — firm_entitlements now has FORCE
+        // ROW LEVEL SECURITY active. assertDatabaseHas() queries with no
+        // tenant context of its own, so it would now see zero rows.
+        // assignPlan() -> EntitlementService::setForSource() already
+        // cleared context by the time control returns here, so this is
+        // a genuinely fresh, explicitly context-wrapped read.
+        $this->runWithFirmContext($firm, function () use ($firm) {
+            $this->assertDatabaseHas('firm_entitlements', [
+                'firm_id' => $firm->id,
+                'module_code' => 'ai',
+                'source' => EntitlementSource::Plan->value,
+                'enabled' => true,
+            ]);
+        });
 
         $event = LicenseEvent::query()
             ->where('licensable_type', FirmLicense::class)
@@ -73,18 +81,27 @@ class FirmLicenseCommercialServiceTest extends TestCase
 
         $this->service->assignPlan($license, $plan, orgLicense: $orgLicense);
 
-        $this->assertDatabaseHas('firm_entitlements', [
-            'firm_id' => $firm->id,
-            'module_code' => 'reports',
-            'source' => EntitlementSource::OrgInherited->value,
-            'enabled' => true,
-        ]);
+        // Section 39A-3L, Checkpoint 4 — same reasoning as
+        // test_assign_plan_updates_the_license_and_syncs_plan_entitlements
+        // above. Both assertions are wrapped in the SAME explicit
+        // context: the assertDatabaseMissing() below must genuinely
+        // prove "no plan-sourced row exists for this firm/module", not
+        // merely benefit from the fail-closed "no context = zero rows"
+        // behavior that would make it vacuously true if left unwrapped.
+        $this->runWithFirmContext($firm, function () use ($firm) {
+            $this->assertDatabaseHas('firm_entitlements', [
+                'firm_id' => $firm->id,
+                'module_code' => 'reports',
+                'source' => EntitlementSource::OrgInherited->value,
+                'enabled' => true,
+            ]);
 
-        $this->assertDatabaseMissing('firm_entitlements', [
-            'firm_id' => $firm->id,
-            'module_code' => 'reports',
-            'source' => EntitlementSource::Plan->value,
-        ]);
+            $this->assertDatabaseMissing('firm_entitlements', [
+                'firm_id' => $firm->id,
+                'module_code' => 'reports',
+                'source' => EntitlementSource::Plan->value,
+            ]);
+        });
     }
 
     public function test_change_status_logs_from_and_to_status(): void

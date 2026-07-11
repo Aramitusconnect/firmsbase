@@ -64,8 +64,24 @@ class RowLevelSecurityPreparationTest extends TestCase
         // activation branch) legitimately activated permanent FORCE ROW
         // LEVEL SECURITY on client_communication_preferences — see
         // database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php.
+        //
+        // GAP FOUND AND FIXED during Section 39A-3L, Checkpoint 4's own
+        // audit (not caused by Checkpoint 4 — discovered here): Section
+        // 39A-3L, Checkpoint 2, Table Phase C legitimately activated
+        // permanent FORCE ROW LEVEL SECURITY on activation_checklists
+        // (see
+        // database/migrations/2026_08_25_930002_force_rls_on_activation_checklists_table.php)
+        // but this exception list was never updated to reflect that —
+        // meaning this test silently asserted the WRONG expectation for
+        // activation_checklists (that it remained un-forced) ever since
+        // Checkpoint 2 landed. Added here, alongside firm_entitlements
+        // (Section 39A-3L, Checkpoint 4's own table — see
+        // database/migrations/2026_08_25_930004_force_rls_on_firm_entitlements_table.php),
+        // which is why this fix landed in the same pass as the new
+        // table's own checkpoint.
+        //
         // Every other Phase 1 table here remains prepared-but-not-forced.
-        if ($table === 'firm_users' || $table === 'client_communication_preferences') {
+        if (in_array($table, ['firm_users', 'client_communication_preferences', 'activation_checklists', 'firm_entitlements'], true)) {
             $this->assertTrue((bool) $row->relforcerowsecurity, "{$table} must have permanent FORCE ROW LEVEL SECURITY active.");
 
             return;

@@ -52,11 +52,19 @@ class EntitlementPlanSyncServiceTest extends TestCase
         $this->assertTrue($this->entitlementService->isEnabled($firm->id, 'invoices'));
         $this->assertFalse($this->entitlementService->isEnabled($firm->id, 'payments'));
 
-        $this->assertDatabaseHas('firm_entitlements', [
-            'firm_id' => $firm->id,
-            'module_code' => 'invoices',
-            'source' => EntitlementSource::Plan->value,
-        ]);
+        // Section 39A-3L, Checkpoint 4 — firm_entitlements now has FORCE
+        // ROW LEVEL SECURITY active. assertDatabaseHas() queries with no
+        // tenant context of its own, so it would now see zero rows.
+        // syncPlanEntitlements() -> EntitlementService::setForSource()
+        // already cleared context by the time control returns here, so
+        // this is a genuinely fresh, explicitly context-wrapped read.
+        $this->runWithFirmContext($firm, function () use ($firm) {
+            $this->assertDatabaseHas('firm_entitlements', [
+                'firm_id' => $firm->id,
+                'module_code' => 'invoices',
+                'source' => EntitlementSource::Plan->value,
+            ]);
+        });
     }
 
     public function test_sync_org_inherited_entitlements_writes_org_inherited_source(): void
@@ -70,12 +78,17 @@ class EntitlementPlanSyncServiceTest extends TestCase
 
         $this->service->syncOrgInheritedEntitlements($firm, $orgLicense);
 
-        $this->assertDatabaseHas('firm_entitlements', [
-            'firm_id' => $firm->id,
-            'module_code' => 'client_portal',
-            'source' => EntitlementSource::OrgInherited->value,
-            'enabled' => true,
-        ]);
+        // Section 39A-3L, Checkpoint 4 — same reasoning as
+        // test_sync_plan_entitlements_writes_one_row_per_plan_module
+        // above: a genuinely fresh, explicitly context-wrapped read.
+        $this->runWithFirmContext($firm, function () use ($firm) {
+            $this->assertDatabaseHas('firm_entitlements', [
+                'firm_id' => $firm->id,
+                'module_code' => 'client_portal',
+                'source' => EntitlementSource::OrgInherited->value,
+                'enabled' => true,
+            ]);
+        });
     }
 
     public function test_firm_override_still_wins_over_a_synced_plan_entitlement(): void

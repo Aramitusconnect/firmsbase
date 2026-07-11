@@ -7,6 +7,7 @@ use App\Enums\TrustChargebackStatus;
 use App\Enums\TrustLedgerEntryType;
 use App\Models\Client;
 use App\Models\FirmUser;
+use App\Models\Matter;
 use App\Services\TrustAccountService;
 use App\Services\TrustChargebackService;
 use App\Services\TrustDepositService;
@@ -84,5 +85,50 @@ class TrustChargebackServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->service->resolve($firm, $chargeback, $user);
+    }
+
+    /**
+     * Regression test for the Section 39A-3L Checkpoint 4 Phase D bug,
+     * exercised through the EXACT real call path it was found in:
+     * TrustChargebackService::reverse() -> TrustLedgerEntryReversalService::reverse().
+     * No manual tenant-context manipulation is needed here at all —
+     * this test's own setupDeposit()/report() calls chain through
+     * several eligibility->assertEligible() checks (each of which
+     * routes through EntitlementService::resolve()'s
+     * runWithFirmContext(), which explicitly clears any ambient
+     * database session context in its finally block) before
+     * $this->service->reverse() is ever called, which is exactly the
+     * real-world condition that made the original entry's ->matter
+     * read silently resolve to null instead of throwing. This proves
+     * the reversal entry posted through the chargeback flow correctly
+     * carries the original entry's matter_id forward — not null.
+     */
+    public function test_chargeback_reversal_entry_matter_id_matches_the_original_deposits_matter(): void
+    {
+        $firm = $this->makeTrustEligibleFirm();
+        $account = app(TrustAccountService::class)->open($firm, 'Firm IOLTA Trust Account');
+        $client = Client::factory()->forFirm($firm)->create();
+        $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
+        $matter = Matter::factory()->forClient($client)->create();
+        $user = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+
+        $deposits = app(TrustDepositService::class);
+        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 10000, $matter), $user);
+        $originalEntry = $deposits->post($firm, $ledger, $approved, $matter);
+
+        $chargeback = $this->service->report($firm, $originalEntry, $user, 10000, 'Client disputed with card issuer.');
+        $chargeback = $this->service->reverse($firm, $chargeback, $user);
+
+        $reversalEntry = \App\Models\TrustLedgerEntry::query()->findOrFail($chargeback->reversal_trust_ledger_entry_id);
+
+        $this->assertSame($matter->id, $reversalEntry->matter_id);
+        $this->assertSame(TrustLedgerEntryType::ChargebackReversal, $reversalEntry->entry_type);
+        $this->assertSame(-10000, $reversalEntry->amount_cents);
+
+        $matterBalance = $this->runWithFirmContext($firm, fn () => \App\Models\MatterTrustBalance::query()
+            ->where('trust_ledger_id', $ledger->id)
+            ->where('matter_id', $matter->id)
+            ->firstOrFail());
+        $this->assertSame(0, $matterBalance->balance_cents);
     }
 }
