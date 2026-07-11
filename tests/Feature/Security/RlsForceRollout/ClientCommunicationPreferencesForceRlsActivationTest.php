@@ -102,10 +102,17 @@ class ClientCommunicationPreferencesForceRlsActivationTest extends TestCase
 
     public function test_exactly_eighteen_intended_tables_are_force_enabled(): void
     {
+        // Section 39A-3L, Checkpoint 1, Table Phase C (a later, distinct
+        // staged-FORCE-activation branch) legitimately activated FORCE
+        // for payment_classification_events too — this test's own scope
+        // (39A-3K) only introduced eighteen, but the exact-count
+        // assertion below must still account for that later, legitimate
+        // addition rather than falsely reporting it as unexpected.
         $expectedForced = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
+            'payment_classification_events',
         ];
 
         $rows = DB::select(
@@ -116,16 +123,20 @@ class ClientCommunicationPreferencesForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the eighteen intended tables must be FORCE RLS enabled — no more, no fewer.');
+        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the eighteen tables introduced by 39A-3A..39A-3K, plus payment_classification_events (39A-3L), must be FORCE RLS enabled — no more, no fewer.');
     }
 
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
+        // Section 39A-3L, Checkpoint 1, Table Phase C (a later, distinct
+        // staged-FORCE-activation branch) legitimately activated FORCE
+        // for payment_classification_events too.
         $forced = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
+            'payment_classification_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

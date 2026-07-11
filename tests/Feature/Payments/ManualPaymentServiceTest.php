@@ -118,12 +118,25 @@ class ManualPaymentServiceTest extends TestCase
                 idempotencyKey: (string) Str::uuid(),
             );
         } catch (PaymentBlockedException $e) {
-            $this->assertDatabaseHas('payment_classification_events', [
-                'payment_id' => $e->payment->id,
-                'event_type' => 'classification_blocked',
-                'requested_classification' => PaymentClassification::TrustIoltaPayment->value,
-                'resolved_classification' => PaymentClassification::BlockedPayment->value,
-            ]);
+            // payment_classification_events now has permanent FORCE ROW
+            // LEVEL SECURITY (Section 39A-3L, Checkpoint 1, Table Phase
+            // C) — by the time this catch block runs,
+            // ManualPaymentService::submit()'s own runWithFirmContext()
+            // wrap has already completed and cleared
+            // app.current_firm_id in its finally block, so a bare
+            // assertDatabaseHas() here would run with no active tenant
+            // context and now correctly find nothing. Re-establish the
+            // firm's context explicitly around the assertion, matching
+            // this codebase's established pattern for post-service-call
+            // reads against a forced table.
+            $this->runWithFirmContext($firm, function () use ($e) {
+                $this->assertDatabaseHas('payment_classification_events', [
+                    'payment_id' => $e->payment->id,
+                    'event_type' => 'classification_blocked',
+                    'requested_classification' => PaymentClassification::TrustIoltaPayment->value,
+                    'resolved_classification' => PaymentClassification::BlockedPayment->value,
+                ]);
+            });
 
             return;
         }
