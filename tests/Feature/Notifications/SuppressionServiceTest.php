@@ -30,7 +30,18 @@ class SuppressionServiceTest extends TestCase
 
         $this->service->recordBounce($firm, 'client@example.com', ConsentChannel::Email, (string) \Illuminate\Support\Str::uuid());
 
-        $this->assertTrue($this->service->isSuppressed($firm, 'client@example.com', ConsentChannel::Email));
+        // Section 39A-3L, Checkpoint 24: notification_events is now
+        // FORCE RLS, and recordBounce() now wraps its own
+        // NotificationEvent::create() call in its own
+        // runWithFirmContext(), which clears app.current_firm_id
+        // before returning. isSuppressed() is a deliberately unwrapped
+        // read (see SuppressionService's own class docblock), so this
+        // call must supply its own explicit context or it would
+        // incorrectly see zero rows regardless of correctness.
+        $this->assertTrue($this->runWithFirmContext(
+            $firm,
+            fn () => $this->service->isSuppressed($firm, 'client@example.com', ConsentChannel::Email),
+        ));
     }
 
     public function test_a_complaint_also_suppresses_the_recipient(): void
@@ -39,7 +50,13 @@ class SuppressionServiceTest extends TestCase
 
         $this->service->recordComplaint($firm, 'client@example.com', ConsentChannel::Sms, (string) \Illuminate\Support\Str::uuid());
 
-        $this->assertTrue($this->service->isSuppressed($firm, 'client@example.com', ConsentChannel::Sms));
+        // Section 39A-3L, Checkpoint 24: same bare-read wrap reasoning
+        // as the test above — recordComplaint() clears context before
+        // returning, so this isSuppressed() read must be explicit.
+        $this->assertTrue($this->runWithFirmContext(
+            $firm,
+            fn () => $this->service->isSuppressed($firm, 'client@example.com', ConsentChannel::Sms),
+        ));
     }
 
     public function test_suppression_is_scoped_to_firm_recipient_and_channel(): void

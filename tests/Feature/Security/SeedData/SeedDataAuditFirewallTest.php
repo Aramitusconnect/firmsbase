@@ -460,6 +460,26 @@ class SeedDataAuditFirewallTest extends TestCase
             // tenant context.
             'database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php',
             'database/factories/PaymentPlanEventFactory.php',
+            // Section 39A-3L, Checkpoint 24 (this batch, a later,
+            // distinct staged-FORCE-activation branch) legitimately
+            // added a notification_events-only FORCE RLS migration,
+            // wrapped NotificationDispatchService::dispatch()'s entire
+            // body in one runWithFirmContext() call (its recordSent()/
+            // recordFailed() methods each keep their own independent
+            // tight wrap), and wrapped SuppressionService's
+            // recordBounce()/recordComplaint() methods each in their
+            // own runWithFirmContext() call, and added a
+            // NotificationEventFactory context-hold fix — the entire
+            // write pathway remains dormant in production today (no
+            // live caller exists yet). Updated the two existing tests
+            // that legitimately needed explicit tenant context after
+            // this activation.
+            'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php',
+            'database/factories/NotificationEventFactory.php',
+            'app/Services/NotificationDispatchService.php',
+            'app/Services/SuppressionService.php',
+            'tests/Feature/Notifications/NotificationDispatchServiceTest.php',
+            'tests/Feature/Notifications/SuppressionServiceTest.php',
         ];
 
         $unexpected = array_values(array_filter(
@@ -819,6 +839,12 @@ class SeedDataAuditFirewallTest extends TestCase
             // firm/plan consistency fix.
             'database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php',
             'database/factories/PaymentPlanEventFactory.php',
+            // Section 39A-3L, Checkpoint 24 (this batch, a later,
+            // distinct staged-FORCE-activation branch) legitimately
+            // added a notification_events-only FORCE RLS migration and
+            // a NotificationEventFactory context-hold fix.
+            'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php',
+            'database/factories/NotificationEventFactory.php',
         ];
 
         return array_values(array_filter(

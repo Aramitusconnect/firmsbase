@@ -122,7 +122,16 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
         // activation batch, covering payment_plan_events) for the
         // same reason — additive only, no existing assertion removed
         // or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events']);
+        // Narrowly updated by Section 39A-3L, Checkpoint 24 (this
+        // repo's forty-second staged FORCE activation batch, covering
+        // notification_events) to extend the "exactly these tables
+        // are forced" list to include notification_events too — this
+        // test's own scope predates Checkpoint 24, but the exact-count
+        // assertion below must still account for that later,
+        // legitimate addition rather than falsely reporting it as
+        // unexpected — additive only, no existing assertion removed
+        // or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events']);
         $actuallyForced = [];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -147,7 +156,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
         // activation batch, covering payment_plan_events) for the
         // same reason — additive only, no existing assertion removed
         // or weakened.
-        $this->assertSame(41, count($actuallyForced), 'Exactly thirty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 20 — no more, no less.');
+        $this->assertSame(42, count($actuallyForced), 'Exactly thirty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 20 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -165,7 +174,10 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
         // activation batch, covering payment_plan_events) for the
         // same reason — additive only, no existing assertion removed
         // or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events']);
+        // Narrowly updated by Section 39A-3L, Checkpoint 24 (covering
+        // notification_events) for the same reason as above —
+        // additive only, no existing assertion removed or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events']);
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
                 continue;

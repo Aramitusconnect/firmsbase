@@ -56,6 +56,13 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         // permanent FORCE ROW LEVEL SECURITY.
         'app/Services/PaymentPlanService.php',
         'app/Services/CustomerSuccessHealthScoreService.php',
+        // Section 39A-3L, Checkpoint 24 (this batch, a later, distinct
+        // staged-FORCE-activation branch) legitimately wired
+        // independent runWithFirmContext() wraps into
+        // NotificationDispatchService and SuppressionService now that
+        // notification_events has permanent FORCE ROW LEVEL SECURITY.
+        'app/Services/NotificationDispatchService.php',
+        'app/Services/SuppressionService.php',
     ];
 
     /**
@@ -448,6 +455,16 @@ class EmergencySupportApprovalFirewallTest extends TestCase
             // tenant context.
             'database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php',
             'database/factories/PaymentPlanEventFactory.php',
+            // Section 39A-3L, Checkpoint 24 (this batch, a later,
+            // distinct staged-FORCE-activation branch) legitimately
+            // added a notification_events-only FORCE RLS migration, a
+            // NotificationEventFactory context-hold fix, and updated
+            // the two existing tests that legitimately needed explicit
+            // tenant context after this activation.
+            'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php',
+            'database/factories/NotificationEventFactory.php',
+            'tests/Feature/Notifications/NotificationDispatchServiceTest.php',
+            'tests/Feature/Notifications/SuppressionServiceTest.php',
         ];
 
         return array_values(array_filter(

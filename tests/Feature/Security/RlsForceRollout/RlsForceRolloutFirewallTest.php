@@ -181,6 +181,13 @@ use Tests\TestCase;
  * are forced" list from forty to forty-one tables and add this
  * batch's own migration-existence check — same additive-only pattern,
  * no existing assertion removed or weakened.
+ *
+ * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 24 (this
+ * repo's forty-second staged FORCE activation batch, covering
+ * notification_events) to extend the "exactly these tables are
+ * forced" list from forty-one to forty-two tables and add this
+ * batch's own migration-existence check — same additive-only pattern,
+ * no existing assertion removed or weakened.
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -270,6 +277,13 @@ class RlsForceRolloutFirewallTest extends TestCase
             // forty to forty-one tables — same additive-only pattern,
             // no existing assertion removed or weakened.
             'payment_plan_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 24
+            // (this repo's forty-second staged FORCE activation
+            // batch, covering notification_events) to extend the
+            // "exactly these tables are forced" list from forty-one
+            // to forty-two tables — same additive-only pattern, no
+            // existing assertion removed or weakened.
+            'notification_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -580,6 +594,13 @@ class RlsForceRolloutFirewallTest extends TestCase
         // Section 39A-3L, Checkpoint 23, Table Phase C's own migration —
         // same file-existence reasoning as the checks above.
         $this->assertFileExists(base_path('database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php'));
+    }
+
+    public function test_the_notification_events_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3L, Checkpoint 24's own migration — same
+        // file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

@@ -278,7 +278,19 @@ class AdminControlUiBoundaryTest extends TestCase
                 // to explicitly wrap two assertDatabaseHas() calls in
                 // tenant context after this activation.
                 && $path !== 'database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php'
-                && $path !== 'database/factories/PaymentPlanEventFactory.php',
+                && $path !== 'database/factories/PaymentPlanEventFactory.php'
+                // Section 39A-3L, Checkpoint 24 (this batch, a later,
+                // distinct staged-FORCE-activation branch) legitimately
+                // added a notification_events-only FORCE RLS migration
+                // and a NotificationEventFactory context-hold fix
+                // (app/Services/ is already excluded above, so only the
+                // migration/factory/affected tests need listing here),
+                // and updated the two existing tests that legitimately
+                // needed explicit tenant context after this activation.
+                && $path !== 'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php'
+                && $path !== 'database/factories/NotificationEventFactory.php'
+                && $path !== 'tests/Feature/Notifications/NotificationDispatchServiceTest.php'
+                && $path !== 'tests/Feature/Notifications/SuppressionServiceTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

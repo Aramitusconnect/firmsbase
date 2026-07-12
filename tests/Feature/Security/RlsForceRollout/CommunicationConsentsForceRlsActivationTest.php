@@ -61,19 +61,30 @@ use Tests\TestCase;
  * callers the migration's own docblock explicitly deferred fixing:
  * PaymentPlanDunningService::checkAndLog() and
  * NotificationDispatchService::dispatch() (via
- * NotificationEligibilityService::check()) both call
- * ConsentService::isGranted() unwrapped. Neither has a real production
- * caller today, so this is documented, not fixed. Empirically, the two
- * behave differently when invoked with genuinely zero tenant context:
- * dispatch() gracefully reports the notification as blocked (every
- * value it dereferences before the consent check is either an
- * already-resolved PHP object or tolerant of a null preference row),
- * while checkAndLog() throws (its own $plan->client lazy-load hits the
- * unrelated, already-FORCE-protected clients table before ever
+ * NotificationEligibilityService::check()) both transitively call
+ * ConsentService::isGranted() (still unwrapped itself). Neither has a
+ * real production caller today.
+ *
+ * UPDATED finding: a bug in dispatch()'s own production wiring (found
+ * and originally documented in this file, unrelated to
+ * communication_consents itself — see
+ * tests/Feature/Security/RlsForceRollout/
+ * NotificationEventsForceRlsActivationTest.php's class docblock for the
+ * full before/after account) has since been fixed in
+ * app/Services/NotificationDispatchService.php: dispatch() now wraps
+ * its entire body in a single runWithFirmContext($firm, ...) call
+ * established from its own $firm parameter, so isGranted()'s unwrapped
+ * read now correctly runs inside dispatch()'s own self-established
+ * context and correctly sees a genuinely GRANTED consent row even with
+ * zero ambient context beforehand — proven below from this file's own
+ * communication_consents angle (complementary to, not redundant with,
+ * NotificationEventsForceRlsActivationTest's own notification_events-
+ * angle proof of the same fix). checkAndLog() is unaffected by this fix
+ * (a different, still-unfixed bug: its own $plan->client lazy-load hits
+ * the unrelated, already-FORCE-protected clients table before ever
  * reaching the consent check, and dereferencing the resulting null
- * throws). Both are named and proven exactly as they behave — neither
- * is described as a false "this is blocked" guarantee where it is
- * actually an uncaught error.
+ * throws) — still proven below exactly as it behaves, not smoothed over
+ * as "blocked" where it is actually an uncaught error.
  */
 class CommunicationConsentsForceRlsActivationTest extends TestCase
 {
@@ -160,7 +171,16 @@ class CommunicationConsentsForceRlsActivationTest extends TestCase
         // activation batch, covering payment_plan_events) for the
         // same reason — additive only, no existing assertion removed
         // or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events']);
+        // Narrowly updated by Section 39A-3L, Checkpoint 24 (this
+        // repo's forty-second staged FORCE activation batch, covering
+        // notification_events) to extend the "exactly these tables
+        // are forced" list to include notification_events too — this
+        // test's own scope predates Checkpoint 24, but the exact-count
+        // assertion below must still account for that later,
+        // legitimate addition rather than falsely reporting it as
+        // unexpected — additive only, no existing assertion removed
+        // or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events']);
         $actuallyForced = [];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -185,7 +205,7 @@ class CommunicationConsentsForceRlsActivationTest extends TestCase
         // activation batch, covering payment_plan_events) for the
         // same reason — additive only, no existing assertion removed
         // or weakened.
-        $this->assertSame(41, count($actuallyForced), 'Exactly thirty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (communication_consent_events added on top of this batch\'s own communication_consents, plus intake_submissions from Checkpoint 13). Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one), again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two), and again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
+        $this->assertSame(42, count($actuallyForced), 'Exactly thirty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (communication_consent_events added on top of this batch\'s own communication_consents, plus intake_submissions from Checkpoint 13). Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one), again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two), and again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -230,7 +250,10 @@ class CommunicationConsentsForceRlsActivationTest extends TestCase
         // activation batch, covering payment_plan_events) for the
         // same reason — additive only, no existing assertion removed
         // or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events']);
+        // Narrowly updated by Section 39A-3L, Checkpoint 24 (covering
+        // notification_events) for the same reason as above —
+        // additive only, no existing assertion removed or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events']);
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
                 continue;
@@ -654,17 +677,29 @@ class CommunicationConsentsForceRlsActivationTest extends TestCase
     }
 
     /**
-     * Regression proof (documented, not fixed — see this file's own
-     * class docblock and the migration's docblock): calling
-     * NotificationDispatchService::dispatch() with genuinely zero
-     * tenant context still correctly reports the notification as
-     * blocked/not-eligible even though a real, granted consent exists
-     * — isGranted()'s unwrapped read simply sees zero rows and returns
-     * false, which is the correct fail-closed direction. No production
-     * caller invokes dispatch() without an already-active context
-     * today; this proves the deferred gap fails closed, not open.
+     * CORRECTED as of the dispatch() fix described in this file's own
+     * class docblock above (full before/after account also in
+     * tests/Feature/Security/RlsForceRollout/
+     * NotificationEventsForceRlsActivationTest.php's class docblock):
+     * calling NotificationDispatchService::dispatch() with genuinely
+     * zero tenant context now correctly SUCCEEDS when a real, granted
+     * consent exists — it no longer fails closed, because it no longer
+     * depends on any ambient context at all. dispatch() establishes its
+     * own context from its own $firm parameter and holds it for its
+     * entire execution, so ConsentService::isGranted() (still unwrapped
+     * itself, still reading FORCE-RLS-protected communication_consents)
+     * correctly runs inside that self-established context and correctly
+     * sees the genuinely GRANTED row. This is this file's own
+     * communication_consents-angle proof that the later
+     * notification_events checkpoint's fix did not leave
+     * communication_consents access broken — complementary to, not
+     * redundant with, NotificationEventsForceRlsActivationTest's own
+     * notification_events-angle proof of the identical fix (that file
+     * additionally proves the persisted Queued event row and the queued
+     * job; this test's distinct job is proving THIS table's read path
+     * specifically).
      */
-    public function test_notification_dispatch_service_still_fails_closed_when_called_with_zero_tenant_context(): void
+    public function test_notification_dispatch_service_now_succeeds_with_zero_tenant_context_because_it_establishes_its_own(): void
     {
         $firm = Firm::factory()->create();
         $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
@@ -693,11 +728,12 @@ class CommunicationConsentsForceRlsActivationTest extends TestCase
 
         $result = $service->dispatch($firm, $client, ConsentChannel::Email, $client->email, 'document_reminder');
 
-        $this->assertFalse(
+        $this->assertNoDatabaseTenantContext('dispatch() must clear its own internal context wrap before returning.');
+        $this->assertTrue(
             $result->accepted,
-            'dispatch() has no production caller today and is documented as deferred — it must still correctly fail closed (never silently accept) when called with no active tenant context, even though a real granted consent exists.'
+            'dispatch() must now genuinely succeed when called with zero ambient tenant context, because it establishes its own context from its own $firm parameter — isGranted() correctly sees the genuinely GRANTED communication_consents row inside that self-established context.'
         );
-        $this->assertStringContainsString('no granted consent', (string) $result->reason);
+        $this->assertSame(\App\Enums\NotificationEventStatus::Queued, $result->status);
     }
 
     /**

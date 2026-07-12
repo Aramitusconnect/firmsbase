@@ -177,7 +177,12 @@ class ClientCommunicationPreferencesForceRlsActivationTest extends TestCase
             // activation batch, covering payment_plan_events) for the
             // same reason — additive only, no existing assertion
             // removed or weakened.
-            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events',
+            // Narrowly updated by Section 39A-3L, Checkpoint 24 (this
+            // repo's forty-second staged FORCE activation batch,
+            // covering notification_events) for the same reason as
+            // above — additive only, no existing assertion removed or
+            // weakened.
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events',
         ];
 
         $rows = DB::select(
@@ -250,7 +255,12 @@ class ClientCommunicationPreferencesForceRlsActivationTest extends TestCase
             // activation batch, covering payment_plan_events) for the
             // same reason — additive only, no existing assertion
             // removed or weakened.
-            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events',
+            // Narrowly updated by Section 39A-3L, Checkpoint 24 (this
+            // repo's forty-second staged FORCE activation batch,
+            // covering notification_events) for the same reason as
+            // above — additive only, no existing assertion removed or
+            // weakened.
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
