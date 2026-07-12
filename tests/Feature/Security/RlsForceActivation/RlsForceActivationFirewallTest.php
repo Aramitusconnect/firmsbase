@@ -72,6 +72,11 @@ class RlsForceActivationFirewallTest extends TestCase
             // batch, covering firm_licenses) — this test's own scope
             // (39A-3A) only asserts clients here.
             'firm_licenses',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 20
+            // (this repo's thirty-eighth staged FORCE activation
+            // batch, covering time_tracking_sessions) — this test's own
+            // scope (39A-3A) only asserts clients here.
+            'time_tracking_sessions',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

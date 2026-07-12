@@ -20,6 +20,21 @@ use Illuminate\Support\Facades\DB;
  * fractional idle/time values" actually true across any number of
  * pause/resume cycles. Stopping a session creates exactly one draft
  * TimeEntry from the session's total whole seconds.
+ *
+ * Section 39A-3L, Checkpoint 20 — all four methods below are wrapped in
+ * runWithFirmContext() (none had any tenant context before). This
+ * table calls no other tenant-context-self-wrapping service, so single,
+ * whole-call wraps are safe here (no decoy-wrap/nested-context risk).
+ * stop() keeps DB::transaction() as the OUTER call with
+ * runWithFirmContext() nested inside it — never the reverse — matching
+ * this arc's established convention and TenantContextService's own
+ * "invoked inside an existing transaction is a savepoint" design. This
+ * closes a duplicate-billing risk: once time_tracking_sessions is
+ * FORCE-protected, an unwrapped $session->update() would silently
+ * affect zero rows while the following TimeEntry::create() (against
+ * time_entries, which remains unforced) would still succeed
+ * unconditionally, leaving a committed TimeEntry with the session
+ * still showing its prior, un-stopped status in the database.
  */
 class TimeTrackingService
 {
@@ -31,7 +46,7 @@ class TimeTrackingService
         bool $isBillable = true,
         ?string $description = null,
     ): TimeTrackingSession {
-        return TimeTrackingSession::create([
+        return (new TenantContextService())->runWithFirmContext($firm, fn () => TimeTrackingSession::create([
             'firm_id' => $firm->id,
             'user_id' => $user->id,
             'matter_id' => $matter?->id,
@@ -42,7 +57,7 @@ class TimeTrackingService
             'last_resumed_at' => now(),
             'is_billable' => $isBillable,
             'description' => $description,
-        ]);
+        ]));
     }
 
     public function pause(TimeTrackingSession $session): TimeTrackingSession
@@ -51,13 +66,15 @@ class TimeTrackingService
             throw new \RuntimeException('Only an active session can be paused.');
         }
 
-        $session->update([
-            'accumulated_seconds' => $session->accumulated_seconds + $this->elapsedSinceResume($session),
-            'status' => TimeTrackingSessionStatus::Paused,
-            'last_resumed_at' => null,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($session->firm_id, function () use ($session) {
+            $session->update([
+                'accumulated_seconds' => $session->accumulated_seconds + $this->elapsedSinceResume($session),
+                'status' => TimeTrackingSessionStatus::Paused,
+                'last_resumed_at' => null,
+            ]);
 
-        return $session->fresh();
+            return $session->fresh();
+        });
     }
 
     public function resume(TimeTrackingSession $session): TimeTrackingSession
@@ -66,17 +83,21 @@ class TimeTrackingService
             throw new \RuntimeException('Only a paused session can be resumed.');
         }
 
-        $session->update([
-            'status' => TimeTrackingSessionStatus::Active,
-            'last_resumed_at' => now(),
-        ]);
+        return (new TenantContextService())->runWithFirmContext($session->firm_id, function () use ($session) {
+            $session->update([
+                'status' => TimeTrackingSessionStatus::Active,
+                'last_resumed_at' => now(),
+            ]);
 
-        return $session->fresh();
+            return $session->fresh();
+        });
     }
 
     /**
      * Stops the session and creates the one TimeEntry it generates, in
-     * a single transaction.
+     * a single transaction. DB::transaction() is the OUTER call, with
+     * runWithFirmContext() nested inside it (per this arc's established
+     * convention) — never the reverse.
      */
     public function stop(TimeTrackingSession $session): TimeEntry
     {
@@ -85,32 +106,34 @@ class TimeTrackingService
         }
 
         return DB::transaction(function () use ($session) {
-            $accumulated = $session->accumulated_seconds;
+            return (new TenantContextService())->runWithFirmContext($session->firm_id, function () use ($session) {
+                $accumulated = $session->accumulated_seconds;
 
-            if ($session->status === TimeTrackingSessionStatus::Active) {
-                $accumulated += $this->elapsedSinceResume($session);
-            }
+                if ($session->status === TimeTrackingSessionStatus::Active) {
+                    $accumulated += $this->elapsedSinceResume($session);
+                }
 
-            $session->update([
-                'status' => TimeTrackingSessionStatus::Stopped,
-                'accumulated_seconds' => $accumulated,
-                'last_resumed_at' => null,
-                'ended_at' => now(),
-                'total_seconds' => $accumulated,
-            ]);
+                $session->update([
+                    'status' => TimeTrackingSessionStatus::Stopped,
+                    'accumulated_seconds' => $accumulated,
+                    'last_resumed_at' => null,
+                    'ended_at' => now(),
+                    'total_seconds' => $accumulated,
+                ]);
 
-            return TimeEntry::create([
-                'firm_id' => $session->firm_id,
-                'user_id' => $session->user_id,
-                'matter_id' => $session->matter_id,
-                'client_id' => $session->client_id,
-                'time_tracking_session_id' => $session->id,
-                'seconds' => $accumulated,
-                'is_billable' => $session->is_billable,
-                'description' => $session->description,
-                'worked_on' => $session->started_at->toDateString(),
-                'status' => TimeEntryStatus::Draft,
-            ]);
+                return TimeEntry::create([
+                    'firm_id' => $session->firm_id,
+                    'user_id' => $session->user_id,
+                    'matter_id' => $session->matter_id,
+                    'client_id' => $session->client_id,
+                    'time_tracking_session_id' => $session->id,
+                    'seconds' => $accumulated,
+                    'is_billable' => $session->is_billable,
+                    'description' => $session->description,
+                    'worked_on' => $session->started_at->toDateString(),
+                    'status' => TimeEntryStatus::Draft,
+                ]);
+            });
         });
     }
 

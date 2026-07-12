@@ -51,14 +51,28 @@ class TimeTrackingServiceTest extends TestCase
 
     public function test_pause_throws_when_session_is_not_active(): void
     {
+        // Section 39A-3L, Checkpoint 20 follow-up: time_tracking_sessions
+        // is now FORCE RLS enabled. TimeTrackingService::pause() self-
+        // wraps in its own runWithFirmContext() (see the service's own
+        // docblock), which ALWAYS clears the PostgreSQL session/PHP-
+        // memory tenant context again before returning (even on
+        // success) — so the ->fresh() re-read below, which happens
+        // AFTER pause() has already returned, would otherwise run with
+        // no context active and be fail-closed (silently returning
+        // null) under FORCE RLS. Re-querying under an explicit, scoped
+        // runWithFirmContext() (rather than setting context for the
+        // whole test class) is the narrow fix — pause() itself still
+        // establishes its own context internally exactly as before.
         $firm = Firm::factory()->create();
         $user = User::factory()->create();
         $session = $this->service->start($firm, $user);
         $this->service->pause($session);
 
+        $freshSession = $this->runWithFirmContext($firm, fn () => $session->fresh());
+
         $this->expectException(\RuntimeException::class);
 
-        $this->service->pause($session->fresh());
+        $this->service->pause($freshSession);
     }
 
     public function test_resume_reactivates_a_paused_session(): void
@@ -76,6 +90,12 @@ class TimeTrackingServiceTest extends TestCase
 
     public function test_stop_creates_exactly_one_time_entry_with_whole_second_total(): void
     {
+        // Section 39A-3L, Checkpoint 20 follow-up: same fail-closed-
+        // fresh()-under-no-context reasoning as
+        // test_pause_throws_when_session_is_not_active() above — stop()
+        // clears its own internal context before returning, so both
+        // ->fresh() re-reads below must be re-queried under an explicit,
+        // scoped runWithFirmContext().
         $firm = Firm::factory()->create();
         $user = User::factory()->create();
         $session = $this->service->start($firm, $user);
@@ -83,15 +103,23 @@ class TimeTrackingServiceTest extends TestCase
 
         $entry = $this->service->stop($session);
 
-        $this->assertSame(TimeTrackingSessionStatus::Stopped, $session->fresh()->status);
+        [$freshStatus, $freshTimeEntryCount] = $this->runWithFirmContext($firm, fn () => [
+            $session->fresh()->status,
+            $session->fresh()->timeEntry()->count(),
+        ]);
+
+        $this->assertSame(TimeTrackingSessionStatus::Stopped, $freshStatus);
         $this->assertSame(3600, $entry->seconds);
         $this->assertIsInt($entry->seconds);
         $this->assertSame($session->id, $entry->time_tracking_session_id);
-        $this->assertSame(1, $session->fresh()->timeEntry()->count());
+        $this->assertSame(1, $freshTimeEntryCount);
     }
 
     public function test_stop_across_a_pause_resume_cycle_sums_whole_seconds_correctly(): void
     {
+        // Section 39A-3L, Checkpoint 20 follow-up: same fail-closed-
+        // fresh()-under-no-context reasoning as
+        // test_pause_throws_when_session_is_not_active() above.
         $firm = Firm::factory()->create();
         $user = User::factory()->create();
 
@@ -100,9 +128,19 @@ class TimeTrackingServiceTest extends TestCase
         $paused = $this->service->pause($session); // accumulated = 600
 
         $resumed = $this->service->resume($paused);
-        $resumed->update(['last_resumed_at' => now()->subSeconds(300)]);
 
-        $entry = $this->service->stop($resumed->fresh());
+        // The update() call itself must also run under context (same
+        // reasoning as above) — otherwise it would silently affect zero
+        // rows under FORCE RLS while still mutating $resumed's in-memory
+        // attributes, and the ->fresh() re-read immediately below would
+        // then observe the OLD, unpersisted last_resumed_at instead.
+        $freshResumed = $this->runWithFirmContext($firm, function () use ($resumed) {
+            $resumed->update(['last_resumed_at' => now()->subSeconds(300)]);
+
+            return $resumed->fresh();
+        });
+
+        $entry = $this->service->stop($freshResumed);
 
         $this->assertSame(900, $entry->seconds);
         $this->assertIsInt($entry->seconds);
@@ -110,13 +148,18 @@ class TimeTrackingServiceTest extends TestCase
 
     public function test_stop_throws_when_already_stopped(): void
     {
+        // Section 39A-3L, Checkpoint 20 follow-up: same fail-closed-
+        // fresh()-under-no-context reasoning as
+        // test_pause_throws_when_session_is_not_active() above.
         $firm = Firm::factory()->create();
         $user = User::factory()->create();
         $session = $this->service->start($firm, $user);
         $this->service->stop($session);
 
+        $freshSession = $this->runWithFirmContext($firm, fn () => $session->fresh());
+
         $this->expectException(\RuntimeException::class);
 
-        $this->service->stop($session->fresh());
+        $this->service->stop($freshSession);
     }
 }
