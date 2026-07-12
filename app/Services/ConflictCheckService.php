@@ -221,28 +221,64 @@ class ConflictCheckService
         ));
     }
 
+    /**
+     * contacts has permanent FORCE ROW LEVEL SECURITY (Section 39A-3L
+     * Phase B5) — see searchClients()'s docblock above for why this
+     * iterates $firmIds explicitly under per-firm tenant context rather
+     * than a single whereIn('firm_id', $firmIds) query.
+     */
     private function searchContacts(array $firmIds, array $terms): Collection
     {
-        return Contact::withoutTenantScope()
-            ->whereIn('firm_id', $firmIds)
-            ->where(fn ($q) => $this->applyTermMatching($q, $terms, ['name', 'company', 'email', 'phone']))
-            ->get()
-            ->map(fn (Contact $c) => ['type' => 'contact', 'id' => $c->id, 'value' => $c->name]);
+        $service = new TenantContextService();
+
+        return collect($firmIds)->flatMap(fn (int $firmId) => $service->runWithFirmContext(
+            $firmId,
+            fn () => Contact::withoutTenantScope()
+                ->where('firm_id', $firmId)
+                ->where(fn ($q) => $this->applyTermMatching($q, $terms, ['name', 'company', 'email', 'phone']))
+                ->get()
+                ->map(fn (Contact $c) => ['type' => 'contact', 'id' => $c->id, 'value' => $c->name])
+        ));
     }
 
+    /**
+     * parties has permanent FORCE ROW LEVEL SECURITY (Section 39A-3L
+     * Phase B5) — same per-firm iteration as searchContacts() above.
+     */
     private function searchParties(array $firmIds, array $terms): Collection
     {
-        return Party::withoutTenantScope()
-            ->whereIn('firm_id', $firmIds)
-            ->where(fn ($q) => $this->applyTermMatching($q, $terms, ['name', 'company', 'email', 'phone']))
-            ->get()
-            ->map(fn (Party $p) => ['type' => 'party', 'id' => $p->id, 'value' => $p->name]);
+        $service = new TenantContextService();
+
+        return collect($firmIds)->flatMap(fn (int $firmId) => $service->runWithFirmContext(
+            $firmId,
+            fn () => Party::withoutTenantScope()
+                ->where('firm_id', $firmId)
+                ->where(fn ($q) => $this->applyTermMatching($q, $terms, ['name', 'company', 'email', 'phone']))
+                ->get()
+                ->map(fn (Party $p) => ['type' => 'party', 'id' => $p->id, 'value' => $p->name])
+        ));
     }
 
     /**
      * Flags a matched party's presence in OTHER matters within scope —
      * this is what actually detects "the same person is opposing
      * counsel here and our own client's party there."
+     *
+     * The Party lookup below fetches full models (not just ids) and is
+     * wrapped per-firm exactly like the Matter half above it, because
+     * parties has permanent FORCE ROW LEVEL SECURITY (Section 39A-3L
+     * Phase B5). The final composed MatterParty query deliberately does
+     * NOT ->with('party'): by the time it runs, every runWithFirmContext()
+     * call above has already returned and cleared both the Postgres
+     * session setting and the PHP-memory context in its own finally
+     * block, so an eager load here would run with no tenant context at
+     * all and the RLS policy would deny every row. matter_parties itself
+     * has no firm_id column and is correctly excluded from this
+     * mission's FORCE list, so its own whereIn(...) filtering below is
+     * unaffected — only the eager-loaded parties relation was at risk.
+     * Instead, party names are looked up from the already-fetched,
+     * already-context-wrapped $parties collection via an in-PHP
+     * [$partyId => $partyName] map.
      */
     private function searchMatterParties(array $firmIds, array $terms, int $excludeMatterId): Collection
     {
@@ -260,24 +296,29 @@ class ConflictCheckService
             return collect();
         }
 
-        $partyIds = Party::withoutTenantScope()
-            ->whereIn('firm_id', $firmIds)
-            ->where(fn ($q) => $this->applyTermMatching($q, $terms, ['name', 'company', 'email', 'phone']))
-            ->pluck('id');
+        $parties = collect($firmIds)->flatMap(fn (int $firmId) => $service->runWithFirmContext(
+            $firmId,
+            fn () => Party::withoutTenantScope()
+                ->where('firm_id', $firmId)
+                ->where(fn ($q) => $this->applyTermMatching($q, $terms, ['name', 'company', 'email', 'phone']))
+                ->get()
+        ));
 
-        if ($partyIds->isEmpty()) {
+        if ($parties->isEmpty()) {
             return collect();
         }
+
+        $partyIds = $parties->pluck('id');
+        $partyNamesById = $parties->pluck('name', 'id');
 
         return MatterParty::query()
             ->whereIn('matter_id', $matterIds)
             ->whereIn('party_id', $partyIds)
-            ->with('party')
             ->get()
             ->map(fn (MatterParty $mp) => [
                 'type' => 'matter_party',
                 'id' => $mp->id,
-                'value' => sprintf('%s (matter #%d)', $mp->party->name, $mp->matter_id),
+                'value' => sprintf('%s (matter #%d)', $partyNamesById[$mp->party_id], $mp->matter_id),
             ]);
     }
 

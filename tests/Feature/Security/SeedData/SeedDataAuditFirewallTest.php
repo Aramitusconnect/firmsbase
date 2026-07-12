@@ -480,6 +480,21 @@ class SeedDataAuditFirewallTest extends TestCase
             'app/Services/SuppressionService.php',
             'tests/Feature/Notifications/NotificationDispatchServiceTest.php',
             'tests/Feature/Notifications/SuppressionServiceTest.php',
+            // Section 39A-3L Phase B5 (this batch, a later, distinct
+            // contacts/parties FORCE-RLS-prerequisite branch — contacts
+            // and parties are NOT yet FORCE-enabled by this batch, only
+            // prepared for it) legitimately added ContactFactory/
+            // PartyFactory context-hold fixes (app/Services/
+            // ConflictCheckService.php, ImportApplyService.php, and
+            // ImportDuplicateDetectionService.php were already allowed
+            // above from Section 39A-3A and needed no new entry here),
+            // and extended tests/Feature/Imports/
+            // ImportDuplicateDetectionServiceTest.php with Contact/
+            // Party duplicate-detection coverage that did not exist
+            // before this batch.
+            'database/factories/ContactFactory.php',
+            'database/factories/PartyFactory.php',
+            'tests/Feature/Imports/ImportDuplicateDetectionServiceTest.php',
         ];
 
         $unexpected = array_values(array_filter(
@@ -845,6 +860,21 @@ class SeedDataAuditFirewallTest extends TestCase
             // a NotificationEventFactory context-hold fix.
             'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php',
             'database/factories/NotificationEventFactory.php',
+            // Section 39A-3L Phase B5 (this batch, a later, distinct
+            // contacts/parties FORCE-RLS-prerequisite branch — contacts
+            // and parties are NOT yet FORCE-enabled by this batch, only
+            // prepared for it) legitimately added ContactFactory/
+            // PartyFactory context-hold fixes (app/Services/
+            // ConflictCheckService.php, ImportApplyService.php, and
+            // ImportDuplicateDetectionService.php were already allowed
+            // above from Section 39A-3A and needed no new entry here),
+            // and extended tests/Feature/Imports/
+            // ImportDuplicateDetectionServiceTest.php with Contact/
+            // Party duplicate-detection coverage that did not exist
+            // before this batch.
+            'database/factories/ContactFactory.php',
+            'database/factories/PartyFactory.php',
+            'tests/Feature/Imports/ImportDuplicateDetectionServiceTest.php',
         ];
 
         return array_values(array_filter(

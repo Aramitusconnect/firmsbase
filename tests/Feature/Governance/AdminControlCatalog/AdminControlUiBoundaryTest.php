@@ -290,7 +290,22 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== 'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php'
                 && $path !== 'database/factories/NotificationEventFactory.php'
                 && $path !== 'tests/Feature/Notifications/NotificationDispatchServiceTest.php'
-                && $path !== 'tests/Feature/Notifications/SuppressionServiceTest.php',
+                && $path !== 'tests/Feature/Notifications/SuppressionServiceTest.php'
+                // Section 39A-3L Phase B5 (this batch, a later, distinct
+                // contacts/parties FORCE-RLS-prerequisite branch —
+                // contacts and parties are NOT yet FORCE-enabled by this
+                // batch, only prepared for it) legitimately added
+                // ContactFactory/PartyFactory context-hold fixes
+                // (app/Services/ is already excluded above, so
+                // ConflictCheckService.php/ImportApplyService.php/
+                // ImportDuplicateDetectionService.php needed no new
+                // entry here), and extended
+                // ImportDuplicateDetectionServiceTest.php with Contact/
+                // Party duplicate-detection coverage that did not exist
+                // before this batch.
+                && $path !== 'database/factories/ContactFactory.php'
+                && $path !== 'database/factories/PartyFactory.php'
+                && $path !== 'tests/Feature/Imports/ImportDuplicateDetectionServiceTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

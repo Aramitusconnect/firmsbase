@@ -114,23 +114,25 @@ class ImportDuplicateDetectionService
 
     private function detectContact(int $firmId, array $data): DuplicateDetectionResult
     {
-        $query = Contact::query()->where('firm_id', $firmId);
+        return (new TenantContextService())->runWithFirmContext($firmId, function () use ($firmId, $data) {
+            $query = Contact::query()->where('firm_id', $firmId);
 
-        if (! empty($data['email'])) {
-            $match = (clone $query)->where('email', $data['email'])->first();
-            if ($match) {
-                return DuplicateDetectionResult::match(Contact::class, $match->id, 'email match');
+            if (! empty($data['email'])) {
+                $match = (clone $query)->where('email', $data['email'])->first();
+                if ($match) {
+                    return DuplicateDetectionResult::match(Contact::class, $match->id, 'email match');
+                }
             }
-        }
 
-        if (! empty($data['phone'])) {
-            $match = (clone $query)->where('phone', $data['phone'])->first();
-            if ($match) {
-                return DuplicateDetectionResult::match(Contact::class, $match->id, 'phone match');
+            if (! empty($data['phone'])) {
+                $match = (clone $query)->where('phone', $data['phone'])->first();
+                if ($match) {
+                    return DuplicateDetectionResult::match(Contact::class, $match->id, 'phone match');
+                }
             }
-        }
 
-        return DuplicateDetectionResult::noMatch();
+            return DuplicateDetectionResult::noMatch();
+        });
     }
 
     /**
@@ -202,23 +204,25 @@ class ImportDuplicateDetectionService
             return DuplicateDetectionResult::noMatch();
         }
 
-        $query = Party::query()->where('firm_id', $firmId)->where('name', $data['name']);
+        return (new TenantContextService())->runWithFirmContext($firmId, function () use ($firmId, $data) {
+            $query = Party::query()->where('firm_id', $firmId)->where('name', $data['name']);
 
-        if (! empty($data['email'])) {
-            $match = (clone $query)->where('email', $data['email'])->first();
-            if ($match) {
-                return DuplicateDetectionResult::match(Party::class, $match->id, 'name + email match');
+            if (! empty($data['email'])) {
+                $match = (clone $query)->where('email', $data['email'])->first();
+                if ($match) {
+                    return DuplicateDetectionResult::match(Party::class, $match->id, 'name + email match');
+                }
             }
-        }
 
-        if (! empty($data['phone'])) {
-            $match = (clone $query)->where('phone', $data['phone'])->first();
-            if ($match) {
-                return DuplicateDetectionResult::match(Party::class, $match->id, 'name + phone match');
+            if (! empty($data['phone'])) {
+                $match = (clone $query)->where('phone', $data['phone'])->first();
+                if ($match) {
+                    return DuplicateDetectionResult::match(Party::class, $match->id, 'name + phone match');
+                }
             }
-        }
 
-        return DuplicateDetectionResult::noMatch();
+            return DuplicateDetectionResult::noMatch();
+        });
     }
 
     /**
