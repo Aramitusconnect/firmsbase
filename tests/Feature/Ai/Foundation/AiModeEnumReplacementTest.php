@@ -30,11 +30,16 @@ class AiModeEnumReplacementTest extends TestCase
     public function test_firm_settings_ai_mode_defaults_to_disabled_via_factory(): void
     {
         $firm = Firm::factory()->create();
-        $settings = $firm->firmSettings()->create([
+        // firm_settings has FORCE ROW LEVEL SECURITY (Section 39A-3L,
+        // Checkpoint 18) — a direct relation create runs with no
+        // tenant context active and is rejected by the policy. The
+        // fresh() re-query below needs context active too (a blocked
+        // SELECT under FORCE RLS returns no row, not an exception).
+        $settings = $this->runWithFirmContext($firm, fn () => $firm->firmSettings()->create([
             'payment_mode' => \App\Enums\PaymentMode::OperatingPaymentsOnly,
-        ]);
+        ])->fresh());
 
-        $this->assertSame(AiMode::Disabled, $settings->fresh()->ai_mode);
+        $this->assertSame(AiMode::Disabled, $settings->ai_mode);
     }
 
     /**
@@ -51,12 +56,23 @@ class AiModeEnumReplacementTest extends TestCase
         $firm = Firm::factory()->create();
 
         foreach (AiMode::cases() as $case) {
-            $settings = $firm->firmSettings()->updateOrCreate([], [
-                'payment_mode' => \App\Enums\PaymentMode::OperatingPaymentsOnly,
-                'ai_mode' => $case,
-            ]);
+            // firm_settings has FORCE ROW LEVEL SECURITY (Section
+            // 39A-3L, Checkpoint 18) — a direct relation
+            // create/update runs with no tenant context active and is
+            // rejected by the policy. The read-back below needs
+            // context active too (a blocked SELECT under FORCE RLS
+            // returns no row, not an exception), so it is wrapped
+            // together with the write.
+            $isTruthy = $this->runWithFirmContext($firm, function () use ($firm, $case) {
+                $firm->firmSettings()->updateOrCreate([], [
+                    'payment_mode' => \App\Enums\PaymentMode::OperatingPaymentsOnly,
+                    'ai_mode' => $case,
+                ]);
 
-            $this->assertTrue((bool) $firm->fresh(['firmSettings'])->firmSettings?->ai_mode, "Case {$case->value} must remain truthy.");
+                return (bool) $firm->fresh(['firmSettings'])->firmSettings?->ai_mode;
+            });
+
+            $this->assertTrue($isTruthy, "Case {$case->value} must remain truthy.");
         }
     }
 }

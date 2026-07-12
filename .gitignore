@@ -3,6 +3,8 @@
 .env
 .env.backup
 .env.production
+.env.testing
+.rls-test-secrets/
 .phpactor.json
 .phpunit.result.cache
 /.codex

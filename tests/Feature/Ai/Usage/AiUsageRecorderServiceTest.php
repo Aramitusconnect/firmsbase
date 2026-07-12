@@ -95,9 +95,20 @@ class AiUsageRecorderServiceTest extends TestCase
         // makeAiEntitledFirm() creates its own firm.
         app(\App\Services\EntitlementService::class)->setForSource($firm, 'ai', \App\Enums\EntitlementSource::AdminOverride, true);
         app(\App\Services\EncryptionKeyService::class)->provision($firm);
-        $firm->firmSettings()->create(['payment_mode' => \App\Enums\PaymentMode::OperatingPaymentsOnly, 'ai_mode' => AiMode::PlatformManaged]);
-        $firm->aiSettings()->create(['usage_markup_basis_points' => 0]);
-        $firm->refresh();
+        // firm_settings has FORCE ROW LEVEL SECURITY (Section 39A-3L,
+        // Checkpoint 18) — a direct relation create runs with no
+        // tenant context active and is rejected by the policy. The
+        // subsequent refresh()/relation load also needs context active
+        // so AiUsageRecorderService::record() below finds firmSettings
+        // already cached on $firm rather than lazy-loading it later
+        // with no context (which would return null under FORCE RLS,
+        // not an exception, and read as "AI mode is disabled").
+        $this->runWithFirmContext($firm, function () use ($firm) {
+            $firm->firmSettings()->create(['payment_mode' => \App\Enums\PaymentMode::OperatingPaymentsOnly, 'ai_mode' => AiMode::PlatformManaged]);
+            $firm->aiSettings()->create(['usage_markup_basis_points' => 0]);
+            $firm->refresh();
+            $firm->load('firmSettings', 'aiSettings');
+        });
 
         $user = User::factory()->create();
 

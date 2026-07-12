@@ -112,8 +112,22 @@ class RowLevelSecurityPreparationTest extends TestCase
         // Added to the exception list in the SAME commit as that
         // migration, again per this file's own docblock lesson above.
         //
+        // GAP FOUND AND FIXED during Section 39A-3L Stage A (test-
+        // harness containment, 2026-07-12; not caused by Stage A —
+        // discovered here): Checkpoint 18 (firm_settings) and
+        // Checkpoint 19 (firm_licenses) each legitimately activated
+        // permanent FORCE ROW LEVEL SECURITY — see
+        // database/migrations/2026_08_25_930018_force_rls_on_firm_settings_table.php
+        // and
+        // database/migrations/2026_08_25_930019_force_rls_on_firm_licenses_table.php
+        // — but, exactly like the activation_checklists gap this file's
+        // own docblock above already documents, this exception list was
+        // never updated for either at the time, so this test silently
+        // asserted the WRONG expectation for both tables from
+        // Checkpoint 18/19 onward.
+        //
         // Every other Phase 1 table here remains prepared-but-not-forced.
-        if (in_array($table, ['firm_users', 'client_communication_preferences', 'activation_checklists', 'firm_entitlements', 'firm_entitlement_events', 'communication_consents', 'communication_consent_events', 'tenant_encryption_keys'], true)) {
+        if (in_array($table, ['firm_users', 'client_communication_preferences', 'activation_checklists', 'firm_entitlements', 'firm_entitlement_events', 'communication_consents', 'communication_consent_events', 'tenant_encryption_keys', 'firm_settings', 'firm_licenses'], true)) {
             $this->assertTrue((bool) $row->relforcerowsecurity, "{$table} must have permanent FORCE ROW LEVEL SECURITY active.");
 
             return;

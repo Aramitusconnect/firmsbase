@@ -6,6 +6,7 @@ use App\Enums\AiMode;
 use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
 use App\Models\Firm;
+use App\Models\FirmSettings;
 use App\Models\FirmUser;
 use App\Services\EncryptionKeyService;
 use App\Services\EntitlementService;
@@ -33,7 +34,14 @@ trait SetsUpAiEntitledFirm
 
         app(EncryptionKeyService::class)->provision($firm);
 
-        $firm->firmSettings()->create([
+        // firm_settings has FORCE ROW LEVEL SECURITY (Section 39A-3L,
+        // Checkpoint 18) — a direct $firm->firmSettings()->create(...)
+        // relation call runs with no tenant context active and is
+        // rejected by the policy. FirmSettingsFactory::create() carries
+        // the established context-hold fix (sets the matching
+        // app.current_firm_id session context before inserting), so
+        // route creation through it instead.
+        FirmSettings::factory()->forFirm($firm)->create([
             'payment_mode' => \App\Enums\PaymentMode::OperatingPaymentsOnly,
             'trust_iolta_protection' => true,
             'ai_mode' => $mode,

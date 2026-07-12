@@ -240,7 +240,25 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== 'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php'
                 && $path !== 'database/factories/CommunicationConsentFactory.php'
                 && $path !== 'tests/Feature/Activation/ConsentServiceTest.php'
-                && $path !== 'tests/Feature/PaymentPlans/PaymentPlanDunningServiceTest.php',
+                && $path !== 'tests/Feature/PaymentPlans/PaymentPlanDunningServiceTest.php'
+                // Section 39A-3L Stage A (a later, distinct test-
+                // harness-safety branch) legitimately added disposable-
+                // database tooling under tools/rls-test/, a PHPUnit
+                // bootstrap guard, and reviewed config/gitignore
+                // corrections.
+                && ! str_starts_with($path, 'tools/rls-test/')
+                && $path !== 'tests/bootstrap.php'
+                && $path !== 'tests/bootstrap-verify-test-database.php'
+                && $path !== '.env.testing.example'
+                && $path !== '.gitignore'
+                && $path !== 'phpunit.xml'
+                // Section 39A-3L Stage A also legitimately fixed a
+                // missing-tenant-context bug in four existing
+                // tests/Feature/Ai/ files.
+                && $path !== 'tests/Feature/Ai/Concerns/SetsUpAiEntitledFirm.php'
+                && $path !== 'tests/Feature/Ai/Entitlement/AiEntitlementAndModeBlockingTest.php'
+                && $path !== 'tests/Feature/Ai/Foundation/AiModeEnumReplacementTest.php'
+                && $path !== 'tests/Feature/Ai/Usage/AiUsageRecorderServiceTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

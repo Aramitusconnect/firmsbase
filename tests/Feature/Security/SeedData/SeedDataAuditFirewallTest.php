@@ -415,6 +415,25 @@ class SeedDataAuditFirewallTest extends TestCase
             // above (Section 39A-3F's matters batch).
             'database/migrations/2026_08_25_930013_force_rls_on_intake_submissions_table.php',
             'database/factories/IntakeSubmissionFactory.php',
+            // Section 39A-3L Stage A (a later, distinct test-harness-
+            // safety branch) legitimately added disposable-database
+            // tooling under tools/rls-test/, a PHPUnit bootstrap guard,
+            // and reviewed config/gitignore corrections.
+            'tools/rls-test/',
+            'tests/bootstrap.php',
+            'tests/bootstrap-verify-test-database.php',
+            '.env.testing.example',
+            '.gitignore',
+            'phpunit.xml',
+            // Section 39A-3L Stage A also legitimately fixed a
+            // missing-tenant-context bug in four existing
+            // tests/Feature/Ai/ files and one existing
+            // tests/Feature/Governance/Deletion/ file.
+            'tests/Feature/Ai/Concerns/SetsUpAiEntitledFirm.php',
+            'tests/Feature/Ai/Entitlement/AiEntitlementAndModeBlockingTest.php',
+            'tests/Feature/Ai/Foundation/AiModeEnumReplacementTest.php',
+            'tests/Feature/Ai/Usage/AiUsageRecorderServiceTest.php',
+            'tests/Feature/Governance/Deletion/DeletionGovernanceLifecycleTest.php',
         ];
 
         $unexpected = array_values(array_filter(

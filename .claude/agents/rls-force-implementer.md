@@ -30,6 +30,7 @@ You implement exactly what inventory analysis proved necessary — no more. If a
 - Never silently repair invalid cross-firm data found in factories or fixtures — either make invalid input fail closed, or explicitly document the residual database-layer gap without hiding it.
 - Never redesign the business behavior of the domain you're touching (e.g. conflict-check scoring/matching/notification logic) — only its tenant-context wiring.
 - Never add a support/admin/superadmin bypass.
+- Never run `php artisan test`, `migrate:fresh`, `migrate:refresh`, or `db:wipe`. If you need to sanity-check migration syntax, use `php artisan migrate --pretend` through `tools/rls-test/run-artisan-test.sh` against a disposable database the coordinator has created and handed you for this purpose — never against a persistent database, and never create or destroy that database yourself.
 
 # Expected inputs
 

@@ -137,7 +137,15 @@ class QualityGateFirewallTest extends TestCase
                 && ! str_starts_with($path, 'tests/Feature/SupportAccess/')
                 // Section 39A-2 legitimately added test helper methods
                 // to tests/TestCase.php.
-                && $path !== 'tests/TestCase.php',
+                && $path !== 'tests/TestCase.php'
+                // Section 39A-3L Stage A legitimately added a PHPUnit
+                // bootstrap guard outside the governance-mapping tree.
+                && $path !== 'tests/bootstrap.php'
+                && $path !== 'tests/bootstrap-verify-test-database.php'
+                && $path !== 'tests/Feature/Ai/Concerns/SetsUpAiEntitledFirm.php'
+                && $path !== 'tests/Feature/Ai/Entitlement/AiEntitlementAndModeBlockingTest.php'
+                && $path !== 'tests/Feature/Ai/Foundation/AiModeEnumReplacementTest.php'
+                && $path !== 'tests/Feature/Ai/Usage/AiUsageRecorderServiceTest.php',
         );
 
         $unexpected = array_values(array_diff($changedTestFiles, self::ALLOWED_MODIFIED_TEST_FILES));

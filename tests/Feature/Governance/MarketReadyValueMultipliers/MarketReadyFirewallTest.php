@@ -164,7 +164,15 @@ class MarketReadyFirewallTest extends TestCase
                 // wrap post-call reads in explicit tenant context, once
                 // conflict_check_runs gained permanent FORCE ROW LEVEL
                 // SECURITY.
-                && $path !== 'tests/Feature/Conflicts/ConflictCheckServiceTest.php',
+                && $path !== 'tests/Feature/Conflicts/ConflictCheckServiceTest.php'
+                // Section 39A-3L Stage A legitimately added a PHPUnit
+                // bootstrap guard outside the governance-mapping tree.
+                && $path !== 'tests/bootstrap.php'
+                && $path !== 'tests/bootstrap-verify-test-database.php'
+                && $path !== 'tests/Feature/Ai/Concerns/SetsUpAiEntitledFirm.php'
+                && $path !== 'tests/Feature/Ai/Entitlement/AiEntitlementAndModeBlockingTest.php'
+                && $path !== 'tests/Feature/Ai/Foundation/AiModeEnumReplacementTest.php'
+                && $path !== 'tests/Feature/Ai/Usage/AiUsageRecorderServiceTest.php',
         );
 
         $this->assertEmpty(
