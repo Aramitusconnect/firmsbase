@@ -116,7 +116,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_tracking_sessions']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_tracking_sessions', 'time_entries']);
 
         $actuallyForced = [];
 
@@ -133,7 +133,11 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(38, count($actuallyForced), 'Exactly thirty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 20 — no more, no less.');
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 21, Table
+        // Phase C (this repo's thirty-ninth staged FORCE activation batch,
+        // covering time_entries) for the same reason — additive only, no
+        // existing assertion removed or weakened.
+        $this->assertSame(39, count($actuallyForced), 'Exactly thirty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 20 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -145,7 +149,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_tracking_sessions']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_tracking_sessions', 'time_entries']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
@@ -172,13 +176,24 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
     }
 
     /**
-     * The single most explicit visibility test in this file — makes
-     * this checkpoint's documented, intentional asymmetry (Central
-     * finding: time_entries remains unforced while
-     * time_tracking_sessions is now forced) visible directly in the
-     * suite itself, rather than only in prose.
+     * HISTORY: at the time this file was written (Section 39A-3L,
+     * Checkpoint 20), this test proved a deliberate, documented
+     * asymmetry — time_tracking_sessions was freshly forced while
+     * time_entries remained intentionally NOT forced, with a future,
+     * separate checkpoint required to close that gap. Section 39A-3L,
+     * Checkpoint 21 (database/migrations/2026_08_25_930021_force_rls_on_time_entries_table.php)
+     * is that later checkpoint: time_entries is now ALSO FORCE RLS
+     * enabled, so the original premise of this test ("time_entries
+     * remains not forced") is no longer true and would be a false
+     * assertion if left unchanged. Rather than deleting this test
+     * outright (which would erase the historical record of the
+     * asymmetry it once proved), it is updated here to assert the
+     * CURRENT reality — both tables are now forced simultaneously —
+     * while this docblock preserves the history for a future reader.
+     * See TimeEntriesForceRlsActivationTest.php for the full activation
+     * proof of time_entries itself.
      */
-    public function test_time_entries_remains_not_forced_while_time_tracking_sessions_is_forced_the_documented_asymmetry(): void
+    public function test_time_entries_and_time_tracking_sessions_are_now_both_forced_the_documented_asymmetry_resolved_in_checkpoint_21(): void
     {
         $sessionsRow = DB::selectOne("select relforcerowsecurity from pg_class where relname = 'time_tracking_sessions'");
         $entriesRow = DB::selectOne("select relforcerowsecurity from pg_class where relname = 'time_entries'");
@@ -190,9 +205,9 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
             (bool) $sessionsRow->relforcerowsecurity,
             'time_tracking_sessions must have permanent FORCE ROW LEVEL SECURITY active after this checkpoint.'
         );
-        $this->assertFalse(
+        $this->assertTrue(
             (bool) $entriesRow->relforcerowsecurity,
-            'time_entries must remain NOT forced after this checkpoint — this is the deliberate, documented asymmetry this checkpoint\'s stop() fix closes the duplicate-billing risk around; a future, separate checkpoint is required to FORCE time_entries itself.'
+            'time_entries must now ALSO have permanent FORCE ROW LEVEL SECURITY active as of Section 39A-3L, Checkpoint 21 — the asymmetry this test originally documented (time_tracking_sessions forced, time_entries not yet forced) has been resolved; both tables are forced simultaneously now.'
         );
     }
 

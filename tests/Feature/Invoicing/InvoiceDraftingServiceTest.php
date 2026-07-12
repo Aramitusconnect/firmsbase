@@ -48,7 +48,17 @@ class InvoiceDraftingServiceTest extends TestCase
         $this->assertSame(1, $invoice->lines()->count());
         $this->assertSame(InvoiceLineType::TimeEntry, $invoice->lines->first()->line_type);
         $this->assertSame(20000, $invoice->total_cents);
-        $this->assertSame(TimeEntryStatus::Invoiced, $entry->fresh()->status);
+
+        // Section 39A-3L, Checkpoint 21 — time_entries is now FORCE RLS
+        // protected, so $entry->fresh() would return null here with no
+        // ambient tenant context active (this test never establishes
+        // one of its own). Re-read under the firm's own context instead
+        // — this is also a stronger proof than the original in-memory
+        // re-fetch, since it confirms the status genuinely persisted to
+        // the database rather than merely being visible to a query that
+        // happens to share the same unscoped connection.
+        $persisted = $this->runWithFirmContext($firm, fn () => TimeEntry::query()->find($entry->id));
+        $this->assertSame(TimeEntryStatus::Invoiced, $persisted->status);
     }
 
     public function test_draft_from_time_entries_throws_when_an_entry_is_not_approved(): void

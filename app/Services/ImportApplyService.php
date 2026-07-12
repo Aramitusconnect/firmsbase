@@ -212,14 +212,14 @@ class ImportApplyService
                 'phone' => $data['phone'] ?? null,
             ]),
             ImportEntityType::Document => $this->applyDocument($firm, $data, $row),
-            ImportEntityType::TimeEntry => TimeEntry::create([
+            ImportEntityType::TimeEntry => (new TenantContextService())->runWithFirmContext($firm, fn () => TimeEntry::create([
                 'firm_id' => $firm->id,
                 'user_id' => $data['user_id'] ?? throw new \InvalidArgumentException('user_id is required'),
                 'matter_id' => $data['matter_id'] ?? null,
                 'client_id' => $data['client_id'] ?? null,
                 'seconds' => $data['seconds'] ?? throw new \InvalidArgumentException('seconds is required'),
                 'worked_on' => $data['worked_on'] ?? throw new \InvalidArgumentException('worked_on is required'),
-            ]),
+            ])),
             ImportEntityType::Invoice => (new TenantContextService())->runWithFirmContext($firm, fn () => Invoice::create([
                 'firm_id' => $firm->id,
                 'client_id' => $data['client_id'] ?? throw new \InvalidArgumentException('client_id is required'),

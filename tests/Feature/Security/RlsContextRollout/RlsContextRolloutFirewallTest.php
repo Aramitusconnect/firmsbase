@@ -79,6 +79,11 @@ class RlsContextRolloutFirewallTest extends TestCase
             // batch, covering time_tracking_sessions). This test's own
             // scope (39A-2) never touched FORCE state.
             'time_tracking_sessions',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 21
+            // (this repo's thirty-ninth staged FORCE activation batch,
+            // covering time_entries). This test's own scope (39A-2)
+            // never touched FORCE state.
+            'time_entries',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -257,7 +262,12 @@ class RlsContextRolloutFirewallTest extends TestCase
                 // batch, a later, distinct staged-FORCE-activation
                 // branch) legitimately added a time_tracking_sessions-
                 // only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930020_force_rls_on_time_tracking_sessions_table.php',
+                && $path !== 'database/migrations/2026_08_25_930020_force_rls_on_time_tracking_sessions_table.php'
+                // Section 39A-3L, Checkpoint 21, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a time_entries-only FORCE
+                // RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930021_force_rls_on_time_entries_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));

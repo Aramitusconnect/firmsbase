@@ -160,6 +160,13 @@ use Tests\TestCase;
  * are forced" list from thirty-seven to thirty-eight tables and add
  * this batch's own migration-existence check — same additive-only
  * pattern, no existing assertion removed or weakened.
+ *
+ * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 21, Table
+ * Phase C (this repo's thirty-ninth staged FORCE activation batch,
+ * covering time_entries) to extend the "exactly these tables are
+ * forced" list from thirty-eight to thirty-nine tables and add this
+ * batch's own migration-existence check — same additive-only pattern,
+ * no existing assertion removed or weakened.
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -228,6 +235,13 @@ class RlsForceRolloutFirewallTest extends TestCase
             // thirty-seven to thirty-eight tables — same additive-only
             // pattern, no existing assertion removed or weakened.
             'time_tracking_sessions',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 21,
+            // Table Phase C (this repo's thirty-ninth staged FORCE
+            // activation batch, covering time_entries) to extend the
+            // "exactly these tables are forced" list from thirty-eight
+            // to thirty-nine tables — same additive-only pattern, no
+            // existing assertion removed or weakened.
+            'time_entries',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -517,6 +531,13 @@ class RlsForceRolloutFirewallTest extends TestCase
         // Section 39A-3L, Checkpoint 20, Table Phase C's own migration —
         // same file-existence reasoning as the checks above.
         $this->assertFileExists(base_path('database/migrations/2026_08_25_930020_force_rls_on_time_tracking_sessions_table.php'));
+    }
+
+    public function test_the_time_entries_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3L, Checkpoint 21, Table Phase C's own migration —
+        // same file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_25_930021_force_rls_on_time_entries_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void
