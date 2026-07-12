@@ -196,8 +196,16 @@ use Tests\TestCase;
  * migration-existence check — same additive-only pattern, no existing
  * assertion removed or weakened. parties, contacts' sibling table
  * under the same prerequisite remediation (Section 39A-3L Phase B5),
- * remains untouched/unforced by this checkpoint — it is addressed by
- * a separate checkpoint (Checkpoint 26), not this one.
+ * remained untouched/unforced by that checkpoint — it was addressed
+ * by a separate checkpoint (Checkpoint 26).
+ *
+ * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 26 (this
+ * repo's forty-fourth staged FORCE activation batch, covering
+ * parties, database/migrations/2026_08_25_930026_force_rls_on_parties_
+ * table.php) to extend the "exactly these tables are forced" list
+ * from forty-three to forty-four tables and add this batch's own
+ * migration-existence check — same additive-only pattern, no existing
+ * assertion removed or weakened.
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -300,10 +308,17 @@ class RlsForceRolloutFirewallTest extends TestCase
             // are forced" list from forty-two to forty-three tables —
             // same additive-only pattern, no existing assertion
             // removed or weakened. parties, contacts' sibling table
-            // under the same prerequisite remediation, remains
-            // untouched/unforced by this checkpoint (Checkpoint 26,
-            // separate task).
+            // under the same prerequisite remediation, remained
+            // untouched/unforced at that point — it was addressed by
+            // the separate Checkpoint 26 below.
             'contacts',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 26
+            // (this repo's forty-fourth staged FORCE activation batch,
+            // covering parties) to extend the "exactly these tables
+            // are forced" list from forty-three to forty-four tables —
+            // same additive-only pattern, no existing assertion
+            // removed or weakened.
+            'parties',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -628,6 +643,13 @@ class RlsForceRolloutFirewallTest extends TestCase
         // Section 39A-3L, Checkpoint 25's own migration — same
         // file-existence reasoning as the checks above.
         $this->assertFileExists(base_path('database/migrations/2026_08_25_930025_force_rls_on_contacts_table.php'));
+    }
+
+    public function test_the_parties_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3L, Checkpoint 26's own migration — same
+        // file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_25_930026_force_rls_on_parties_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

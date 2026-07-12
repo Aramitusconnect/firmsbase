@@ -102,6 +102,11 @@ class RlsForceActivationFirewallTest extends TestCase
             // covering contacts) — this test's own scope (39A-3A) only
             // asserts clients here.
             'contacts',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 26
+            // (this repo's forty-fourth staged FORCE activation batch,
+            // covering parties) — this test's own scope (39A-3A) only
+            // asserts clients here.
+            'parties',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

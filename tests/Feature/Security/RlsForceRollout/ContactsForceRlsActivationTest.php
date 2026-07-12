@@ -53,10 +53,15 @@ use Tests\TestCase;
  * definition() already defaults client_id to null.
  *
  * parties, contacts' sibling table under the same Phase B5 prerequisite
- * remediation, is explicitly OUT of scope for this checkpoint
- * (Checkpoint 26, a separate task) — this file also proves parties
- * remains untouched/unforced by this migration, so a reader of this
- * file does not have to take that on faith.
+ * remediation, was explicitly OUT of scope for this checkpoint at the
+ * time it was authored (Checkpoint 26, a separate task) — this file
+ * originally proved parties remained untouched/unforced by this
+ * migration. Narrowly updated now that Checkpoint 26's own migration
+ * (database/migrations/2026_08_25_930026_force_rls_on_parties_table.php)
+ * is also present in this working tree: this file's own
+ * test_parties_remains_rls_enabled_but_not_forced_and_is_unaffected_by_this_checkpoint()
+ * now asserts parties IS forced too, matching reality, and the
+ * "exactly N prepared tables" count below includes parties.
  *
  * This file also proves the same honest RLS scope boundary as every
  * prior checkpoint: RLS only ever validates a row's OWN firm_id, never
@@ -153,7 +158,7 @@ class ContactsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['contacts']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['contacts', 'parties']);
 
         $actuallyForced = [];
 
@@ -170,7 +175,8 @@ class ContactsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(43, count($actuallyForced), 'Exactly forty-three prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 25 — no more, no less.');
+        // Narrowly updated by Section 39A-3L, Checkpoint 26 (parties) for the same reason — additive only, no existing assertion removed or weakened.
+        $this->assertSame(44, count($actuallyForced), 'Exactly forty-three prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 25 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -180,7 +186,7 @@ class ContactsForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['contacts']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['contacts', 'parties']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
@@ -195,10 +201,21 @@ class ContactsForceRlsActivationTest extends TestCase
 
     /**
      * parties is contacts' sibling table under the same Section 39A-3L
-     * Phase B5 prerequisite remediation, but it is explicitly OUT of
-     * scope for this checkpoint (Checkpoint 26, a separate task).
-     * parties is RLS-enabled (Phase 2) but must NOT be FORCE-enabled by
-     * this migration.
+     * Phase B5 prerequisite remediation. At the time this checkpoint
+     * (Checkpoint 25) was authored, parties was explicitly OUT of scope
+     * (deferred to the separate Checkpoint 26 task) and this test
+     * originally asserted parties was RLS-enabled but NOT yet forced.
+     *
+     * Narrowly updated by Section 39A-3L, Checkpoint 26 (database/
+     * migrations/2026_08_25_930026_force_rls_on_parties_table.php,
+     * this repo's forty-fourth staged FORCE activation batch) now that
+     * parties itself has been forced — this test's own scope predates
+     * Checkpoint 26, but it must still assert the real, current state
+     * of this working tree rather than a frozen, now-false snapshot of
+     * Checkpoint 25 alone. This is a correction to match reality, not a
+     * weakening: RLS-enabled is still asserted, and FORCE is now
+     * asserted true instead of false, matching Checkpoint 26's actual
+     * effect.
      */
     public function test_parties_remains_rls_enabled_but_not_forced_and_is_unaffected_by_this_checkpoint(): void
     {
@@ -206,9 +223,9 @@ class ContactsForceRlsActivationTest extends TestCase
 
         $this->assertNotNull($row, 'parties table not found in pg_class.');
         $this->assertTrue((bool) $row->relrowsecurity, 'parties must remain RLS-enabled (Phase 2 preparation).');
-        $this->assertFalse(
+        $this->assertTrue(
             (bool) $row->relforcerowsecurity,
-            'parties must NOT be FORCE-enabled by the contacts checkpoint — it is addressed by a separate checkpoint (Checkpoint 26).'
+            'parties is now FORCE-enabled by the separate Section 39A-3L, Checkpoint 26 migration, which is present in this working tree alongside this Checkpoint 25 contacts migration.'
         );
     }
 

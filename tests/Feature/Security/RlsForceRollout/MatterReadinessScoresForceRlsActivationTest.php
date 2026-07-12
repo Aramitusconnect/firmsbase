@@ -158,7 +158,7 @@ class MatterReadinessScoresForceRlsActivationTest extends TestCase
         // legitimate addition rather than falsely reporting it as
         // unexpected — additive only, no existing assertion removed
         // or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties']);
         $actuallyForced = [];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -183,7 +183,8 @@ class MatterReadinessScoresForceRlsActivationTest extends TestCase
         // activation batch, covering payment_plan_events) for the
         // same reason — additive only, no existing assertion removed
         // or weakened.
-        $this->assertSame(43, count($actuallyForced), 'Exactly thirty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 14 — no more, no less. Narrowly updated again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two), and again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
+        // Narrowly updated by Section 39A-3L, Checkpoint 26 (parties) for the same reason — additive only, no existing assertion removed or weakened.
+        $this->assertSame(44, count($actuallyForced), 'Exactly thirty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 14 — no more, no less. Narrowly updated again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two), and again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -207,7 +208,7 @@ class MatterReadinessScoresForceRlsActivationTest extends TestCase
         // Narrowly updated by Section 39A-3L, Checkpoint 24 (covering
         // notification_events) for the same reason as above —
         // additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties']);
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
                 continue;

@@ -145,7 +145,7 @@ class FirmLicensesForceRlsActivationTest extends TestCase
         // legitimate addition rather than falsely reporting it as
         // unexpected — additive only, no existing assertion removed
         // or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties']);
         $actuallyForced = [];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -170,7 +170,8 @@ class FirmLicensesForceRlsActivationTest extends TestCase
         // activation batch, covering payment_plan_events) for the
         // same reason — additive only, no existing assertion removed
         // or weakened.
-        $this->assertSame(43, count($actuallyForced), 'Exactly thirty-seven prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 19 — no more, no less.');
+        // Narrowly updated by Section 39A-3L, Checkpoint 26 (parties) for the same reason — additive only, no existing assertion removed or weakened.
+        $this->assertSame(44, count($actuallyForced), 'Exactly thirty-seven prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 19 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -189,7 +190,7 @@ class FirmLicensesForceRlsActivationTest extends TestCase
         // Narrowly updated by Section 39A-3L, Checkpoint 24 (covering
         // notification_events) for the same reason as above —
         // additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties']);
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
                 continue;

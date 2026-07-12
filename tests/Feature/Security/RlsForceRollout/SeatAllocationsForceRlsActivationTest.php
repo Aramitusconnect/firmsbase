@@ -161,7 +161,7 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
         // legitimate addition rather than falsely reporting it as
         // unexpected — additive only, no existing assertion removed
         // or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties']);
         $actuallyForced = [];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -192,7 +192,8 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
         // activation batch, covering payment_plan_events) for the
         // same reason — additive only, no existing assertion removed
         // or weakened.
-        $this->assertSame(43, count($actuallyForced), 'Exactly thirty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (document_requests and communication_consents added on top of this batch\'s own seat_allocations, plus communication_consent_events from Checkpoint 12, plus intake_submissions from Checkpoint 13). Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one), again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two), and again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
+        // Narrowly updated by Section 39A-3L, Checkpoint 26 (parties) for the same reason — additive only, no existing assertion removed or weakened.
+        $this->assertSame(44, count($actuallyForced), 'Exactly thirty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (document_requests and communication_consents added on top of this batch\'s own seat_allocations, plus communication_consent_events from Checkpoint 12, plus intake_submissions from Checkpoint 13). Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one), again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two), and again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -235,7 +236,7 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
         // Narrowly updated by Section 39A-3L, Checkpoint 24 (covering
         // notification_events) for the same reason as above —
         // additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties']);
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
                 continue;
