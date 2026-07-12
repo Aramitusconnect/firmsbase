@@ -224,7 +224,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
             // activation batch, covering tenant_encryption_keys) for
             // the same reason — additive only, no existing assertion
             // removed or weakened.
-            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events',
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings',
         ];
 
         $rows = DB::select(
@@ -287,7 +287,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
             // activation batch, covering tenant_encryption_keys) for
             // the same reason — additive only, no existing assertion
             // removed or weakened.
-            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events',
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

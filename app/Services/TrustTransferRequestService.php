@@ -207,8 +207,20 @@ class TrustTransferRequestService
                 'recorded_by' => $appliedBy->user_id,
             ]));
 
-            $result = $this->classification->classify($firm, PaymentClassification::OperatingPayment);
-            $payment = (new TenantContextService())->runWithFirmContext($firm, function () use ($payment, $result, $appliedBy) {
+            // Section 39A-3L, Checkpoint 18 - firm_settings is FORCE-RLS
+            // protected as of this checkpoint, and classify() reads
+            // firm_settings.payment_mode. classify() used to run here
+            // unwrapped, between the Payment::create() wrap above (whose
+            // finally already cleared context) and this wrap - once
+            // forced, that unwrapped read would silently resolve
+            // firm_settings to null and mis-classify the payment for a
+            // firm configured with payment_mode = Blocked. Moved inside
+            // this wrap (merged with recordDecision(), since $result is
+            // only ever used here) rather than given its own separate
+            // wrap, since a second consecutive wrap for the very next
+            // line would be pure boilerplate with no isolation benefit.
+            $payment = (new TenantContextService())->runWithFirmContext($firm, function () use ($payment, $firm, $appliedBy) {
+                $result = $this->classification->classify($firm, PaymentClassification::OperatingPayment);
                 $this->classification->recordDecision($payment, PaymentClassification::OperatingPayment, $result, $appliedBy->user);
 
                 return $payment->fresh();

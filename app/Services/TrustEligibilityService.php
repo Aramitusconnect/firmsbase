@@ -48,7 +48,15 @@ class TrustEligibilityService
             return TrustEligibilityDecision::deny('The trust_iolta entitlement is not enabled for this firm.');
         }
 
-        $settings = $firm->firmSettings;
+        // firm_settings is FORCE-RLS-protected as of this checkpoint. None
+        // of the ~25 call sites across the 7 Trust services that reach this
+        // gate (assertEligible()/isEligible()/evaluate()) establish their
+        // own tenant context first, so the read must be self-wrapped here,
+        // scoped tightly to resolving $settings only — not the whole
+        // method, since the other checks (customer_type, entitlement,
+        // hasApprovedTrustSetup) don't touch firm_settings and shouldn't be
+        // pulled inside the wrap.
+        $settings = (new TenantContextService())->runWithFirmContext($firm, fn () => $firm->firmSettings);
 
         if ($settings?->payment_mode !== PaymentMode::OperatingAndTrust) {
             return TrustEligibilityDecision::deny('Firm payment_mode is not operating_and_trust.');

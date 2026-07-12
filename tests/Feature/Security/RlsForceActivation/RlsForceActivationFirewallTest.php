@@ -62,6 +62,11 @@ class RlsForceActivationFirewallTest extends TestCase
             'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests',
             'communication_consents', 'communication_consent_events', 'intake_submissions',
             'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 18
+            // (this repo's thirty-sixth staged FORCE activation batch,
+            // covering firm_settings) — this test's own scope (39A-3A)
+            // only asserts clients here.
+            'firm_settings',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

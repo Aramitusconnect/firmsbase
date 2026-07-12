@@ -120,7 +120,7 @@ class ReadinessScoreEventsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['readiness_score_events', 'tenant_encryption_keys', 'document_chase_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings']);
 
         $actuallyForced = [];
 
@@ -137,7 +137,7 @@ class ReadinessScoreEventsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(35, count($actuallyForced), 'Exactly thirty-five prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 15 — no more, no less. Narrowly updated again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
+        $this->assertSame(36, count($actuallyForced), 'Exactly thirty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 15 — no more, no less. Narrowly updated again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -147,7 +147,7 @@ class ReadinessScoreEventsForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['readiness_score_events', 'tenant_encryption_keys', 'document_chase_events']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

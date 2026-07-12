@@ -175,7 +175,15 @@ class FirmProductionActivationServiceTest extends TestCase
     public function test_auto_complete_verifiable_items_marks_only_genuinely_satisfied_items(): void
     {
         $firm = $this->firmWithBaseActivationSatisfied();
-        $firm->firmSettings->update(['state_jurisdiction' => 'NY']);
+        // Section 39A-3L, Checkpoint 18 — same bare-read fix pattern as
+        // the activation_checklists fixes elsewhere in this file:
+        // firm_settings now has FORCE ROW LEVEL SECURITY active, so
+        // this lazy relation load + update() needs an explicit tenant
+        // context (ambient context from firmWithBaseActivationSatisfied()'s
+        // own FirmSettings::factory() call is no longer reliably active
+        // by this point, since createChecklist() runs its own wrap in
+        // between and clears it on return).
+        $this->runWithFirmContext($firm, fn () => $firm->firmSettings->update(['state_jurisdiction' => 'NY']));
         FirmPracticeArea::factory()->create(['firm_id' => $firm->id, 'practice_area_id' => PracticeArea::factory()->create()->id, 'is_enabled' => true]);
         FirmUser::factory()->create(['firm_id' => $firm->id, 'user_id' => User::factory()->create()->id, 'status' => FirmUserStatus::Active]);
         $this->activationChecklist->seedProductionReadinessItems($firm);

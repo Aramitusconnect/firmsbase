@@ -177,7 +177,15 @@ class LoginPolicyFirewallTest extends TestCase
             'app/Services/SupportAccessRequestService.php',
             'app/Services/EmergencyAccessGovernanceGapService.php',
             'app/Services/SeedDataSecurityAuditService.php',
-            'app/Services/FirmUser2faPolicyService.php',
+            // FirmUser2faPolicyService.php is deliberately NOT in this
+            // list any more — Section 39A-3L, Checkpoint 18 (a later,
+            // distinct staged-FORCE-activation branch) found a genuine
+            // need to correct a stale docblock claim ("no login route/
+            // UI surface yet") once User::canAccessPanel() became a
+            // live consumer of this service, wrapped in tenant context
+            // because firm_settings gained permanent FORCE ROW LEVEL
+            // SECURITY in that checkpoint. Only the docblock changed —
+            // no method logic in this file was touched.
             'database/seeders/DatabaseSeeder.php',
             'app/Services/RowLevelSecurityCoverageMappingService.php',
             // PaymentClassificationService.php is deliberately NOT in
@@ -186,7 +194,14 @@ class LoginPolicyFirewallTest extends TestCase
             // wire recordDecision()'s $payment->update() call with
             // explicit tenant context, since payments now has
             // permanent FORCE ROW LEVEL SECURITY.
-            'app/Services/TrustEligibilityService.php',
+            // TrustEligibilityService.php is deliberately NOT in this
+            // list any more — Section 39A-3L, Checkpoint 18 (a later,
+            // distinct staged-FORCE-activation branch) found a genuine
+            // need to wrap evaluate()'s $firm->firmSettings read in
+            // runWithFirmContext(), since firm_settings now has
+            // permanent FORCE ROW LEVEL SECURITY. Only the single
+            // $settings read line changed — decision logic, order, and
+            // return values are byte-for-byte identical.
             'app/Services/AiRetrievalIsolationService.php',
             // ConsentService.php is deliberately NOT in this list any
             // more — Section 39A-3L, Checkpoint 11 (a later, distinct

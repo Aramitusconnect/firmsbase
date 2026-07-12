@@ -193,6 +193,13 @@ class RlsForceRolloutFirewallTest extends TestCase
             'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests',
             'communication_consents', 'communication_consent_events', 'intake_submissions',
             'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 18,
+            // Table Phase C (this repo's thirty-sixth staged FORCE
+            // activation batch, covering firm_settings) to extend the
+            // "exactly these tables are forced" list from thirty-five
+            // to thirty-six tables — same additive-only pattern, no
+            // existing assertion removed or weakened.
+            'firm_settings',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

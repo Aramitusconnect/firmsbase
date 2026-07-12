@@ -115,7 +115,7 @@ class CommunicationConsentEventsForceRlsActivationTest extends TestCase
         // activation batch, covering tenant_encryption_keys) for
         // the same reason — additive only, no existing assertion
         // removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings']);
 
         $actuallyForced = [];
 
@@ -132,7 +132,7 @@ class CommunicationConsentEventsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(35, count($actuallyForced), 'Exactly thirty-five prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 (intake_submissions added on top of this batch\'s own communication_consent_events) — no more, no less. Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one), again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two), and again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
+        $this->assertSame(36, count($actuallyForced), 'Exactly thirty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 (intake_submissions added on top of this batch\'s own communication_consent_events) — no more, no less. Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one), again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two), and again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -157,7 +157,7 @@ class CommunicationConsentEventsForceRlsActivationTest extends TestCase
         // activation batch, covering tenant_encryption_keys) for
         // the same reason — additive only, no existing assertion
         // removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

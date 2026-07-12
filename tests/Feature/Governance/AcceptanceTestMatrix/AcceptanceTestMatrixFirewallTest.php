@@ -89,7 +89,14 @@ class AcceptanceTestMatrixFirewallTest extends TestCase
         'app/Models/Firm.php',
         'app/Services/TenantContextResolver.php',
         'app/Services/TrustPilotExitCriteriaService.php',
-        'app/Services/TrustEligibilityService.php',
+        // TrustEligibilityService.php is deliberately NOT in this list
+        // any more — Section 39A-3L, Checkpoint 18 (a later, distinct
+        // staged-FORCE-activation branch) found a genuine need to wrap
+        // evaluate()'s $firm->firmSettings read in runWithFirmContext(),
+        // since firm_settings now has permanent FORCE ROW LEVEL
+        // SECURITY. Only the single $settings read line changed —
+        // decision logic, order, and return values are byte-for-byte
+        // identical.
         'composer.json',
     ];
 

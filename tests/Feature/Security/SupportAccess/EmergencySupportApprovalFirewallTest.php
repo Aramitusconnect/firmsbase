@@ -44,6 +44,11 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         // permanent FORCE ROW LEVEL SECURITY.
         'app/Services/CalendarEventService.php',
         'app/Services/EmployeeRateService.php',
+        // Section 39A-3L Checkpoint 18 addendum (this batch, a later,
+        // distinct staged-FORCE-activation branch) legitimately fixed
+        // TrustEligibilityService now that firm_settings has permanent
+        // FORCE ROW LEVEL SECURITY.
+        'app/Services/TrustEligibilityService.php',
     ];
 
     /**
@@ -62,7 +67,14 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         // recordDecision()'s $payment->update() call with explicit
         // tenant context, since payments now has permanent FORCE ROW
         // LEVEL SECURITY.
-        'app/Services/TrustEligibilityService.php',
+        // TrustEligibilityService.php is deliberately NOT in this list
+        // any more — Section 39A-3L, Checkpoint 18 (a later, distinct
+        // staged-FORCE-activation branch) found a genuine need to wrap
+        // evaluate()'s $firm->firmSettings read in runWithFirmContext(),
+        // since firm_settings now has permanent FORCE ROW LEVEL
+        // SECURITY. Only the single $settings read line changed —
+        // decision logic, order, and return values are byte-for-byte
+        // identical.
         'app/Services/AiRetrievalIsolationService.php',
         'app/Services/RowLevelSecurityCoverageMappingService.php',
         'app/Services/ConsentService.php',

@@ -94,7 +94,16 @@ class FirmUser2faFirewallTest extends TestCase
             // wire recordDecision()'s $payment->update() call with
             // explicit tenant context, since payments now has
             // permanent FORCE ROW LEVEL SECURITY.
-            'app/Services/TrustEligibilityService.php',
+            // TrustEligibilityService.php is deliberately NOT in this
+            // list any more — Section 39A-3L, Checkpoint 18 (this same
+            // staged-FORCE-activation branch, a later fix pass) found a
+            // genuine need to wrap evaluate()'s $firm->firmSettings read
+            // in runWithFirmContext(), since firm_settings gained
+            // permanent FORCE ROW LEVEL SECURITY in this checkpoint and
+            // every one of this service's ~25 live Trust-service call
+            // sites invoked it with no ambient tenant context. Only the
+            // single $settings read line changed — decision logic,
+            // order, and return values are byte-for-byte identical.
             'app/Services/AiRetrievalIsolationService.php',
             // ConsentService.php is deliberately NOT in this list any
             // more — Section 39A-3L, Checkpoint 11 (a later, distinct

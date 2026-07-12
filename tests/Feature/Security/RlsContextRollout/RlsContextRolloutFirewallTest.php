@@ -64,6 +64,11 @@ class RlsContextRolloutFirewallTest extends TestCase
             'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests',
             'communication_consents', 'communication_consent_events', 'intake_submissions',
             'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 18
+            // (this repo's thirty-sixth staged FORCE activation batch,
+            // covering firm_settings). This test's own scope (39A-2)
+            // never touched FORCE state.
+            'firm_settings',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -227,7 +232,12 @@ class RlsContextRolloutFirewallTest extends TestCase
                 // batch, a later, distinct staged-FORCE-activation
                 // branch) legitimately added a document_chase_events-
                 // only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930017_force_rls_on_document_chase_events_table.php',
+                && $path !== 'database/migrations/2026_08_25_930017_force_rls_on_document_chase_events_table.php'
+                // Section 39A-3L, Checkpoint 18, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a firm_settings-only FORCE
+                // RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930018_force_rls_on_firm_settings_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));
@@ -265,7 +275,15 @@ class RlsContextRolloutFirewallTest extends TestCase
             'app/Services/SupportAccessRequestService.php',
             'app/Services/EmergencyAccessGovernanceGapService.php',
             'app/Services/SeedDataSecurityAuditService.php',
-            'app/Services/FirmUser2faPolicyService.php',
+            // FirmUser2faPolicyService.php is deliberately NOT in this
+            // list any more — Section 39A-3L, Checkpoint 18 (a later,
+            // distinct staged-FORCE-activation branch) found a genuine
+            // need to correct a stale docblock claim ("no login route/
+            // UI surface yet") once User::canAccessPanel() became a
+            // live consumer of this service, wrapped in tenant context
+            // because firm_settings gained permanent FORCE ROW LEVEL
+            // SECURITY in that checkpoint. Only the docblock changed —
+            // no method logic in this file was touched.
             // LoginPolicyService.php is deliberately NOT in this list
             // any more — Section 39A-3B (a later, distinct staged-
             // FORCE-activation branch) found a genuine need to wire
