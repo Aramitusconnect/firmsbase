@@ -59,8 +59,17 @@ class PaymentPlanServiceTest extends TestCase
 
         $this->service->activate($edited);
 
+        // Section 39A-3L, Checkpoint 22 fallout: payment_plans is now
+        // FORCE-RLS protected, and PaymentPlanService::activate() (like
+        // every other status-transition method here) correctly clears
+        // its own runWithFirmContext() wrap before returning. That
+        // leaves no ambient PostgreSQL session context active for this
+        // test's own bare $edited->fresh() read below (unlike the
+        // PaymentPlan::factory()->create()-based tests elsewhere, which
+        // deliberately leave a "context-hold" active) — so it must
+        // supply its own context to read the row back.
         $this->expectException(\RuntimeException::class);
-        $this->service->edit($edited->fresh(), $this->threeInstallments());
+        $this->service->edit($this->runWithFirmContext($firm, fn () => $edited->fresh()), $this->threeInstallments());
     }
 
     public function test_activate_locks_the_schedule(): void
@@ -82,19 +91,26 @@ class PaymentPlanServiceTest extends TestCase
         $plan = $this->service->create($firm, $client, $this->threeInstallments());
         $this->service->activate($plan);
 
-        $newPlan = $this->service->renegotiate($plan->fresh(), [
+        // Section 39A-3L, Checkpoint 22 fallout: payment_plans is now
+        // FORCE-RLS protected, and activate() (like every other
+        // status-transition method in PaymentPlanService) correctly
+        // clears its own runWithFirmContext() wrap before returning —
+        // no ambient PostgreSQL session context is left active for
+        // this test's own bare $plan->fresh() reads below, so each
+        // must supply its own context explicitly.
+        $newPlan = $this->service->renegotiate($this->runWithFirmContext($firm, fn () => $plan->fresh()), [
             ['amount_cents' => 5000, 'due_at' => now()->addMonth()],
             ['amount_cents' => 5000, 'due_at' => now()->addMonths(2)],
         ]);
 
-        $this->assertSame(PaymentPlanStatus::Renegotiated, $plan->fresh()->status);
+        $this->assertSame(PaymentPlanStatus::Renegotiated, $this->runWithFirmContext($firm, fn () => $plan->fresh())->status);
         $this->assertSame(PaymentPlanStatus::Active, $newPlan->status);
         $this->assertSame($plan->id, $newPlan->supersedes_payment_plan_id);
         $this->assertSame(10000, $newPlan->total_cents);
 
         // Prior installments retain history — the old plan's
         // installments are untouched, not deleted or rewritten.
-        $this->assertSame(3, $plan->fresh()->installments()->count());
+        $this->assertSame(3, $this->runWithFirmContext($firm, fn () => $plan->fresh())->installments()->count());
     }
 
     public function test_renegotiate_throws_unless_plan_is_active(): void
@@ -139,7 +155,13 @@ class PaymentPlanServiceTest extends TestCase
         $plan = $this->service->create($firm, $client, $this->threeInstallments());
         $this->service->activate($plan);
 
-        $defaulted = $this->service->markDefaulted($plan->fresh(), $actor, 'Client unresponsive after repeated misses');
+        // Section 39A-3L, Checkpoint 22 fallout: payment_plans is now
+        // FORCE-RLS protected, and activate() correctly clears its own
+        // runWithFirmContext() wrap before returning — no ambient
+        // PostgreSQL session context is left active for this test's
+        // own bare $plan->fresh() read below, so it must supply its
+        // own context explicitly.
+        $defaulted = $this->service->markDefaulted($this->runWithFirmContext($firm, fn () => $plan->fresh()), $actor, 'Client unresponsive after repeated misses');
 
         $this->assertSame(PaymentPlanStatus::Defaulted, $defaulted->status);
         $this->assertDatabaseHas('payment_plan_events', [
@@ -163,9 +185,21 @@ class PaymentPlanServiceTest extends TestCase
             'paid_amount_cents' => 10000,
         ]);
 
-        $this->service->markCompletedIfAllInstallmentsPaid($plan->fresh());
+        // Section 39A-3L, Checkpoint 22 fallout: payment_plans is now
+        // FORCE-RLS protected, and markCompletedIfAllInstallmentsPaid()
+        // is deliberately NOT self-wrapped (see its own docblock) — its
+        // only production caller (PaymentApplicationService::
+        // applyToInstallment(), itself only ever invoked from inside
+        // ManualPaymentService::submit()'s own whole-method wrap)
+        // always supplies context. This test calls it directly, the
+        // same "caller must supply context" contract, so it must wrap
+        // both the read AND the write (the write is a bare
+        // $plan->update() call inside the method) in one context.
+        $this->runWithFirmContext($firm, function () use ($plan) {
+            $this->service->markCompletedIfAllInstallmentsPaid($plan->fresh());
+        });
 
-        $this->assertSame(PaymentPlanStatus::Completed, $plan->fresh()->status);
+        $this->assertSame(PaymentPlanStatus::Completed, $this->runWithFirmContext($firm, fn () => $plan->fresh())->status);
     }
 
     public function test_mark_completed_if_all_installments_paid_is_a_no_op_when_one_is_still_open(): void
@@ -180,8 +214,15 @@ class PaymentPlanServiceTest extends TestCase
             'paid_amount_cents' => 10000,
         ]);
 
-        $this->service->markCompletedIfAllInstallmentsPaid($plan->fresh());
+        // Section 39A-3L, Checkpoint 22 fallout — same reasoning as
+        // test_mark_completed_if_all_installments_paid_completes_the_plan
+        // above: markCompletedIfAllInstallmentsPaid() is deliberately
+        // unwrapped and relies on its caller (this test, here) to
+        // supply tenant context for both the read and the write.
+        $this->runWithFirmContext($firm, function () use ($plan) {
+            $this->service->markCompletedIfAllInstallmentsPaid($plan->fresh());
+        });
 
-        $this->assertSame(PaymentPlanStatus::Active, $plan->fresh()->status);
+        $this->assertSame(PaymentPlanStatus::Active, $this->runWithFirmContext($firm, fn () => $plan->fresh())->status);
     }
 }

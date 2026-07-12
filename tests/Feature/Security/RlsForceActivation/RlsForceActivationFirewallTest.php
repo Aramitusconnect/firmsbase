@@ -82,6 +82,11 @@ class RlsForceActivationFirewallTest extends TestCase
             // covering time_entries) — this test's own scope (39A-3A)
             // only asserts clients here.
             'time_entries',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 22
+            // (this repo's fortieth staged FORCE activation batch,
+            // covering payment_plans) — this test's own scope (39A-3A)
+            // only asserts clients here.
+            'payment_plans',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

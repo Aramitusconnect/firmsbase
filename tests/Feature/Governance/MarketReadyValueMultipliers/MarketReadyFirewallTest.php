@@ -492,6 +492,20 @@ class MarketReadyFirewallTest extends TestCase
             'app/Services/ConsentService.php',
             'tests/Feature/Activation/ConsentServiceTest.php',
             'tests/Feature/PaymentPlans/PaymentPlanDunningServiceTest.php',
+            // Section 39A-3L, Checkpoint 22, Table Phase C (this
+            // batch, a later, distinct staged-FORCE-activation
+            // branch) legitimately added a payment_plans-only FORCE
+            // RLS migration, wrapped PaymentPlanService's create()/
+            // edit()/activate()/renegotiate()/cancel()/
+            // markDefaulted() each in their own runWithFirmContext()
+            // call, added a PaymentPlanFactory context-hold +
+            // firm/client consistency fix, and updated the one
+            // existing test that genuinely needed explicit tenant
+            // context after this activation.
+            'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php',
+            'database/factories/PaymentPlanFactory.php',
+            'app/Services/PaymentPlanService.php',
+            'tests/Feature/PaymentPlans/PaymentPlanServiceTest.php',
         ];
 
         return array_values(array_filter(

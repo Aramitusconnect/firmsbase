@@ -74,7 +74,14 @@ class AdminControlFirewallTest extends TestCase
         'app/Services/FleetMigrationOrchestrationService.php',
         'app/Services/VersionSkewPolicyService.php',
         'app/Services/DeploymentHealthEnvelopeService.php',
-        'app/Services/CustomerSuccessHealthScoreService.php',
+        // CustomerSuccessHealthScoreService.php is deliberately NOT in
+        // this list any more — Section 39A-3L, Checkpoint 22 (a later,
+        // distinct staged-FORCE-activation branch) found a genuine
+        // need to wrap the $firm->paymentPlans()->count() read in its
+        // own tight runWithFirmContext() call, since payment_plans now
+        // has permanent FORCE ROW LEVEL SECURITY. Only that single
+        // count line changed — every other line, order, and return
+        // value is byte-for-byte identical.
         'app/Services/AnnouncementService.php',
         'app/Services/ReleaseNoteService.php',
         'app/Services/StatusPageService.php',
@@ -582,6 +589,20 @@ class AdminControlFirewallTest extends TestCase
             'app/Services/ConsentService.php',
             'tests/Feature/Activation/ConsentServiceTest.php',
             'tests/Feature/PaymentPlans/PaymentPlanDunningServiceTest.php',
+            // Section 39A-3L, Checkpoint 22, Table Phase C (this
+            // batch, a later, distinct staged-FORCE-activation
+            // branch) legitimately added a payment_plans-only FORCE
+            // RLS migration, wrapped PaymentPlanService's create()/
+            // edit()/activate()/renegotiate()/cancel()/
+            // markDefaulted() each in their own runWithFirmContext()
+            // call, added a PaymentPlanFactory context-hold +
+            // firm/client consistency fix, and updated the one
+            // existing test that genuinely needed explicit tenant
+            // context after this activation.
+            'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php',
+            'database/factories/PaymentPlanFactory.php',
+            'app/Services/PaymentPlanService.php',
+            'tests/Feature/PaymentPlans/PaymentPlanServiceTest.php',
         ];
 
         return array_values(array_filter(

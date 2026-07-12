@@ -434,6 +434,19 @@ class SeedDataAuditFirewallTest extends TestCase
             'tests/Feature/Ai/Foundation/AiModeEnumReplacementTest.php',
             'tests/Feature/Ai/Usage/AiUsageRecorderServiceTest.php',
             'tests/Feature/Governance/Deletion/DeletionGovernanceLifecycleTest.php',
+            // Section 39A-3L, Checkpoint 22, Table Phase C (this batch,
+            // a later, distinct staged-FORCE-activation branch)
+            // legitimately added a payment_plans-only FORCE RLS
+            // migration, a PaymentPlanFactory context-hold + firm/client
+            // consistency fix, explicit tenant-context wiring in
+            // PaymentPlanService and CustomerSuccessHealthScoreService,
+            // and updated the one existing test that genuinely needed
+            // explicit tenant context after this activation.
+            'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php',
+            'database/factories/PaymentPlanFactory.php',
+            'app/Services/PaymentPlanService.php',
+            'app/Services/CustomerSuccessHealthScoreService.php',
+            'tests/Feature/PaymentPlans/PaymentPlanServiceTest.php',
         ];
 
         $unexpected = array_values(array_filter(
@@ -779,6 +792,13 @@ class SeedDataAuditFirewallTest extends TestCase
             // consistency + context-hold fix.
             'database/migrations/2026_08_25_930013_force_rls_on_intake_submissions_table.php',
             'database/factories/IntakeSubmissionFactory.php',
+            // Section 39A-3L, Checkpoint 22, Table Phase C (this batch,
+            // a later, distinct staged-FORCE-activation branch)
+            // legitimately added a payment_plans-only FORCE RLS
+            // migration and a PaymentPlanFactory context-hold +
+            // firm/client consistency fix.
+            'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php',
+            'database/factories/PaymentPlanFactory.php',
         ];
 
         return array_values(array_filter(

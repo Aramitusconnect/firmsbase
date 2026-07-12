@@ -233,7 +233,12 @@ class ConsultationsForceRlsActivationTest extends TestCase
             // activation batch, covering tenant_encryption_keys) for
             // the same reason — additive only, no existing assertion
             // removed or weakened.
-            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 22,
+            // Table Phase C (this repo's fortieth staged FORCE
+            // activation batch, covering payment_plans) for the same
+            // reason — additive only, no existing assertion removed or
+            // weakened.
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans',
         ];
 
         $rows = DB::select(
@@ -296,7 +301,12 @@ class ConsultationsForceRlsActivationTest extends TestCase
             // activation batch, covering tenant_encryption_keys) for
             // the same reason — additive only, no existing assertion
             // removed or weakened.
-            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 22,
+            // Table Phase C (this repo's fortieth staged FORCE
+            // activation batch, covering payment_plans) for the same
+            // reason — additive only, no existing assertion removed or
+            // weakened.
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

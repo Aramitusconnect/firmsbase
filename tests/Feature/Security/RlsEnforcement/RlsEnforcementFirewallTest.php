@@ -179,7 +179,12 @@ class RlsEnforcementFirewallTest extends TestCase
                 // batch, a later, distinct staged-FORCE-activation
                 // branch) legitimately added a time_entries-only FORCE
                 // RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930021_force_rls_on_time_entries_table.php',
+                && $path !== 'database/migrations/2026_08_25_930021_force_rls_on_time_entries_table.php'
+                // Section 39A-3L, Checkpoint 22, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a payment_plans-only FORCE
+                // RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A must add no migrations in this pass, but found: '.implode(', ', $changed));

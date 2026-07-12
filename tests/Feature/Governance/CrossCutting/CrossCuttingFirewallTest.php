@@ -189,7 +189,12 @@ class CrossCuttingFirewallTest extends TestCase
                 // batch, a later, distinct staged-FORCE-activation
                 // branch) legitimately added a communication_consents-
                 // only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php',
+                && $path !== 'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php'
+                // Section 39A-3L, Checkpoint 22, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a payment_plans-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php',
         ));
     }
 

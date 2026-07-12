@@ -227,14 +227,14 @@ class ImportApplyService
                 'total_cents' => $data['total_cents'] ?? 0,
                 'subtotal_cents' => $data['subtotal_cents'] ?? ($data['total_cents'] ?? 0),
             ])),
-            ImportEntityType::PaymentPlan => PaymentPlan::create([
+            ImportEntityType::PaymentPlan => (new TenantContextService())->runWithFirmContext($firm, fn () => PaymentPlan::create([
                 'firm_id' => $firm->id,
                 'client_id' => $data['client_id'] ?? throw new \InvalidArgumentException('client_id is required'),
                 'matter_id' => $data['matter_id'] ?? null,
                 'invoice_id' => $data['invoice_id'] ?? null,
                 'total_cents' => $data['total_cents'] ?? throw new \InvalidArgumentException('total_cents is required'),
                 'installment_count' => $data['installment_count'] ?? 1,
-            ]),
+            ])),
             default => throw new \InvalidArgumentException("Unsupported entity type for apply: {$entityType->value}"),
         };
     }

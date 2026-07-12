@@ -49,6 +49,13 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         // TrustEligibilityService now that firm_settings has permanent
         // FORCE ROW LEVEL SECURITY.
         'app/Services/TrustEligibilityService.php',
+        // Section 39A-3L, Checkpoint 22 (this batch, a later, distinct
+        // staged-FORCE-activation branch) legitimately wired explicit
+        // tenant context into PaymentPlanService and
+        // CustomerSuccessHealthScoreService now that payment_plans has
+        // permanent FORCE ROW LEVEL SECURITY.
+        'app/Services/PaymentPlanService.php',
+        'app/Services/CustomerSuccessHealthScoreService.php',
     ];
 
     /**
@@ -420,6 +427,16 @@ class EmergencySupportApprovalFirewallTest extends TestCase
             'app/Services/ReadinessScorecardRegistry.php',
             'tests/Feature/Tasks/TaskDependencyServiceTest.php',
             'tests/Feature/Webhooks/Wiring/TaskCompletedWiringTest.php',
+            // Section 39A-3L, Checkpoint 22, Table Phase C (this batch,
+            // a later, distinct staged-FORCE-activation branch)
+            // legitimately added a payment_plans-only FORCE RLS
+            // migration, a PaymentPlanFactory context-hold + firm/client
+            // consistency fix, and updated the one existing test that
+            // genuinely needed explicit tenant context after this
+            // activation.
+            'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php',
+            'database/factories/PaymentPlanFactory.php',
+            'tests/Feature/PaymentPlans/PaymentPlanServiceTest.php',
         ];
 
         return array_values(array_filter(
