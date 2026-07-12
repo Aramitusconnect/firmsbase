@@ -447,6 +447,19 @@ class SeedDataAuditFirewallTest extends TestCase
             'app/Services/PaymentPlanService.php',
             'app/Services/CustomerSuccessHealthScoreService.php',
             'tests/Feature/PaymentPlans/PaymentPlanServiceTest.php',
+            // Section 39A-3L, Checkpoint 23, Table Phase C (this batch,
+            // a later, distinct staged-FORCE-activation branch)
+            // legitimately added a payment_plan_events-only FORCE RLS
+            // migration and a PaymentPlanEventFactory context-hold +
+            // firm/plan consistency fix — no production service file
+            // required any wiring change this checkpoint (both real
+            // writers already execute under context established at
+            // Checkpoint 22 / Checkpoint 39A-3H). The same
+            // PaymentPlanServiceTest.php (already allowed above) was
+            // updated again to wrap two assertDatabaseHas() calls in
+            // tenant context.
+            'database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php',
+            'database/factories/PaymentPlanEventFactory.php',
         ];
 
         $unexpected = array_values(array_filter(
@@ -799,6 +812,13 @@ class SeedDataAuditFirewallTest extends TestCase
             // firm/client consistency fix.
             'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php',
             'database/factories/PaymentPlanFactory.php',
+            // Section 39A-3L, Checkpoint 23, Table Phase C (this batch,
+            // a later, distinct staged-FORCE-activation branch)
+            // legitimately added a payment_plan_events-only FORCE RLS
+            // migration and a PaymentPlanEventFactory context-hold +
+            // firm/plan consistency fix.
+            'database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php',
+            'database/factories/PaymentPlanEventFactory.php',
         ];
 
         return array_values(array_filter(

@@ -89,6 +89,11 @@ class RlsContextRolloutFirewallTest extends TestCase
             // covering payment_plans). This test's own scope (39A-2)
             // never touched FORCE state.
             'payment_plans',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 23
+            // (this repo's forty-first staged FORCE activation batch,
+            // covering payment_plan_events). This test's own scope
+            // (39A-2) never touched FORCE state.
+            'payment_plan_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -277,7 +282,12 @@ class RlsContextRolloutFirewallTest extends TestCase
                 // batch, a later, distinct staged-FORCE-activation
                 // branch) legitimately added a payment_plans-only FORCE
                 // RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php',
+                && $path !== 'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php'
+                // Section 39A-3L, Checkpoint 23, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a payment_plan_events-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));

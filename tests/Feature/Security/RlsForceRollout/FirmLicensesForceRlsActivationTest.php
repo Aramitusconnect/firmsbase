@@ -131,8 +131,12 @@ class FirmLicensesForceRlsActivationTest extends TestCase
         $coverage = new RowLevelSecurityCoverageMappingService();
 
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 22, Table Phase C (this repo's fortieth staged FORCE activation batch, covering payment_plans) for the same reason — additive only, no existing assertion removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans']);
-
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 23,
+        // Table Phase C (this repo's forty-first staged FORCE
+        // activation batch, covering payment_plan_events) for the
+        // same reason — additive only, no existing assertion removed
+        // or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events']);
         $actuallyForced = [];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -152,7 +156,12 @@ class FirmLicensesForceRlsActivationTest extends TestCase
         // Phase C (this repo's thirty-ninth staged FORCE activation batch,
         // covering time_entries) for the same reason — additive only, no
         // existing assertion removed or weakened.
-        $this->assertSame(40, count($actuallyForced), 'Exactly thirty-seven prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 19 — no more, no less.');
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 23,
+        // Table Phase C (this repo's forty-first staged FORCE
+        // activation batch, covering payment_plan_events) for the
+        // same reason — additive only, no existing assertion removed
+        // or weakened.
+        $this->assertSame(41, count($actuallyForced), 'Exactly thirty-seven prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 19 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -163,8 +172,12 @@ class FirmLicensesForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 22, Table Phase C (payment_plans) for the same reason — additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans']);
-
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 23,
+        // Table Phase C (this repo's forty-first staged FORCE
+        // activation batch, covering payment_plan_events) for the
+        // same reason — additive only, no existing assertion removed
+        // or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events']);
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
                 continue;

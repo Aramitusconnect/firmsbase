@@ -648,6 +648,17 @@ class PrePilotRemediationFirewallTest extends TestCase
             'database/factories/PaymentPlanFactory.php',
             'app/Services/PaymentPlanService.php',
             'tests/Feature/PaymentPlans/PaymentPlanServiceTest.php',
+            // Section 39A-3L, Checkpoint 23, Table Phase C (this
+            // batch, a later, distinct staged-FORCE-activation
+            // branch) legitimately added a payment_plan_events-only
+            // FORCE RLS migration and a PaymentPlanEventFactory
+            // context-hold + firm/plan consistency fix — no
+            // production service file required any wiring change
+            // this checkpoint. The same PaymentPlanServiceTest.php
+            // (already allowed above) was updated again to wrap two
+            // assertDatabaseHas() calls in tenant context.
+            'database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php',
+            'database/factories/PaymentPlanEventFactory.php',
         ];
 
         return array_values(array_filter(

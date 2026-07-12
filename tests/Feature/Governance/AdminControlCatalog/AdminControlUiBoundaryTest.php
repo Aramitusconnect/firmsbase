@@ -268,7 +268,17 @@ class AdminControlUiBoundaryTest extends TestCase
                 // explicit tenant context after this activation.
                 && $path !== 'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php'
                 && $path !== 'database/factories/PaymentPlanFactory.php'
-                && $path !== 'tests/Feature/PaymentPlans/PaymentPlanServiceTest.php',
+                && $path !== 'tests/Feature/PaymentPlans/PaymentPlanServiceTest.php'
+                // Section 39A-3L, Checkpoint 23, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a payment_plan_events-only
+                // FORCE RLS migration, a PaymentPlanEventFactory
+                // context-hold + firm/plan consistency fix, and updated
+                // the same existing test file (already allowed above)
+                // to explicitly wrap two assertDatabaseHas() calls in
+                // tenant context after this activation.
+                && $path !== 'database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php'
+                && $path !== 'database/factories/PaymentPlanEventFactory.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

@@ -44,7 +44,15 @@ class PaymentPlanServiceTest extends TestCase
         $this->assertSame(30000, $plan->total_cents);
         $this->assertSame(3, $plan->installment_count);
         $this->assertSame(3, $plan->installments()->count());
-        $this->assertDatabaseHas('payment_plan_events', ['payment_plan_id' => $plan->id, 'event_type' => 'created']);
+
+        // Section 39A-3L, Checkpoint 23 fallout: payment_plan_events is
+        // now FORCE-RLS protected too, and create() clears its own
+        // context wrap before returning, so a bare assertDatabaseHas()
+        // here (outside any active context) would find zero rows even
+        // though the event genuinely persisted.
+        $this->runWithFirmContext($firm, function () use ($plan) {
+            $this->assertDatabaseHas('payment_plan_events', ['payment_plan_id' => $plan->id, 'event_type' => 'created']);
+        });
     }
 
     public function test_edit_is_only_allowed_before_activation(): void
@@ -164,11 +172,18 @@ class PaymentPlanServiceTest extends TestCase
         $defaulted = $this->service->markDefaulted($this->runWithFirmContext($firm, fn () => $plan->fresh()), $actor, 'Client unresponsive after repeated misses');
 
         $this->assertSame(PaymentPlanStatus::Defaulted, $defaulted->status);
-        $this->assertDatabaseHas('payment_plan_events', [
-            'payment_plan_id' => $plan->id,
-            'event_type' => 'defaulted',
-            'actor_user_id' => $actor->id,
-        ]);
+
+        // Section 39A-3L, Checkpoint 23 fallout: same fix as
+        // test_create_builds_the_installment_schedule_and_totals above
+        // — payment_plan_events is now FORCE-RLS protected, and
+        // markDefaulted() clears its own context wrap before returning.
+        $this->runWithFirmContext($firm, function () use ($plan, $actor) {
+            $this->assertDatabaseHas('payment_plan_events', [
+                'payment_plan_id' => $plan->id,
+                'event_type' => 'defaulted',
+                'actor_user_id' => $actor->id,
+            ]);
+        });
     }
 
     public function test_mark_completed_if_all_installments_paid_completes_the_plan(): void

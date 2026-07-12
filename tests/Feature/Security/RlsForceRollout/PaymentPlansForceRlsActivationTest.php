@@ -140,9 +140,13 @@ class PaymentPlansForceRlsActivationTest extends TestCase
     public function test_exactly_forty_prepared_tables_are_force_row_level_security_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 23,
+        // Table Phase C (this repo's forty-first staged FORCE
+        // activation batch, covering payment_plan_events) for the
+        // same reason — additive only, no existing assertion removed
+        // or weakened.
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['payment_plans']);
-
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['payment_plans', 'payment_plan_events']);
         $actuallyForced = [];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -157,8 +161,13 @@ class PaymentPlansForceRlsActivationTest extends TestCase
 
         sort($expectedForced);
         sort($actuallyForced);
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 23,
+        // Table Phase C (this repo's forty-first staged FORCE
+        // activation batch, covering payment_plan_events) for the
+        // same reason — additive only, no existing assertion removed
+        // or weakened.
 
-        $this->assertSame(40, count($actuallyForced), 'Exactly forty prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 22 — no more, no less.');
+        $this->assertSame(41, count($actuallyForced), 'Exactly forty prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 22 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -168,8 +177,12 @@ class PaymentPlansForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['payment_plans']);
-
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 23,
+        // Table Phase C (this repo's forty-first staged FORCE
+        // activation batch, covering payment_plan_events) for the
+        // same reason — additive only, no existing assertion removed
+        // or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['payment_plans', 'payment_plan_events']);
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
                 continue;
