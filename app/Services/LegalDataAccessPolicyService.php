@@ -62,9 +62,20 @@ class LegalDataAccessPolicyService
 
     public function currentStatus(Firm $firm): ?LicenseStatus
     {
-        $firm->loadMissing('licenses');
+        // Section 39A-3L, Checkpoint 19 - firm_licenses is FORCE-RLS
+        // protected as of this checkpoint. This relation load used to
+        // run with no ambient tenant context; once forced, it would
+        // silently resolve to an empty collection rather than raising,
+        // making canRead()/canWrite()/canExport() report unrestricted
+        // full access for a Suspended/PastDue/Restricted firm - a
+        // fail-OPEN data-access-control gap. This method calls no other
+        // tenant-context-sensitive service, so a single self-contained
+        // wrap is safe (no nesting risk).
+        $statuses = (new TenantContextService())->runWithFirmContext($firm, function () use ($firm) {
+            $firm->loadMissing('licenses');
 
-        $statuses = $firm->licenses->pluck('license_status');
+            return $firm->licenses->pluck('license_status');
+        });
 
         if ($statuses->isEmpty()) {
             return null;

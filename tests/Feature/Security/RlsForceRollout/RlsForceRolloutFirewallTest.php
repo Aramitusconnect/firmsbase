@@ -146,6 +146,13 @@ use Tests\TestCase;
  * tables are forced" firewall list from thirty-three to thirty-four
  * tables and add this batch's own migration-existence check — same
  * additive-only pattern, no existing assertion removed or weakened.
+ *
+ * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 19, Table
+ * Phase C (this repo's thirty-seventh staged FORCE activation batch,
+ * covering firm_licenses) to extend the "exactly these tables are
+ * forced" list from thirty-six to thirty-seven tables and add this
+ * batch's own migration-existence check — same additive-only pattern,
+ * no existing assertion removed or weakened.
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -200,6 +207,13 @@ class RlsForceRolloutFirewallTest extends TestCase
             // to thirty-six tables — same additive-only pattern, no
             // existing assertion removed or weakened.
             'firm_settings',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 19,
+            // Table Phase C (this repo's thirty-seventh staged FORCE
+            // activation batch, covering firm_licenses) to extend the
+            // "exactly these tables are forced" list from thirty-six to
+            // thirty-seven tables — same additive-only pattern, no
+            // existing assertion removed or weakened.
+            'firm_licenses',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -475,6 +489,13 @@ class RlsForceRolloutFirewallTest extends TestCase
         // Section 39A-3L, Checkpoint 16, Table Phase C's own migration —
         // same file-existence reasoning as the checks above.
         $this->assertFileExists(base_path('database/migrations/2026_08_25_930016_force_rls_on_tenant_encryption_keys_table.php'));
+    }
+
+    public function test_the_firm_licenses_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3L, Checkpoint 19, Table Phase C's own migration —
+        // same file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_25_930019_force_rls_on_firm_licenses_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

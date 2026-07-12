@@ -16,6 +16,20 @@ use Illuminate\Support\Facades\DB;
  * org_license, billing_mode) onto an EXISTING firm_licenses row and
  * keeps firm_entitlements in sync via EntitlementPlanSyncService. Every
  * assignment/status change writes a license_events row.
+ *
+ * Section 39A-3L, Checkpoint 19 — firm_licenses is FORCE-RLS protected
+ * as of this checkpoint. assignPlan() deliberately does NOT wrap its
+ * entire body in one outer runWithFirmContext() call:
+ * EntitlementPlanSyncService::syncOrgInheritedEntitlements()/
+ * syncPlanEntitlements() call EntitlementService::setForSource(), which
+ * already self-wraps its own whole body (its own docblock requires
+ * callers not to wrap it). A single outer wrap here would let that
+ * inner self-wrap's finally clear the outer wrap's context the instant
+ * it returns, silently breaking context for the remaining code (the
+ * decoy-wrap bug this arc has fixed before). Instead, each actual
+ * firm_licenses read/write gets its own tightly-scoped wrap, with the
+ * self-wrapping sync call and the (unprotected) LicenseEvent write left
+ * outside any wrap in between.
  */
 class FirmLicenseCommercialService
 {
@@ -31,11 +45,13 @@ class FirmLicenseCommercialService
         ?User $actor = null,
     ): FirmLicense {
         return DB::transaction(function () use ($license, $plan, $orgLicense, $billingMode, $actor) {
-            $license->update([
-                'plan_id' => $plan->id,
-                'org_license_id' => $orgLicense?->id,
-                'billing_mode' => $billingMode ?? $license->billing_mode,
-            ]);
+            (new TenantContextService())->runWithFirmContext($license->firm, function () use ($license, $plan, $orgLicense, $billingMode) {
+                $license->update([
+                    'plan_id' => $plan->id,
+                    'org_license_id' => $orgLicense?->id,
+                    'billing_mode' => $billingMode ?? $license->billing_mode,
+                ]);
+            });
 
             LicenseEvent::create([
                 'licensable_type' => FirmLicense::class,
@@ -52,7 +68,7 @@ class FirmLicenseCommercialService
                 $this->entitlementPlanSync->syncPlanEntitlements($license->firm, $plan, $actor);
             }
 
-            return $license->fresh();
+            return (new TenantContextService())->runWithFirmContext($license->firm, fn () => $license->fresh());
         });
     }
 
@@ -65,7 +81,9 @@ class FirmLicenseCommercialService
         return DB::transaction(function () use ($license, $status, $reason, $actor) {
             $fromStatus = $license->license_status;
 
-            $license->update(['license_status' => $status]);
+            (new TenantContextService())->runWithFirmContext($license->firm, function () use ($license, $status) {
+                $license->update(['license_status' => $status]);
+            });
 
             LicenseEvent::create([
                 'licensable_type' => FirmLicense::class,
@@ -78,7 +96,7 @@ class FirmLicenseCommercialService
                 'actor_id' => $actor?->id,
             ]);
 
-            return $license->fresh();
+            return (new TenantContextService())->runWithFirmContext($license->firm, fn () => $license->fresh());
         });
     }
 }

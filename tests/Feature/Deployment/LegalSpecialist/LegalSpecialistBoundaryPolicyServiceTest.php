@@ -29,19 +29,42 @@ class LegalSpecialistBoundaryPolicyServiceTest extends TestCase
     public function test_asserts_trust_iolta_never_enabled_for_legal_specialist(): void
     {
         $firm = $this->makeDeploymentFirm(DeploymentMode::Dedicated, CustomerType::LegalSpecialist);
-        $firm->firmSettings()->update(['trust_iolta_protection' => true]);
+
+        // Checkpoint 18 activated FORCE ROW LEVEL SECURITY on
+        // firm_settings; a bare, unwrapped update()/fresh() against it
+        // with no ambient tenant context silently affects/returns zero
+        // rows rather than throwing, which made this test's own setup a
+        // no-op. Wrapped narrowly (write + the refresh that reloads the
+        // firmSettings relation) so the assertion below actually
+        // exercises the true-value precondition it claims to test.
+        $firm = $this->runWithFirmContext($firm, function () use ($firm) {
+            $firm->firmSettings()->update(['trust_iolta_protection' => true]);
+
+            return $firm->fresh(['firmSettings']);
+        });
 
         $this->expectException(\RuntimeException::class);
-        $this->service->assertTrustIoltaNeverEnabledFor($firm->fresh(['firmSettings']));
+        $this->service->assertTrustIoltaNeverEnabledFor($firm);
     }
 
     public function test_law_firm_may_have_trust_iolta_protection_enabled(): void
     {
         $firm = $this->makeDeploymentFirm(DeploymentMode::Dedicated, CustomerType::LawFirm);
-        $firm->firmSettings()->update(['trust_iolta_protection' => true]);
+
+        // Same FORCE-RLS wrapping as the legal_specialist test above,
+        // for consistency — this test doesn't currently fail without it
+        // (its assertion is trivially satisfied either way), but leaving
+        // an identical bare write "unfixed" two lines from the fixed one
+        // would be inconsistent and could mask a real bug if this
+        // assertion is ever tightened later.
+        $firm = $this->runWithFirmContext($firm, function () use ($firm) {
+            $firm->firmSettings()->update(['trust_iolta_protection' => true]);
+
+            return $firm->fresh(['firmSettings']);
+        });
 
         // Should not throw.
-        $this->service->assertTrustIoltaNeverEnabledFor($firm->fresh(['firmSettings']));
+        $this->service->assertTrustIoltaNeverEnabledFor($firm);
         $this->assertTrue(true);
     }
 

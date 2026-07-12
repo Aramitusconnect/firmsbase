@@ -69,6 +69,11 @@ class RlsContextRolloutFirewallTest extends TestCase
             // covering firm_settings). This test's own scope (39A-2)
             // never touched FORCE state.
             'firm_settings',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 19
+            // (this repo's thirty-seventh staged FORCE activation
+            // batch, covering firm_licenses). This test's own scope
+            // (39A-2) never touched FORCE state.
+            'firm_licenses',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -237,7 +242,12 @@ class RlsContextRolloutFirewallTest extends TestCase
                 // batch, a later, distinct staged-FORCE-activation
                 // branch) legitimately added a firm_settings-only FORCE
                 // RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930018_force_rls_on_firm_settings_table.php',
+                && $path !== 'database/migrations/2026_08_25_930018_force_rls_on_firm_settings_table.php'
+                // Section 39A-3L, Checkpoint 19, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a firm_licenses-only FORCE
+                // RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930019_force_rls_on_firm_licenses_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));
