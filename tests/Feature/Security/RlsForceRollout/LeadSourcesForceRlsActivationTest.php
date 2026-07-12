@@ -239,7 +239,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
             // covering notification_events) for the same reason as
             // above — additive only, no existing assertion removed or
             // weakened.
-            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events',
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts',
         ];
 
         $rows = DB::select(
@@ -317,7 +317,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
             // covering notification_events) for the same reason as
             // above — additive only, no existing assertion removed or
             // weakened.
-            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events',
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

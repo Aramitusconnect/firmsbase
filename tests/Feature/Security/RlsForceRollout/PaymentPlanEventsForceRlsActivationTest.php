@@ -155,7 +155,7 @@ class PaymentPlanEventsForceRlsActivationTest extends TestCase
         // must still account for that later, legitimate addition
         // rather than falsely reporting it as unexpected — additive
         // only, no existing assertion removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['payment_plan_events', 'notification_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['payment_plan_events', 'notification_events', 'contacts']);
 
         $actuallyForced = [];
 
@@ -172,7 +172,7 @@ class PaymentPlanEventsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(42, count($actuallyForced), 'Exactly forty-one prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 23 — no more, no less.');
+        $this->assertSame(43, count($actuallyForced), 'Exactly forty-one prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 23 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -185,7 +185,7 @@ class PaymentPlanEventsForceRlsActivationTest extends TestCase
         // Narrowly updated by Section 39A-3L, Checkpoint 24 (covering
         // notification_events) for the same reason as above —
         // additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['payment_plan_events', 'notification_events']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['payment_plan_events', 'notification_events', 'contacts']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

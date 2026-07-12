@@ -188,6 +188,16 @@ use Tests\TestCase;
  * forced" list from forty-one to forty-two tables and add this
  * batch's own migration-existence check — same additive-only pattern,
  * no existing assertion removed or weakened.
+ *
+ * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 25 (this
+ * repo's forty-third staged FORCE activation batch, covering
+ * contacts) to extend the "exactly these tables are forced" list
+ * from forty-two to forty-three tables and add this batch's own
+ * migration-existence check — same additive-only pattern, no existing
+ * assertion removed or weakened. parties, contacts' sibling table
+ * under the same prerequisite remediation (Section 39A-3L Phase B5),
+ * remains untouched/unforced by this checkpoint — it is addressed by
+ * a separate checkpoint (Checkpoint 26), not this one.
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -284,6 +294,16 @@ class RlsForceRolloutFirewallTest extends TestCase
             // to forty-two tables — same additive-only pattern, no
             // existing assertion removed or weakened.
             'notification_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 25
+            // (this repo's forty-third staged FORCE activation batch,
+            // covering contacts) to extend the "exactly these tables
+            // are forced" list from forty-two to forty-three tables —
+            // same additive-only pattern, no existing assertion
+            // removed or weakened. parties, contacts' sibling table
+            // under the same prerequisite remediation, remains
+            // untouched/unforced by this checkpoint (Checkpoint 26,
+            // separate task).
+            'contacts',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -601,6 +621,13 @@ class RlsForceRolloutFirewallTest extends TestCase
         // Section 39A-3L, Checkpoint 24's own migration — same
         // file-existence reasoning as the checks above.
         $this->assertFileExists(base_path('database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php'));
+    }
+
+    public function test_the_contacts_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3L, Checkpoint 25's own migration — same
+        // file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_25_930025_force_rls_on_contacts_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

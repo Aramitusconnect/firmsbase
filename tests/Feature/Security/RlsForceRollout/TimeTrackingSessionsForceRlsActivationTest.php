@@ -131,7 +131,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
         // legitimate addition rather than falsely reporting it as
         // unexpected — additive only, no existing assertion removed
         // or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts']);
         $actuallyForced = [];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -156,7 +156,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
         // activation batch, covering payment_plan_events) for the
         // same reason — additive only, no existing assertion removed
         // or weakened.
-        $this->assertSame(42, count($actuallyForced), 'Exactly thirty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 20 — no more, no less.');
+        $this->assertSame(43, count($actuallyForced), 'Exactly thirty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 20 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -177,7 +177,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
         // Narrowly updated by Section 39A-3L, Checkpoint 24 (covering
         // notification_events) for the same reason as above —
         // additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts']);
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
                 continue;
