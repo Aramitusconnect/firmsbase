@@ -502,6 +502,17 @@ class DocumentChaseEventsForceRlsActivationTest extends TestCase
             'status' => \App\Enums\DocumentRequestItemStatus::Requested,
         ]);
 
+        // The preceding CommunicationConsent/DocumentRequest factory
+        // calls each leave DB-session tenant context set to $firm->id
+        // (the established context-hold factory pattern) — establish a
+        // genuinely clean baseline immediately before the call under
+        // test, so the post-call assertion below proves checkAndLog()
+        // itself clears context, rather than incidentally observing an
+        // ambient value that runWithFirmContext() now correctly restores.
+        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService())->clearFirmContext();
+        $this->assertNoDatabaseTenantContext();
+
         $service = app(DocumentChaseService::class);
         $result = $service->checkAndLog($firm, $item);
 

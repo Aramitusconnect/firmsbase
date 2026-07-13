@@ -644,7 +644,17 @@ class SeatAllocationsForceRlsActivationTest extends TestCase
         // Deliberately no ambient tenant context set here — proving
         // evaluate() establishes its own context internally rather than
         // relying on the caller (or a leftover leaked context) to have
-        // already done so.
+        // already done so. FirmUser::factory()->forFirm($firm)->...->create()
+        // above actually leaves DB-session tenant context set to
+        // $firm->id (the established context-hold factory pattern) —
+        // this was previously masked by runWithFirmContext()'s old
+        // unconditional clear; now that it correctly restores an
+        // ambient context instead, this test's own stated intent needs
+        // an explicit clean baseline to genuinely hold.
+        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService())->clearFirmContext();
+        $this->assertNoDatabaseTenantContext();
+
         $result = $service->evaluate($firm, $newPlan);
         $this->assertNoDatabaseTenantContext('evaluate() must clear its own context wrap(s) before returning.');
 

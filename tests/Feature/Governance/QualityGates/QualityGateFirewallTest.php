@@ -176,6 +176,23 @@ class QualityGateFirewallTest extends TestCase
         $this->assertEmpty($violations, implode("\n", $violations));
     }
 
+    /**
+     * Section 39A-3L Stage B (Checkpoints 22-34) activated permanent
+     * FORCE ROW LEVEL SECURITY on all 52 originally-prepared tables —
+     * $enforcementActive below is therefore now genuinely TRUE, unlike
+     * when this test was first written. That does NOT make this
+     * control fully Implemented: firm_settings being forced was always
+     * a proxy for "is ANY enforcement active," not the actual gating
+     * condition — the real reason this control remains
+     * PartiallyImplemented is that 61 additional tenant-owned tables
+     * discovered by inventory sweeps still have zero RLS preparation
+     * at all (see the rls_prepared_not_enforced gap's own still-open
+     * component). This assertion is therefore unconditional now,
+     * rather than gated behind $enforcementActive — gating it there
+     * made this test silently perform zero assertions the instant
+     * enforcement activated, exactly the failure mode this rewrite
+     * closes.
+     */
     public function test_test_coverage_mapping_service_does_not_claim_rls_broken_scope_is_implemented_while_enforcement_is_inactive(): void
     {
         $row = DB::selectOne(
@@ -184,11 +201,18 @@ class QualityGateFirewallTest extends TestCase
         );
         $enforcementActive = (bool) $row->relforcerowsecurity;
 
+        $this->assertTrue(
+            $enforcementActive,
+            'firm_settings must have permanent FORCE ROW LEVEL SECURITY active — Section 39A-3L Stage B is complete.'
+        );
+
         $item = (new TestCoverageMappingService())->byKey('tenant_isolation_broken_scope_caught_by_rls');
 
-        if (! $enforcementActive) {
-            $this->assertNotSame(GovernanceMappingStatus::Implemented, $item->status);
-        }
+        $this->assertNotSame(
+            GovernanceMappingStatus::Implemented,
+            $item->status,
+            'This control remains PartiallyImplemented — not because enforcement is inactive (it now is), but because 61 uncovered tenant-owned tables still lack any RLS preparation at all.'
+        );
     }
 
     /**

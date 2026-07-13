@@ -50,7 +50,7 @@ class DeploymentModeCoverageMappingService
                 item_label: 'SaaS firm isolation with RLS as defense-in-depth',
                 owning_class: \App\Services\RowLevelSecurityCoverageMappingService::class,
                 status: GovernanceMappingStatus::PartiallyImplemented,
-                notes: 'BelongsToTenant enforces isolation at the application/query layer for every SaaS firm. Database-level RLS is only PREPARED (52 tables), never ENFORCED (no FORCE ROW LEVEL SECURITY, no SET LOCAL app.current_firm_id) — see the rls_prepared_not_enforced gap. Cannot be Implemented until enforcement is active.',
+                notes: 'BelongsToTenant enforces isolation at the application/query layer for every SaaS firm. Database-level RLS enforcement (FORCE ROW LEVEL SECURITY, SET LOCAL app.current_firm_id) is now genuinely ACTIVE for all 52 originally-prepared tables (Section 39A-3L Stage B, complete) — real defense-in-depth for those tables. Still PartiallyImplemented, not Implemented: 61 additional tenant-owned tables discovered by inventory sweeps remain entirely uncovered (no RLS preparation at all) — see the rls_prepared_not_enforced gap\'s own remaining, still-open component. Cannot be Implemented until every tenant-owned table carries enforced RLS, not just the 52 already covered.',
             ),
             new GovernanceMappingResult(
                 item_key: 'saas_plan_license_controls',

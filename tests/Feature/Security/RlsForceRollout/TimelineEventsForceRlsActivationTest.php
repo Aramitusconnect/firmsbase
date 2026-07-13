@@ -614,6 +614,14 @@ class TimelineEventsForceRlsActivationTest extends TestCase
         Client::factory()->forFirm($matter->firm)->create(['display_name' => 'Jane Conflict']);
         $actor = User::factory()->create();
 
+        // Matter::factory()/Client::factory() (bare, above) each leave
+        // DB-session tenant context set (the established context-hold
+        // factory pattern) — establish a genuinely clean baseline
+        // immediately before the call under test.
+        $this->tenantContext()->clearDatabaseTenantContext();
+        $this->tenantContext()->clearFirmContext();
+        $this->assertNoDatabaseTenantContext();
+
         $service = new ConflictCheckService($this->recorder());
         $summary = $service->run($matter, ['Jane Conflict'], [], $actor);
 
@@ -635,6 +643,14 @@ class TimelineEventsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $client = Client::factory()->forFirm($firm)->create();
         $createdBy = User::factory()->create();
+
+        // Firm::factory()/Client::factory() (bare, above) each leave
+        // DB-session tenant context set to $firm->id (the established
+        // context-hold factory pattern) — establish a genuinely clean
+        // baseline immediately before the call under test.
+        $this->tenantContext()->clearDatabaseTenantContext();
+        $this->tenantContext()->clearFirmContext();
+        $this->assertNoDatabaseTenantContext();
 
         $service = new InvoiceDraftingService(new TimeEntryApprovalService(new EmployeeRateService()), $this->recorder());
         $invoice = $service->createFlatFee($firm, $client, 'Flat fee for initial consultation', 50000, null, $createdBy);
@@ -662,6 +678,14 @@ class TimelineEventsForceRlsActivationTest extends TestCase
             'seconds' => 3600,
             'billing_rate_cents_snapshot' => 20000,
         ]);
+
+        // The bare factory calls above each leave DB-session tenant
+        // context set to $firm->id (the established context-hold
+        // factory pattern) — establish a genuinely clean baseline
+        // immediately before the call under test.
+        $this->tenantContext()->clearDatabaseTenantContext();
+        $this->tenantContext()->clearFirmContext();
+        $this->assertNoDatabaseTenantContext();
 
         $service = new InvoiceDraftingService(new TimeEntryApprovalService(new EmployeeRateService()), $this->recorder());
         $invoice = $service->draftFromTimeEntries($firm, $client, [$entry]);
@@ -747,6 +771,15 @@ class TimelineEventsForceRlsActivationTest extends TestCase
         $plan = $this->runWithFirmContext($firm, fn () => PaymentPlan::factory()->forClient($client)->active()->create());
         $installment = PaymentPlanInstallment::factory()->forPlan($plan)->status(PaymentPlanInstallmentStatus::Missed)->create();
 
+        // PaymentPlanInstallment::factory() (bare, above) leaves
+        // DB-session tenant context set to $plan->firm_id (the
+        // established context-hold factory pattern) — establish a
+        // genuinely clean baseline immediately before the call under
+        // test.
+        $this->tenantContext()->clearDatabaseTenantContext();
+        $this->tenantContext()->clearFirmContext();
+        $this->assertNoDatabaseTenantContext();
+
         $service = new PaymentPlanDunningService(new ConsentService(), $this->recorder());
         $result = $this->runWithFirmContext($firm, fn () => $service->checkAndLog($installment));
 
@@ -765,8 +798,35 @@ class TimelineEventsForceRlsActivationTest extends TestCase
         $plan = PaymentPlan::factory()->active()->create();
         $installment = PaymentPlanInstallment::factory()->forPlan($plan)->status(PaymentPlanInstallmentStatus::Due)->create();
 
+        // PaymentPlanInstallment deliberately has no own firm_id — its
+        // tenant isolation flows entirely through its parent PaymentPlan
+        // (payment_plan_installments itself carries no RLS at all).
+        // markMissed()'s own internal runWithFirmContext() call resolves
+        // its target firm via $installment->paymentPlan->firm, evaluated
+        // as that call's own argument BEFORE its wrap begins — a real
+        // structural bootstrap need (not a test artifact): reading the
+        // parent payment_plans row requires a firm context to already be
+        // active, since payment_plans itself carries FORCE ROW LEVEL
+        // SECURITY. Matches the same pattern already established for
+        // PaymentPlanDunningService::checkAndLog() above — the test
+        // provides that bootstrap context via its own outer wrap, keyed
+        // on $plan->firm (already known from this test's own setup), and
+        // the now-correct nested-wrap snapshot/restore semantics ensure
+        // the inner self-wrap composes safely without leaking or
+        // clearing this outer one prematurely. The bare factory calls
+        // above leave DB-session tenant context set to $plan->firm_id
+        // (the established context-hold factory pattern) — clear it
+        // before starting the outer wrap below (firms itself carries no
+        // RLS at all, so reading $plan->firm as that wrap's own argument
+        // needs no context either way), so the outer wrap's own snapshot
+        // is genuinely clean and its restore afterward proves that,
+        // rather than coincidentally restoring the same leftover firm.
+        $this->tenantContext()->clearDatabaseTenantContext();
+        $this->tenantContext()->clearFirmContext();
+        $this->assertNoDatabaseTenantContext();
+
         $service = new PaymentPlanInstallmentService($this->recorder());
-        $missed = $service->markMissed($installment);
+        $missed = $this->runWithFirmContext($plan->firm, fn () => $service->markMissed($installment));
 
         $this->assertSame(PaymentPlanInstallmentStatus::Missed, $missed->status);
         $this->assertNotNull($missed, 'markMissed()\'s trailing fresh() must return a populated model under FORCE.');
@@ -785,8 +845,32 @@ class TimelineEventsForceRlsActivationTest extends TestCase
         $installment = PaymentPlanInstallment::factory()->forPlan($plan)->status(PaymentPlanInstallmentStatus::Due)->create();
         $actor = User::factory()->create();
 
+        // PaymentPlanInstallment deliberately has no own firm_id — its
+        // tenant isolation flows entirely through its parent PaymentPlan
+        // (payment_plan_installments itself carries no RLS at all).
+        // markWaived()'s own internal runWithFirmContext() call resolves
+        // its target firm via $installment->paymentPlan->firm, evaluated
+        // as that call's own argument BEFORE its wrap begins — a real
+        // structural bootstrap need (not a test artifact): reading the
+        // parent payment_plans row requires a firm context to already be
+        // active, since payment_plans itself carries FORCE ROW LEVEL
+        // SECURITY. Matches the same pattern already established for
+        // PaymentPlanDunningService::checkAndLog() above and
+        // markMissed() below — the test provides that bootstrap context
+        // via its own outer wrap, keyed on $plan->firm (already known
+        // from this test's own setup). The bare factory calls above
+        // leave DB-session tenant context set to $plan->firm_id (the
+        // established context-hold factory pattern) — clear it before
+        // starting the outer wrap below (firms itself carries no RLS at
+        // all, so reading $plan->firm as that wrap's own argument needs
+        // no context either way), so the outer wrap's own snapshot is
+        // genuinely clean.
+        $this->tenantContext()->clearDatabaseTenantContext();
+        $this->tenantContext()->clearFirmContext();
+        $this->assertNoDatabaseTenantContext();
+
         $service = new PaymentPlanInstallmentService($this->recorder());
-        $waived = $service->markWaived($installment, $actor, 'Hardship waiver approved');
+        $waived = $this->runWithFirmContext($plan->firm, fn () => $service->markWaived($installment, $actor, 'Hardship waiver approved'));
 
         $this->assertSame(PaymentPlanInstallmentStatus::Waived, $waived->status);
         $this->assertNoDatabaseTenantContext('PaymentPlanInstallmentService::markWaived() must clear its own context wrap before returning.');
@@ -814,6 +898,15 @@ class TimelineEventsForceRlsActivationTest extends TestCase
             'webhook_subscription_id' => $subscription->id,
             'webhook_event_id' => $webhookEvent->id,
         ]);
+
+        // The preceding bare factory calls (FirmUser, WebhookEvent,
+        // WebhookDelivery) each leave DB-session tenant context set to
+        // $firm->id (the established context-hold factory pattern) —
+        // establish a genuinely clean baseline immediately before the
+        // call under test.
+        $this->tenantContext()->clearDatabaseTenantContext();
+        $this->tenantContext()->clearFirmContext();
+        $this->assertNoDatabaseTenantContext();
 
         $service = app(WebhookReplayService::class);
         $replay = $service->replay($firm, $originalDelivery, $owner);

@@ -542,6 +542,16 @@ class FirmActivationEventsForceRlsActivationTest extends TestCase
         FirmPracticeArea::factory()->create(['firm_id' => $firm->id, 'practice_area_id' => PracticeArea::factory()->create()->id, 'is_enabled' => true]);
         FirmUser::factory()->create(['firm_id' => $firm->id, 'user_id' => \App\Models\User::factory()->create()->id, 'status' => FirmUserStatus::Active]);
 
+        // The two bare factory calls above each leave DB-session tenant
+        // context set to $firm->id (the established context-hold
+        // factory pattern) — establish a genuinely clean baseline here
+        // so every subsequent runWithFirmContext()-wrapped call in this
+        // test correctly restores to "no context" rather than to that
+        // leftover value.
+        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService())->clearFirmContext();
+        $this->assertNoDatabaseTenantContext();
+
         $completed = $service->autoCompleteVerifiableItems($firm->fresh());
         $this->assertNotEmpty($completed);
 

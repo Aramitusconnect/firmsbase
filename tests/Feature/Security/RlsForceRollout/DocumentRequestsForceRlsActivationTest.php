@@ -696,6 +696,15 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
             'status' => DocumentRequestItemStatus::Requested,
         ]));
 
+        // Matter::factory()->create() (bare, above) leaves DB-session
+        // tenant context set to $matter->firm_id (the established
+        // context-hold factory pattern) — establish a genuinely clean
+        // baseline immediately before the call under test, so the
+        // post-call assertion proves the wrap itself clears context.
+        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService())->clearFirmContext();
+        $this->assertNoDatabaseTenantContext();
+
         $registry = new ReadinessScorecardRegistry();
         $results = $this->runWithFirmContext($matter->firm, fn () => $registry->evaluate($matter));
         $this->assertNoDatabaseTenantContext('the test\'s own runWithFirmContext() wrap must clear context before returning.');
@@ -741,6 +750,14 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
             'status' => DocumentRequestItemStatus::Approved,
         ]));
 
+        // Matter::factory()->create() (bare, above) leaves DB-session
+        // tenant context set to $matter->firm_id (the established
+        // context-hold factory pattern) — establish a genuinely clean
+        // baseline immediately before the call under test.
+        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService())->clearFirmContext();
+        $this->assertNoDatabaseTenantContext();
+
         $registry = new ReadinessScorecardRegistry();
         $results = $this->runWithFirmContext($matter->firm, fn () => $registry->evaluate($matter));
         $this->assertNoDatabaseTenantContext();
@@ -768,6 +785,14 @@ class DocumentRequestsForceRlsActivationTest extends TestCase
             $matter->firm,
             fn () => DocumentRequest::factory()->forClient($client)->create(['matter_id' => $matter->id]),
         );
+
+        // Matter::factory()->create() (bare, above) leaves DB-session
+        // tenant context set to $matter->firm_id (the established
+        // context-hold factory pattern) — establish a genuinely clean
+        // baseline immediately before the call under test.
+        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService())->clearFirmContext();
+        $this->assertNoDatabaseTenantContext();
 
         $this->assertTrue(
             $service->documentChecklistAvailable($matter),

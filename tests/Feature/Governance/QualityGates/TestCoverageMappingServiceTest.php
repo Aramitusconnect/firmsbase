@@ -76,21 +76,44 @@ class TestCoverageMappingServiceTest extends TestCase
         $this->assertNull($this->service->byKey('does_not_exist'));
     }
 
+    /**
+     * Section 39A-3L Stage B (Checkpoints 22-34) activated permanent
+     * FORCE ROW LEVEL SECURITY on all 52 originally-prepared tables —
+     * $enforcementActive below is therefore now genuinely TRUE, unlike
+     * when this test was first written (its name and the guard below
+     * are historical). That does NOT make this control fully
+     * Implemented: firm_settings being forced was always a proxy for
+     * "is ANY enforcement active," not the actual gating condition —
+     * the real reason this control remains PartiallyImplemented is
+     * that 61 additional tenant-owned tables discovered by inventory
+     * sweeps still have zero RLS preparation at all, so a broken
+     * scope against any of THOSE remains uncaught (see the
+     * rls_prepared_not_enforced gap's own still-open component). This
+     * assertion is therefore unconditional now, rather than gated
+     * behind $enforcementActive — gating it there made this test
+     * silently perform zero assertions the instant enforcement
+     * activated, exactly the failure mode this rewrite closes.
+     */
     public function test_rls_broken_scope_is_not_implemented_because_enforcement_is_inactive(): void
     {
-        // Corroborate directly against the database: FORCE ROW LEVEL
-        // SECURITY must be off, proving enforcement really is inactive.
         $row = DB::selectOne(
             'select relforcerowsecurity from pg_class where relname = ?',
             ['firm_settings']
         );
         $enforcementActive = (bool) $row->relforcerowsecurity;
 
+        $this->assertTrue(
+            $enforcementActive,
+            'firm_settings must have permanent FORCE ROW LEVEL SECURITY active — Section 39A-3L Stage B is complete.'
+        );
+
         $item = $this->service->byKey('tenant_isolation_broken_scope_caught_by_rls');
 
-        if (! $enforcementActive) {
-            $this->assertNotSame(GovernanceMappingStatus::Implemented, $item->status);
-        }
+        $this->assertNotSame(
+            GovernanceMappingStatus::Implemented,
+            $item->status,
+            'This control remains PartiallyImplemented — not because enforcement is inactive (it now is), but because 61 uncovered tenant-owned tables still lack any RLS preparation at all.'
+        );
     }
 
     public function test_role_permission_org_boundaries_is_not_implemented_while_org_admin_is_missing(): void
