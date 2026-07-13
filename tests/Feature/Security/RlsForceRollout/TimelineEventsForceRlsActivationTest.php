@@ -798,39 +798,28 @@ class TimelineEventsForceRlsActivationTest extends TestCase
         $plan = PaymentPlan::factory()->active()->create();
         $installment = PaymentPlanInstallment::factory()->forPlan($plan)->status(PaymentPlanInstallmentStatus::Due)->create();
 
-        // PaymentPlanInstallment deliberately has no own firm_id — its
-        // tenant isolation flows entirely through its parent PaymentPlan
-        // (payment_plan_installments itself carries no RLS at all).
-        // markMissed()'s own internal runWithFirmContext() call resolves
-        // its target firm via $installment->paymentPlan->firm, evaluated
-        // as that call's own argument BEFORE its wrap begins — a real
-        // structural bootstrap need (not a test artifact): reading the
-        // parent payment_plans row requires a firm context to already be
-        // active, since payment_plans itself carries FORCE ROW LEVEL
-        // SECURITY. Matches the same pattern already established for
-        // PaymentPlanDunningService::checkAndLog() above — the test
-        // provides that bootstrap context via its own outer wrap, keyed
-        // on $plan->firm (already known from this test's own setup), and
-        // the now-correct nested-wrap snapshot/restore semantics ensure
-        // the inner self-wrap composes safely without leaking or
-        // clearing this outer one prematurely. The bare factory calls
-        // above leave DB-session tenant context set to $plan->firm_id
-        // (the established context-hold factory pattern) — clear it
-        // before starting the outer wrap below (firms itself carries no
-        // RLS at all, so reading $plan->firm as that wrap's own argument
-        // needs no context either way), so the outer wrap's own snapshot
-        // is genuinely clean and its restore afterward proves that,
-        // rather than coincidentally restoring the same leftover firm.
+        // PaymentPlanInstallmentService::markMissed() now requires an
+        // explicit PaymentPlan tenant anchor (Section 39A-3L
+        // installment-lifecycle contract fix) — it no longer lazy-loads
+        // $installment->paymentPlan->firm before its own context wrap
+        // begins, so it no longer has any hidden precondition on the
+        // caller having already established (or a factory having
+        // accidentally left behind) ambient tenant context. The bare
+        // factory calls above leave DB-session tenant context set to
+        // $plan->firm_id (the established context-hold factory
+        // pattern) — clear it explicitly so this proof exercises a
+        // genuinely context-free baseline, not a coincidentally
+        // matching leftover one.
         $this->tenantContext()->clearDatabaseTenantContext();
         $this->tenantContext()->clearFirmContext();
         $this->assertNoDatabaseTenantContext();
 
         $service = new PaymentPlanInstallmentService($this->recorder());
-        $missed = $this->runWithFirmContext($plan->firm, fn () => $service->markMissed($installment));
+        $missed = $service->markMissed($plan, $installment);
 
         $this->assertSame(PaymentPlanInstallmentStatus::Missed, $missed->status);
         $this->assertNotNull($missed, 'markMissed()\'s trailing fresh() must return a populated model under FORCE.');
-        $this->assertNoDatabaseTenantContext('PaymentPlanInstallmentService::markMissed() must clear its own context wrap before returning.');
+        $this->assertNoDatabaseTenantContext('PaymentPlanInstallmentService::markMissed() must leave no tenant context behind when called from a context-free baseline.');
 
         $event = $this->runWithFirmContext(
             $plan->firm,
@@ -845,35 +834,23 @@ class TimelineEventsForceRlsActivationTest extends TestCase
         $installment = PaymentPlanInstallment::factory()->forPlan($plan)->status(PaymentPlanInstallmentStatus::Due)->create();
         $actor = User::factory()->create();
 
-        // PaymentPlanInstallment deliberately has no own firm_id — its
-        // tenant isolation flows entirely through its parent PaymentPlan
-        // (payment_plan_installments itself carries no RLS at all).
-        // markWaived()'s own internal runWithFirmContext() call resolves
-        // its target firm via $installment->paymentPlan->firm, evaluated
-        // as that call's own argument BEFORE its wrap begins — a real
-        // structural bootstrap need (not a test artifact): reading the
-        // parent payment_plans row requires a firm context to already be
-        // active, since payment_plans itself carries FORCE ROW LEVEL
-        // SECURITY. Matches the same pattern already established for
-        // PaymentPlanDunningService::checkAndLog() above and
-        // markMissed() below — the test provides that bootstrap context
-        // via its own outer wrap, keyed on $plan->firm (already known
-        // from this test's own setup). The bare factory calls above
-        // leave DB-session tenant context set to $plan->firm_id (the
-        // established context-hold factory pattern) — clear it before
-        // starting the outer wrap below (firms itself carries no RLS at
-        // all, so reading $plan->firm as that wrap's own argument needs
-        // no context either way), so the outer wrap's own snapshot is
-        // genuinely clean.
+        // PaymentPlanInstallmentService::markWaived() now requires an
+        // explicit PaymentPlan tenant anchor (Section 39A-3L
+        // installment-lifecycle contract fix) — see markMissed()'s own
+        // proof above for the full rationale. The bare factory calls
+        // above leave DB-session tenant context set to $plan->firm_id
+        // (the established context-hold factory pattern) — clear it
+        // explicitly so this proof exercises a genuinely context-free
+        // baseline.
         $this->tenantContext()->clearDatabaseTenantContext();
         $this->tenantContext()->clearFirmContext();
         $this->assertNoDatabaseTenantContext();
 
         $service = new PaymentPlanInstallmentService($this->recorder());
-        $waived = $this->runWithFirmContext($plan->firm, fn () => $service->markWaived($installment, $actor, 'Hardship waiver approved'));
+        $waived = $service->markWaived($plan, $installment, $actor, 'Hardship waiver approved');
 
         $this->assertSame(PaymentPlanInstallmentStatus::Waived, $waived->status);
-        $this->assertNoDatabaseTenantContext('PaymentPlanInstallmentService::markWaived() must clear its own context wrap before returning.');
+        $this->assertNoDatabaseTenantContext('PaymentPlanInstallmentService::markWaived() must leave no tenant context behind when called from a context-free baseline.');
 
         $event = $this->runWithFirmContext(
             $plan->firm,

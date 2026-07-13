@@ -24,11 +24,18 @@ use App\ValueObjects\GovernanceMappingResult;
  */
 class TestCoverageMappingService
 {
+    public function __construct(
+        private RowLevelSecurityCoverageMappingService $rlsCoverage = new RowLevelSecurityCoverageMappingService(),
+    ) {
+    }
+
     /**
      * @return array<int, GovernanceMappingResult>
      */
     public function all(): array
     {
+        $uncoveredCount = count($this->rlsCoverage->missingPreparedTables());
+
         return [
             new GovernanceMappingResult(
                 item_key: 'tenant_isolation_general',
@@ -42,7 +49,7 @@ class TestCoverageMappingService
                 item_label: 'A broken/bypassed application-layer query scope is still caught by database-level row-level security',
                 owning_class: \App\Services\RowLevelSecurityCoverageMappingService::class,
                 status: GovernanceMappingStatus::PartiallyImplemented,
-                notes: 'FORCE ROW LEVEL SECURITY and SET LOCAL app.current_firm_id middleware are now genuinely active for all 52 originally-prepared tables (Section 39A-3L Stage B, complete — see tests/Feature/Security/RlsForceRollout/*ForceRlsActivationTest.php) — a broken/bypassed application-layer scope against any of those 52 tables IS now actually caught at the database layer. Still PartiallyImplemented, not Implemented: 61 additional tenant-owned tables discovered by inventory sweeps have no RLS preparation at all, so a broken scope against any of those remains uncaught by anything at the database layer — see the rls_prepared_not_enforced gap\'s own remaining, still-open component.',
+                notes: "FORCE ROW LEVEL SECURITY and SET LOCAL app.current_firm_id middleware are now genuinely active for all originally-prepared tables (Section 39A-3L Stage B, complete — see tests/Feature/Security/RlsForceRollout/*ForceRlsActivationTest.php) — a broken/bypassed application-layer scope against any of those tables IS now actually caught at the database layer. Still PartiallyImplemented, not Implemented: {$uncoveredCount} additional tenant-owned tables discovered by inventory sweeps have no RLS preparation at all, so a broken scope against any of those remains uncaught by anything at the database layer — see the rls_prepared_not_enforced gap's own remaining, still-open component.",
             ),
             new GovernanceMappingResult(
                 item_key: 'role_permission_org_boundaries',
