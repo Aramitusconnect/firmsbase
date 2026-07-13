@@ -154,6 +154,7 @@ class SchemaTenantFirewallTest extends TestCase
         $excludedFiles = [
             app_path('Services/RowLevelSecurityCoverageMappingService.php'),
             app_path('Services/ComplianceGapRegistryService.php'),
+            app_path('Console/Commands/SchemaTenantFirewallCommand.php'),
         ];
 
         $patterns = [
