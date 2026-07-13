@@ -222,6 +222,14 @@ use Tests\TestCase;
  * forced" list from forty-five to forty-six tables and add this
  * batch's own migration-existence check — same additive-only pattern,
  * no existing assertion removed or weakened.
+ *
+ * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 29 (this
+ * repo's forty-seventh staged FORCE activation batch, covering
+ * incident_events, database/migrations/2026_08_25_930029_force_rls_on_
+ * incident_events_table.php) to extend the "exactly these tables are
+ * forced" list from forty-six to forty-seven tables and add this
+ * batch's own migration-existence check — same additive-only pattern,
+ * no existing assertion removed or weakened.
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -349,6 +357,13 @@ class RlsForceRolloutFirewallTest extends TestCase
             // tables — same additive-only pattern, no existing
             // assertion removed or weakened.
             'health_checks',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 29
+            // (this repo's forty-seventh staged FORCE activation
+            // batch, covering incident_events) to extend the "exactly
+            // these tables are forced" list from forty-six to
+            // forty-seven tables — same additive-only pattern, no
+            // existing assertion removed or weakened.
+            'incident_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -694,6 +709,13 @@ class RlsForceRolloutFirewallTest extends TestCase
         // Section 39A-3L, Checkpoint 28's own migration — same
         // file-existence reasoning as the checks above.
         $this->assertFileExists(base_path('database/migrations/2026_08_25_930028_force_rls_on_health_checks_table.php'));
+    }
+
+    public function test_the_incident_events_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3L, Checkpoint 29's own migration — same
+        // file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_25_930029_force_rls_on_incident_events_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

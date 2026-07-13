@@ -117,6 +117,11 @@ class RlsForceActivationFirewallTest extends TestCase
             // covering health_checks) — this test's own scope (39A-3A)
             // only asserts clients here.
             'health_checks',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 29
+            // (this repo's forty-seventh staged FORCE activation
+            // batch, covering incident_events) — this test's own
+            // scope (39A-3A) only asserts clients here.
+            'incident_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
