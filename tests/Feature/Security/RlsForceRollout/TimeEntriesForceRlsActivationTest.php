@@ -156,7 +156,8 @@ class TimeEntriesForceRlsActivationTest extends TestCase
         // legitimate addition rather than falsely reporting it as
         // unexpected — additive only, no existing assertion removed
         // or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties']);
+        // Narrowly updated by Section 39A-3L, Checkpoint 27 (backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests']);
         $actuallyForced = [];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -178,7 +179,7 @@ class TimeEntriesForceRlsActivationTest extends TestCase
         // or weakened.
 
         // Narrowly updated by Section 39A-3L, Checkpoint 26 (parties) for the same reason — additive only, no existing assertion removed or weakened.
-        $this->assertSame(44, count($actuallyForced), 'Exactly thirty-nine prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 21 — no more, no less.');
+        $this->assertSame(45, count($actuallyForced), 'Exactly thirty-nine prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 21 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -197,7 +198,8 @@ class TimeEntriesForceRlsActivationTest extends TestCase
         // Narrowly updated by Section 39A-3L, Checkpoint 24 (covering
         // notification_events) for the same reason as above —
         // additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties']);
+        // Narrowly updated by Section 39A-3L, Checkpoint 27 (backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests']);
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
                 continue;
