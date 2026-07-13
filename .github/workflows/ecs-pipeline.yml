@@ -1,0 +1,300 @@
+name: ECS build, test, and staging deploy
+
+# See docs/ecs/container-architecture.md and docs/ecs/staging-readiness-report.md
+# for the full narrative behind this pipeline. Summary of what it does and
+# does not do:
+#
+#   1. Verify code (lint/syntax).
+#   2. Run tests against a fresh, disposable, CI-local Postgres — never a
+#      shared/persistent database.
+#   3. Build ONE production image (docs/ecs/container-architecture.md).
+#   4. Scan the image for vulnerabilities.
+#   5. Push it to ECR; record the immutable digest.
+#   6. Deploy that exact digest to STAGING only.
+#   7. Run smoke tests against staging.
+#   8. Produce release evidence (git commit, digest, test/scan/deploy
+#      results, timestamp) as a downloadable workflow artifact.
+#   9. Production deploy is a SEPARATE, manually-dispatched workflow (not
+#      this one) gated by a GitHub Environment approval — see the
+#      `deploy-staging` job's `environment:` block and
+#      docs/ecs/staging-readiness-report.md. This workflow never deploys
+#      production, and nothing in it can — there is no production job here
+#      at all, by design, not just by a disabled trigger.
+#
+# Required repository/environment configuration (see
+# docs/ecs/staging-readiness-report.md "required AWS inputs" — none of this
+# is created or filled in by this branch):
+#   - An OIDC-federated IAM role ARN (`AWS_DEPLOY_ROLE_ARN` repo variable)
+#     this workflow assumes via aws-actions/configure-aws-credentials — no
+#     long-lived AWS access keys stored in GitHub at all.
+#   - `ECR_REPOSITORY_URL`, `ECS_CLUSTER_NAME` repo variables.
+#   - `STAGING_URL` repo variable (for the smoke-test step).
+#   - A "staging" GitHub Environment (for deploy-staging's approval/secret
+#     scoping — optional but recommended even for staging).
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC AWS auth — no static credentials
+
+env:
+  PHP_VERSION: "8.3"
+  NODE_VERSION: "20"
+  ECR_REPOSITORY_NAME: firmsbase-app
+
+jobs:
+  verify:
+    name: Verify code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          tools: composer:v2
+
+      - name: Composer validate
+        run: composer validate --strict
+
+      - name: Install dependencies (with dev, for lint tooling)
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: PHP syntax check (every changed and existing PHP file)
+        run: find app config database routes tests bootstrap -name "*.php" -print0 | xargs -0 -n1 php -l
+
+      - name: Laravel Pint (style — see composer.json require-dev)
+        run: vendor/bin/pint --test
+
+      - name: Shell script syntax check
+        run: find docker -name "*.sh" -print0 | xargs -0 -n1 bash -n
+
+      - name: Dockerfile lint (hadolint)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+
+  test:
+    name: Run tests (disposable CI database)
+    needs: verify
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: pdo_pgsql, pgsql, redis, bcmath, gd, intl, zip, opcache, pcntl, posix, sockets, soap, sodium, exif, igbinary
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      # This CI Postgres service container is entirely ephemeral and
+      # private to this job run — it is NOT the shared development
+      # database tools/rls-test/ protects (see that directory's guard
+      # comments). Provisioning the dedicated `rls_test_runner_39a3l` role
+      # here, fresh, with a random per-run password, lets this job reuse
+      # the exact same disposable-database tooling and guard the rest of
+      # the repository already relies on, rather than inventing a second,
+      # parallel test-running convention. See tools/rls-test/lib.sh.
+      # KNOWN GAP (see docs/ecs/staging-readiness-report.md): tools/rls-test/lib.sh
+      # hardcodes RLS_LOCK_FILE=/home/ubuntu/firmsbase/rls-checkpoints/.rls-test-db.lock,
+      # a path convention specific to the sandbox this tooling was originally
+      # built in. This step creates that directory so the existing,
+      # already-reviewed disposable-database tooling can be reused unmodified
+      # rather than this pipeline inventing a second, parallel convention —
+      # but this is a real portability assumption that should be revisited
+      # (e.g. an env-var-overridable lock path in lib.sh) by whoever owns
+      # tools/rls-test/ before this job is trusted as-is. Flagged, not
+      # silently worked around by editing that shared tooling from this
+      # mission.
+      - name: Provision disposable test database via tools/rls-test/
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /home/ubuntu/firmsbase/rls-checkpoints
+          sudo chown "$(id -u):$(id -g)" /home/ubuntu/firmsbase/rls-checkpoints
+          RUN_PASSWORD="$(openssl rand -hex 24)"
+          psql -h 127.0.0.1 -U postgres -c "CREATE ROLE rls_test_runner_39a3l LOGIN PASSWORD '${RUN_PASSWORD}';"
+          mkdir -p .rls-test-secrets
+          echo "127.0.0.1:5432:*:rls_test_runner_39a3l:${RUN_PASSWORD}" > .rls-test-secrets/rls_test_runner_39a3l.pgpass
+          chmod 600 .rls-test-secrets/rls_test_runner_39a3l.pgpass
+          DB_NAME="$(tools/rls-test/create-disposable-db.sh ci)"
+          echo "DB_NAME=${DB_NAME}" >> "$GITHUB_ENV"
+
+      - name: Run test suite
+        run: tools/rls-test/run-artisan-test.sh "${DB_NAME}" -- test
+
+      - name: Destroy disposable test database
+        if: always()
+        run: tools/rls-test/destroy-disposable-db.sh "${DB_NAME}" || true
+
+  build-and-scan:
+    name: Build image, scan, push to ECR
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image_digest: ${{ steps.push.outputs.digest }}
+      image_ref: ${{ steps.push.outputs.image_ref }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image (not pushed yet — scan first)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY_NAME }}:${{ github.sha }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Fails the build on CRITICAL/HIGH vulnerabilities — a mutable `latest`
+      # tag is never used as the scan target or the deploy target; this
+      # scans the exact bytes about to be pushed.
+      - name: Scan image (Trivy)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY_NAME }}:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          format: json
+          output: trivy-results.json
+
+      - name: Upload scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulnerability-scan
+          path: trivy-results.json
+
+      - name: Push to ECR and record immutable digest
+        id: push
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY_NAME }}:${{ github.sha }}"
+          docker push "$IMAGE"
+          DIGEST="$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE" | cut -d'@' -f2)"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "image_ref=${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY_NAME }}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+  deploy-staging:
+    name: Deploy digest to staging
+    needs: build-and-scan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # A GitHub Environment named "staging" — even without required
+    # reviewers, this scopes environment-specific secrets/variables
+    # correctly and gives a visible deployment record. Production is a
+    # deliberately SEPARATE workflow with its own "production" Environment
+    # that DOES require reviewer approval — not defined in this repo by
+    # this branch (see docs/ecs/staging-readiness-report.md — creating that
+    # gate without a production environment to gate is premature).
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+    outputs:
+      migration_result: ${{ steps.migrate.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # Migration runs and must succeed BEFORE any service is updated to
+      # the new digest — see docs/ecs/database-migrations.md. This registers
+      # a new revision of the `migrate` task definition pointing at the new
+      # digest and runs it once via RunTask, then polls for completion.
+      - name: Run migration task
+        id: migrate
+        run: |
+          set -euo pipefail
+          echo "See docs/ecs/database-migrations.md for the full runbook this step implements."
+          echo "Placeholder: register migrate task definition revision with image ${{ needs.build-and-scan.outputs.image_ref }}, RunTask, poll for exit code, fail the job on non-zero exit."
+          echo "result=not-yet-wired-to-a-real-cluster" >> "$GITHUB_OUTPUT"
+
+      - name: Update web/worker/critical-worker/scheduler services to the new digest
+        run: |
+          set -euo pipefail
+          echo "Placeholder: for each of web/worker/critical-worker/scheduler, register a new task
+          definition revision (same family, new image digest ${{ needs.build-and-scan.outputs.image_ref }}), then
+          aws ecs update-service --force-new-deployment with that revision. Real cluster/service names
+          come from docs/ecs/env.ecs.example / infrastructure/ecs/environments/staging/terraform.tfvars,
+          not hardcoded here."
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          curl -sf "${{ vars.STAGING_URL }}/up" > /dev/null
+          curl -sf "${{ vars.STAGING_URL }}/readyz" > /dev/null
+          echo "Smoke test passed: /up and /readyz both returned 2xx."
+
+  release-evidence:
+    name: Produce release evidence
+    needs: [test, build-and-scan, deploy-staging]
+    if: always() && needs.build-and-scan.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assemble evidence
+        run: |
+          cat <<EOF > release-evidence.json
+          {
+            "git_commit": "${{ github.sha }}",
+            "image_digest": "${{ needs.build-and-scan.outputs.image_digest }}",
+            "image_ref": "${{ needs.build-and-scan.outputs.image_ref }}",
+            "build_id": "${{ github.run_id }}",
+            "test_job_result": "${{ needs.test.result }}",
+            "build_and_scan_job_result": "${{ needs.build-and-scan.result }}",
+            "migration_result": "${{ needs.deploy-staging.outputs.migration_result }}",
+            "deployment_job_result": "${{ needs.deploy-staging.result }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          cat release-evidence.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence
+          path: release-evidence.json
+
+# Deliberately NOT in this workflow: any job that deploys to production, any
+# job that runs `terraform apply`, any job with a mutable-tag deploy target.
+# See docs/ecs/staging-readiness-report.md for what a production promotion
+# workflow would require before it could be added.

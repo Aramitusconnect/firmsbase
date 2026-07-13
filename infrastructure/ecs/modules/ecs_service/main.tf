@@ -1,0 +1,156 @@
+locals {
+  container_name = "app"
+
+  container_definition = {
+    name      = local.container_name
+    image     = var.image
+    essential = true
+    command   = var.command
+
+    portMappings = var.container_port == null ? [] : [
+      {
+        containerPort = var.container_port
+        protocol      = "tcp"
+      }
+    ]
+
+    environment = [
+      for k, v in var.environment : { name = k, value = v }
+    ]
+
+    secrets = [
+      for k, v in var.secrets : { name = k, valueFrom = v }
+    ]
+
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = var.log_group_name
+        "awslogs-region"        = var.aws_region
+        "awslogs-stream-prefix" = var.name
+      }
+    }
+
+    healthCheck = var.container_health_check_command == null ? null : {
+      command     = var.container_health_check_command
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 30
+    }
+
+    # See docs/ecs/observability.md — logs go to stdout/stderr only, no
+    # in-container log file, so no mountPoints/volumes are needed here.
+    readonlyRootFilesystem = false # storage/{framework,logs} and bootstrap/cache must remain writable — see docs/ecs/container-architecture.md. A split read-only-root + tmpfs-mounted writable dirs is a documented hardening follow-up, not the staging default.
+  }
+}
+
+resource "aws_ecs_task_definition" "this" {
+  family                   = var.family
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.cpu
+  memory                   = var.memory
+  execution_role_arn       = var.execution_role_arn
+  task_role_arn            = var.task_role_arn
+
+  container_definitions = jsonencode([
+    { for k, v in local.container_definition : k => v if v != null }
+  ])
+
+  tags = var.tags
+}
+
+resource "aws_ecs_service" "this" {
+  count = var.create_service ? 1 : 0
+
+  name            = var.name
+  cluster         = var.cluster_id
+  task_definition = aws_ecs_task_definition.this.arn
+  desired_count   = var.desired_count
+
+  # No `launch_type` set — capacity_provider_strategy below governs
+  # placement instead of a fixed launch_type (the two are mutually
+  # exclusive on this resource).
+  capacity_provider_strategy {
+    capacity_provider = var.capacity_provider
+    weight            = 100
+    base              = 0
+  }
+
+  network_configuration {
+    subnets          = var.subnet_ids
+    security_groups  = var.security_group_ids
+    assign_public_ip = false # tasks run in private subnets only — see infrastructure/ecs/modules/networking
+  }
+
+  dynamic "load_balancer" {
+    for_each = var.target_group_arn == null ? [] : [1]
+    content {
+      target_group_arn = var.target_group_arn
+      container_name   = local.container_name
+      container_port   = var.container_port
+    }
+  }
+
+  deployment_minimum_healthy_percent = var.deployment_minimum_healthy_percent
+  deployment_maximum_percent         = var.deployment_maximum_percent
+
+  deployment_circuit_breaker {
+    enable   = var.enable_deployment_circuit_breaker
+    rollback = var.enable_deployment_circuit_breaker
+  }
+
+  enable_execute_command = var.enable_execute_command
+
+  # Web tasks need time to pass the ALB health check before the deployment
+  # considers them steady; other roles have no load balancer to wait on.
+  health_check_grace_period_seconds = var.target_group_arn == null ? null : 60
+
+  tags = var.tags
+
+  lifecycle {
+    ignore_changes = [
+      task_definition, # deploys update this via the CI/CD pipeline (see docs/ecs/env.ecs.example and .github/workflows/ecs-pipeline.yml), not via `terraform apply` re-running with a stale local image reference
+    ]
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Autoscaling — target-tracking on CPU by default (see
+# docs/ecs/infrastructure-architecture.md for why this is the default basis
+# rather than the custom queue-depth metric, which is prepared in
+# docs/ecs/observability.md but requires the CloudWatch custom metric to
+# actually be emitted first). Only wired when enable_autoscaling=true — the
+# critical worker and scheduler explicitly leave this off (fixed capacity —
+# see docs/ecs/queue-and-redis-architecture.md and
+# docs/ecs/graceful-shutdown.md).
+# ---------------------------------------------------------------------------
+resource "aws_appautoscaling_target" "this" {
+  count = var.create_service && var.enable_autoscaling ? 1 : 0
+
+  service_namespace  = "ecs"
+  resource_id        = "service/${var.cluster_id}/${aws_ecs_service.this[0].name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  min_capacity       = var.autoscaling_min_capacity
+  max_capacity       = var.autoscaling_max_capacity
+}
+
+resource "aws_appautoscaling_policy" "cpu" {
+  count = var.create_service && var.enable_autoscaling ? 1 : 0
+
+  name               = "${var.name}-cpu-target-tracking"
+  policy_type        = "TargetTrackingScaling"
+  service_namespace  = aws_appautoscaling_target.this[0].service_namespace
+  resource_id        = aws_appautoscaling_target.this[0].resource_id
+  scalable_dimension = aws_appautoscaling_target.this[0].scalable_dimension
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = var.autoscaling_cpu_target_percent
+    scale_in_cooldown  = 120
+    scale_out_cooldown = 60
+  }
+}
