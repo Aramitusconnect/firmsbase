@@ -122,7 +122,9 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // moved from "untracked" into MISSING_PREPARED_TABLES.
         $this->assertCount(52, $this->service->preparedTables());
         $this->assertCount(61, $this->service->missingPreparedTables());
-        $this->assertCount(22, $this->service->exemptTables());
+        // 22 original exemptions + the Wave 1A (Section 39A-4B)
+        // additions (module_catalog, readiness_scorecard_components) = 24.
+        $this->assertCount(24, $this->service->exemptTables());
         $this->assertCount(113, $this->service->tenantOwnedTables());
         $forceMigrationFiles = glob(
             database_path('migrations/*_force_rls_on_*_table.php')
@@ -257,4 +259,150 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertContains('firm_users', $forcedTables);
     }
 
+    // -----------------------------------------------------------------
+    // Wave 1A (Section 39A-4B) canonical 208-table inventory additions.
+    // -----------------------------------------------------------------
+
+    public function test_exempt_tables_includes_the_two_wave_1a_additions(): void
+    {
+        $exempt = $this->service->exemptTables();
+
+        $this->assertContains('module_catalog', $exempt);
+        $this->assertContains('readiness_scorecard_components', $exempt);
+    }
+
+    public function test_full_table_inventory_contains_every_table_exactly_once(): void
+    {
+        $inventory = $this->service->fullTableInventory();
+
+        $migrationCreatedTables = [];
+
+        foreach (glob(database_path('migrations/*.php')) ?: [] as $path) {
+            $source = file_get_contents($path);
+
+            if ($source === false) {
+                continue;
+            }
+
+            if (preg_match_all("/Schema::create\('([a-z0-9_]+)'/", $source, $matches)) {
+                foreach ($matches[1] as $table) {
+                    $migrationCreatedTables[] = $table;
+                }
+            }
+        }
+
+        $migrationCreatedTables = array_values(array_unique($migrationCreatedTables));
+        sort($migrationCreatedTables);
+
+        $inventoryTables = array_keys($inventory);
+        sort($inventoryTables);
+
+        $this->assertSame(
+            $migrationCreatedTables,
+            $inventoryTables,
+            'Every table created by a Schema::create() migration must appear in fullTableInventory() exactly once, and vice versa.'
+        );
+
+        // No duplicates snuck in via array key overwriting.
+        $this->assertCount(count($migrationCreatedTables), $inventoryTables);
+    }
+
+    public function test_full_table_inventory_classification_counts_reconcile_to_208(): void
+    {
+        $summary = $this->service->classificationSummary();
+
+        $this->assertSame(113, $summary[\App\Enums\TenantOwnershipClassification::DirectTenant->value]);
+        $this->assertSame(24, $summary[\App\Enums\TenantOwnershipClassification::InheritedTenant->value]);
+        $this->assertSame(3, $summary[\App\Enums\TenantOwnershipClassification::Pivot->value]);
+        $this->assertSame(10, $summary[\App\Enums\TenantOwnershipClassification::Hybrid->value]);
+        $this->assertSame(44, $summary[\App\Enums\TenantOwnershipClassification::Global->value]);
+        $this->assertSame(4, $summary[\App\Enums\TenantOwnershipClassification::Audit->value]);
+        $this->assertSame(8, $summary[\App\Enums\TenantOwnershipClassification::System->value]);
+        $this->assertSame(1, $summary[\App\Enums\TenantOwnershipClassification::RootTenant->value]);
+        $this->assertSame(1, $summary[\App\Enums\TenantOwnershipClassification::Uncertain->value]);
+
+        $this->assertSame(208, array_sum($summary));
+    }
+
+    public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void
+    {
+        $mustHavePath = [
+            \App\Enums\TenantOwnershipClassification::DirectTenant,
+            \App\Enums\TenantOwnershipClassification::InheritedTenant,
+            \App\Enums\TenantOwnershipClassification::Hybrid,
+            \App\Enums\TenantOwnershipClassification::Pivot,
+        ];
+
+        $violations = [];
+
+        foreach ($this->service->fullTableInventory() as $table => $item) {
+            if (in_array($item->classification, $mustHavePath, true) && ($item->ownershipPath === null || $item->ownershipPath === '')) {
+                $violations[] = $table;
+            }
+        }
+
+        $this->assertEmpty($violations, 'Tables missing a required ownership path: '.implode(', ', $violations));
+    }
+
+    public function test_firms_is_classified_root_tenant_with_ownership_path_self(): void
+    {
+        $this->assertSame(
+            \App\Enums\TenantOwnershipClassification::RootTenant,
+            $this->service->classificationOf('firms')
+        );
+        $this->assertSame('self', $this->service->ownershipPathOf('firms'));
+    }
+
+    public function test_offboarding_exports_is_classified_uncertain_with_no_invented_ownership_path(): void
+    {
+        $this->assertSame(
+            \App\Enums\TenantOwnershipClassification::Uncertain,
+            $this->service->classificationOf('offboarding_exports')
+        );
+        $this->assertNull($this->service->ownershipPathOf('offboarding_exports'));
+
+        // offboarding_exports must never be silently folded into
+        // EXEMPT_TABLES — its ownership is still under investigation.
+        $this->assertNotContains('offboarding_exports', $this->service->exemptTables());
+    }
+
+    public function test_every_exempt_table_has_non_empty_exempt_metadata(): void
+    {
+        $metadata = $this->service->exemptTableMetadata();
+
+        $this->assertCount(count($this->service->exemptTables()), $metadata);
+
+        foreach ($metadata as $item) {
+            $this->assertNotSame('', trim($item->reason), "{$item->table} must have a non-empty reason.");
+            $this->assertNotEmpty($item->expectedReaders, "{$item->table} must have at least one expected reader.");
+            $this->assertNotEmpty($item->authorizedWriters, "{$item->table} must have at least one authorized writer.");
+        }
+    }
+
+    public function test_new_exemptions_have_documented_reason_readers_and_writers(): void
+    {
+        foreach (['module_catalog', 'readiness_scorecard_components'] as $table) {
+            $meta = $this->service->exemptMetadataFor($table);
+
+            $this->assertNotNull($meta, "{$table} must have exempt metadata.");
+            $this->assertNotSame('', trim($meta->reason));
+            $this->assertNotEmpty($meta->expectedReaders);
+            $this->assertNotEmpty($meta->authorizedWriters);
+            $this->assertSame(
+                \App\Enums\TenantOwnershipClassification::Global,
+                $this->service->classificationOf($table)
+            );
+        }
+    }
+
+    public function test_prepared_and_missing_tables_are_classified_direct_tenant(): void
+    {
+        foreach ($this->service->preparedTables() as $table) {
+            $this->assertSame(\App\Enums\TenantOwnershipClassification::DirectTenant, $this->service->classificationOf($table));
+        }
+
+        foreach ($this->service->missingPreparedTables() as $table) {
+            $this->assertSame(\App\Enums\TenantOwnershipClassification::DirectTenant, $this->service->classificationOf($table));
+        }
+    }
 }
