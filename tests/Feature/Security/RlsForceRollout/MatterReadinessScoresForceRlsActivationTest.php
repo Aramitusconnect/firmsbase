@@ -160,7 +160,7 @@ class MatterReadinessScoresForceRlsActivationTest extends TestCase
         // or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 27 (backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 28 (health_checks) for the same reason — additive only, no existing assertion removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items']);
         $actuallyForced = [];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -186,7 +186,7 @@ class MatterReadinessScoresForceRlsActivationTest extends TestCase
         // same reason — additive only, no existing assertion removed
         // or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 26 (parties) for the same reason — additive only, no existing assertion removed or weakened.
-        $this->assertSame(49, count($actuallyForced), 'Exactly thirty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 14 — no more, no less. Narrowly updated again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two), and again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
+        $this->assertSame(50, count($actuallyForced), 'Exactly thirty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 14 — no more, no less. Narrowly updated again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two), and again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -212,7 +212,7 @@ class MatterReadinessScoresForceRlsActivationTest extends TestCase
         // additive only, no existing assertion removed or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 27 (backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 28 (health_checks) for the same reason — additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items']);
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
                 continue;

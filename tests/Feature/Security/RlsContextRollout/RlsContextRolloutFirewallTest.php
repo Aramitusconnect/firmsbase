@@ -135,6 +135,11 @@ class RlsContextRolloutFirewallTest extends TestCase
             // This test's own scope (39A-2) never touched FORCE
             // state.
             'notification_templates',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 32,
+            // Phase B6 (this repo's fiftieth staged FORCE activation
+            // batch, covering pilot_feedback_items). This test's own
+            // scope (39A-2) never touched FORCE state.
+            'pilot_feedback_items',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -361,7 +366,12 @@ class RlsContextRolloutFirewallTest extends TestCase
                 // a later, distinct staged-FORCE-activation branch)
                 // legitimately added a notification_templates-only
                 // FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930031_force_rls_on_notification_templates_table.php',
+                && $path !== 'database/migrations/2026_08_25_930031_force_rls_on_notification_templates_table.php'
+                // Section 39A-3L, Checkpoint 32, Phase B6 (this batch,
+                // a later, distinct staged-FORCE-activation branch)
+                // legitimately added a pilot_feedback_items-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930032_force_rls_on_pilot_feedback_items_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));
