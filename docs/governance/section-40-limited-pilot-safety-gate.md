@@ -8,6 +8,8 @@
 
 ---
 
+> **Correction (2026-07-13):** The "44 prepared-but-unforced" and "43 uncovered tenant-owned tables" figures below are a 2026-07-10 snapshot and are now stale. As of the Section 39A-3L FORCE RLS rollout (merged into `main`), all 52 RLS-prepared tables are forced — **0 prepared-but-unforced tables remain**. Separately, a later Wave 0/1 inventory-sweep correction found more true tenant-owned tables than the original 39A-4 scope had identified — the accurate current count is **61 uncovered tenant-owned tables** (this is a scoping correction, not a regression: no table went from covered to uncovered). See `docs/governance/rls-gap-registry.md` for the current authoritative gap accounting, and `RowLevelSecurityCoverageMappingService::preparedTables()` / `missingPreparedTables()` for the live, code-derived counts. The narrative below is preserved as the historical record of this gate's original review and is not otherwise rewritten.
+
 ## What this gate is
 
 **This permits internal pilot/login/panel/domain smoke testing only.**
@@ -16,9 +18,9 @@ This is a **limited internal pilot readiness gate** — it answers one narrow qu
 
 **This does not permit public production launch.** The gate service itself hardcodes `public_production_launch_recommended => false` unconditionally — it is not derived from a condition that could someday flip true by accident. A separate, later gate is required before any public production launch.
 
-**39A-4 remains outstanding.** 43 tenant-owned tables (email, forms, e-signature, accounting/expenses, trust accounting, webhooks, AI governance) have no RLS preparation at all.
+**39A-4 remains outstanding.** 43 tenant-owned tables (email, forms, e-signature, accounting/expenses, trust accounting, webhooks, AI governance) have no RLS preparation at all. *(Corrected 2026-07-13: now 61 — see correction note above.)*
 
-**Remaining prepared-but-unforced FORCE RLS work remains outstanding.** 44 of the 52 RLS-prepared tables are not yet forced.
+**Remaining prepared-but-unforced FORCE RLS work remains outstanding.** 44 of the 52 RLS-prepared tables are not yet forced. *(Corrected 2026-07-13: 0 of 52 remain unforced — Section 39A-3L completed forcing all prepared tables. See correction note above.)*
 
 ## What Section 40 allows
 
@@ -58,8 +60,8 @@ All 8 pilot-critical tables remain forced (directly re-confirmed via `pg_class.r
 
 ## Remaining RLS limitations
 
-- **44 prepared-but-unforced tables** — `Section40LimitedPilotSafetyGateService::remainingPreparedUnforcedTables()`, sourced from the same `RowLevelSecurityCoverageMappingService::preparedTables()` the existing RLS firewall tests use.
-- **43 fully uncovered tenant-owned tables** requiring Section 39A-4 classification — `Section40LimitedPilotSafetyGateService::uncoveredTenantTables()`, sourced from `RowLevelSecurityCoverageMappingService::missingPreparedTables()`.
+- **44 prepared-but-unforced tables** — `Section40LimitedPilotSafetyGateService::remainingPreparedUnforcedTables()`, sourced from the same `RowLevelSecurityCoverageMappingService::preparedTables()` the existing RLS firewall tests use. *(Corrected 2026-07-13: 0 remain — see correction note above.)*
+- **43 fully uncovered tenant-owned tables** requiring Section 39A-4 classification — `Section40LimitedPilotSafetyGateService::uncoveredTenantTables()`, sourced from `RowLevelSecurityCoverageMappingService::missingPreparedTables()`. *(Corrected 2026-07-13: 61 — see correction note above.)*
 - The documented transitive firm-ownership mismatch residual risk (Matter/Invoice/Payment foreign keys not cross-validated by RLS) carried forward from the Section 39A checkpoint remains unresolved and out of scope here.
 
 ## Security foundation readiness (all confirmed present and wired)
