@@ -48,6 +48,18 @@ class PilotFeedbackService
         PilotFeedbackPriority $priority = PilotFeedbackPriority::Medium,
         ?User $createdBy = null,
     ): PilotFeedbackItem {
+        if ($firm !== null && $client !== null && $client->firm_id !== $firm->id) {
+            throw new \RuntimeException(
+                'Client does not belong to the same firm as the pilot feedback item.'
+            );
+        }
+
+        if ($firm !== null && $matter !== null && $matter->firm_id !== $firm->id) {
+            throw new \RuntimeException(
+                'Matter does not belong to the same firm as the pilot feedback item.'
+            );
+        }
+
         $create = fn () => PilotFeedbackItem::create([
             'firm_id' => $firm?->id,
             'client_id' => $client?->id,

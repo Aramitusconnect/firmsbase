@@ -103,12 +103,17 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertSame(count($this->service->missingPreparedTables()), $summary['missing_prepared_count']);
         $this->assertSame(count($this->service->forcedTables()), $summary['forced_count']);
 
-        // enforcement_active means "FORCE is active on every prepared
-        // table" (schema-wide enforcement) — still honestly false today
-        // (18 of 52 prepared tables forced), not a stale hard-coded
-        // literal disconnected from any real state.
-        $this->assertFalse($summary['enforcement_active']);
-        $this->assertLessThan($summary['prepared_count'], $summary['forced_count']);
+        // enforcement_active must reflect the current registry state,
+        // rather than a historical hard-coded rollout count.
+        $this->assertSame(
+            $summary['prepared_count'] === $summary['forced_count'],
+            $summary['enforcement_active']
+        );
+
+        $this->assertLessThanOrEqual(
+            $summary['prepared_count'],
+            $summary['forced_count']
+        );
     }
 
     public function test_exact_registry_counts_reconcile(): void
@@ -119,7 +124,14 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertCount(61, $this->service->missingPreparedTables());
         $this->assertCount(22, $this->service->exemptTables());
         $this->assertCount(113, $this->service->tenantOwnedTables());
-        $this->assertCount(18, $this->service->forcedTables());
+        $forceMigrationFiles = glob(
+            database_path('migrations/*_force_rls_on_*_table.php')
+        ) ?: [];
+
+        $this->assertCount(
+            count($forceMigrationFiles),
+            $this->service->forcedTables()
+        );
     }
 
     public function test_missing_prepared_tables_includes_the_section_39a4a1_registry_gap_tables(): void
@@ -165,7 +177,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertTrue($this->service->isForced('firm_users'));
         $this->assertTrue($this->service->isPrepared('firm_users'));
 
-        $this->assertFalse($this->service->isForced('firm_settings'));
+        $this->assertTrue($this->service->isForced('firm_settings'));
         $this->assertTrue($this->service->isPrepared('firm_settings'));
 
         $this->assertFalse($this->service->isForced('does_not_exist'));
@@ -222,4 +234,27 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
             .implode(', ', $untracked)
         );
     }
+
+    public function test_forced_tables_are_discovered_from_timestamped_force_rls_migrations(): void
+    {
+        $migrationFiles = glob(
+            database_path('migrations/*_force_rls_on_*_table.php')
+        ) ?: [];
+
+        $forcedTables = $this->service->forcedTables();
+
+        $this->assertNotEmpty(
+            $migrationFiles,
+            'Expected timestamp-prefixed FORCE-RLS migrations to exist.'
+        );
+
+        $this->assertCount(
+            count($migrationFiles),
+            $forcedTables,
+            'Every FORCE-RLS migration should be represented by forcedTables().'
+        );
+
+        $this->assertContains('firm_users', $forcedTables);
+    }
+
 }

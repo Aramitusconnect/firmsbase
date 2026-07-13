@@ -700,6 +700,13 @@ class SecurityEventsForceRlsActivationTest extends TestCase
         ]);
         $session = \App\Models\SupportAccessSession::query()->find($sessionId);
 
+        // Factories and setup services may intentionally leave an ambient
+        // tenant context. Establish a context-free baseline so this test
+        // measures only what logSessionAudit() establishes and restores.
+        $this->tenantContext()->clearDatabaseTenantContext();
+        $this->tenantContext()->clearFirmContext();
+        $this->assertNoDatabaseTenantContext();
+
         app(SupportAccessPolicyService::class)->logSessionAudit($session, 'support_access_session_started');
 
         $event = $this->runWithFirmContext(
@@ -730,6 +737,12 @@ class SecurityEventsForceRlsActivationTest extends TestCase
             'webhook_subscription_id' => $subscription->id,
             'webhook_event_id' => $webhookEvent->id,
         ]);
+
+        // Establish a context-free baseline. WebhookReplayService must
+        // establish and remove every context needed for its own work.
+        $this->tenantContext()->clearDatabaseTenantContext();
+        $this->tenantContext()->clearFirmContext();
+        $this->assertNoDatabaseTenantContext();
 
         $replay = app(WebhookReplayService::class)->replay($firm, $originalDelivery, $owner);
 
