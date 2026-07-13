@@ -47,6 +47,31 @@ class TimelineEvent extends Model
         ];
     }
 
+    /**
+     * Section 39A-3L Phase B6 fast-follow — append-only enforcement
+     * guard, mirroring TrustLedgerEntry::booted()/SecurityEvent::booted()
+     * exactly. timeline_events_tenant_isolation is a single FOR ALL
+     * policy sharing one USING/WITH CHECK expression, so a stray
+     * UPDATE/DELETE from the row's own tenant context would actually
+     * SUCCEED at the RLS layer rather than no-op — this app-layer guard
+     * is the real enforcement against a mistaken mutation of an existing
+     * row.
+     */
+    protected static function booted(): void
+    {
+        static::updating(function () {
+            throw new \LogicException(
+                'timeline_events is append-only: an existing row can never be updated.'
+            );
+        });
+
+        static::deleting(function () {
+            throw new \LogicException(
+                'timeline_events is append-only: an existing row can never be deleted.'
+            );
+        });
+    }
+
     public function firm(): BelongsTo
     {
         return $this->belongsTo(Firm::class);
