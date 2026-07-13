@@ -27,8 +27,13 @@ class AdminControlUiBoundaryTest extends TestCase
     {
         $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
 
+        // ReadinessController.php (ECS readiness foundation) is a reviewed,
+        // narrow exception: a pure infra health-check endpoint with no
+        // model access, no admin UI, and no Filament/Livewire involvement
+        // — orthogonal to this test's actual concern (no admin resource
+        // was generated for Section 34).
         $controllerFiles = glob(base_path('app/Http/Controllers/*.php')) ?: [];
-        $this->assertSame(['Controller.php'], array_map('basename', $controllerFiles), 'No real controller should exist beyond the empty Laravel scaffold.');
+        $this->assertSame(['Controller.php', 'ReadinessController.php'], array_map('basename', $controllerFiles), 'No real controller should exist beyond the empty Laravel scaffold and the reviewed ECS readiness probe.');
     }
 
     public function test_this_section_remains_catalog_mapping_only(): void
