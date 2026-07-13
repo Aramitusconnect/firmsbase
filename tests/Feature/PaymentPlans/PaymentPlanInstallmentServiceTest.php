@@ -56,10 +56,18 @@ class PaymentPlanInstallmentServiceTest extends TestCase
         $waived = $this->service->markWaived($installment, $actor, 'Hardship waiver approved');
 
         $this->assertSame(PaymentPlanInstallmentStatus::Waived, $waived->status);
-        $this->assertDatabaseHas('payment_plan_events', [
-            'payment_plan_id' => $plan->id,
-            'event_type' => 'installment_waived',
-            'actor_user_id' => $actor->id,
-        ]);
+
+        // payment_plan_events has permanent FORCE ROW LEVEL SECURITY
+        // (Section 39A-3L Checkpoint 23) — markWaived() now correctly
+        // clears its own context on return (Section 39A-3L Checkpoint
+        // 33/timeline_events prerequisite), so this read-time assertion
+        // needs its own context wrap to see the row it just wrote.
+        $this->runWithFirmContext($plan->firm, function () use ($plan, $actor) {
+            $this->assertDatabaseHas('payment_plan_events', [
+                'payment_plan_id' => $plan->id,
+                'event_type' => 'installment_waived',
+                'actor_user_id' => $actor->id,
+            ]);
+        });
     }
 }

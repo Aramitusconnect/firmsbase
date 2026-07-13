@@ -41,17 +41,19 @@ class PaymentPlanInstallmentService
             throw new \RuntimeException('This installment cannot be marked missed from its current status.');
         }
 
-        $installment->update(['status' => PaymentPlanInstallmentStatus::Missed]);
+        return (new TenantContextService())->runWithFirmContext($installment->paymentPlan->firm, function () use ($installment) {
+            $installment->update(['status' => PaymentPlanInstallmentStatus::Missed]);
 
-        $installment->paymentPlan->events()->create([
-            'firm_id' => $installment->paymentPlan->firm_id,
-            'event_type' => 'installment_missed',
-            'metadata_json' => ['payment_plan_installment_id' => $installment->id, 'sequence' => $installment->sequence],
-        ]);
+            $installment->paymentPlan->events()->create([
+                'firm_id' => $installment->paymentPlan->firm_id,
+                'event_type' => 'installment_missed',
+                'metadata_json' => ['payment_plan_installment_id' => $installment->id, 'sequence' => $installment->sequence],
+            ]);
 
-        $this->timeline->record($installment->paymentPlan->firm, 'payment_plan_installment_missed', $installment->paymentPlan);
+            $this->timeline->record($installment->paymentPlan->firm, 'payment_plan_installment_missed', $installment->paymentPlan);
 
-        return $installment->fresh();
+            return $installment->fresh();
+        });
     }
 
     public function markWaived(PaymentPlanInstallment $installment, User $actor, ?string $reason = null): PaymentPlanInstallment
@@ -60,17 +62,19 @@ class PaymentPlanInstallmentService
             throw new \RuntimeException('This installment cannot be waived from its current status.');
         }
 
-        $installment->update(['status' => PaymentPlanInstallmentStatus::Waived]);
+        return (new TenantContextService())->runWithFirmContext($installment->paymentPlan->firm, function () use ($installment, $actor, $reason) {
+            $installment->update(['status' => PaymentPlanInstallmentStatus::Waived]);
 
-        $installment->paymentPlan->events()->create([
-            'firm_id' => $installment->paymentPlan->firm_id,
-            'event_type' => 'installment_waived',
-            'metadata_json' => ['payment_plan_installment_id' => $installment->id, 'reason' => $reason],
-            'actor_user_id' => $actor->id,
-        ]);
+            $installment->paymentPlan->events()->create([
+                'firm_id' => $installment->paymentPlan->firm_id,
+                'event_type' => 'installment_waived',
+                'metadata_json' => ['payment_plan_installment_id' => $installment->id, 'reason' => $reason],
+                'actor_user_id' => $actor->id,
+            ]);
 
-        $this->timeline->record($installment->paymentPlan->firm, 'payment_plan_installment_waived', $installment->paymentPlan, $actor);
+            $this->timeline->record($installment->paymentPlan->firm, 'payment_plan_installment_waived', $installment->paymentPlan, $actor);
 
-        return $installment->fresh();
+            return $installment->fresh();
+        });
     }
 }

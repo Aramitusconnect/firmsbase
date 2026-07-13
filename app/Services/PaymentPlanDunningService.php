@@ -84,21 +84,23 @@ class PaymentPlanDunningService
     ): DunningEligibility {
         $plan = $installment->paymentPlan;
 
-        $installment->update([
-            'dunning_state' => $eligible ? 'reminder_queued' : 'reminder_skipped',
-        ]);
+        (new TenantContextService())->runWithFirmContext($plan->firm, function () use ($installment, $plan, $eligible, $reason, $channel) {
+            $installment->update([
+                'dunning_state' => $eligible ? 'reminder_queued' : 'reminder_skipped',
+            ]);
 
-        $plan->events()->create([
-            'firm_id' => $plan->firm_id,
-            'event_type' => $eligible ? 'dunning_reminder_queued' : 'dunning_reminder_skipped',
-            'metadata_json' => [
-                'payment_plan_installment_id' => $installment->id,
-                'channel' => $channel->value,
-                'reason' => $reason,
-            ],
-        ]);
+            $plan->events()->create([
+                'firm_id' => $plan->firm_id,
+                'event_type' => $eligible ? 'dunning_reminder_queued' : 'dunning_reminder_skipped',
+                'metadata_json' => [
+                    'payment_plan_installment_id' => $installment->id,
+                    'channel' => $channel->value,
+                    'reason' => $reason,
+                ],
+            ]);
 
-        $this->timeline->record($plan->firm, $eligible ? 'dunning_reminder_queued' : 'dunning_reminder_skipped', $installment);
+            $this->timeline->record($plan->firm, $eligible ? 'dunning_reminder_queued' : 'dunning_reminder_skipped', $installment);
+        });
 
         return new DunningEligibility(
             eligible: $eligible,

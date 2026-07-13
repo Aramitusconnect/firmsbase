@@ -66,10 +66,10 @@ class WebhookReplayService
             'replayed_at' => now(),
         ]);
 
-        $this->timeline->record($firm, 'webhook_delivery_replayed', $newDelivery, $actor->user, [
+        (new TenantContextService())->runWithFirmContext($firm, fn () => $this->timeline->record($firm, 'webhook_delivery_replayed', $newDelivery, $actor->user, [
             'original_webhook_delivery_id' => $originalDelivery->id,
             'new_webhook_delivery_id' => $newDelivery->id,
-        ]);
+        ]));
 
         $this->auditSecurityEvent($firm, $originalDelivery, $newDelivery, $actor);
 

@@ -120,10 +120,10 @@ class ConflictCheckService
                 return $run->fresh('results');
             });
 
-            $this->timeline->record($firm, 'conflict_check_completed', $matter, $actor, [
+            $tenantContext->runWithFirmContext($firm, fn () => $this->timeline->record($firm, 'conflict_check_completed', $matter, $actor, [
                 'conflict_check_run_id' => $run->id,
                 'result_count' => $resultCount,
-            ]);
+            ]));
 
             return $this->summarize($run);
         });
