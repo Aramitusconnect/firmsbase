@@ -2,71 +2,69 @@
 
 namespace Tests\Feature\Security\RlsForceRollout;
 
-use App\Enums\IncidentSeverity;
-use App\Enums\IncidentStatus;
+use App\Enums\MaintenanceWindowStatus;
 use App\Models\Firm;
-use App\Models\IncidentEvent;
+use App\Models\MaintenanceWindow;
 use App\Services\ComplianceGapRegistryService;
-use App\Services\IncidentService;
+use App\Services\MaintenanceWindowService;
 use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
- * IncidentEventsForceRlsActivationTest — Section 39A-3L, Checkpoint 29
- * (Phase B6). Proves the forty-seventh staged FORCE ROW LEVEL SECURITY
- * activation batch (database/migrations/2026_08_25_930029_force_rls_
- * on_incident_events_table.php) is permanently active for
- * incident_events and behaves correctly — including this checkpoint's
- * own novel security contribution (see below): every previously-forced
- * table remains forced simultaneously; missing-context read/insert
- * denial; a firm-specific row remains strictly single-firm-visible; a
- * platform-wide (firm_id = NULL) row is visible under EVERY
+ * MaintenanceWindowsForceRlsActivationTest — Section 39A-3L, Checkpoint
+ * 30 (Phase B6). Proves the forty-eighth staged FORCE ROW LEVEL
+ * SECURITY activation batch (database/migrations/2026_08_25_930030_
+ * force_rls_on_maintenance_windows_table.php) is permanently active
+ * for maintenance_windows and behaves correctly — including this
+ * checkpoint's own novel contribution (see below): every previously-
+ * forced table remains forced simultaneously; missing-context read/
+ * insert denial; a firm-specific row remains strictly single-firm-
+ * visible; a platform-wide (firm_id = NULL) row is visible under EVERY
  * firm-scoped session's context; the asymmetric WITH CHECK closes both
  * the INSERT-side forgery gap and the DELETE-side gap, mirroring
- * backup_restore_tests'/health_checks' own two-policy design exactly.
+ * backup_restore_tests'/health_checks'/incident_events' own two-policy
+ * design exactly.
  *
- * The checkpoint's actual novel security contribution (distinguishing
- * it from both prior tables): IncidentService's six append-style
- * methods (updateSeverity, updateStatus, recordRootCause,
- * flagCustomerImpact, flagNotificationNeeded, resolve) must first read
- * an incident's CURRENT ownership via an unscoped currentState() call
- * before knowing what context to write under — a chicken-and-egg
- * problem neither backup_restore_tests nor health_checks faced. Solved
- * by a required `?Firm $firm` parameter on all six methods (mirroring
- * open()'s own convention), each wrapping its own read+write in ONE
- * context. This produces two DISTINCT asymmetric failure modes for a
- * mismatched $firm — proven SEPARATELY below, not conflated into one
- * test, per the design dossier's own explicit requirement: (a) wrong
- * firm against a firm-specific incident → ModelNotFoundException from
- * currentState()'s firstOrFail(); (b) non-null firm against an
- * actually-platform-wide incident → currentState() succeeds (the read
- * policy's firm_id IS NULL branch is unconditional) but appendEvent()'s
- * write is rejected directly by Postgres's row-level security policy.
- * Also proven directly: appendEvent()'s forwarded
- * firm_id = $current->firm_id never diverges from the row actually
- * read under the active context — a firm-specific incident's timeline
- * never picks up a platform-wide or sibling-firm row.
+ * The checkpoint's actual novel contribution (distinguishing it from
+ * all three prior tables, and genuinely NEW in this arc — neither
+ * health_checks' mixed-ownership-batch problem nor incident_events'
+ * chicken-and-egg ownership-discovery problem): this is the FIRST time
+ * ANY test exercises a non-null-firm_id maintenance window at all —
+ * every pre-existing MaintenanceWindowServiceTest case used firm_id =
+ * null exclusively. start(), complete(), cancel(), and
+ * markCustomerNotificationSent() all follow the shape
+ * `$window->update([...]); return $window->fresh();` — Model::fresh()
+ * issues a NEW SELECT by primary key, which is only visible under FORCE
+ * RLS if the correct context is STILL active at that point. This test
+ * file directly proves the application-code prerequisite's wrap-must-
+ * extend-through-fresh() fix actually works (not just that it was
+ * written) via a full schedule -> start -> complete lifecycle exercised
+ * against a firm-scoped window, plus cancel() and
+ * markCustomerNotificationSent() exercised the same way, plus
+ * reschedule() proven to carry the original window's exact firm_id
+ * forward onto the new row it creates.
  *
  * Full design rationale and the exact approved SQL:
- * rls-checkpoints/39a3l/B6-incident_events-design-dossier.md (APPROVED
- * by both rls-policy-designer and tenant-context-auditor).
+ * rls-checkpoints/39a3l/B6-maintenance_windows-design-dossier.md
+ * (APPROVED by both rls-policy-designer and tenant-context-auditor).
  *
- * Like backup_restore_tests/health_checks, incident_events required
- * real application-code prerequisites ahead of this FORCE migration —
- * IncidentService's six methods gaining a required ?Firm $firm
- * parameter, and IncidentEventFactory's context-hold create() override
- * with an explicit null-firm_id branch — all committed independently
- * ahead of this migration, per the dossier's own note that the
- * preparation and the FORCE activation are split into two commits
- * here, matching the contacts/parties (Checkpoints 25/26) and
- * backup_restore_tests/health_checks (Checkpoints 27/28) precedent.
+ * Like backup_restore_tests/health_checks/incident_events,
+ * maintenance_windows required real application-code prerequisites
+ * ahead of this FORCE migration — MaintenanceWindowService's four
+ * affected methods gaining a context wrap that extends through their
+ * trailing ->fresh() re-read, and MaintenanceWindowFactory's
+ * context-hold create() override with an explicit null-firm_id branch
+ * — all committed independently ahead of this migration, per the
+ * dossier's own note that the preparation and the FORCE activation are
+ * split into two commits here, matching the contacts/parties
+ * (Checkpoints 25/26) and backup_restore_tests/health_checks/
+ * incident_events (Checkpoints 27/28/29) precedent.
  */
-class IncidentEventsForceRlsActivationTest extends TestCase
+class MaintenanceWindowsForceRlsActivationTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -81,7 +79,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events',
         'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans',
         'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests',
-        'health_checks',
+        'health_checks', 'incident_events',
     ];
 
     private function tenantContext(): TenantContextService
@@ -89,23 +87,23 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         return new TenantContextService();
     }
 
-    private function incidentService(): IncidentService
+    private function maintenanceWindowService(): MaintenanceWindowService
     {
-        return new IncidentService();
+        return new MaintenanceWindowService();
     }
 
-    private function insertRow(?int $firmId, string $suffix, ?IncidentSeverity $severity = null, ?IncidentStatus $status = null, ?string $correlationId = null): int
+    private function insertRow(?int $firmId, string $suffix, ?MaintenanceWindowStatus $status = null): int
     {
-        return DB::table('incident_events')->insertGetId([
+        return DB::table('maintenance_windows')->insertGetId([
+            'uuid' => (string) Str::uuid7(),
             'firm_id' => $firmId,
-            'correlation_id' => $correlationId ?? (string) Str::uuid(),
-            'event_type' => 'opened',
-            'severity' => ($severity ?? IncidentSeverity::Medium)->value,
-            'status' => ($status ?? IncidentStatus::Investigating)->value,
-            'customer_impact' => false,
-            'notification_needed' => false,
-            'message' => 'RLS proof row '.$suffix,
+            'title' => 'RLS proof row '.$suffix,
+            'status' => ($status ?? MaintenanceWindowStatus::Scheduled)->value,
+            'scheduled_starts_at' => now()->addDay(),
+            'scheduled_ends_at' => now()->addDay()->addHours(2),
+            'affected_components' => json_encode(['database']),
             'created_at' => now(),
+            'updated_at' => now(),
         ]);
     }
 
@@ -126,35 +124,35 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         }
     }
 
-    public function test_incident_events_has_row_level_security_enabled(): void
+    public function test_maintenance_windows_has_row_level_security_enabled(): void
     {
-        $row = DB::selectOne("select relrowsecurity from pg_class where relname = 'incident_events'");
+        $row = DB::selectOne("select relrowsecurity from pg_class where relname = 'maintenance_windows'");
 
         $this->assertNotNull($row);
         $this->assertTrue((bool) $row->relrowsecurity);
     }
 
-    public function test_incident_events_has_permanent_force_row_level_security_enabled(): void
+    public function test_maintenance_windows_has_permanent_force_row_level_security_enabled(): void
     {
-        $row = DB::selectOne("select relforcerowsecurity from pg_class where relname = 'incident_events'");
+        $row = DB::selectOne("select relforcerowsecurity from pg_class where relname = 'maintenance_windows'");
 
         $this->assertNotNull($row);
         $this->assertTrue(
             (bool) $row->relforcerowsecurity,
-            'incident_events must have permanent FORCE ROW LEVEL SECURITY active — this is not a transient, per-test setting.'
+            'maintenance_windows must have permanent FORCE ROW LEVEL SECURITY active — this is not a transient, per-test setting.'
         );
     }
 
     /**
-     * Exactly forty-seven tables (the forty-six previously forced plus
-     * incident_events) must be FORCE-enabled among ALL prepared tables
-     * — no more, no less.
+     * Exactly forty-eight tables (the forty-seven previously forced
+     * plus maintenance_windows) must be FORCE-enabled among ALL
+     * prepared tables — no more, no less.
      */
-    public function test_exactly_forty_seven_prepared_tables_are_force_row_level_security_enabled(): void
+    public function test_exactly_forty_eight_prepared_tables_are_force_row_level_security_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['incident_events', 'maintenance_windows']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['maintenance_windows']);
 
         $actuallyForced = [];
 
@@ -171,7 +169,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(48, count($actuallyForced), 'Exactly forty-seven prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 29 — no more, no less.');
+        $this->assertSame(48, count($actuallyForced), 'Exactly forty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 30 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -181,7 +179,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['incident_events', 'maintenance_windows']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['maintenance_windows']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
@@ -202,7 +200,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
     public function test_the_original_single_policy_no_longer_exists(): void
     {
         $policy = DB::selectOne(
-            "select polname from pg_policy where polrelid = 'incident_events'::regclass and polname = 'incident_events_tenant_isolation'"
+            "select polname from pg_policy where polrelid = 'maintenance_windows'::regclass and polname = 'maintenance_windows_tenant_isolation'"
         );
 
         $this->assertNull($policy, 'The original single-expression policy must have been dropped and replaced by the two new policies.');
@@ -213,10 +211,10 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         $readPolicy = DB::selectOne(
             "select polname, polcmd, pg_get_expr(polqual, polrelid) as using_expr, pg_get_expr(polwithcheck, polrelid) as with_check_expr
              from pg_policy
-             where polrelid = 'incident_events'::regclass and polname = 'incident_events_tenant_read'"
+             where polrelid = 'maintenance_windows'::regclass and polname = 'maintenance_windows_tenant_read'"
         );
 
-        $this->assertNotNull($readPolicy, 'incident_events_tenant_read must exist.');
+        $this->assertNotNull($readPolicy, 'maintenance_windows_tenant_read must exist.');
         $this->assertSame('r', $readPolicy->polcmd, 'the read policy must be FOR SELECT only.');
         $this->assertStringContainsString('firm_id IS NULL', $readPolicy->using_expr);
         $this->assertNull($readPolicy->with_check_expr, 'a FOR SELECT policy has no WITH CHECK.');
@@ -224,10 +222,10 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         $writePolicy = DB::selectOne(
             "select polname, pg_get_expr(polqual, polrelid) as using_expr, pg_get_expr(polwithcheck, polrelid) as with_check_expr
              from pg_policy
-             where polrelid = 'incident_events'::regclass and polname = 'incident_events_tenant_write'"
+             where polrelid = 'maintenance_windows'::regclass and polname = 'maintenance_windows_tenant_write'"
         );
 
-        $this->assertNotNull($writePolicy, 'incident_events_tenant_write must exist.');
+        $this->assertNotNull($writePolicy, 'maintenance_windows_tenant_write must exist.');
         $this->assertNotNull($writePolicy->with_check_expr, 'the write policy must carry an explicit, asymmetric WITH CHECK — not the FOR ALL implicit reuse of USING.');
         $this->assertStringContainsString('firm_id IS NULL', $writePolicy->using_expr);
         $this->assertStringContainsString('firm_id IS NULL', $writePolicy->with_check_expr);
@@ -236,7 +234,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
     /**
      * No other table's policy was modified by this migration — spot
      * check clients' own policy (the very first table forced in this
-     * arc) and health_checks' own policy (the immediately prior
+     * arc) and incident_events' own policy (the immediately prior
      * checkpoint) as representative unrelated policies.
      */
     public function test_no_other_tables_policy_was_changed(): void
@@ -245,8 +243,8 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         $this->assertNotNull($clientsPolicy);
         $this->assertSame('clients_tenant_isolation', $clientsPolicy->polname);
 
-        $healthChecksWritePolicy = DB::selectOne("select polname from pg_policy where polrelid = 'health_checks'::regclass and polname = 'health_checks_tenant_write'");
-        $this->assertNotNull($healthChecksWritePolicy);
+        $incidentEventsWritePolicy = DB::selectOne("select polname from pg_policy where polrelid = 'incident_events'::regclass and polname = 'incident_events_tenant_write'");
+        $this->assertNotNull($incidentEventsWritePolicy);
     }
 
     // ---------------------------------------------------------------
@@ -256,12 +254,12 @@ class IncidentEventsForceRlsActivationTest extends TestCase
     public function test_missing_tenant_context_cannot_read_a_firm_specific_row(): void
     {
         $firm = Firm::factory()->create();
-        $this->runWithFirmContext($firm, fn () => $this->insertRow($firm->id, 'firm-specific', IncidentSeverity::Critical, IncidentStatus::Investigating));
+        $this->runWithFirmContext($firm, fn () => $this->insertRow($firm->id, 'firm-specific'));
 
         $this->tenantContext()->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
-        $this->assertSame(0, IncidentEvent::query()->where('firm_id', $firm->id)->count());
+        $this->assertSame(0, MaintenanceWindow::query()->where('firm_id', $firm->id)->count());
     }
 
     public function test_missing_tenant_context_cannot_insert_a_firm_specific_row(): void
@@ -289,7 +287,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
 
         $visibleIds = $this->runWithFirmContext(
             $firmA,
-            fn () => IncidentEvent::query()->where('firm_id', $firmA->id)->pluck('id')->all(),
+            fn () => MaintenanceWindow::query()->where('firm_id', $firmA->id)->pluck('id')->all(),
         );
 
         $this->assertSame([$rowId], $visibleIds);
@@ -304,7 +302,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
 
         $visibleIds = $this->runWithFirmContext(
             $firmA,
-            fn () => IncidentEvent::query()->pluck('id')->all(),
+            fn () => MaintenanceWindow::query()->pluck('id')->all(),
         );
 
         $this->assertNotContains($rowB, $visibleIds);
@@ -336,18 +334,18 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         $rowB = $this->runWithFirmContext($firmB, fn () => $this->insertRow($firmB->id, 'update-target'));
 
         $affected = $this->runWithFirmContext($firmA, function () use ($rowB) {
-            return DB::table('incident_events')->where('id', $rowB)->update(['message' => 'Hijacked']);
+            return DB::table('maintenance_windows')->where('id', $rowB)->update(['title' => 'Hijacked']);
         });
 
-        $this->assertSame(0, $affected, 'No rows should be visible/updatable — Firm A must not be able to update Firm B\'s incident_events row.');
+        $this->assertSame(0, $affected, 'No rows should be visible/updatable — Firm A must not be able to update Firm B\'s maintenance_windows row.');
 
         $reReadAsFirmB = $this->runWithFirmContext(
             $firmB,
-            fn () => IncidentEvent::query()->find($rowB),
+            fn () => MaintenanceWindow::query()->find($rowB),
         );
 
         $this->assertNotNull($reReadAsFirmB);
-        $this->assertStringStartsWith('RLS proof row update-target', $reReadAsFirmB->message);
+        $this->assertStringStartsWith('RLS proof row update-target', $reReadAsFirmB->title);
     }
 
     public function test_firm_a_context_cannot_reassign_firm_b_row_ownership(): void
@@ -357,14 +355,14 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         $rowB = $this->runWithFirmContext($firmB, fn () => $this->insertRow($firmB->id, 'reassign-target'));
 
         $affected = $this->runWithFirmContext($firmA, function () use ($firmA, $rowB) {
-            return DB::table('incident_events')->where('id', $rowB)->update(['firm_id' => $firmA->id]);
+            return DB::table('maintenance_windows')->where('id', $rowB)->update(['firm_id' => $firmA->id]);
         });
 
-        $this->assertSame(0, $affected, 'No rows should be visible/updatable — Firm A must not be able to reassign Firm B\'s incident_events row to itself.');
+        $this->assertSame(0, $affected, 'No rows should be visible/updatable — Firm A must not be able to reassign Firm B\'s maintenance_windows row to itself.');
 
         $reReadAsFirmB = $this->runWithFirmContext(
             $firmB,
-            fn () => IncidentEvent::query()->find($rowB),
+            fn () => MaintenanceWindow::query()->find($rowB),
         );
 
         $this->assertNotNull($reReadAsFirmB);
@@ -378,15 +376,15 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         $rowB = $this->runWithFirmContext($firmB, fn () => $this->insertRow($firmB->id, 'delete-target'));
 
         $this->runWithFirmContext($firmA, function () use ($rowB) {
-            DB::table('incident_events')->where('id', $rowB)->delete();
+            DB::table('maintenance_windows')->where('id', $rowB)->delete();
         });
 
         $reReadAsFirmB = $this->runWithFirmContext(
             $firmB,
-            fn () => IncidentEvent::query()->find($rowB),
+            fn () => MaintenanceWindow::query()->find($rowB),
         );
 
-        $this->assertNotNull($reReadAsFirmB, 'Firm A context must not be able to delete Firm B\'s incident_events row.');
+        $this->assertNotNull($reReadAsFirmB, 'Firm A context must not be able to delete Firm B\'s maintenance_windows row.');
     }
 
     // ---------------------------------------------------------------
@@ -402,8 +400,8 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         $firmA = Firm::factory()->create();
         $firmB = Firm::factory()->create();
 
-        $visibleToA = $this->runWithFirmContext($firmA, fn () => IncidentEvent::query()->whereNull('firm_id')->pluck('id')->all());
-        $visibleToB = $this->runWithFirmContext($firmB, fn () => IncidentEvent::query()->whereNull('firm_id')->pluck('id')->all());
+        $visibleToA = $this->runWithFirmContext($firmA, fn () => MaintenanceWindow::query()->whereNull('firm_id')->pluck('id')->all());
+        $visibleToB = $this->runWithFirmContext($firmB, fn () => MaintenanceWindow::query()->whereNull('firm_id')->pluck('id')->all());
 
         $this->assertContains($platformWideId, $visibleToA, 'Firm A must see the platform-wide row.');
         $this->assertContains($platformWideId, $visibleToB, 'Firm B must also independently see the same platform-wide row.');
@@ -417,7 +415,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         $firmB = Firm::factory()->create();
         $rowB = $this->runWithFirmContext($firmB, fn () => $this->insertRow($firmB->id, 'firm-b-not-leaked'));
 
-        $visibleToA = $this->runWithFirmContext($firmA, fn () => IncidentEvent::query()->pluck('id')->all());
+        $visibleToA = $this->runWithFirmContext($firmA, fn () => MaintenanceWindow::query()->pluck('id')->all());
 
         $this->assertNotContains($rowB, $visibleToA, 'Firm A must still not see Firm B\'s firm-specific row, even though a platform-wide row is visible to both.');
     }
@@ -460,13 +458,13 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
 
         $affected = $this->runWithFirmContext($firm, function () use ($platformWideId) {
-            return DB::table('incident_events')->where('id', $platformWideId)->delete();
+            return DB::table('maintenance_windows')->where('id', $platformWideId)->delete();
         });
 
         $this->assertSame(0, $affected, 'A firm-scoped session must not be able to delete a platform-wide (firm_id = NULL) row.');
 
         $stillExists = $this->tenantContext()->runWithoutFirmContext(
-            fn () => IncidentEvent::query()->whereNull('firm_id')->find($platformWideId),
+            fn () => MaintenanceWindow::query()->whereNull('firm_id')->find($platformWideId),
         );
 
         $this->assertNotNull($stillExists, 'The platform-wide row must genuinely still exist in the database after the blocked delete attempt.');
@@ -480,13 +478,13 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
 
         $affected = $this->runWithFirmContext($firm, function () {
-            return DB::table('incident_events')->whereNull('firm_id')->delete();
+            return DB::table('maintenance_windows')->whereNull('firm_id')->delete();
         });
 
-        $this->assertSame(0, $affected, 'DELETE FROM incident_events WHERE firm_id IS NULL must affect zero rows under a firm-scoped session.');
+        $this->assertSame(0, $affected, 'DELETE FROM maintenance_windows WHERE firm_id IS NULL must affect zero rows under a firm-scoped session.');
 
         $remaining = $this->tenantContext()->runWithoutFirmContext(
-            fn () => IncidentEvent::query()->whereNull('firm_id')->count(),
+            fn () => MaintenanceWindow::query()->whereNull('firm_id')->count(),
         );
 
         $this->assertSame(2, $remaining, 'Both platform-wide rows must genuinely still exist.');
@@ -499,7 +497,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
 
         $platformWideId = $this->insertRow(null, 'context-free-delete-target');
 
-        $affected = DB::table('incident_events')->where('id', $platformWideId)->delete();
+        $affected = DB::table('maintenance_windows')->where('id', $platformWideId)->delete();
 
         $this->assertSame(1, $affected, 'A genuinely context-free session must be able to delete a platform-wide row it is also able to write.');
     }
@@ -523,7 +521,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
 
         try {
             $this->runWithFirmContext($firmA, function () use ($firmB, $rowA) {
-                return DB::table('incident_events')->where('id', $rowA)->update(['firm_id' => $firmB->id]);
+                return DB::table('maintenance_windows')->where('id', $rowA)->update(['firm_id' => $firmB->id]);
             });
             $this->fail('Expected a row-level security policy violation when Firm A tries to reassign its own row to Firm B.');
         } catch (\Illuminate\Database\QueryException $e) {
@@ -532,166 +530,114 @@ class IncidentEventsForceRlsActivationTest extends TestCase
 
         $this->assertNoDatabaseTenantContext();
 
-        $stillFirmAs = $this->runWithFirmContext($firmA, fn () => IncidentEvent::query()->find($rowA));
+        $stillFirmAs = $this->runWithFirmContext($firmA, fn () => MaintenanceWindow::query()->find($rowA));
         $this->assertNotNull($stillFirmAs);
         $this->assertSame($firmA->id, $stillFirmAs->firm_id);
     }
 
     // ---------------------------------------------------------------
-    // Six-append-method correct-firm proofs — direct proof that the
-    // newly-$firm-parameterized methods correctly find and update a
-    // firm-specific incident when given the correct firm.
+    // Novel security contribution — the wrap-must-extend-through-
+    // fresh() fix, proven directly against a firm-scoped window. This
+    // is the FIRST time any test in this repo exercises a non-null-
+    // firm_id maintenance window's full lifecycle.
     // ---------------------------------------------------------------
 
-    public function test_update_severity_with_the_correct_firm_finds_and_updates_the_firm_specific_incident(): void
+    public function test_full_lifecycle_schedule_start_complete_against_a_firm_scoped_window_returns_populated_models_under_force(): void
     {
         $firm = Firm::factory()->create();
-        $service = $this->incidentService();
+        $service = $this->maintenanceWindowService();
 
-        $opened = $service->open($firm, IncidentSeverity::Low, 'Tenant-specific anomaly');
-        $updated = $service->updateSeverity($firm, $opened->correlation_id, IncidentSeverity::Critical);
+        $window = $service->schedule($firm, 'Firm-scoped API upgrade', now()->addHour(), now()->addHours(2));
 
-        $this->assertSame(IncidentSeverity::Critical, $updated->severity);
-        $this->assertSame($firm->id, $updated->firm_id);
+        $this->assertSame($firm->id, $window->firm_id);
+        $this->assertSame(MaintenanceWindowStatus::Scheduled, $window->status);
+
+        $started = $service->start($window);
+
+        $this->assertNotNull($started, 'start()\'s trailing fresh() must return a populated model, not null, for a firm-scoped window under FORCE.');
+        $this->assertSame(MaintenanceWindowStatus::InProgress, $started->status);
+        $this->assertNotNull($started->actual_starts_at);
+        $this->assertSame($firm->id, $started->firm_id);
+
+        $completed = $service->complete($started);
+
+        $this->assertNotNull($completed, 'complete()\'s trailing fresh() must return a populated model, not null, for a firm-scoped window under FORCE.');
+        $this->assertSame(MaintenanceWindowStatus::Completed, $completed->status);
+        $this->assertNotNull($completed->actual_ends_at);
+        $this->assertSame($firm->id, $completed->firm_id);
     }
 
-    public function test_all_six_append_methods_succeed_with_the_correct_firm_against_a_firm_specific_incident(): void
+    public function test_cancel_against_a_firm_scoped_window_returns_a_populated_model_under_force(): void
     {
         $firm = Firm::factory()->create();
-        $service = $this->incidentService();
+        $service = $this->maintenanceWindowService();
 
-        $opened = $service->open($firm, IncidentSeverity::Medium, 'Firm-specific incident', customerImpact: true, notificationNeeded: true);
-        $correlationId = $opened->correlation_id;
+        $window = $service->schedule($firm, 'Firm-scoped migration', now()->addDay(), now()->addDay()->addHour());
 
-        $service->updateSeverity($firm, $correlationId, IncidentSeverity::High);
-        $service->updateStatus($firm, $correlationId, IncidentStatus::Identified);
-        $service->recordRootCause($firm, $correlationId, 'Bad tenant-scoped deploy');
-        $service->flagCustomerImpact($firm, $correlationId, false);
-        $service->flagNotificationNeeded($firm, $correlationId, false);
-        $resolved = $service->resolve($firm, $correlationId, 'Rolled back the deploy');
+        $cancelled = $service->cancel($window, 'No longer needed');
 
-        $this->assertSame(IncidentStatus::Resolved, $resolved->status);
-        $this->assertSame($firm->id, $resolved->firm_id);
-
-        $timeline = $this->runWithFirmContext($firm, fn () => $service->timeline($correlationId));
-        $this->assertCount(7, $timeline);
-        foreach ($timeline as $event) {
-            $this->assertSame($firm->id, $event->firm_id, 'Every row for this correlation_id must share the same firm_id — ownership never mixes within one correlation_id.');
-        }
+        $this->assertNotNull($cancelled, 'cancel()\'s trailing fresh() must return a populated model, not null, for a firm-scoped window under FORCE.');
+        $this->assertSame(MaintenanceWindowStatus::Cancelled, $cancelled->status);
+        $this->assertSame('No longer needed', $cancelled->cancellation_reason);
+        $this->assertSame($firm->id, $cancelled->firm_id);
     }
 
-    // ---------------------------------------------------------------
-    // Two distinct mismatch failure modes — Design Reviewer 1's
-    // finding, proven SEPARATELY per the dossier's own explicit
-    // requirement, not conflated into one test.
-    // ---------------------------------------------------------------
-
-    /**
-     * Mismatch mode (a): a firm-scoped $firm against an incident
-     * actually owned by a DIFFERENT firm → the row is invisible under
-     * the wrong context, so currentState()'s firstOrFail() throws
-     * ModelNotFoundException.
-     */
-    public function test_wrong_firm_against_a_firm_specific_incident_throws_model_not_found(): void
+    public function test_mark_customer_notification_sent_against_a_firm_scoped_window_returns_a_populated_model_under_force(): void
     {
-        $firmA = Firm::factory()->create();
-        $firmB = Firm::factory()->create();
-        $service = $this->incidentService();
+        $firm = Firm::factory()->create();
+        $service = $this->maintenanceWindowService();
 
-        $opened = $service->open($firmA, IncidentSeverity::High, 'Firm A only incident');
+        $window = $service->schedule($firm, 'Firm-scoped upgrade', now()->addDay(), now()->addDay()->addHour());
 
-        $this->expectException(ModelNotFoundException::class);
+        $this->assertFalse($window->customerNotificationSent());
 
-        $service->updateSeverity($firmB, $opened->correlation_id, IncidentSeverity::Critical);
+        $notified = $service->markCustomerNotificationSent($window);
+
+        $this->assertNotNull($notified, 'markCustomerNotificationSent()\'s trailing fresh() must return a populated model, not null, for a firm-scoped window under FORCE.');
+        $this->assertTrue($notified->customerNotificationSent());
+        $this->assertSame($firm->id, $notified->firm_id);
     }
 
     /**
-     * Mismatch mode (b): a non-null $firm against an incident that is
-     * actually PLATFORM-WIDE → currentState() SUCCEEDS (the read
-     * policy's firm_id IS NULL branch is unconditional, so the row is
-     * visible regardless of context), but appendEvent()'s subsequent
-     * write is rejected directly by Postgres's row-level security
-     * policy (neither the write policy's null-branch nor match-branch
-     * is satisfied under a non-null context) — a distinct exception
-     * type/site from mode (a) above, NOT a ModelNotFoundException.
+     * reschedule() specifically: the new row must inherit the EXACT
+     * same firm_id as the original — proven under a firm-scoped
+     * context, where a mismatch would either be invisible (wrong
+     * context) or rejected outright by WITH CHECK (forged ownership).
      */
-    public function test_firm_against_an_actually_platform_wide_incident_fails_at_the_write_not_the_read(): void
+    public function test_reschedule_against_a_firm_scoped_window_creates_a_new_row_with_the_same_firm_id(): void
     {
         $firm = Firm::factory()->create();
-        $service = $this->incidentService();
+        $service = $this->maintenanceWindowService();
 
-        $opened = $service->open(null, IncidentSeverity::Medium, 'Platform-wide incident');
+        $original = $service->schedule($firm, 'Firm-scoped storage migration', now()->addDay(), now()->addDay()->addHours(3));
+        $originalScheduledStart = $original->scheduled_starts_at;
 
-        // Confirm the read succeeds under a mismatched firm context —
-        // ruling out ModelNotFoundException as a false-positive
-        // explanation for the failure asserted below.
-        $readUnderMismatchedContext = $this->runWithFirmContext(
-            $firm,
-            fn () => $service->currentState($opened->correlation_id),
-        );
-        $this->assertNotNull($readUnderMismatchedContext);
-        $this->assertNull($readUnderMismatchedContext->firm_id);
+        $newStart = now()->addWeek();
+        $newEnd = now()->addWeek()->addHours(3);
 
-        $this->expectException(\Illuminate\Database\QueryException::class);
-        $this->expectExceptionMessageMatches('/row-level security policy/');
+        $rescheduled = $service->reschedule($original, $newStart, $newEnd);
 
-        $service->updateSeverity($firm, $opened->correlation_id, IncidentSeverity::Critical);
-    }
+        $this->assertNotNull($rescheduled);
+        $this->assertSame($firm->id, $rescheduled->firm_id, 'The new row must inherit the exact same firm_id as the original.');
+        $this->assertSame(MaintenanceWindowStatus::Scheduled, $rescheduled->status);
+        $this->assertSame($original->id, $rescheduled->rescheduled_from_id);
 
-    // ---------------------------------------------------------------
-    // Novel security contribution — appendEvent()'s forwarded
-    // firm_id = $current->firm_id never diverges from the row actually
-    // read under the active context. A firm-specific incident's
-    // timeline never picks up a platform-wide or sibling-firm row.
-    // ---------------------------------------------------------------
+        $refreshedOriginal = $this->runWithFirmContext($firm, fn () => MaintenanceWindow::query()->find($original->id));
+        $this->assertNotNull($refreshedOriginal, 'The original row itself must remain readable under the firm\'s own context.');
+        $this->assertSame(MaintenanceWindowStatus::Rescheduled, $refreshedOriginal->status);
+        $this->assertTrue($refreshedOriginal->scheduled_starts_at->equalTo($originalScheduledStart));
+        $this->assertSame($firm->id, $refreshedOriginal->firm_id);
 
-    public function test_appended_events_never_diverge_from_the_incidents_own_firm_ownership(): void
-    {
-        $firmA = Firm::factory()->create();
-        $firmB = Firm::factory()->create();
-        $service = $this->incidentService();
+        // Direct database-level confirmation both rows genuinely share
+        // one firm_id — not merely equal in-memory attribute values
+        // that could mask a stale/uncommitted read.
+        $distinctFirmIds = $this->runWithFirmContext($firm, fn () => DB::table('maintenance_windows')
+            ->whereIn('id', [$original->id, $rescheduled->id])
+            ->distinct()
+            ->pluck('firm_id'));
 
-        // A platform-wide incident and two firm-specific incidents,
-        // all created first so genuinely competing rows exist in the
-        // database before any append runs.
-        $platformWide = $service->open(null, IncidentSeverity::Low, 'Platform-wide baseline');
-        $firmAIncident = $service->open($firmA, IncidentSeverity::High, 'Firm A incident');
-        $firmBIncident = $service->open($firmB, IncidentSeverity::High, 'Firm B incident');
-
-        $service->updateStatus(null, $platformWide->correlation_id, IncidentStatus::Identified);
-        $service->updateStatus($firmA, $firmAIncident->correlation_id, IncidentStatus::Identified);
-        $service->updateStatus($firmB, $firmBIncident->correlation_id, IncidentStatus::Identified);
-
-        $platformTimeline = $this->tenantContext()->runWithoutFirmContext(fn () => $service->timeline($platformWide->correlation_id));
-        $firmATimeline = $this->runWithFirmContext($firmA, fn () => $service->timeline($firmAIncident->correlation_id));
-        $firmBTimeline = $this->runWithFirmContext($firmB, fn () => $service->timeline($firmBIncident->correlation_id));
-
-        foreach ($platformTimeline as $event) {
-            $this->assertNull($event->firm_id, 'Every row in the platform-wide incident\'s timeline must remain firm_id = NULL.');
-        }
-        foreach ($firmATimeline as $event) {
-            $this->assertSame($firmA->id, $event->firm_id, 'Every row in Firm A\'s incident timeline must remain firm_id = Firm A — never NULL, never Firm B.');
-        }
-        foreach ($firmBTimeline as $event) {
-            $this->assertSame($firmB->id, $event->firm_id, 'Every row in Firm B\'s incident timeline must remain firm_id = Firm B — never NULL, never Firm A.');
-        }
-
-        // Direct database-level confirmation: no row anywhere mixes a
-        // correlation_id with more than one distinct firm_id value.
-        // COALESCE(firm_id, -1) is required because COUNT(DISTINCT ...)
-        // silently excludes NULLs in PostgreSQL — without it, a
-        // genuinely-consistent all-NULL (platform-wide) correlation_id
-        // group would wrongly report zero distinct values instead of
-        // one.
-        $distinctFirmIdsPerCorrelation = $this->tenantContext()->runWithoutFirmContext(fn () => DB::table('incident_events')
-            ->select('correlation_id')
-            ->selectRaw('count(distinct coalesce(firm_id, -1)) as distinct_firm_ids')
-            ->groupBy('correlation_id')
-            ->pluck('distinct_firm_ids', 'correlation_id'));
-
-        foreach ($distinctFirmIdsPerCorrelation as $correlationId => $distinctCount) {
-            $this->assertSame(1, (int) $distinctCount, "correlation_id {$correlationId} must have exactly one distinct firm_id across all its rows.");
-        }
+        $this->assertCount(1, $distinctFirmIds);
+        $this->assertSame($firm->id, $distinctFirmIds->first());
     }
 
     // ---------------------------------------------------------------
@@ -700,13 +646,13 @@ class IncidentEventsForceRlsActivationTest extends TestCase
 
     public function test_bare_factory_default_creation_is_safe_and_immediately_readable_under_any_firm(): void
     {
-        $row = IncidentEvent::factory()->create();
+        $row = MaintenanceWindow::factory()->create();
 
         $this->assertNotNull($row->id);
         $this->assertNull($row->firm_id);
 
         $firm = Firm::factory()->create();
-        $persisted = $this->runWithFirmContext($firm, fn () => IncidentEvent::query()->find($row->id));
+        $persisted = $this->runWithFirmContext($firm, fn () => MaintenanceWindow::query()->find($row->id));
 
         $this->assertNotNull($persisted, 'A bare factory-created platform-wide row must be visible under any firm\'s own context.');
         $this->assertNull($persisted->firm_id);
@@ -717,15 +663,15 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $otherFirm = Firm::factory()->create();
 
-        $row = IncidentEvent::factory()->create(['firm_id' => $firm->id]);
+        $row = MaintenanceWindow::factory()->create(['firm_id' => $firm->id]);
 
         $this->assertSame($firm->id, $row->firm_id);
 
-        $persisted = $this->runWithFirmContext($firm, fn () => IncidentEvent::query()->find($row->id));
+        $persisted = $this->runWithFirmContext($firm, fn () => MaintenanceWindow::query()->find($row->id));
         $this->assertNotNull($persisted);
         $this->assertSame($firm->id, $persisted->firm_id);
 
-        $notVisibleToOther = $this->runWithFirmContext($otherFirm, fn () => IncidentEvent::query()->where('firm_id', $firm->id)->find($row->id));
+        $notVisibleToOther = $this->runWithFirmContext($otherFirm, fn () => MaintenanceWindow::query()->where('firm_id', $firm->id)->find($row->id));
         $this->assertNull($notVisibleToOther, 'A firm-scoped factory row must not be visible under a sibling firm\'s own context.');
     }
 
@@ -736,7 +682,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         \App\Models\Client::factory()->forFirm($firm)->create();
         $this->assertDatabaseTenantContextIs($firm, 'ClientFactory must have left a stale, non-null DB-level context active.');
 
-        $row = IncidentEvent::factory()->create();
+        $row = MaintenanceWindow::factory()->create();
 
         $this->assertNull($row->firm_id, 'The bare factory create() must still succeed and produce a genuinely null-firm_id row, despite the stale ambient context.');
     }
@@ -776,68 +722,78 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         $this->assertNoDatabaseTenantContext();
     }
 
-    public function test_incident_service_methods_clear_database_context_after_a_firm_scoped_operation(): void
+    public function test_maintenance_window_service_methods_clear_database_context_after_a_firm_scoped_operation(): void
     {
         $firm = Firm::factory()->create();
 
-        $this->incidentService()->open($firm, IncidentSeverity::Low, 'Context lifecycle proof');
+        $this->maintenanceWindowService()->schedule($firm, 'Context lifecycle proof', now()->addDay(), now()->addDay()->addHour());
 
         $this->assertNoDatabaseTenantContext();
     }
 
-    public function test_incident_service_methods_clear_database_context_after_a_platform_wide_operation(): void
+    public function test_maintenance_window_service_methods_clear_database_context_after_a_platform_wide_operation(): void
     {
-        $this->incidentService()->open(null, IncidentSeverity::Low, 'Context lifecycle proof, platform-wide');
+        $this->maintenanceWindowService()->schedule(null, 'Context lifecycle proof, platform-wide', now()->addDay(), now()->addDay()->addHour());
 
         $this->assertNoDatabaseTenantContext();
     }
 
-    // ---------------------------------------------------------------
-    // Real production writer/reader proofs — IncidentService
-    // ---------------------------------------------------------------
-
-    public function test_incident_service_open_with_no_firm_persists_a_genuinely_visible_platform_wide_row(): void
+    public function test_full_lifecycle_against_a_firm_scoped_window_clears_context_after_every_step(): void
     {
-        $opened = $this->incidentService()->open(null, IncidentSeverity::High, 'Email delivery degraded');
-
-        $this->assertNull($opened->firm_id);
-
         $firm = Firm::factory()->create();
-        $visible = $this->runWithFirmContext($firm, fn () => IncidentEvent::query()->find($opened->id));
-        $this->assertNotNull($visible, 'open() with no firm must genuinely persist a row visible under any firm\'s context.');
+        $service = $this->maintenanceWindowService();
+
+        $window = $service->schedule($firm, 'Context lifecycle, full trip', now()->addHour(), now()->addHours(2));
+        $this->assertNoDatabaseTenantContext();
+
+        $started = $service->start($window);
+        $this->assertNoDatabaseTenantContext();
+
+        $service->complete($started);
+        $this->assertNoDatabaseTenantContext();
     }
 
-    public function test_incident_service_open_with_a_firm_persists_a_firm_scoped_row_invisible_to_a_sibling(): void
+    // ---------------------------------------------------------------
+    // Real production writer/reader proofs — MaintenanceWindowService
+    // ---------------------------------------------------------------
+
+    public function test_schedule_with_no_firm_persists_a_genuinely_visible_platform_wide_row(): void
+    {
+        $window = $this->maintenanceWindowService()->schedule(null, 'Shared infrastructure upgrade', now()->addDay(), now()->addDay()->addHours(2));
+
+        $this->assertNull($window->firm_id);
+
+        $firm = Firm::factory()->create();
+        $visible = $this->runWithFirmContext($firm, fn () => MaintenanceWindow::query()->find($window->id));
+        $this->assertNotNull($visible, 'schedule() with no firm must genuinely persist a row visible under any firm\'s context.');
+    }
+
+    public function test_schedule_with_a_firm_persists_a_firm_scoped_row_invisible_to_a_sibling(): void
     {
         $firm = Firm::factory()->create();
         $otherFirm = Firm::factory()->create();
 
-        $opened = $this->incidentService()->open($firm, IncidentSeverity::High, 'Tenant-specific anomaly', customerImpact: true);
+        $window = $this->maintenanceWindowService()->schedule($firm, 'Dedicated deployment upgrade', now()->addDay(), now()->addDay()->addHours(2));
 
-        $this->assertSame($firm->id, $opened->firm_id);
+        $this->assertSame($firm->id, $window->firm_id);
 
-        $visible = $this->runWithFirmContext($firm, fn () => IncidentEvent::query()->find($opened->id));
+        $visible = $this->runWithFirmContext($firm, fn () => MaintenanceWindow::query()->find($window->id));
         $this->assertNotNull($visible);
 
-        $notVisibleToOther = $this->runWithFirmContext($otherFirm, fn () => IncidentEvent::query()->find($opened->id));
+        $notVisibleToOther = $this->runWithFirmContext($otherFirm, fn () => MaintenanceWindow::query()->find($window->id));
         $this->assertNull($notVisibleToOther);
     }
 
     // ---------------------------------------------------------------
-    // Residual gap scope note — incident_events has no OTHER
+    // Residual gap scope note — maintenance_windows has no OTHER
     // tenant-owned relation of its own that RLS does not already
     // govern: firm_id is both its only foreign key into tenant-owned
-    // data AND the exact column RLS itself governs. The one genuinely
-    // table-specific residual gap, disclosed plainly rather than
-    // hidden: currentState()/timeline() called directly (not through
-    // one of the six wrapped methods) for a firm-specific incident,
-    // with no or the wrong context established, is not protected by
-    // anything but caller discipline — RLS fails closed (invisible row
-    // or empty collection), but nothing forces a caller to establish
-    // context before calling these two methods directly. Zero current
-    // call sites exercise this directly, so nothing to fix today; a
-    // future real caller must establish context itself, exactly as
-    // health_checks' checkForKnownAnomalyPatterns() already requires.
+    // data AND the exact column RLS itself governs (rescheduled_from_id
+    // is a self-FK, always sharing the same firm_id by construction —
+    // never independently derived). Zero existing pre-prerequisite test
+    // coverage of a non-null-firm_id window's full lifecycle existed
+    // before this checkpoint's own new activation test above — the
+    // first place this path is exercised at all.
     // ---------------------------------------------------------------
 
     // ---------------------------------------------------------------
@@ -865,7 +821,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
      * marketplace surface was added by this checkpoint — an
      * application-code-prerequisite-plus-migration-plus-test change
      * only, matching the contacts/parties/backup_restore_tests/
-     * health_checks precedent's own scope.
+     * health_checks/incident_events precedent's own scope.
      */
     public function test_no_ui_routes_or_controllers_were_introduced_by_this_checkpoint(): void
     {
@@ -874,18 +830,18 @@ class IncidentEventsForceRlsActivationTest extends TestCase
                 'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($relativeDir)
             ));
 
-            $this->assertSame('', $changed, "Section 39A-3L, Checkpoint 29 must introduce no UI/route/domain surface, but found changes under {$relativeDir}.");
+            $this->assertSame('', $changed, "Section 39A-3L, Checkpoint 30 must introduce no UI/route/domain surface, but found changes under {$relativeDir}.");
         }
     }
 
     /**
-     * Forty-six previously forced tables plus incident_events must be
-     * independently force-active and independently isolated at the
-     * same time — proof this batch did not weaken or interfere with
-     * any prior section's own enforcement. Uses health_checks as the
-     * companion table (forced immediately prior, at Checkpoint 28).
+     * Forty-seven previously forced tables plus maintenance_windows
+     * must be independently force-active and independently isolated at
+     * the same time — proof this batch did not weaken or interfere
+     * with any prior section's own enforcement. Uses incident_events as
+     * the companion table (forced immediately prior, at Checkpoint 29).
      */
-    public function test_incident_events_are_isolated_independently_and_simultaneously_with_health_checks(): void
+    public function test_maintenance_windows_are_isolated_independently_and_simultaneously_with_incident_events(): void
     {
         $firmA = Firm::factory()->create();
         $firmB = Firm::factory()->create();
@@ -893,18 +849,38 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         $rowA = $this->runWithFirmContext($firmA, fn () => $this->insertRow($firmA->id, 'simultaneous-a'));
         $rowB = $this->runWithFirmContext($firmB, fn () => $this->insertRow($firmB->id, 'simultaneous-b'));
 
-        $healthCheckA = $this->runWithFirmContext($firmA, fn () => \App\Models\HealthCheck::factory()->create(['firm_id' => $firmA->id, 'check_type' => \App\Enums\HealthCheckType::TenantIsolationAnomalies->value, 'status' => \App\Enums\HealthCheckStatus::Unhealthy->value]));
-        $healthCheckB = $this->runWithFirmContext($firmB, fn () => \App\Models\HealthCheck::factory()->create(['firm_id' => $firmB->id, 'check_type' => \App\Enums\HealthCheckType::TenantIsolationAnomalies->value, 'status' => \App\Enums\HealthCheckStatus::Unhealthy->value]));
+        $incidentA = $this->runWithFirmContext($firmA, fn () => DB::table('incident_events')->insertGetId([
+            'firm_id' => $firmA->id,
+            'correlation_id' => (string) Str::uuid(),
+            'event_type' => 'opened',
+            'severity' => \App\Enums\IncidentSeverity::Medium->value,
+            'status' => \App\Enums\IncidentStatus::Investigating->value,
+            'customer_impact' => false,
+            'notification_needed' => false,
+            'message' => 'Simultaneous isolation proof A',
+            'created_at' => now(),
+        ]));
+        $incidentB = $this->runWithFirmContext($firmB, fn () => DB::table('incident_events')->insertGetId([
+            'firm_id' => $firmB->id,
+            'correlation_id' => (string) Str::uuid(),
+            'event_type' => 'opened',
+            'severity' => \App\Enums\IncidentSeverity::Medium->value,
+            'status' => \App\Enums\IncidentStatus::Investigating->value,
+            'customer_impact' => false,
+            'notification_needed' => false,
+            'message' => 'Simultaneous isolation proof B',
+            'created_at' => now(),
+        ]));
 
         $resultA = $this->runWithFirmContext($firmA, fn () => [
-            'incident_events' => IncidentEvent::query()->where('firm_id', $firmA->id)->pluck('id')->all(),
-            'health_checks' => \App\Models\HealthCheck::query()->pluck('id')->all(),
+            'maintenance_windows' => MaintenanceWindow::query()->where('firm_id', $firmA->id)->pluck('id')->all(),
+            'incident_events' => DB::table('incident_events')->pluck('id')->all(),
         ]);
 
-        $this->assertSame([$rowA], $resultA['incident_events']);
-        $this->assertNotContains($rowB, $resultA['incident_events']);
-        $this->assertSame([$healthCheckA->id], $resultA['health_checks']);
-        $this->assertNotContains($healthCheckB->id, $resultA['health_checks']);
+        $this->assertSame([$rowA], $resultA['maintenance_windows']);
+        $this->assertNotContains($rowB, $resultA['maintenance_windows']);
+        $this->assertContains($incidentA, $resultA['incident_events']);
+        $this->assertNotContains($incidentB, $resultA['incident_events']);
     }
 
     // ---------------------------------------------------------------
@@ -912,7 +888,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
     // ---------------------------------------------------------------
 
     /**
-     * Rollback support: the incident_events migration's down() must
+     * Rollback support: the maintenance_windows migration's down() must
      * genuinely restore the Section 39A baseline — RLS still enabled,
      * but NOT forced, and the ORIGINAL single-expression policy
      * restored byte-for-byte (both new policies dropped). Also proves
@@ -921,14 +897,14 @@ class IncidentEventsForceRlsActivationTest extends TestCase
      * finally block so this test leaves the schema in the same state
      * it found it in.
      */
-    public function test_incident_events_migration_down_restores_the_original_single_policy_and_affects_only_this_table(): void
+    public function test_maintenance_windows_migration_down_restores_the_original_single_policy_and_affects_only_this_table(): void
     {
-        $migration = require base_path('database/migrations/2026_08_25_930029_force_rls_on_incident_events_table.php');
+        $migration = require base_path('database/migrations/2026_08_25_930030_force_rls_on_maintenance_windows_table.php');
 
         $migration->down();
 
         try {
-            $row = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'incident_events'");
+            $row = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'maintenance_windows'");
 
             $this->assertTrue((bool) $row->relrowsecurity, 'Rollback must not disable RLS itself.');
             $this->assertFalse((bool) $row->relforcerowsecurity, 'Rollback must clear FORCE.');
@@ -938,19 +914,19 @@ class IncidentEventsForceRlsActivationTest extends TestCase
 
                 $this->assertTrue(
                     (bool) $otherRow->relforcerowsecurity,
-                    "{$table} must remain FORCE RLS enabled even while incident_events is rolled back."
+                    "{$table} must remain FORCE RLS enabled even while maintenance_windows is rolled back."
                 );
             }
 
-            $readPolicy = DB::selectOne("select polname from pg_policy where polrelid = 'incident_events'::regclass and polname = 'incident_events_tenant_read'");
-            $writePolicy = DB::selectOne("select polname from pg_policy where polrelid = 'incident_events'::regclass and polname = 'incident_events_tenant_write'");
+            $readPolicy = DB::selectOne("select polname from pg_policy where polrelid = 'maintenance_windows'::regclass and polname = 'maintenance_windows_tenant_read'");
+            $writePolicy = DB::selectOne("select polname from pg_policy where polrelid = 'maintenance_windows'::regclass and polname = 'maintenance_windows_tenant_write'");
             $this->assertNull($readPolicy, 'Rollback must drop the new read policy.');
             $this->assertNull($writePolicy, 'Rollback must drop the new write policy.');
 
             $originalPolicy = DB::selectOne(
                 "select polname, pg_get_expr(polqual, polrelid) as using_expr, pg_get_expr(polwithcheck, polrelid) as with_check_expr
                  from pg_policy
-                 where polrelid = 'incident_events'::regclass and polname = 'incident_events_tenant_isolation'"
+                 where polrelid = 'maintenance_windows'::regclass and polname = 'maintenance_windows_tenant_isolation'"
             );
             $this->assertNotNull($originalPolicy, 'Rollback must restore the original single-expression policy.');
             $this->assertStringContainsString('current_setting', $originalPolicy->using_expr);
@@ -961,10 +937,10 @@ class IncidentEventsForceRlsActivationTest extends TestCase
             $migration->up();
         }
 
-        $rowAfterUp = DB::selectOne("select relforcerowsecurity from pg_class where relname = 'incident_events'");
+        $rowAfterUp = DB::selectOne("select relforcerowsecurity from pg_class where relname = 'maintenance_windows'");
         $this->assertTrue((bool) $rowAfterUp->relforcerowsecurity, 'up() must be restored in the finally block.');
 
-        $writePolicyAfterUp = DB::selectOne("select polname from pg_policy where polrelid = 'incident_events'::regclass and polname = 'incident_events_tenant_write'");
+        $writePolicyAfterUp = DB::selectOne("select polname from pg_policy where polrelid = 'maintenance_windows'::regclass and polname = 'maintenance_windows_tenant_write'");
         $this->assertNotNull($writePolicyAfterUp, 'up() must recreate the write policy.');
     }
 }
