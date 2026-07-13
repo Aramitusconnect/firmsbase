@@ -222,4 +222,27 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
             .implode(', ', $untracked)
         );
     }
+
+    public function test_forced_tables_are_discovered_from_timestamped_force_rls_migrations(): void
+    {
+        $migrationFiles = glob(
+            database_path('migrations/*_force_rls_on_*_table.php')
+        ) ?: [];
+
+        $forcedTables = $this->service->forcedTables();
+
+        $this->assertNotEmpty(
+            $migrationFiles,
+            'Expected timestamp-prefixed FORCE-RLS migrations to exist.'
+        );
+
+        $this->assertCount(
+            count($migrationFiles),
+            $forcedTables,
+            'Every FORCE-RLS migration should be represented by forcedTables().'
+        );
+
+        $this->assertContains('firm_users', $forcedTables);
+    }
+
 }

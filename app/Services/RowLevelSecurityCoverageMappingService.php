@@ -162,7 +162,7 @@ class RowLevelSecurityCoverageMappingService
      * (verified consistent across every FORCE migration written since
      * Section 39A-3A) — see discoverForcedTables().
      */
-    private const FORCE_RLS_MIGRATION_GLOB = 'force_rls_on_*_table.php';
+    private const FORCE_RLS_MIGRATION_GLOB = '*_force_rls_on_*_table.php';
 
     /**
      * @return array<int, string>
