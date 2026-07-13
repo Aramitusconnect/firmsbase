@@ -145,7 +145,7 @@ class HealthChecksForceRlsActivationTest extends TestCase
         $coverage = new RowLevelSecurityCoverageMappingService();
 
         // Narrowly updated by Section 39A-3L, Checkpoint 29 (incident_events) for the same reason — additive only, no existing assertion removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['health_checks', 'incident_events', 'maintenance_windows']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['health_checks', 'incident_events', 'maintenance_windows', 'notification_templates']);
 
         $actuallyForced = [];
 
@@ -162,7 +162,7 @@ class HealthChecksForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(48, count($actuallyForced), 'Exactly forty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 28 — no more, no less.');
+        $this->assertSame(49, count($actuallyForced), 'Exactly forty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 28 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -173,7 +173,7 @@ class HealthChecksForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
         // Narrowly updated by Section 39A-3L, Checkpoint 29 (incident_events) for the same reason — additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['health_checks', 'incident_events', 'maintenance_windows']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['health_checks', 'incident_events', 'maintenance_windows', 'notification_templates']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

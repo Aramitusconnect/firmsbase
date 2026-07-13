@@ -129,6 +129,12 @@ class RlsContextRolloutFirewallTest extends TestCase
             // batch, covering maintenance_windows). This test's own
             // scope (39A-2) never touched FORCE state.
             'maintenance_windows',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 31,
+            // Phase B6 (this repo's forty-ninth staged FORCE
+            // activation batch, covering notification_templates).
+            // This test's own scope (39A-2) never touched FORCE
+            // state.
+            'notification_templates',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -350,7 +356,12 @@ class RlsContextRolloutFirewallTest extends TestCase
                 // Section 39A-3L, Checkpoint 30 (this batch, a later,
                 // distinct staged-FORCE-activation branch) legitimately
                 // added a maintenance_windows-only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930030_force_rls_on_maintenance_windows_table.php',
+                && $path !== 'database/migrations/2026_08_25_930030_force_rls_on_maintenance_windows_table.php'
+                // Section 39A-3L, Checkpoint 31, Phase B6 (this batch,
+                // a later, distinct staged-FORCE-activation branch)
+                // legitimately added a notification_templates-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930031_force_rls_on_notification_templates_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));

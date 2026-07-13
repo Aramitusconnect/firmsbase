@@ -238,6 +238,15 @@ use Tests\TestCase;
  * tables are forced" list from forty-seven to forty-eight tables and
  * add this batch's own migration-existence check — same additive-only
  * pattern, no existing assertion removed or weakened.
+ *
+ * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 31, Phase B6
+ * (this repo's forty-ninth staged FORCE activation batch, covering
+ * notification_templates, database/migrations/2026_08_25_930031_
+ * force_rls_on_notification_templates_table.php) to extend the
+ * "exactly these tables are forced" list from forty-eight to
+ * forty-nine tables and add this batch's own migration-existence
+ * check — same additive-only pattern, no existing assertion removed
+ * or weakened.
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -379,6 +388,13 @@ class RlsForceRolloutFirewallTest extends TestCase
             // to forty-eight tables — same additive-only pattern, no
             // existing assertion removed or weakened.
             'maintenance_windows',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 31,
+            // Phase B6 (this repo's forty-ninth staged FORCE
+            // activation batch, covering notification_templates) to
+            // extend the "exactly these tables are forced" list from
+            // forty-eight to forty-nine tables — same additive-only
+            // pattern, no existing assertion removed or weakened.
+            'notification_templates',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -738,6 +754,13 @@ class RlsForceRolloutFirewallTest extends TestCase
         // Section 39A-3L, Checkpoint 30's own migration — same
         // file-existence reasoning as the checks above.
         $this->assertFileExists(base_path('database/migrations/2026_08_25_930030_force_rls_on_maintenance_windows_table.php'));
+    }
+
+    public function test_the_notification_templates_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3L, Checkpoint 31, Phase B6's own migration —
+        // same file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_25_930031_force_rls_on_notification_templates_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

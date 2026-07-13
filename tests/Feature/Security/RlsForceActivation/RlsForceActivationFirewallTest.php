@@ -127,6 +127,12 @@ class RlsForceActivationFirewallTest extends TestCase
             // batch, covering maintenance_windows) — this test's own
             // scope (39A-3A) only asserts clients here.
             'maintenance_windows',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 31,
+            // Phase B6 (this repo's forty-ninth staged FORCE
+            // activation batch, covering notification_templates) —
+            // this test's own scope (39A-3A) only asserts clients
+            // here.
+            'notification_templates',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
