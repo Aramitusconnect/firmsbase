@@ -154,7 +154,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events']);
 
         $actuallyForced = [];
 
@@ -171,7 +171,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(50, count($actuallyForced), 'Exactly forty-seven prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 29 — no more, no less.');
+        $this->assertSame(51, count($actuallyForced), 'Exactly forty-seven prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 29 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -181,7 +181,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

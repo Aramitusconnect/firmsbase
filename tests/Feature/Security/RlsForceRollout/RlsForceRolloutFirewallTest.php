@@ -255,6 +255,19 @@ use Tests\TestCase;
  * "exactly these tables are forced" list from forty-nine to fifty
  * tables and add this batch's own migration-existence check — same
  * additive-only pattern, no existing assertion removed or weakened.
+ *
+ * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 33, Phase B6
+ * (this repo's fifty-first staged FORCE activation batch, covering
+ * timeline_events, database/migrations/2026_08_25_930033_force_rls_
+ * on_timeline_events_table.php) to extend the "exactly these tables
+ * are forced" list from fifty to fifty-one tables and add this
+ * batch's own migration-existence check — same additive-only pattern,
+ * no existing assertion removed or weakened. Unlike every prior
+ * checkpoint in this file's own history, this migration issues no
+ * DROP POLICY/CREATE POLICY at all — a bare FORCE flip only, since
+ * timeline_events' existing single-clause policy was already exactly
+ * correct (no IS NULL branch needed or wanted; see this batch's own
+ * TimelineEventsForceRlsActivationTest for the full proof).
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -410,6 +423,13 @@ class RlsForceRolloutFirewallTest extends TestCase
             // to fifty tables — same additive-only pattern, no
             // existing assertion removed or weakened.
             'pilot_feedback_items',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 33,
+            // Phase B6 (this repo's fifty-first staged FORCE activation
+            // batch, covering timeline_events) to extend the "exactly
+            // these tables are forced" list from fifty to fifty-one
+            // tables — same additive-only pattern, no existing
+            // assertion removed or weakened.
+            'timeline_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -783,6 +803,16 @@ class RlsForceRolloutFirewallTest extends TestCase
         // Section 39A-3L, Checkpoint 32, Phase B6's own migration —
         // same file-existence reasoning as the checks above.
         $this->assertFileExists(base_path('database/migrations/2026_08_25_930032_force_rls_on_pilot_feedback_items_table.php'));
+    }
+
+    public function test_the_timeline_events_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3L, Checkpoint 33, Phase B6's own migration —
+        // same file-existence reasoning as the checks above. Unlike
+        // every prior checkpoint's own migration file, this one issues
+        // no DROP POLICY/CREATE POLICY at all (bare FORCE flip only) —
+        // its existence is still proven here the same way.
+        $this->assertFileExists(base_path('database/migrations/2026_08_25_930033_force_rls_on_timeline_events_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

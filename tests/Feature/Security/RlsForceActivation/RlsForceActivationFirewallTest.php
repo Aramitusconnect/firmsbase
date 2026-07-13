@@ -138,6 +138,11 @@ class RlsForceActivationFirewallTest extends TestCase
             // batch, covering pilot_feedback_items) — this test's own
             // scope (39A-3A) only asserts clients here.
             'pilot_feedback_items',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 33,
+            // Phase B6 (this repo's fifty-first staged FORCE activation
+            // batch, covering timeline_events) — this test's own scope
+            // (39A-3A) only asserts clients here.
+            'timeline_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
