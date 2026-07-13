@@ -1,0 +1,185 @@
+# schema-tenant-firewall.yml — Section 39A-4B (Agent 1B).
+#
+# This is the FIRST CI workflow of any kind in this repository. A prior
+# read-only audit (Wave 0E) confirmed there was no .github/workflows,
+# GitLab CI, or CircleCI configuration anywhere — every existing safety
+# net (RowLevelSecurityCoverageMappingServiceTest's live information_schema
+# diff, the per-section "Firewall" allowlist tests) only ever ran when a
+# human/agent manually invoked the test suite. Nothing stopped a new
+# database table from merging with zero tenant classification or RLS
+# policy. This workflow, together with `php artisan security:schema-firewall`
+# (app/Console/Commands/SchemaTenantFirewallCommand.php), is that gate.
+#
+# ---------------------------------------------------------------------
+# IMPORTANT — read before adapting this workflow for a real rollout
+# ---------------------------------------------------------------------
+#
+# 1. Database provisioning below (the "Provision the disposable CI
+#    database and role" step) creates a role literally named
+#    `rls_test_runner_39a3l` and a database matching the pattern
+#    `firmsbase_test_39a3l_disposable_<purpose>_<run_id>`. That exact
+#    name and pattern are NOT a real CI convention — they exist only
+#    because tests/bootstrap-verify-test-database.php (owned by a
+#    separate workstream, not this one) hard-aborts the entire PHPUnit
+#    process unless DB_USERNAME is exactly that role and DB_DATABASE
+#    matches that disposable-naming regex. That guard was built for
+#    this repository's interactive multi-agent mission tooling
+#    (tools/rls-test/*.sh), to stop a human/agent from accidentally
+#    running tests against a shared or persistent database mid-mission.
+#    A real, ephemeral, single-purpose GitHub Actions Postgres service
+#    container (as used below) does not need that protection — it is
+#    already fully isolated per run and destroyed when the job ends.
+#    Once the RLS migration effort this guard was protecting is
+#    complete, that guard file should be revisited/relaxed so a real CI
+#    pipeline is not forced to mimic this mission's internal naming
+#    scheme just to get the test suite to run at all. Until then, this
+#    workflow satisfies the guard as it exists today so that it can
+#    actually execute successfully.
+#
+# 2. Secrets / environment a REAL run needs, beyond what is generated
+#    ephemerally below:
+#      - None are required to run against the Postgres SERVICE CONTAINER
+#        defined in this file — its user/password/database are created
+#        fresh, in-job, and never leave the runner.
+#      - If a future revision of this workflow points at a persistent/
+#        managed Postgres instance instead of an ephemeral service
+#        container, it would need a `DATABASE_URL` (or discrete
+#        `DB_HOST` / `DB_PORT` / `DB_DATABASE` / `DB_USERNAME` /
+#        `DB_PASSWORD`) configured as GitHub Actions repository/
+#        environment secrets — never committed to this file.
+#      - `APP_KEY` is generated fresh per run below
+#        (`php artisan key:generate`) rather than stored as a secret,
+#        since nothing in this workflow persists encrypted data across
+#        runs. A deployment pipeline (not this CI gate) would need a
+#        real, secret-managed `APP_KEY` instead.
+#      - No third-party service credentials (Stripe, AI providers,
+#        email/SMS providers, etc.) are required for this gate — it
+#        never exercises those integrations.
+#
+# 3. This workflow deliberately runs `php artisan security:schema-firewall`
+#    as its own dedicated step (fails fast, clear job name in the GitHub
+#    UI) BEFORE the full test suite, and also runs the full existing
+#    protected test suite (`php artisan test`) so this becomes the first
+#    place either kind of regression — a schema/RLS classification gap,
+#    or a broken application test — is caught automatically on every
+#    pull request.
+
+name: Schema Tenant Firewall
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: schema-tenant-firewall-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  schema-tenant-firewall:
+    name: Schema tenant firewall + protected test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, pdo_pgsql, pgsql, bcmath, intl, zip, dom, curl, fileinfo
+          coverage: none
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare application environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Provision the disposable CI database and role
+        # See note 1 at the top of this file: this exact role name and
+        # database-naming pattern exist only to satisfy
+        # tests/bootstrap-verify-test-database.php's mission-specific
+        # guard, not because a real CI convention requires them.
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+
+          CI_DB_PASSWORD="$(openssl rand -hex 24)"
+          CI_DB_NAME="firmsbase_test_39a3l_disposable_ci_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+
+          psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -c \
+            "CREATE ROLE rls_test_runner_39a3l LOGIN PASSWORD '${CI_DB_PASSWORD}';"
+          psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -c \
+            "CREATE DATABASE \"${CI_DB_NAME}\" OWNER rls_test_runner_39a3l;"
+
+          {
+            echo "CI_DB_NAME=${CI_DB_NAME}"
+            echo "CI_DB_PASSWORD=${CI_DB_PASSWORD}"
+          } >> "$GITHUB_ENV"
+
+      - name: Run database migrations
+        env:
+          APP_ENV: testing
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: ${{ env.CI_DB_NAME }}
+          DB_USERNAME: rls_test_runner_39a3l
+          DB_PASSWORD: ${{ env.CI_DB_PASSWORD }}
+        run: php artisan migrate --force
+
+      - name: Run schema tenant firewall (security:schema-firewall)
+        env:
+          APP_ENV: testing
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: ${{ env.CI_DB_NAME }}
+          DB_USERNAME: rls_test_runner_39a3l
+          DB_PASSWORD: ${{ env.CI_DB_PASSWORD }}
+        run: php artisan security:schema-firewall
+
+      - name: Run full protected test suite
+        env:
+          APP_ENV: testing
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: ${{ env.CI_DB_NAME }}
+          DB_USERNAME: rls_test_runner_39a3l
+          DB_PASSWORD: ${{ env.CI_DB_PASSWORD }}
+        run: php artisan test
