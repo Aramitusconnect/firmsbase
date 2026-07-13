@@ -58,17 +58,29 @@ class ReadinessControllerTest extends TestCase
         // immediately (no real network wait) — proves the failure path
         // returns 503 and a bare "error" token, never the underlying
         // exception message/connection details.
+        //
+        // Restored in `finally`: RefreshDatabase rolls back this test's
+        // transaction via DB::connection() (the default connection) during
+        // its own teardown, so leaving `database.default` pointed at a
+        // nonexistent connection past the end of this test breaks that
+        // rollback with the same "not configured" exception, attributed
+        // back to this test rather than surfacing as an assertion result.
+        $originalDefault = config('database.default');
         config(['database.default' => 'nonexistent_connection_for_test']);
 
-        $response = $this->get('/readyz');
+        try {
+            $response = $this->get('/readyz');
 
-        $response->assertStatus(503);
-        $response->assertExactJson([
-            'status' => 'not_ready',
-            'checks' => [
-                'database' => 'error',
-            ],
-        ]);
+            $response->assertStatus(503);
+            $response->assertExactJson([
+                'status' => 'not_ready',
+                'checks' => [
+                    'database' => 'error',
+                ],
+            ]);
+        } finally {
+            config(['database.default' => $originalDefault]);
+        }
     }
 
     public function test_readiness_endpoint_checks_redis_when_cache_store_is_redis_and_reports_ok_when_reachable(): void
