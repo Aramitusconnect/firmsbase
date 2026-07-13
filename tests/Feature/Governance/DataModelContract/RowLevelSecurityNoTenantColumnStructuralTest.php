@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Governance\DataModelContract;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -30,9 +31,7 @@ class RowLevelSecurityNoTenantColumnStructuralTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider newExemptionTableProvider
-     */
+    #[DataProvider('newExemptionTableProvider')]
     public function test_new_exemption_table_has_no_firm_referencing_column(string $table, string $migrationGlob): void
     {
         $matches = glob(database_path('migrations/'.$migrationGlob)) ?: [];

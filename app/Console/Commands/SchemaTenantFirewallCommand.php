@@ -507,6 +507,9 @@ class SchemaTenantFirewallCommand extends Command
         $excludedFiles = [
             app_path('Services/RowLevelSecurityCoverageMappingService.php'),
             app_path('Services/ComplianceGapRegistryService.php'),
+            // This file's own docblock/pattern-comment examples otherwise
+            // trip its own detection regexes below.
+            app_path('Console/Commands/SchemaTenantFirewallCommand.php'),
         ];
 
         $patterns = [
