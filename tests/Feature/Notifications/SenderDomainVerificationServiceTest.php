@@ -61,8 +61,10 @@ class SenderDomainVerificationServiceTest extends TestCase
         $updated = $this->service->syncVerificationAcrossFirmTemplates($firm->id, 'mail.example.com', true);
 
         $this->assertSame(2, $updated);
-        $this->assertTrue($this->service->isVerified($templateA->fresh()));
-        $this->assertTrue($this->service->isVerified($templateB->fresh()));
+        $this->runWithFirmContext($firm, function () use ($templateA, $templateB) {
+            $this->assertTrue($this->service->isVerified($templateA->fresh()));
+            $this->assertTrue($this->service->isVerified($templateB->fresh()));
+        });
     }
 
     public function test_no_live_dns_lookup_is_performed_verification_reads_stored_fields_only(): void
