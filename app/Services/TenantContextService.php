@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Firm;
+use App\ValueObjects\TenantContext;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -40,8 +41,14 @@ use Illuminate\Support\Facades\DB;
  *    policies' own NULLIF(current_setting(...), '') pattern exactly —
  *    empirically confirmed to make current_setting() evaluate to NULL,
  *    which never equals any firm_id (fail closed).
- *  - Never leaves context set past the end of runWithFirmContext(),
- *    even when the callback throws.
+ *  - runWithFirmContext() restores whatever context (if any) was active
+ *    immediately before it was called, rather than unconditionally
+ *    clearing — it may be nested inside an already-active ambient
+ *    context (e.g. HTTP middleware that set context for the whole
+ *    request, such as FirmPanelProvider's EstablishFirmTenantContext).
+ *    An unconditional clear would wipe that outer context for the rest
+ *    of the request/job instead of merely undoing this call's own
+ *    effect. This restore happens even when the callback throws.
  */
 class TenantContextService
 {
@@ -81,20 +88,23 @@ class TenantContextService
     /**
      * Sets PHP-memory context, wraps the callback in a real database
      * transaction, and pushes the PostgreSQL session setting using SET
-     * LOCAL semantics. Also EXPLICITLY clears the database setting in
-     * a finally block rather than relying solely on transaction-end
-     * auto-revert: when runWithFirmContext() is itself called inside
-     * an already-open outer transaction (e.g. RefreshDatabase's own
-     * per-test transaction), the inner DB::transaction() becomes a
-     * savepoint rather than a true transaction boundary, and Postgres
-     * scopes SET LOCAL to the enclosing transaction, not the savepoint
-     * — so it would otherwise leak into the rest of that outer
-     * transaction. The explicit clear makes this safe regardless of
-     * nesting. PHP-memory context is always cleared too, regardless of
-     * outcome.
+     * LOCAL semantics. Saves whatever context (PHP-memory and database)
+     * was active before the call, and restores exactly that in a
+     * finally block — rather than unconditionally clearing — because
+     * when runWithFirmContext() is itself called inside an already-open
+     * outer transaction (e.g. RefreshDatabase's own per-test
+     * transaction) OR inside an already-active ambient, non-transaction
+     * -scoped context (e.g. HTTP middleware that set context for the
+     * whole request), an unconditional clear would wipe that outer
+     * context instead of merely undoing this call's own effect. This
+     * restore happens regardless of nesting and even when the callback
+     * throws.
      */
     public function runWithFirmContext(Firm|int|string $firm, callable $callback): mixed
     {
+        $previousContext = TenantContextResolver::current();
+        $previousDatabaseFirmId = $this->currentDatabaseTenantContextValue();
+
         $this->setFirmContext($firm);
 
         try {
@@ -104,8 +114,8 @@ class TenantContextService
                 return $callback();
             });
         } finally {
-            $this->clearDatabaseTenantContext();
-            $this->clearFirmContext();
+            $this->restoreDatabaseTenantContext($previousDatabaseFirmId);
+            $this->restoreFirmContext($previousContext);
         }
     }
 
@@ -136,6 +146,45 @@ class TenantContextService
     public function clearDatabaseTenantContext(): void
     {
         DB::select('select set_config(?, ?, ?)', [self::SESSION_SETTING_NAME, '', $this->isLocalScoped()]);
+    }
+
+    /**
+     * Reads the CURRENTLY active database session/transaction setting,
+     * without touching it. Returns null for both "never set" and
+     * "explicitly cleared to empty string" — the same equivalence the
+     * RLS policies themselves rely on (NULLIF(current_setting(...), '')).
+     * Used by runWithFirmContext() to snapshot the prior value so it can
+     * be restored afterward instead of unconditionally cleared.
+     */
+    private function currentDatabaseTenantContextValue(): ?string
+    {
+        $value = DB::selectOne('select current_setting(?, true) as value', [self::SESSION_SETTING_NAME])?->value;
+
+        return $value === '' ? null : $value;
+    }
+
+    /**
+     * Restores a previously-snapshotted database session/transaction
+     * setting (from currentDatabaseTenantContextValue()) — null restores
+     * to the cleared empty-string state, matching clearDatabaseTenantContext().
+     */
+    private function restoreDatabaseTenantContext(?string $previousFirmId): void
+    {
+        DB::select('select set_config(?, ?, ?)', [self::SESSION_SETTING_NAME, $previousFirmId ?? '', $this->isLocalScoped()]);
+    }
+
+    /**
+     * Restores a previously-snapshotted PHP-memory context (from
+     * TenantContextResolver::current(), taken before runWithFirmContext()
+     * overwrote it) — null restores to the cleared state.
+     */
+    private function restoreFirmContext(?TenantContext $previousContext): void
+    {
+        if ($previousContext === null) {
+            TenantContextResolver::clear();
+        } else {
+            TenantContextResolver::set($previousContext);
+        }
     }
 
     /**
