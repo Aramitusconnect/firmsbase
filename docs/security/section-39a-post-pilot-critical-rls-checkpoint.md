@@ -7,6 +7,8 @@
 
 ---
 
+> **Correction (2026-07-13):** §4 ("44 prepared-but-unforced") and §5 ("43" uncovered tenant tables), and the corresponding references in §8–11, are a 2026-07-10 snapshot and are now stale. Following the Section 39A-3L FORCE RLS rollout (merged into `main`), **all 52 RLS-prepared tables are now forced — 0 prepared-but-unforced tables remain.** Separately, a later Wave 0/1 inventory-sweep correction identified more true tenant-owned tables than the original 39A-4 scope had captured, so the accurate current uncovered count is **61**, not 43 (a scoping correction, not a regression — no table went from covered to uncovered). See `docs/governance/rls-gap-registry.md` for the current authoritative gap accounting. The narrative, table lists, and verification detail below are preserved as the historical record of this checkpoint's original inspection and are not otherwise rewritten.
+
 ## 1. Current main commit
 
 ```
@@ -47,7 +49,7 @@ All 8 pilot-critical tables are forced. No table outside this list has FORCE RLS
 
 Computed via `RowLevelSecurityCoverageMappingService::preparedTables()` (the same source used by the existing RLS firewall/coverage tests) minus the 8 now-forced tables.
 
-**Count: 44**
+**Count: 44** *(Corrected 2026-07-13: 0 remain unforced — Section 39A-3L completed forcing all 52 prepared tables. See correction note above. The table list immediately below is preserved as the historical 2026-07-10 snapshot.)*
 
 ```
 firm_settings, security_events, firm_licenses, firm_entitlements,
@@ -72,7 +74,7 @@ These tables have `ENABLE ROW LEVEL SECURITY` + a firm-matching policy already i
 
 Computed via `RowLevelSecurityCoverageMappingService::missingPreparedTables()`.
 
-**Count: 43**
+**Count: 43** *(Corrected 2026-07-13: the accurate current count is 61 — a later Wave 0/1 inventory-sweep correction found more true tenant-owned tables than this checkpoint's original scope had captured. See correction note above and `docs/governance/rls-gap-registry.md`. The table list immediately below is preserved as the historical 2026-07-10 snapshot and is not itself wrong for that date — it is simply incomplete relative to the corrected inventory.)*
 
 ```
 accounting_export_batches, ai_approval_events, ai_approval_requests,
