@@ -119,7 +119,14 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertCount(61, $this->service->missingPreparedTables());
         $this->assertCount(22, $this->service->exemptTables());
         $this->assertCount(113, $this->service->tenantOwnedTables());
-        $this->assertCount(18, $this->service->forcedTables());
+        $forceMigrationFiles = glob(
+            database_path('migrations/*_force_rls_on_*_table.php')
+        ) ?: [];
+
+        $this->assertCount(
+            count($forceMigrationFiles),
+            $this->service->forcedTables()
+        );
     }
 
     public function test_missing_prepared_tables_includes_the_section_39a4a1_registry_gap_tables(): void
