@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Services\RowLevelSecurityCoverageMappingService;
+use App\ValueObjects\ExemptTableMetadata;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -81,6 +82,7 @@ class SchemaTenantFirewallCommand extends Command
      * method `(string $table): ?string`.
      */
     private const OWNERSHIP_PATH_METHOD_CANDIDATES = [
+        'ownershipPathOf',
         'ownershipPaths', 'tenantOwnershipPaths', 'ownershipPathMap',
         'ownershipPathFor', 'ownershipPathForTable', 'tenantOwnershipPathFor',
     ];
@@ -90,6 +92,7 @@ class SchemaTenantFirewallCommand extends Command
      * documented reasons.
      */
     private const EXEMPTION_REASON_METHOD_CANDIDATES = [
+        'exemptMetadataFor',
         'exemptionReasons', 'exemptTableReasons', 'exemptionReasonMap',
         'exemptionReasonFor', 'exemptionReasonForTable',
     ];
@@ -329,6 +332,10 @@ class SchemaTenantFirewallCommand extends Command
     {
         if ($value === null) {
             return false;
+        }
+
+        if ($value instanceof ExemptTableMetadata) {
+            return trim($value->reason) !== '';
         }
 
         if (is_string($value)) {
