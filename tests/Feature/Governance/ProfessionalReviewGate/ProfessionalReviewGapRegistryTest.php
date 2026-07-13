@@ -89,8 +89,15 @@ class ProfessionalReviewGapRegistryTest extends TestCase
     {
         $referenced = $this->service->overallGateStatus()['referenced_gaps'];
 
-        foreach ($referenced as $gapKey) {
-            $this->assertTrue($this->registry->isTracked($gapKey), "referenced_gaps entry '{$gapKey}' must exist in ComplianceGapRegistryService.");
-        }
+        $missing = array_values(array_filter(
+            $referenced,
+            fn (string $gapKey): bool => ! $this->registry->isTracked($gapKey)
+        ));
+
+        $this->assertSame(
+            [],
+            $missing,
+            'Every referenced_gaps entry must exist in ComplianceGapRegistryService.'
+        );
     }
 }
