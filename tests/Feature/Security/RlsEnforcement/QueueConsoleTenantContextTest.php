@@ -4,6 +4,7 @@ namespace Tests\Feature\Security\RlsEnforcement;
 
 use App\Models\Client;
 use App\Models\Firm;
+use App\Services\TenantContextService;
 use App\Support\TenantAwareJobContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -79,6 +80,13 @@ class QueueConsoleTenantContextTest extends TestCase
         $firmB = Firm::factory()->create();
         Client::factory()->forFirm($firmA)->create();
         Client::factory()->forFirm($firmB)->create();
+
+        // ClientFactory deliberately leaves the database tenant context
+        // set to the last-created row's firm after create() returns
+        // (see its own docblock) — clear that baseline so the "no
+        // context is active outside the loop" assertion below proves
+        // what it actually claims to, rather than passing by accident.
+        (new TenantContextService())->clearDatabaseTenantContext();
 
         DB::statement('ALTER TABLE clients FORCE ROW LEVEL SECURITY');
 

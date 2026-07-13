@@ -14,16 +14,20 @@ namespace App\Services;
  *
  * RLS enforcement (FORCE ROW LEVEL SECURITY + SET LOCAL
  * app.current_firm_id session middleware) is PARTIALLY active: as of
- * Sections 39A-3A through 39A-3K, FORCE ROW LEVEL SECURITY has been
- * activated on 18 of the 52 prepared tables (see FORCED_TABLES below),
- * and SET LOCAL app.current_firm_id wiring (TenantContextService) is
- * exercised by every one of those 18 tables' write paths. This is
- * real, partial enforcement — it is NOT schema-wide: the remaining 34
- * prepared tables are still inert for the app's own database
- * connection (table-owner role is exempt from non-forced RLS), and the
- * 61 tables in MISSING_PREPARED_TABLES have no RLS policy of any kind
- * yet. Do not read this docblock as "RLS is fully enforced" — it is
- * not.
+ * Section 39A-3K, FORCE ROW LEVEL SECURITY had been activated on 18 of
+ * the 52 prepared tables, and further sections keep forcing more of
+ * them one batch at a time. Rather than hardcode a count that a
+ * still-active rollout would immediately outdate again,
+ * forcedTables() below is derived at call time from every
+ * database/migrations/*_force_rls_on_*_table.php migration present in
+ * the repository — see forcedTables() for how. SET LOCAL
+ * app.current_firm_id wiring (TenantContextService) is exercised by
+ * every forced table's write paths. This is real, partial enforcement
+ * — it is NOT schema-wide: prepared tables that have no FORCE
+ * migration yet are still inert for the app's own database connection
+ * (table-owner role is exempt from non-forced RLS), and the 61 tables
+ * in MISSING_PREPARED_TABLES have no RLS policy of any kind yet. Do
+ * not read this docblock as "RLS is fully enforced" — it is not.
  *
  * Source of truth: the 6 RLS-preparation migrations
  * (2026_07_04_500001 through 2026_07_09_900024) cover only Phases 1-6.
@@ -152,25 +156,13 @@ class RowLevelSecurityCoverageMappingService
     ];
 
     /**
-     * Subset of PREPARED_TABLES that also have FORCE ROW LEVEL
-     * SECURITY active today, per the 18 FORCE-activation migrations
-     * completed across Sections 39A-3A through 39A-3K
-     * (database/migrations/2026_07_30_900001_force_rls_on_clients_table.php
-     * through 2026_08_20_920005_force_rls_on_client_communication_preferences_table.php).
-     * Like PREPARED_TABLES/MISSING_PREPARED_TABLES/EXEMPT_TABLES, this
-     * is built from direct migration inspection, not live introspection
-     * — kept in sync manually whenever a future section forces another
-     * prepared table.
-     *
-     * @var array<int, string>
+     * Filename glob matching every FORCE-activation migration. Each
+     * matching migration is a `return new class extends Migration`
+     * with a `private const TABLE = '<table_name>';` declaration
+     * (verified consistent across every FORCE migration written since
+     * Section 39A-3A) — see discoverForcedTables().
      */
-    private const FORCED_TABLES = [
-        'calendar_events', 'client_communication_preferences', 'clients',
-        'conflict_check_runs', 'consultation_outcomes', 'consultations',
-        'deadlines', 'document_chase_rules', 'documents', 'employee_rates',
-        'firm_leads', 'firm_practice_areas', 'firm_users', 'invoices',
-        'lead_sources', 'matters', 'payments', 'tasks',
-    ];
+    private const FORCE_RLS_MIGRATION_GLOB = '*_force_rls_on_*_table.php';
 
     /**
      * @return array<int, string>
@@ -205,11 +197,44 @@ class RowLevelSecurityCoverageMappingService
     }
 
     /**
+     * Every table with FORCE ROW LEVEL SECURITY active, derived by
+     * scanning database/migrations for every FORCE-activation
+     * migration and reading each one's own `private const TABLE`
+     * declaration. This is intentionally not a hardcoded list: the
+     * FORCE rollout is still an active, checkpoint-by-checkpoint
+     * effort, and a hardcoded array here has repeatedly gone stale
+     * (18 was correct as of Section 39A-3K and wrong within days of
+     * Section 39A-3L starting). Deriving it from the migrations that
+     * are the actual source of truth for FORCE state means this never
+     * needs another manual bump — landing a new
+     * force_rls_on_<table>_table.php migration is sufficient.
+     *
      * @return array<int, string>
      */
     public function forcedTables(): array
     {
-        return self::FORCED_TABLES;
+        return $this->discoverForcedTables();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function discoverForcedTables(): array
+    {
+        $tables = [];
+
+        foreach (glob(database_path('migrations/'.self::FORCE_RLS_MIGRATION_GLOB)) ?: [] as $path) {
+            $source = file_get_contents($path);
+
+            if ($source !== false && preg_match("/private const TABLE = '([a-z_][a-z0-9_]*)'/", $source, $matches)) {
+                $tables[] = $matches[1];
+            }
+        }
+
+        $tables = array_values(array_unique($tables));
+        sort($tables);
+
+        return $tables;
     }
 
     /**
@@ -222,14 +247,17 @@ class RowLevelSecurityCoverageMappingService
             'tenant_owned_count' => count($this->tenantOwnedTables()),
             'missing_prepared_count' => count(self::MISSING_PREPARED_TABLES),
             // Aggregate FORCE-count so callers are never misled by a
-            // single boolean: 18 of 52 prepared tables are forced
-            // today. 'enforcement_active' below means "FORCE is active
-            // on every prepared table" (schema-wide enforcement) — it
-            // is intentionally still false, since 34 prepared tables
-            // remain unforced. Use forced_count / forcedTables() /
-            // isForced() for partial/per-table enforcement state.
-            'forced_count' => count(self::FORCED_TABLES),
-            'enforcement_active' => count(self::FORCED_TABLES) === count(self::PREPARED_TABLES),
+            // single boolean: forced_count/forcedTables() reflect
+            // however many FORCE migrations exist right now (see
+            // discoverForcedTables()) and grow on their own as the
+            // rollout lands more of them. 'enforcement_active' below
+            // means "FORCE is active on every prepared table"
+            // (schema-wide enforcement) — false until every prepared
+            // table has a FORCE migration. Use forced_count /
+            // forcedTables() / isForced() for partial/per-table
+            // enforcement state.
+            'forced_count' => count($this->forcedTables()),
+            'enforcement_active' => count($this->forcedTables()) === count(self::PREPARED_TABLES),
         ];
     }
 
@@ -245,6 +273,6 @@ class RowLevelSecurityCoverageMappingService
 
     public function isForced(string $table): bool
     {
-        return in_array($table, self::FORCED_TABLES, true);
+        return in_array($table, $this->forcedTables(), true);
     }
 }

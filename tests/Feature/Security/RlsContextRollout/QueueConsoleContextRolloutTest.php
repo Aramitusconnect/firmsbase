@@ -5,6 +5,7 @@ namespace Tests\Feature\Security\RlsContextRollout;
 use App\Models\Client;
 use App\Models\Firm;
 use App\Models\Matter;
+use App\Services\TenantContextService;
 use App\Support\TenantAwareJobContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -46,6 +47,13 @@ class QueueConsoleContextRolloutTest extends TestCase
         $clientB = Client::factory()->forFirm($firmB)->create();
         Matter::factory()->forFirm($firmB)->create();
 
+        // ClientFactory/MatterFactory deliberately leave the database
+        // tenant context set to the last-created row's firm after
+        // create() returns (see ClientFactory's own docblock) — clear
+        // that baseline so "no context bleeds forward" below proves
+        // what it actually claims to, rather than passing by accident.
+        (new TenantContextService())->clearDatabaseTenantContext();
+
         DB::statement('ALTER TABLE clients FORCE ROW LEVEL SECURITY');
         DB::statement('ALTER TABLE matters FORCE ROW LEVEL SECURITY');
 
@@ -83,6 +91,14 @@ class QueueConsoleContextRolloutTest extends TestCase
             Client::factory()->forFirm($firm)->create();
             Matter::factory()->forFirm($firm)->create();
         }
+
+        // ClientFactory/MatterFactory deliberately leave the database
+        // tenant context set to the last-created row's firm after
+        // create() returns (see ClientFactory's own docblock) — clear
+        // that baseline so "no context is active outside the loop"
+        // below proves what it actually claims to, rather than passing
+        // by accident.
+        (new TenantContextService())->clearDatabaseTenantContext();
 
         DB::statement('ALTER TABLE clients FORCE ROW LEVEL SECURITY');
         DB::statement('ALTER TABLE matters FORCE ROW LEVEL SECURITY');

@@ -90,7 +90,17 @@ class TenantContextServiceTest extends TestCase
     public function test_tenant_context_is_cleared_after_run_with_firm_context_database_layer(): void
     {
         $firmA = Firm::factory()->create();
+        // ClientFactory deliberately leaves the database tenant context
+        // set to the created row's firm after create() returns (see its
+        // own docblock) — clear that baseline first so this test proves
+        // what it actually claims to prove: that runWithFirmContext()
+        // itself does not leak forward when there was no ambient
+        // context active before it was called. (Nesting into an
+        // existing ambient context is covered separately by
+        // TenantContextServiceSessionScopedNestingTest, where the
+        // correct behavior is to restore, not clear, that context.)
         $clientA = Client::factory()->forFirm($firmA)->create();
+        $this->tenantContext->clearDatabaseTenantContext();
 
         DB::statement('ALTER TABLE clients FORCE ROW LEVEL SECURITY');
 
