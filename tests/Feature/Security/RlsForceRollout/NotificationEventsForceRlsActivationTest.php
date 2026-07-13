@@ -195,7 +195,8 @@ class NotificationEventsForceRlsActivationTest extends TestCase
         $coverage = new RowLevelSecurityCoverageMappingService();
 
         // Narrowly updated by Section 39A-3L, Checkpoint 27 (backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['notification_events', 'contacts', 'parties', 'backup_restore_tests']);
+        // Narrowly updated by Section 39A-3L, Checkpoint 28 (health_checks) for the same reason — additive only, no existing assertion removed or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks']);
 
         $actuallyForced = [];
 
@@ -213,7 +214,7 @@ class NotificationEventsForceRlsActivationTest extends TestCase
         sort($actuallyForced);
 
         // Narrowly updated by Section 39A-3L, Checkpoint 26 (parties) for the same reason — additive only, no existing assertion removed or weakened.
-        $this->assertSame(45, count($actuallyForced), 'Exactly forty-two prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 24 — no more, no less.');
+        $this->assertSame(46, count($actuallyForced), 'Exactly forty-two prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 24 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -224,7 +225,8 @@ class NotificationEventsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
         // Narrowly updated by Section 39A-3L, Checkpoint 27 (backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['notification_events', 'contacts', 'parties', 'backup_restore_tests']);
+        // Narrowly updated by Section 39A-3L, Checkpoint 28 (health_checks) for the same reason — additive only, no existing assertion removed or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

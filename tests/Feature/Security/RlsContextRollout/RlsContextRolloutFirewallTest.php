@@ -114,6 +114,11 @@ class RlsContextRolloutFirewallTest extends TestCase
             // covering backup_restore_tests). This test's own scope
             // (39A-2) never touched FORCE state.
             'backup_restore_tests',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 28
+            // (this repo's forty-sixth staged FORCE activation batch,
+            // covering health_checks). This test's own scope (39A-2)
+            // never touched FORCE state.
+            'health_checks',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -323,7 +328,11 @@ class RlsContextRolloutFirewallTest extends TestCase
                 // Section 39A-3L, Checkpoint 27 (this batch, a later,
                 // distinct staged-FORCE-activation branch) legitimately
                 // added a backup_restore_tests-only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930027_force_rls_on_backup_restore_tests_table.php',
+                && $path !== 'database/migrations/2026_08_25_930027_force_rls_on_backup_restore_tests_table.php'
+                // Section 39A-3L, Checkpoint 28 (this batch, a later,
+                // distinct staged-FORCE-activation branch) legitimately
+                // added a health_checks-only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930028_force_rls_on_health_checks_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));

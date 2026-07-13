@@ -214,6 +214,14 @@ use Tests\TestCase;
  * these tables are forced" list from forty-four to forty-five tables
  * and add this batch's own migration-existence check — same
  * additive-only pattern, no existing assertion removed or weakened.
+ *
+ * Narrowly updated AGAIN by Section 39A-3L, Checkpoint 28 (this
+ * repo's forty-sixth staged FORCE activation batch, covering
+ * health_checks, database/migrations/2026_08_25_930028_force_rls_on_
+ * health_checks_table.php) to extend the "exactly these tables are
+ * forced" list from forty-five to forty-six tables and add this
+ * batch's own migration-existence check — same additive-only pattern,
+ * no existing assertion removed or weakened.
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -334,6 +342,13 @@ class RlsForceRolloutFirewallTest extends TestCase
             // forty-five tables — same additive-only pattern, no
             // existing assertion removed or weakened.
             'backup_restore_tests',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 28
+            // (this repo's forty-sixth staged FORCE activation batch,
+            // covering health_checks) to extend the "exactly these
+            // tables are forced" list from forty-five to forty-six
+            // tables — same additive-only pattern, no existing
+            // assertion removed or weakened.
+            'health_checks',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -672,6 +687,13 @@ class RlsForceRolloutFirewallTest extends TestCase
         // Section 39A-3L, Checkpoint 27's own migration — same
         // file-existence reasoning as the checks above.
         $this->assertFileExists(base_path('database/migrations/2026_08_25_930027_force_rls_on_backup_restore_tests_table.php'));
+    }
+
+    public function test_the_health_checks_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3L, Checkpoint 28's own migration — same
+        // file-existence reasoning as the checks above.
+        $this->assertFileExists(base_path('database/migrations/2026_08_25_930028_force_rls_on_health_checks_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

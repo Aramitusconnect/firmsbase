@@ -135,7 +135,8 @@ class BackupRestoreTestsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['backup_restore_tests']);
+        // Narrowly updated by Section 39A-3L, Checkpoint 28 (health_checks) for the same reason — additive only, no existing assertion removed or weakened.
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['backup_restore_tests', 'health_checks']);
 
         $actuallyForced = [];
 
@@ -152,7 +153,7 @@ class BackupRestoreTestsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(45, count($actuallyForced), 'Exactly forty-five prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 27 — no more, no less.');
+        $this->assertSame(46, count($actuallyForced), 'Exactly forty-five prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 27 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -162,7 +163,8 @@ class BackupRestoreTestsForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['backup_restore_tests']);
+        // Narrowly updated by Section 39A-3L, Checkpoint 28 (health_checks) for the same reason — additive only, no existing assertion removed or weakened.
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['backup_restore_tests', 'health_checks']);
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {
