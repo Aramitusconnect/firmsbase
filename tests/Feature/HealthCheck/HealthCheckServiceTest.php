@@ -9,6 +9,7 @@ use App\Services\HealthCheckRegistry;
 use App\Services\HealthCheckService;
 use App\Services\QueueHealthService;
 use App\Services\SchedulerHealthService;
+use App\Services\TenantContextService;
 use App\Services\TenantIsolationAnomalyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -43,7 +44,10 @@ class HealthCheckServiceTest extends TestCase
 
         $this->service->runAllAndRecord($firm);
 
-        $tenantCheck = \App\Models\HealthCheck::query()->where('check_type', HealthCheckType::TenantIsolationAnomalies->value)->first();
+        $tenantCheck = app(TenantContextService::class)->runWithFirmContext(
+            $firm,
+            fn () => \App\Models\HealthCheck::query()->where('check_type', HealthCheckType::TenantIsolationAnomalies->value)->first()
+        );
         $webUptimeCheck = \App\Models\HealthCheck::query()->where('check_type', HealthCheckType::WebUptime->value)->first();
 
         $this->assertSame($firm->id, $tenantCheck->firm_id);

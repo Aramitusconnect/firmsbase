@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\HealthCheckStatus;
 use App\Enums\HealthCheckType;
 use App\Models\Firm;
+use App\Services\TenantContextService;
 use App\ValueObjects\HealthCheckResult;
 
 /**
@@ -27,10 +28,17 @@ class TenantIsolationAnomalyService
      * Firm is nullable to allow recording a platform-wide anomaly
      * (e.g. a query pattern that could affect every tenant), though in
      * practice most anomalies are firm-specific.
+     *
+     * Self-wraps its own body in the correct tenant context matching
+     * $firm. Callers must NOT nest this call inside their own
+     * runWithFirmContext()/runWithoutFirmContext() wrap — doing so
+     * would let this method's own finally block clear the outer
+     * caller's context prematurely (the "decoy wrap" bug class). Call
+     * standalone; wrap only what runs before/after it.
      */
     public function recordAnomaly(?Firm $firm, string $description, array $metadata = []): \App\Models\HealthCheck
     {
-        return \App\Models\HealthCheck::create([
+        $create = fn () => \App\Models\HealthCheck::create([
             'firm_id' => $firm?->id,
             'check_type' => HealthCheckType::TenantIsolationAnomalies,
             'status' => HealthCheckStatus::Unhealthy,
@@ -38,6 +46,12 @@ class TenantIsolationAnomalyService
             'checked_at' => now(),
             'metadata_json' => $metadata,
         ]);
+
+        $tenantContext = app(TenantContextService::class);
+
+        return $firm
+            ? $tenantContext->runWithFirmContext($firm, $create)
+            : $tenantContext->runWithoutFirmContext($create);
     }
 
     /**

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Firm;
 use App\Models\HealthCheck;
+use App\Services\TenantContextService;
 
 /**
  * HealthCheckService — persists a health_checks row (append-only) for
@@ -26,21 +27,65 @@ class HealthCheckService
     }
 
     /**
+     * Read phase runs under one context (matching $firm) so that
+     * checkForKnownAnomalyPatterns() (invoked transitively via
+     * registry->runAll()) can only ever observe rows RLS permits for
+     * that context. Write phase is then split by each result's own
+     * destined firm_id: the 8 always-platform-wide results write under
+     * runWithoutFirmContext(), and the one TenantIsolationAnomalies
+     * result (only when $firm is given) writes under
+     * runWithFirmContext($firm, ...). A single shared wrap for the
+     * whole method would make the 8 null-firm_id writes fail the
+     * asymmetric WITH CHECK whenever $firm is given.
+     *
      * @return array<int, HealthCheck>
      */
     public function runAllAndRecord(?Firm $firm = null): array
     {
         $checkedAt = now();
+        $tenantContext = app(TenantContextService::class);
 
-        return array_map(function ($result) use ($firm, $checkedAt) {
-            return HealthCheck::create([
-                'firm_id' => $result->checkType === \App\Enums\HealthCheckType::TenantIsolationAnomalies ? $firm?->id : null,
+        $readBody = fn () => $this->registry->runAll();
+
+        $results = $firm
+            ? $tenantContext->runWithFirmContext($firm, $readBody)
+            : $tenantContext->runWithoutFirmContext($readBody);
+
+        $platformResults = [];
+        $firmResult = null;
+
+        foreach ($results as $result) {
+            if ($firm && $result->checkType === \App\Enums\HealthCheckType::TenantIsolationAnomalies) {
+                $firmResult = $result;
+            } else {
+                $platformResults[] = $result;
+            }
+        }
+
+        $writePlatform = fn () => array_map(
+            fn ($result) => HealthCheck::create([
+                'firm_id' => null,
                 'check_type' => $result->checkType,
                 'status' => $result->status,
                 'detail' => $result->detail,
                 'checked_at' => $checkedAt,
-            ]);
-        }, $this->registry->runAll());
+            ]),
+            $platformResults
+        );
+
+        $created = $tenantContext->runWithoutFirmContext($writePlatform);
+
+        if ($firmResult !== null) {
+            $created[] = $tenantContext->runWithFirmContext($firm, fn () => HealthCheck::create([
+                'firm_id' => $firm->id,
+                'check_type' => $firmResult->checkType,
+                'status' => $firmResult->status,
+                'detail' => $firmResult->detail,
+                'checked_at' => $checkedAt,
+            ]));
+        }
+
+        return $created;
     }
 
     public function latestFor(\App\Enums\HealthCheckType $type): ?HealthCheck
