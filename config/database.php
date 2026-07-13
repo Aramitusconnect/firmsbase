@@ -179,6 +179,27 @@ return [
             'backoff_cap' => env('REDIS_BACKOFF_CAP', 1000),
         ],
 
+        // Dedicated queue connection/database index — kept separate from
+        // 'default' (distributed locks/general use) and 'cache' so queue
+        // traffic (potentially high-volume, latency-sensitive) is isolated
+        // from cache eviction/lock contention on the same Redis logical
+        // database. config/queue.php's redis connection defaults to
+        // REDIS_QUEUE_CONNECTION=default for backward compatibility; set
+        // REDIS_QUEUE_CONNECTION=queue in ECS task environments to use this
+        // isolated connection instead. See docs/ecs/queue-and-redis-architecture.md.
+        'queue' => [
+            'url' => env('REDIS_URL'),
+            'host' => env('REDIS_HOST', '127.0.0.1'),
+            'username' => env('REDIS_USERNAME'),
+            'password' => env('REDIS_PASSWORD'),
+            'port' => env('REDIS_PORT', '6379'),
+            'database' => env('REDIS_QUEUE_DB', '2'),
+            'max_retries' => env('REDIS_MAX_RETRIES', 3),
+            'backoff_algorithm' => env('REDIS_BACKOFF_ALGORITHM', 'decorrelated_jitter'),
+            'backoff_base' => env('REDIS_BACKOFF_BASE', 100),
+            'backoff_cap' => env('REDIS_BACKOFF_CAP', 1000),
+        ],
+
     ],
 
 ];

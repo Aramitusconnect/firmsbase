@@ -1,0 +1,35 @@
+{
+	# TLS terminates at the ALB (see docs/ecs/infrastructure-architecture.md
+	# "ALB and HTTPS listener") — this container only ever speaks plain HTTP
+	# on the container port. Disabling auto_https also stops Caddy from
+	# attempting any outbound ACME/cert traffic, which would otherwise be a
+	# confusing unexplained egress requirement for a task that should have
+	# none beyond RDS/Redis/AWS API calls.
+	auto_https off
+	admin off
+
+	# FrankenPHP classic (non-worker) mode — one fresh PHP request lifecycle
+	# per HTTP request, behaviorally identical to php-fpm, zero application
+	# code changes required. See docs/ecs/container-architecture.md.
+	frankenphp
+}
+
+:8080 {
+	root * public
+	encode gzip
+
+	# Structured access log to stdout — no log file on local disk, consistent
+	# with docs/ecs/observability.md (stdout/stderr only, collected by the
+	# ECS awslogs driver into CloudWatch).
+	log {
+		output stdout
+		format json
+	}
+
+	php_server
+
+	# Anything not matched by php_server (i.e. not an existing static file
+	# under public/ and not routed to index.php) falls through to Laravel's
+	# own 404 handling via php_server's default rewrite-to-index.php
+	# behavior — no separate file_server block needed.
+}

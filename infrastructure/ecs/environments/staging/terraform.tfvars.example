@@ -1,0 +1,40 @@
+# Copy to terraform.tfvars and fill in real values (or, better, pass
+# sensitive values via -var/-var-file sourced from Secrets Manager at plan
+# time rather than committing them to a tfvars file at all).
+# terraform.tfvars is gitignored (see infrastructure/ecs/.gitignore) —
+# never commit real values.
+#
+# Every value below is a placeholder. See docs/ecs/staging-readiness-report.md
+# "required AWS inputs" for who needs to supply each one and why this
+# mission does not fill them in itself.
+
+aws_region  = "us-east-1"
+name_prefix = "firmsbase-staging"
+
+vpc_id              = "vpc-REPLACE_ME"
+public_subnet_ids   = ["subnet-REPLACE_ME_PUBLIC_A", "subnet-REPLACE_ME_PUBLIC_B"]
+private_subnet_ids  = ["subnet-REPLACE_ME_PRIVATE_A", "subnet-REPLACE_ME_PRIVATE_B"]
+alb_ingress_cidr_blocks = ["203.0.113.0/24"] # replace with actual allowed staging-access range
+
+acm_certificate_arn = "arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/REPLACE_ME"
+
+rds_instance_id       = "REPLACE_ME"
+rds_security_group_id = "sg-REPLACE_ME"
+db_host                = "REPLACE_ME.rds.amazonaws.com"
+db_database              = "firmsbase_staging"
+
+# Supplied by the CI/CD pipeline for a real deploy — see
+# .github/workflows/ecs-pipeline.yml. Never hand-typed for anything beyond
+# a local `terraform validate`/`plan` dry run.
+app_image_digest = "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/firmsbase-app@sha256:REPLACE_ME"
+
+app_key_secret_arn          = "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:firmsbase/staging/app-key-REPLACE_ME"
+db_password_secret_arn       = "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:firmsbase/staging/db-password-REPLACE_ME"
+redis_auth_token_secret_arn   = "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:firmsbase/staging/redis-auth-token-REPLACE_ME"
+# redis_auth_token: do NOT put the real value here — pass via
+# `-var="redis_auth_token=$(aws secretsmanager get-secret-value ...)"` at
+# plan/apply time instead.
+
+alarm_sns_topic_arn = "arn:aws:sns:us-east-1:ACCOUNT_ID:REPLACE_ME"
+
+enable_custom_metric_alarms = false

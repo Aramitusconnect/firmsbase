@@ -1,7 +1,11 @@
 {
     "$schema": "https://www.schemastore.org/package.json",
+    "name": "firmsbase-app",
     "private": true,
     "type": "module",
+    "engines": {
+        "node": ">=20.19.0"
+    },
     "scripts": {
         "build": "vite build",
         "dev": "vite"
