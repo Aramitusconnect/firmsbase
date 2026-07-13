@@ -7,6 +7,7 @@ use App\Enums\IncidentStatus;
 use App\Models\Firm;
 use App\Models\IncidentEvent;
 use App\Models\User;
+use App\Services\TenantContextService;
 use Illuminate\Support\Str;
 
 /**
@@ -33,7 +34,7 @@ class IncidentService
     ): IncidentEvent {
         $correlationId = (string) Str::uuid();
 
-        return IncidentEvent::create([
+        $create = fn () => IncidentEvent::create([
             'firm_id' => $firm?->id,
             'correlation_id' => $correlationId,
             'event_type' => 'opened',
@@ -44,48 +45,102 @@ class IncidentService
             'message' => $message,
             'actor_user_id' => $actor?->id,
         ]);
+
+        $tenantContext = app(TenantContextService::class);
+
+        return $firm
+            ? $tenantContext->runWithFirmContext($firm, $create)
+            : $tenantContext->runWithoutFirmContext($create);
     }
 
-    public function updateSeverity(string $correlationId, IncidentSeverity $severity, ?User $actor = null): IncidentEvent
+    public function updateSeverity(?Firm $firm, string $correlationId, IncidentSeverity $severity, ?User $actor = null): IncidentEvent
     {
-        $current = $this->currentState($correlationId);
+        $tenantContext = app(TenantContextService::class);
 
-        return $this->appendEvent($current, 'severity_changed', ['severity' => $severity], $actor);
+        $body = function () use ($correlationId, $severity, $actor) {
+            $current = $this->currentState($correlationId);
+
+            return $this->appendEvent($current, 'severity_changed', ['severity' => $severity], $actor);
+        };
+
+        return $firm
+            ? $tenantContext->runWithFirmContext($firm, $body)
+            : $tenantContext->runWithoutFirmContext($body);
     }
 
-    public function updateStatus(string $correlationId, IncidentStatus $status, ?User $actor = null): IncidentEvent
+    public function updateStatus(?Firm $firm, string $correlationId, IncidentStatus $status, ?User $actor = null): IncidentEvent
     {
-        $current = $this->currentState($correlationId);
+        $tenantContext = app(TenantContextService::class);
 
-        return $this->appendEvent($current, 'status_changed', ['status' => $status], $actor);
+        $body = function () use ($correlationId, $status, $actor) {
+            $current = $this->currentState($correlationId);
+
+            return $this->appendEvent($current, 'status_changed', ['status' => $status], $actor);
+        };
+
+        return $firm
+            ? $tenantContext->runWithFirmContext($firm, $body)
+            : $tenantContext->runWithoutFirmContext($body);
     }
 
-    public function recordRootCause(string $correlationId, string $rootCause, ?User $actor = null): IncidentEvent
+    public function recordRootCause(?Firm $firm, string $correlationId, string $rootCause, ?User $actor = null): IncidentEvent
     {
-        $current = $this->currentState($correlationId);
+        $tenantContext = app(TenantContextService::class);
 
-        return $this->appendEvent($current, 'root_cause_added', ['root_cause' => $rootCause], $actor);
+        $body = function () use ($correlationId, $rootCause, $actor) {
+            $current = $this->currentState($correlationId);
+
+            return $this->appendEvent($current, 'root_cause_added', ['root_cause' => $rootCause], $actor);
+        };
+
+        return $firm
+            ? $tenantContext->runWithFirmContext($firm, $body)
+            : $tenantContext->runWithoutFirmContext($body);
     }
 
-    public function flagCustomerImpact(string $correlationId, bool $customerImpact, ?User $actor = null): IncidentEvent
+    public function flagCustomerImpact(?Firm $firm, string $correlationId, bool $customerImpact, ?User $actor = null): IncidentEvent
     {
-        $current = $this->currentState($correlationId);
+        $tenantContext = app(TenantContextService::class);
 
-        return $this->appendEvent($current, 'customer_impact_flagged', ['customer_impact' => $customerImpact], $actor);
+        $body = function () use ($correlationId, $customerImpact, $actor) {
+            $current = $this->currentState($correlationId);
+
+            return $this->appendEvent($current, 'customer_impact_flagged', ['customer_impact' => $customerImpact], $actor);
+        };
+
+        return $firm
+            ? $tenantContext->runWithFirmContext($firm, $body)
+            : $tenantContext->runWithoutFirmContext($body);
     }
 
-    public function flagNotificationNeeded(string $correlationId, bool $notificationNeeded, ?User $actor = null): IncidentEvent
+    public function flagNotificationNeeded(?Firm $firm, string $correlationId, bool $notificationNeeded, ?User $actor = null): IncidentEvent
     {
-        $current = $this->currentState($correlationId);
+        $tenantContext = app(TenantContextService::class);
 
-        return $this->appendEvent($current, 'notification_needed_flagged', ['notification_needed' => $notificationNeeded], $actor);
+        $body = function () use ($correlationId, $notificationNeeded, $actor) {
+            $current = $this->currentState($correlationId);
+
+            return $this->appendEvent($current, 'notification_needed_flagged', ['notification_needed' => $notificationNeeded], $actor);
+        };
+
+        return $firm
+            ? $tenantContext->runWithFirmContext($firm, $body)
+            : $tenantContext->runWithoutFirmContext($body);
     }
 
-    public function resolve(string $correlationId, string $resolution, ?User $actor = null): IncidentEvent
+    public function resolve(?Firm $firm, string $correlationId, string $resolution, ?User $actor = null): IncidentEvent
     {
-        $current = $this->currentState($correlationId);
+        $tenantContext = app(TenantContextService::class);
 
-        return $this->appendEvent($current, 'resolved', ['status' => IncidentStatus::Resolved, 'resolution' => $resolution], $actor);
+        $body = function () use ($correlationId, $resolution, $actor) {
+            $current = $this->currentState($correlationId);
+
+            return $this->appendEvent($current, 'resolved', ['status' => IncidentStatus::Resolved, 'resolution' => $resolution], $actor);
+        };
+
+        return $firm
+            ? $tenantContext->runWithFirmContext($firm, $body)
+            : $tenantContext->runWithoutFirmContext($body);
     }
 
     public function currentState(string $correlationId): IncidentEvent

@@ -64,8 +64,22 @@ class WebhookReplayServiceTest extends TestCase
 
         $this->service->replay($firm, $original, $owner);
 
-        $this->assertDatabaseHas('timeline_events', ['firm_id' => $firm->id, 'event_type' => 'webhook_delivery_replayed']);
-        $this->assertDatabaseHas('security_events', ['firm_id' => $firm->id, 'event_type' => 'webhook_delivery_replayed', 'category' => 'webhook_replay']);
+        // timeline_events has permanent FORCE ROW LEVEL SECURITY
+        // (Section 39A-3L, Checkpoint 33) — replay()'s own narrow
+        // context wrap around the timeline->record() call correctly
+        // clears before returning, so this read-time assertion needs
+        // its own context wrap to see the row it just wrote.
+        // security_events ALSO has permanent FORCE ROW LEVEL SECURITY as
+        // of Section 39A-3L, Checkpoint 34 — auditSecurityEvent()'s own
+        // call site is now wrapped in runWithFirmContext() too, so this
+        // assertion needs the same context wrap to see the row it just
+        // wrote (no longer bare/unwrapped).
+        $this->runWithFirmContext($firm, function () use ($firm) {
+            $this->assertDatabaseHas('timeline_events', ['firm_id' => $firm->id, 'event_type' => 'webhook_delivery_replayed']);
+        });
+        $this->runWithFirmContext($firm, function () use ($firm) {
+            $this->assertDatabaseHas('security_events', ['firm_id' => $firm->id, 'event_type' => 'webhook_delivery_replayed', 'category' => 'webhook_replay']);
+        });
     }
 
     public function test_replay_is_capped_at_3_per_original_delivery(): void

@@ -38,7 +38,7 @@ class NotificationTemplateServiceTest extends TestCase
         $this->service->createGlobalDefault('document_reminder', ConsentChannel::Email, 'Global body.');
         $override = $this->service->createFirmOverride($firm, 'document_reminder', ConsentChannel::Email, 'Firm-specific body.');
 
-        $resolved = $this->service->resolve($firm, 'document_reminder', ConsentChannel::Email);
+        $resolved = $this->runWithFirmContext($firm, fn () => $this->service->resolve($firm, 'document_reminder', ConsentChannel::Email));
 
         $this->assertTrue($resolved->is($override));
     }

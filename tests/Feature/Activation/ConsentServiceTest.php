@@ -43,12 +43,22 @@ class ConsentServiceTest extends TestCase
         $this->assertSame(ConsentStatus::Granted, $consent->status);
         $this->assertNotNull($consent->granted_at);
 
-        $this->assertDatabaseHas('communication_consent_events', [
-            'communication_consent_id' => $consent->id,
-            'action' => 'captured',
-            'new_status' => 'granted',
-            'actor_user_id' => $actor->id,
-        ]);
+        // Section 39A-3L, Checkpoint 12 fallout: communication_consent_events
+        // is now FORCE-RLS protected too, and capture() clears its own
+        // context wrap before returning, so a bare assertDatabaseHas()
+        // here (outside any active context) would find zero rows even
+        // though the event genuinely persisted. Same fix already applied
+        // to the communication_consents assertions in this file at
+        // Checkpoint 11 — this file was never updated to apply the same
+        // fix to the communication_consent_events assertions until now.
+        $this->runWithFirmContext($firm, function () use ($consent, $actor) {
+            $this->assertDatabaseHas('communication_consent_events', [
+                'communication_consent_id' => $consent->id,
+                'action' => 'captured',
+                'new_status' => 'granted',
+                'actor_user_id' => $actor->id,
+            ]);
+        });
     }
 
     public function test_capture_twice_updates_in_place_rather_than_duplicating(): void
@@ -60,19 +70,31 @@ class ConsentServiceTest extends TestCase
         $second = $this->service->capture($firm, $client->id, ConsentChannel::Email, 'v2');
 
         $this->assertSame($first->id, $second->id);
-        $this->assertSame('v2', $second->fresh()->consent_text_version);
+        // Section 39A-3L, Checkpoint 11 fallout: communication_consents is
+        // now FORCE-RLS protected, and capture() clears its own context
+        // wrap before returning, so a bare $second->fresh() re-query here
+        // (outside any active context) would return null. capture()
+        // already returns $consent->fresh() from INSIDE its own context
+        // wrap, so $second is already the correct, up-to-date row —
+        // asserting directly on it needs no re-fetch at all.
+        $this->assertSame('v2', $second->consent_text_version);
         $this->assertSame(
             1,
-            CommunicationConsent::where('firm_id', $firm->id)
+            $this->runWithFirmContext($firm, fn () => CommunicationConsent::where('firm_id', $firm->id)
                 ->where('client_id', $client->id)
                 ->where('channel', 'email')
-                ->count()
+                ->count())
         );
 
-        $this->assertDatabaseHas('communication_consent_events', [
-            'communication_consent_id' => $first->id,
-            'action' => 'recaptured',
-        ]);
+        // Section 39A-3L, Checkpoint 12 fallout: see the identical fix and
+        // explanation in test_capture_creates_granted_consent_and_audit_event
+        // above — communication_consent_events is now FORCE-RLS protected.
+        $this->runWithFirmContext($firm, function () use ($first) {
+            $this->assertDatabaseHas('communication_consent_events', [
+                'communication_consent_id' => $first->id,
+                'action' => 'recaptured',
+            ]);
+        });
     }
 
     public function test_revoke_transitions_status_and_writes_audit_event(): void
@@ -86,12 +108,17 @@ class ConsentServiceTest extends TestCase
         $this->assertSame(ConsentStatus::Revoked, $revoked->status);
         $this->assertNotNull($revoked->revoked_at);
 
-        $this->assertDatabaseHas('communication_consent_events', [
-            'communication_consent_id' => $consent->id,
-            'action' => 'revoked',
-            'previous_status' => 'granted',
-            'new_status' => 'revoked',
-        ]);
+        // Section 39A-3L, Checkpoint 12 fallout: see the identical fix and
+        // explanation in test_capture_creates_granted_consent_and_audit_event
+        // above — communication_consent_events is now FORCE-RLS protected.
+        $this->runWithFirmContext($firm, function () use ($consent) {
+            $this->assertDatabaseHas('communication_consent_events', [
+                'communication_consent_id' => $consent->id,
+                'action' => 'revoked',
+                'previous_status' => 'granted',
+                'new_status' => 'revoked',
+            ]);
+        });
     }
 
     public function test_revoke_throws_when_no_consent_exists(): void
@@ -116,7 +143,15 @@ class ConsentServiceTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $this->service->capture($firm, $client->id, ConsentChannel::Sms, 'v1');
 
-        $this->assertTrue($this->service->isGranted($firm, $client->id, ConsentChannel::Sms));
+        // Section 39A-3L, Checkpoint 11 fallout: isGranted() is
+        // deliberately left unwrapped in ConsentService (a pure read
+        // helper — see its own docblock), so any caller of a bare
+        // isGranted() must supply its own active tenant context now
+        // that communication_consents is FORCE-RLS protected. capture()
+        // above clears its own context wrap before returning, so this
+        // read genuinely needs its own wrap — it is not one this test
+        // can share with capture()'s.
+        $this->assertTrue($this->runWithFirmContext($firm, fn () => $this->service->isGranted($firm, $client->id, ConsentChannel::Sms)));
     }
 
     public function test_is_granted_false_after_revoke(): void
@@ -127,6 +162,12 @@ class ConsentServiceTest extends TestCase
         $this->service->capture($firm, $client->id, ConsentChannel::Sms, 'v1');
         $this->service->revoke($firm, $client->id, ConsentChannel::Sms, reason: 'client requested opt-out');
 
-        $this->assertFalse($this->service->isGranted($firm, $client->id, ConsentChannel::Sms));
+        // Same fix as test_is_granted_true_after_capture above. Without
+        // this wrap the assertion would still coincidentally pass (a
+        // missing-context read also returns false), but it would no
+        // longer be genuinely proving the revoke() transition — it
+        // would just be proving the read has no context. Wrapping makes
+        // this test actually exercise the revoked-status behavior again.
+        $this->assertFalse($this->runWithFirmContext($firm, fn () => $this->service->isGranted($firm, $client->id, ConsentChannel::Sms)));
     }
 }

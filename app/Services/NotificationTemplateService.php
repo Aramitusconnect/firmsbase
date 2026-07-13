@@ -6,6 +6,7 @@ use App\Enums\ConsentChannel;
 use App\Enums\NotificationTemplateStatus;
 use App\Models\Firm;
 use App\Models\NotificationTemplate;
+use App\Services\TenantContextService;
 
 /**
  * NotificationTemplateService — resolve() implements the global-
@@ -50,7 +51,7 @@ class NotificationTemplateService
         ?string $fromEmail = null,
         ?string $fromDomain = null,
     ): NotificationTemplate {
-        return NotificationTemplate::create([
+        $create = fn () => NotificationTemplate::create([
             'firm_id' => null,
             'key' => $key,
             'channel' => $channel,
@@ -61,6 +62,8 @@ class NotificationTemplateService
             'from_email' => $fromEmail,
             'from_domain' => $fromDomain,
         ]);
+
+        return app(TenantContextService::class)->runWithoutFirmContext($create);
     }
 
     public function createFirmOverride(
@@ -73,7 +76,7 @@ class NotificationTemplateService
         ?string $fromEmail = null,
         ?string $fromDomain = null,
     ): NotificationTemplate {
-        return NotificationTemplate::create([
+        $create = fn () => NotificationTemplate::create([
             'firm_id' => $firm->id,
             'key' => $key,
             'channel' => $channel,
@@ -84,12 +87,23 @@ class NotificationTemplateService
             'from_email' => $fromEmail,
             'from_domain' => $fromDomain,
         ]);
+
+        return app(TenantContextService::class)->runWithFirmContext($firm, $create);
     }
 
     public function archive(NotificationTemplate $template): NotificationTemplate
     {
-        $template->update(['status' => NotificationTemplateStatus::Archived]);
+        $tenantContext = app(TenantContextService::class);
+        $firmId = $template->firm_id;
 
-        return $template->fresh();
+        $body = function () use ($template) {
+            $template->update(['status' => NotificationTemplateStatus::Archived]);
+
+            return $template->fresh();
+        };
+
+        return $firmId !== null
+            ? $tenantContext->runWithFirmContext($firmId, $body)
+            : $tenantContext->runWithoutFirmContext($body);
     }
 }

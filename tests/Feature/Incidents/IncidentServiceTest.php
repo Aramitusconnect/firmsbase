@@ -34,9 +34,9 @@ class IncidentServiceTest extends TestCase
     {
         $opened = $this->service->open(null, IncidentSeverity::Medium, 'Storage latency spike');
 
-        $this->service->updateStatus($opened->correlation_id, IncidentStatus::Identified);
-        $this->service->recordRootCause($opened->correlation_id, 'Disk contention on primary node');
-        $this->service->resolve($opened->correlation_id, 'Scaled storage tier');
+        $this->service->updateStatus(null, $opened->correlation_id, IncidentStatus::Identified);
+        $this->service->recordRootCause(null, $opened->correlation_id, 'Disk contention on primary node');
+        $this->service->resolve(null, $opened->correlation_id, 'Scaled storage tier');
 
         $timeline = $this->service->timeline($opened->correlation_id);
 
@@ -47,7 +47,7 @@ class IncidentServiceTest extends TestCase
     public function test_current_state_is_always_the_latest_row_for_the_correlation_id(): void
     {
         $opened = $this->service->open(null, IncidentSeverity::Low, 'Minor blip');
-        $this->service->updateSeverity($opened->correlation_id, IncidentSeverity::Critical);
+        $this->service->updateSeverity(null, $opened->correlation_id, IncidentSeverity::Critical);
 
         $current = $this->service->currentState($opened->correlation_id);
 
@@ -58,7 +58,7 @@ class IncidentServiceTest extends TestCase
     {
         $opened = $this->service->open(null, IncidentSeverity::High, 'API errors', customerImpact: true, notificationNeeded: true);
 
-        $this->service->recordRootCause($opened->correlation_id, 'Bad deploy');
+        $this->service->recordRootCause(null, $opened->correlation_id, 'Bad deploy');
         $current = $this->service->currentState($opened->correlation_id);
 
         $this->assertTrue($current->customer_impact);
@@ -69,7 +69,7 @@ class IncidentServiceTest extends TestCase
     {
         $opened = $this->service->open(null, IncidentSeverity::Medium, 'Slow queries');
 
-        $resolved = $this->service->resolve($opened->correlation_id, 'Added missing index');
+        $resolved = $this->service->resolve(null, $opened->correlation_id, 'Added missing index');
 
         $this->assertSame(IncidentStatus::Resolved, $resolved->status);
         $this->assertSame('Added missing index', $resolved->resolution);

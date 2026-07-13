@@ -73,7 +73,127 @@ class RlsEnforcementFirewallTest extends TestCase
                 && $path !== 'database/migrations/2026_08_20_920002_force_rls_on_document_chase_rules_table.php'
                 && $path !== 'database/migrations/2026_08_20_920003_force_rls_on_employee_rates_table.php'
                 && $path !== 'database/migrations/2026_08_20_920004_force_rls_on_calendar_events_table.php'
-                && $path !== 'database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php',
+                && $path !== 'database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php'
+                // Section 39A-3L, Checkpoint 1, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a
+                // payment_classification_events-only FORCE RLS
+                // migration.
+                && $path !== 'database/migrations/2026_08_25_930001_force_rls_on_payment_classification_events_table.php'
+                // Section 39A-3L, Checkpoint 2, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added an activation_checklists-
+                // only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930002_force_rls_on_activation_checklists_table.php'
+                // Section 39A-3L, Checkpoint 3, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a firm_activation_events-
+                // only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930003_force_rls_on_firm_activation_events_table.php'
+                // Section 39A-3L, Checkpoint 4, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a firm_entitlements-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930004_force_rls_on_firm_entitlements_table.php'
+                // Section 39A-3L, Checkpoint 5, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a
+                // firm_entitlement_events-only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930005_force_rls_on_firm_entitlement_events_table.php'
+                // Section 39A-3L, Checkpoint 6, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added an
+                // installed_template_packs-only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930006_force_rls_on_installed_template_packs_table.php'
+                // Section 39A-3L, Checkpoint 7, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a template_upgrade_logs-
+                // only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930007_force_rls_on_template_upgrade_logs_table.php'
+                // Section 39A-3L, Checkpoint 8, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a
+                // template_upgrade_previews-only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930008_force_rls_on_template_upgrade_previews_table.php'
+                // Section 39A-3L, Checkpoint 9, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a seat_allocations-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930009_force_rls_on_seat_allocations_table.php'
+                // Section 39A-3L, Checkpoint 10, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a document_requests-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930010_force_rls_on_document_requests_table.php'
+                // Section 39A-3L, Checkpoint 11, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a communication_consents-
+                // only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php'
+                // Section 39A-3L, Checkpoint 12, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a
+                // communication_consent_events-only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930012_force_rls_on_communication_consent_events_table.php'
+                // Section 39A-3L, Checkpoint 13, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added an intake_submissions-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930013_force_rls_on_intake_submissions_table.php'
+                // Section 39A-3L, Checkpoint 14, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a matter_readiness_scores-
+                // only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930014_force_rls_on_matter_readiness_scores_table.php'
+                // Section 39A-3L, Checkpoint 15, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a readiness_score_events-
+                // only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930015_force_rls_on_readiness_score_events_table.php'
+                // Section 39A-3L, Checkpoint 16, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a tenant_encryption_keys-
+                // only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930016_force_rls_on_tenant_encryption_keys_table.php'
+                // Section 39A-3L, Checkpoint 17, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a document_chase_events-
+                // only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930017_force_rls_on_document_chase_events_table.php'
+                // Section 39A-3L, Checkpoint 18, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a firm_settings-only FORCE
+                // RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930018_force_rls_on_firm_settings_table.php'
+                // Section 39A-3L, Checkpoint 19, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a firm_licenses-only FORCE
+                // RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930019_force_rls_on_firm_licenses_table.php'
+                // Section 39A-3L, Checkpoint 20, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a time_tracking_sessions-
+                // only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930020_force_rls_on_time_tracking_sessions_table.php'
+                // Section 39A-3L, Checkpoint 21, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a time_entries-only FORCE
+                // RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930021_force_rls_on_time_entries_table.php'
+                // Section 39A-3L, Checkpoint 22, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a payment_plans-only FORCE
+                // RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php'
+                // Section 39A-3L, Checkpoint 23, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a payment_plan_events-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php'
+                // Section 39A-3L, Checkpoint 24 (this batch, a later,
+                // distinct staged-FORCE-activation branch) legitimately
+                // added a notification_events-only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A must add no migrations in this pass, but found: '.implode(', ', $changed));
@@ -177,7 +297,15 @@ class RlsEnforcementFirewallTest extends TestCase
             'app/Services/SupportAccessRequestService.php',
             'app/Services/EmergencyAccessGovernanceGapService.php',
             'app/Services/SeedDataSecurityAuditService.php',
-            'app/Services/FirmUser2faPolicyService.php',
+            // FirmUser2faPolicyService.php is deliberately NOT in this
+            // list any more — Section 39A-3L, Checkpoint 18 (a later,
+            // distinct staged-FORCE-activation branch) found a genuine
+            // need to correct a stale docblock claim ("no login route/
+            // UI surface yet") once User::canAccessPanel() became a
+            // live consumer of this service, wrapped in tenant context
+            // because firm_settings gained permanent FORCE ROW LEVEL
+            // SECURITY in that checkpoint. Only the docblock changed —
+            // no method logic in this file was touched.
             // LoginPolicyService.php is deliberately NOT in this list
             // any more — Section 39A-3B (a later, distinct staged-
             // FORCE-activation branch) found a genuine need to wire
@@ -191,9 +319,23 @@ class RlsEnforcementFirewallTest extends TestCase
             // wire recordDecision()'s $payment->update() call with
             // explicit tenant context, since payments now has
             // permanent FORCE ROW LEVEL SECURITY.
-            'app/Services/TrustEligibilityService.php',
+            // TrustEligibilityService.php is deliberately NOT in this
+            // list any more — Section 39A-3L, Checkpoint 18 (this same
+            // staged-FORCE-activation branch, a later fix pass) found a
+            // genuine need to wrap evaluate()'s $firm->firmSettings read
+            // in runWithFirmContext(), since firm_settings gained
+            // permanent FORCE ROW LEVEL SECURITY in this checkpoint and
+            // every one of this service's ~25 live Trust-service call
+            // sites invoked it with no ambient tenant context. Only the
+            // single $settings read line changed — decision logic,
+            // order, and return values are byte-for-byte identical.
             'app/Services/AiRetrievalIsolationService.php',
-            'app/Services/ConsentService.php',
+            // ConsentService.php is deliberately NOT in this list any
+            // more — Section 39A-3L, Checkpoint 11 (a later, distinct
+            // staged-FORCE-activation branch) found a genuine need to
+            // wrap capture()/revoke()'s bodies in runWithFirmContext(),
+            // since communication_consents now has permanent FORCE ROW
+            // LEVEL SECURITY.
             // User.php is deliberately NOT in this list any more —
             // internal login/panel access wiring (a later, distinct
             // section) found a genuine need to add

@@ -6,7 +6,6 @@ use App\Enums\TenantEncryptionKeyStatus;
 use App\Models\Firm;
 use App\Models\TenantEncryptionKey;
 use Illuminate\Support\Facades\Crypt;
-use Illuminate\Support\Facades\DB;
 
 /**
  * EncryptionKeyService — envelope encryption for per-firm data keys.
@@ -43,18 +42,27 @@ class EncryptionKeyService
 {
     private const KEY_BYTES = 32;
 
+    /**
+     * Section 39A-3L, Checkpoint 16: every method below wraps its own
+     * DB access in runWithFirmContext($firm->id, ...), replacing the
+     * plain DB::transaction() calls that used to establish only an
+     * atomicity boundary, not a tenant-context one — under FORCE RLS,
+     * tenant_encryption_keys reads/writes fail closed without it.
+     * runWithFirmContext() already opens its own internal
+     * DB::transaction(), so no method here wraps in both.
+     */
     public function provision(Firm $firm): TenantEncryptionKey
     {
-        $existingActive = TenantEncryptionKey::query()
-            ->where('firm_id', $firm->id)
-            ->where('status', TenantEncryptionKeyStatus::Active)
-            ->exists();
+        return (new TenantContextService())->runWithFirmContext($firm->id, function () use ($firm) {
+            $existingActive = TenantEncryptionKey::query()
+                ->where('firm_id', $firm->id)
+                ->where('status', TenantEncryptionKeyStatus::Active)
+                ->exists();
 
-        if ($existingActive) {
-            throw new \RuntimeException('Firm already has an active tenant encryption key. Use rotate() instead.');
-        }
+            if ($existingActive) {
+                throw new \RuntimeException('Firm already has an active tenant encryption key. Use rotate() instead.');
+            }
 
-        return DB::transaction(function () use ($firm) {
             $nextVersion = ((int) TenantEncryptionKey::query()
                 ->where('firm_id', $firm->id)
                 ->max('key_version')) + 1;
@@ -75,7 +83,7 @@ class EncryptionKeyService
      */
     public function rotate(Firm $firm): TenantEncryptionKey
     {
-        return DB::transaction(function () use ($firm) {
+        return (new TenantContextService())->runWithFirmContext($firm->id, function () use ($firm) {
             $current = TenantEncryptionKey::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', TenantEncryptionKeyStatus::Active)
@@ -98,14 +106,20 @@ class EncryptionKeyService
 
     /**
      * Decrypt and return the firm's current active inner key, in
-     * memory only. Throws if no active key exists.
+     * memory only. Throws if no active key exists. Only the DB lookup
+     * is wrapped — Crypt::decryptString() touches no database table, so
+     * it deliberately runs outside the wrap (nothing further to protect
+     * once the row is already in hand).
      */
     public function decryptActiveKey(Firm $firm): string
     {
-        $active = TenantEncryptionKey::query()
-            ->where('firm_id', $firm->id)
-            ->where('status', TenantEncryptionKeyStatus::Active)
-            ->first();
+        $active = (new TenantContextService())->runWithFirmContext(
+            $firm->id,
+            fn () => TenantEncryptionKey::query()
+                ->where('firm_id', $firm->id)
+                ->where('status', TenantEncryptionKeyStatus::Active)
+                ->first()
+        );
 
         if (! $active) {
             throw new \RuntimeException("Firm {$firm->id} has no active tenant encryption key.");
@@ -125,7 +139,7 @@ class EncryptionKeyService
      */
     public function destroy(Firm $firm, ?int $keyDestructionRequestId = null): int
     {
-        return DB::transaction(function () use ($firm, $keyDestructionRequestId) {
+        return (new TenantContextService())->runWithFirmContext($firm->id, function () use ($firm, $keyDestructionRequestId) {
             $keys = TenantEncryptionKey::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', '!=', TenantEncryptionKeyStatus::Destroyed->value)

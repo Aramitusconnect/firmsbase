@@ -35,43 +35,64 @@ class WebhookReplayService
 
     public function replay(Firm $firm, WebhookDelivery $originalDelivery, FirmUser $actor): WebhookDelivery
     {
-        $this->entitlement->assertEnabled($firm);
-        $this->tenantSafePolicy->assertWebhookDeliveryBelongsToFirm($originalDelivery, $firm);
-        $this->accessPolicy->assertCanManage($actor);
+        $tenantContext = new TenantContextService();
 
-        // Walk back to the ROOT original delivery — replaying a
-        // replay still counts against the same original's cap, and the
-        // new row's replayed_from_delivery_id points at the delivery
-        // the caller actually replayed (not forcibly rewritten to the
-        // root), matching a simple, auditable one-hop lineage per row.
-        $existingReplayCount = WebhookDelivery::query()
-            ->where('replayed_from_delivery_id', $originalDelivery->id)
-            ->count();
+        $newDelivery = $tenantContext->runWithFirmContext(
+            $firm,
+            function () use ($firm, $originalDelivery, $actor): WebhookDelivery {
+                $this->entitlement->assertEnabled($firm);
+                $this->tenantSafePolicy->assertWebhookDeliveryBelongsToFirm($originalDelivery, $firm);
+                $this->accessPolicy->assertCanManage($actor);
 
-        if ($existingReplayCount >= self::MAX_REPLAYS_PER_ORIGINAL) {
-            throw new \RuntimeException(
-                "This delivery has already been replayed {$existingReplayCount} times; the maximum of ".
-                self::MAX_REPLAYS_PER_ORIGINAL.' manual replays per original delivery has been reached.'
-            );
-        }
+                // Replaying a replay still counts against the delivery the
+                // caller selected, and the new row retains one-hop lineage.
+                $existingReplayCount = WebhookDelivery::query()
+                    ->where('replayed_from_delivery_id', $originalDelivery->id)
+                    ->count();
 
-        $newDelivery = WebhookDelivery::create([
-            'firm_id' => $originalDelivery->firm_id,
-            'webhook_subscription_id' => $originalDelivery->webhook_subscription_id,
-            'webhook_event_id' => $originalDelivery->webhook_event_id,
-            'status' => WebhookDeliveryStatus::Pending,
-            'attempt_count' => 0,
-            'replayed_from_delivery_id' => $originalDelivery->id,
-            'replayed_by_firm_user_id' => $actor->id,
-            'replayed_at' => now(),
-        ]);
+                if ($existingReplayCount >= self::MAX_REPLAYS_PER_ORIGINAL) {
+                    throw new \RuntimeException(
+                        "This delivery has already been replayed {$existingReplayCount} times; the maximum of ".
+                        self::MAX_REPLAYS_PER_ORIGINAL.' manual replays per original delivery has been reached.'
+                    );
+                }
 
-        $this->timeline->record($firm, 'webhook_delivery_replayed', $newDelivery, $actor->user, [
-            'original_webhook_delivery_id' => $originalDelivery->id,
-            'new_webhook_delivery_id' => $newDelivery->id,
-        ]);
+                return WebhookDelivery::create([
+                    'firm_id' => $originalDelivery->firm_id,
+                    'webhook_subscription_id' => $originalDelivery->webhook_subscription_id,
+                    'webhook_event_id' => $originalDelivery->webhook_event_id,
+                    'status' => WebhookDeliveryStatus::Pending,
+                    'attempt_count' => 0,
+                    'replayed_from_delivery_id' => $originalDelivery->id,
+                    'replayed_by_firm_user_id' => $actor->id,
+                    'replayed_at' => now(),
+                ]);
+            },
+        );
 
-        $this->auditSecurityEvent($firm, $originalDelivery, $newDelivery, $actor);
+        $tenantContext->runWithFirmContext(
+            $firm,
+            fn () => $this->timeline->record(
+                $firm,
+                'webhook_delivery_replayed',
+                $newDelivery,
+                $actor->user,
+                [
+                    'original_webhook_delivery_id' => $originalDelivery->id,
+                    'new_webhook_delivery_id' => $newDelivery->id,
+                ],
+            ),
+        );
+
+        $tenantContext->runWithFirmContext(
+            $firm,
+            fn () => $this->auditSecurityEvent(
+                $firm,
+                $originalDelivery,
+                $newDelivery,
+                $actor,
+            ),
+        );
 
         return $newDelivery;
     }

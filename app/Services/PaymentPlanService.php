@@ -25,6 +25,18 @@ use Illuminate\Support\Facades\DB;
  * automatic because PaymentPlanDunningService only ever acts on a plan
  * whose status is Active, and the old plan's status becomes
  * Renegotiated the instant this happens.
+ *
+ * Section 39A-3L, Checkpoint 22 — payment_plans is now FORCE-RLS
+ * protected. create(), edit(), activate(), renegotiate(), cancel(),
+ * and markDefaulted() each wrap their entire body in a single
+ * runWithFirmContext() call (their existing inner DB::transaction()
+ * calls are left as-is; nested inside runWithFirmContext()'s own
+ * transaction they correctly become Postgres savepoints, per
+ * TenantContextService's own docblock). create() keys off its own
+ * $firm parameter; the rest key off $plan->firm_id, a plain
+ * in-memory scalar already on the loaded model, never a relation load.
+ * markCompletedIfAllInstallmentsPaid() is deliberately NOT
+ * self-wrapped — see its own docblock below.
  */
 class PaymentPlanService
 {
@@ -47,23 +59,25 @@ class PaymentPlanService
             throw new \InvalidArgumentException('At least one installment is required.');
         }
 
-        return DB::transaction(function () use ($firm, $client, $matter, $invoice, $installments, $createdBy) {
-            $plan = PaymentPlan::create([
-                'firm_id' => $firm->id,
-                'client_id' => $client->id,
-                'matter_id' => $matter?->id,
-                'invoice_id' => $invoice?->id,
-                'status' => PaymentPlanStatus::Draft,
-                'total_cents' => 0,
-                'installment_count' => 0,
-                'created_by' => $createdBy?->id,
-            ]);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $client, $matter, $invoice, $installments, $createdBy) {
+            return DB::transaction(function () use ($firm, $client, $matter, $invoice, $installments, $createdBy) {
+                $plan = PaymentPlan::create([
+                    'firm_id' => $firm->id,
+                    'client_id' => $client->id,
+                    'matter_id' => $matter?->id,
+                    'invoice_id' => $invoice?->id,
+                    'status' => PaymentPlanStatus::Draft,
+                    'total_cents' => 0,
+                    'installment_count' => 0,
+                    'created_by' => $createdBy?->id,
+                ]);
 
-            $this->replaceInstallments($plan, $installments);
+                $this->replaceInstallments($plan, $installments);
 
-            $this->logEvent($plan, 'created', $createdBy);
+                $this->logEvent($plan, 'created', $createdBy);
 
-            return $plan->fresh('installments');
+                return $plan->fresh('installments');
+            });
         });
     }
 
@@ -83,11 +97,13 @@ class PaymentPlanService
             throw new \InvalidArgumentException('At least one installment is required.');
         }
 
-        return DB::transaction(function () use ($plan, $installments) {
-            $plan->installments()->delete();
-            $this->replaceInstallments($plan, $installments);
+        return (new TenantContextService())->runWithFirmContext($plan->firm_id, function () use ($plan, $installments) {
+            return DB::transaction(function () use ($plan, $installments) {
+                $plan->installments()->delete();
+                $this->replaceInstallments($plan, $installments);
 
-            return $plan->fresh('installments');
+                return $plan->fresh('installments');
+            });
         });
     }
 
@@ -97,14 +113,16 @@ class PaymentPlanService
             throw new \RuntimeException('Only a draft payment plan can be activated.');
         }
 
-        $plan->update([
-            'status' => PaymentPlanStatus::Active,
-            'activated_at' => now(),
-        ]);
+        return (new TenantContextService())->runWithFirmContext($plan->firm_id, function () use ($plan) {
+            $plan->update([
+                'status' => PaymentPlanStatus::Active,
+                'activated_at' => now(),
+            ]);
 
-        $this->logEvent($plan, 'activated', null);
+            $this->logEvent($plan, 'activated', null);
 
-        return $plan->fresh();
+            return $plan->fresh();
+        });
     }
 
     /**
@@ -120,35 +138,37 @@ class PaymentPlanService
             throw new \RuntimeException('Only an active payment plan can be renegotiated.');
         }
 
-        return DB::transaction(function () use ($plan, $newInstallments, $actor) {
-            $newPlan = PaymentPlan::create([
-                'firm_id' => $plan->firm_id,
-                'client_id' => $plan->client_id,
-                'matter_id' => $plan->matter_id,
-                'invoice_id' => $plan->invoice_id,
-                'status' => PaymentPlanStatus::Draft,
-                'total_cents' => 0,
-                'installment_count' => 0,
-                'supersedes_payment_plan_id' => $plan->id,
-                'created_by' => $actor?->id,
-            ]);
+        return (new TenantContextService())->runWithFirmContext($plan->firm_id, function () use ($plan, $newInstallments, $actor) {
+            return DB::transaction(function () use ($plan, $newInstallments, $actor) {
+                $newPlan = PaymentPlan::create([
+                    'firm_id' => $plan->firm_id,
+                    'client_id' => $plan->client_id,
+                    'matter_id' => $plan->matter_id,
+                    'invoice_id' => $plan->invoice_id,
+                    'status' => PaymentPlanStatus::Draft,
+                    'total_cents' => 0,
+                    'installment_count' => 0,
+                    'supersedes_payment_plan_id' => $plan->id,
+                    'created_by' => $actor?->id,
+                ]);
 
-            $this->replaceInstallments($newPlan, $newInstallments);
+                $this->replaceInstallments($newPlan, $newInstallments);
 
-            $newPlan->update([
-                'status' => PaymentPlanStatus::Active,
-                'activated_at' => now(),
-            ]);
+                $newPlan->update([
+                    'status' => PaymentPlanStatus::Active,
+                    'activated_at' => now(),
+                ]);
 
-            $plan->update([
-                'status' => PaymentPlanStatus::Renegotiated,
-                'renegotiated_at' => now(),
-            ]);
+                $plan->update([
+                    'status' => PaymentPlanStatus::Renegotiated,
+                    'renegotiated_at' => now(),
+                ]);
 
-            $this->logEvent($plan, 'renegotiated', $actor, ['superseded_by_payment_plan_id' => $newPlan->id]);
-            $this->logEvent($newPlan, 'created_from_renegotiation', $actor, ['supersedes_payment_plan_id' => $plan->id]);
+                $this->logEvent($plan, 'renegotiated', $actor, ['superseded_by_payment_plan_id' => $newPlan->id]);
+                $this->logEvent($newPlan, 'created_from_renegotiation', $actor, ['supersedes_payment_plan_id' => $plan->id]);
 
-            return $newPlan->fresh('installments');
+                return $newPlan->fresh('installments');
+            });
         });
     }
 
@@ -158,11 +178,13 @@ class PaymentPlanService
             throw new \RuntimeException('This payment plan cannot be cancelled from its current status.');
         }
 
-        $plan->update(['status' => PaymentPlanStatus::Cancelled, 'cancelled_at' => now()]);
+        return (new TenantContextService())->runWithFirmContext($plan->firm_id, function () use ($plan, $actor, $reason) {
+            $plan->update(['status' => PaymentPlanStatus::Cancelled, 'cancelled_at' => now()]);
 
-        $this->logEvent($plan, 'cancelled', $actor, ['reason' => $reason]);
+            $this->logEvent($plan, 'cancelled', $actor, ['reason' => $reason]);
 
-        return $plan->fresh();
+            return $plan->fresh();
+        });
     }
 
     /**
@@ -177,17 +199,31 @@ class PaymentPlanService
             throw new \RuntimeException('Only an active payment plan can be marked defaulted.');
         }
 
-        $plan->update(['status' => PaymentPlanStatus::Defaulted, 'defaulted_at' => now()]);
+        return (new TenantContextService())->runWithFirmContext($plan->firm_id, function () use ($plan, $actor, $reason) {
+            $plan->update(['status' => PaymentPlanStatus::Defaulted, 'defaulted_at' => now()]);
 
-        $this->logEvent($plan, 'defaulted', $actor, ['reason' => $reason]);
+            $this->logEvent($plan, 'defaulted', $actor, ['reason' => $reason]);
 
-        return $plan->fresh();
+            return $plan->fresh();
+        });
     }
 
     /**
      * Called by PaymentApplicationService after applying a payment to
      * an installment — completes the plan only when every installment
      * is fully paid.
+     *
+     * Section 39A-3L, Checkpoint 22 — deliberately NOT wrapped in
+     * runWithFirmContext(): its only caller,
+     * PaymentApplicationService::applyToInstallment(), is itself only
+     * ever invoked from inside ManualPaymentService::submit()'s own
+     * whole-method runWithFirmContext() wrap (established when payments
+     * was forced at Checkpoint 39A-3H). Self-wrapping here would
+     * reintroduce the nested "decoy wrap" bug this arc has repeatedly
+     * avoided: the inner wrap's finally block would clear the outer,
+     * still-needed context the instant this method returns, breaking
+     * submit()'s own subsequent reads/writes (timeline recording,
+     * payment->fresh(), the afterCommit webhook dispatch).
      */
     public function markCompletedIfAllInstallmentsPaid(PaymentPlan $plan): void
     {

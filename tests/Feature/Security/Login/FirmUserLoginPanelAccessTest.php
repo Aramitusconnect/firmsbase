@@ -96,11 +96,16 @@ class FirmUserLoginPanelAccessTest extends TestCase
 
         auth('web')->login($user);
 
-        $event = SecurityEvent::query()
+        // security_events has permanent FORCE ROW LEVEL SECURITY (Section
+        // 39A-3L, Phase B6, Checkpoint 34) — a real, non-null firm_id row
+        // is only visible under that same firm's own context, so this
+        // read-time assertion needs a context wrap to see the row the
+        // Login listener just wrote.
+        $event = $this->runWithFirmContext($firm, fn () => SecurityEvent::query()
             ->where('actor_type', User::class)
             ->where('actor_id', $user->id)
             ->where('event_type', 'login_succeeded')
-            ->first();
+            ->first());
 
         $this->assertNotNull($event, 'Expected a login_succeeded SecurityEvent row for the firm user.');
         $this->assertSame($firm->id, $event->firm_id);

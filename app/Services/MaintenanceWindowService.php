@@ -6,6 +6,7 @@ use App\Enums\MaintenanceWindowStatus;
 use App\Models\Firm;
 use App\Models\MaintenanceWindow;
 use App\Models\User;
+use App\Services\TenantContextService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -38,7 +39,7 @@ class MaintenanceWindowService
         ?string $privateMessage = null,
         ?User $createdBy = null,
     ): MaintenanceWindow {
-        return MaintenanceWindow::create([
+        $create = fn () => MaintenanceWindow::create([
             'firm_id' => $firm?->id,
             'title' => $title,
             'status' => MaintenanceWindowStatus::Scheduled,
@@ -49,6 +50,12 @@ class MaintenanceWindowService
             'private_message' => $privateMessage,
             'created_by' => $createdBy?->id,
         ]);
+
+        $tenantContext = app(TenantContextService::class);
+
+        return $firm
+            ? $tenantContext->runWithFirmContext($firm, $create)
+            : $tenantContext->runWithoutFirmContext($create);
     }
 
     public function start(MaintenanceWindow $window): MaintenanceWindow
@@ -57,27 +64,54 @@ class MaintenanceWindowService
             throw new \RuntimeException('Only a scheduled maintenance window can be started.');
         }
 
-        $window->update(['status' => MaintenanceWindowStatus::InProgress, 'actual_starts_at' => now()]);
+        $tenantContext = app(TenantContextService::class);
+        $firmId = $window->firm_id;
 
-        return $window->fresh();
+        $body = function () use ($window) {
+            $window->update(['status' => MaintenanceWindowStatus::InProgress, 'actual_starts_at' => now()]);
+
+            return $window->fresh();
+        };
+
+        return $firmId !== null
+            ? $tenantContext->runWithFirmContext($firmId, $body)
+            : $tenantContext->runWithoutFirmContext($body);
     }
 
     public function complete(MaintenanceWindow $window): MaintenanceWindow
     {
-        $window->update(['status' => MaintenanceWindowStatus::Completed, 'actual_ends_at' => now()]);
+        $tenantContext = app(TenantContextService::class);
+        $firmId = $window->firm_id;
 
-        return $window->fresh();
+        $body = function () use ($window) {
+            $window->update(['status' => MaintenanceWindowStatus::Completed, 'actual_ends_at' => now()]);
+
+            return $window->fresh();
+        };
+
+        return $firmId !== null
+            ? $tenantContext->runWithFirmContext($firmId, $body)
+            : $tenantContext->runWithoutFirmContext($body);
     }
 
     public function cancel(MaintenanceWindow $window, ?string $reason = null): MaintenanceWindow
     {
-        $window->update([
-            'status' => MaintenanceWindowStatus::Cancelled,
-            'cancelled_at' => now(),
-            'cancellation_reason' => $reason,
-        ]);
+        $tenantContext = app(TenantContextService::class);
+        $firmId = $window->firm_id;
 
-        return $window->fresh();
+        $body = function () use ($window, $reason) {
+            $window->update([
+                'status' => MaintenanceWindowStatus::Cancelled,
+                'cancelled_at' => now(),
+                'cancellation_reason' => $reason,
+            ]);
+
+            return $window->fresh();
+        };
+
+        return $firmId !== null
+            ? $tenantContext->runWithFirmContext($firmId, $body)
+            : $tenantContext->runWithoutFirmContext($body);
     }
 
     /**
@@ -90,33 +124,51 @@ class MaintenanceWindowService
         \DateTimeInterface $newScheduledStartsAt,
         \DateTimeInterface $newScheduledEndsAt,
     ): MaintenanceWindow {
-        return DB::transaction(function () use ($window, $newScheduledStartsAt, $newScheduledEndsAt) {
-            $window->update([
-                'status' => MaintenanceWindowStatus::Rescheduled,
-                'cancelled_at' => now(),
-                'cancellation_reason' => 'Rescheduled',
-            ]);
+        $tenantContext = app(TenantContextService::class);
+        $firmId = $window->firm_id;
 
-            return MaintenanceWindow::create([
-                'firm_id' => $window->firm_id,
-                'title' => $window->title,
-                'status' => MaintenanceWindowStatus::Scheduled,
-                'scheduled_starts_at' => $this->normalize($newScheduledStartsAt),
-                'scheduled_ends_at' => $this->normalize($newScheduledEndsAt),
-                'affected_components' => $window->affected_components,
-                'public_message' => $window->public_message,
-                'private_message' => $window->private_message,
-                'rescheduled_from_id' => $window->id,
-                'created_by' => $window->created_by,
-            ]);
-        });
+        $body = function () use ($window, $newScheduledStartsAt, $newScheduledEndsAt) {
+            return DB::transaction(function () use ($window, $newScheduledStartsAt, $newScheduledEndsAt) {
+                $window->update([
+                    'status' => MaintenanceWindowStatus::Rescheduled,
+                    'cancelled_at' => now(),
+                    'cancellation_reason' => 'Rescheduled',
+                ]);
+
+                return MaintenanceWindow::create([
+                    'firm_id' => $window->firm_id,
+                    'title' => $window->title,
+                    'status' => MaintenanceWindowStatus::Scheduled,
+                    'scheduled_starts_at' => $this->normalize($newScheduledStartsAt),
+                    'scheduled_ends_at' => $this->normalize($newScheduledEndsAt),
+                    'affected_components' => $window->affected_components,
+                    'public_message' => $window->public_message,
+                    'private_message' => $window->private_message,
+                    'rescheduled_from_id' => $window->id,
+                    'created_by' => $window->created_by,
+                ]);
+            });
+        };
+
+        return $firmId !== null
+            ? $tenantContext->runWithFirmContext($firmId, $body)
+            : $tenantContext->runWithoutFirmContext($body);
     }
 
     public function markCustomerNotificationSent(MaintenanceWindow $window): MaintenanceWindow
     {
-        $window->update(['customer_notification_sent_at' => now()]);
+        $tenantContext = app(TenantContextService::class);
+        $firmId = $window->firm_id;
 
-        return $window->fresh();
+        $body = function () use ($window) {
+            $window->update(['customer_notification_sent_at' => now()]);
+
+            return $window->fresh();
+        };
+
+        return $firmId !== null
+            ? $tenantContext->runWithFirmContext($firmId, $body)
+            : $tenantContext->runWithoutFirmContext($body);
     }
 
     private function normalize(\DateTimeInterface $dateTime): Carbon

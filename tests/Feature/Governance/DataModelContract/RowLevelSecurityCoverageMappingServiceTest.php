@@ -103,12 +103,17 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertSame(count($this->service->missingPreparedTables()), $summary['missing_prepared_count']);
         $this->assertSame(count($this->service->forcedTables()), $summary['forced_count']);
 
-        // enforcement_active means "FORCE is active on every prepared
-        // table" (schema-wide enforcement) — still honestly false today
-        // (18 of 52 prepared tables forced), not a stale hard-coded
-        // literal disconnected from any real state.
-        $this->assertFalse($summary['enforcement_active']);
-        $this->assertLessThan($summary['prepared_count'], $summary['forced_count']);
+        // enforcement_active must reflect the current registry state,
+        // rather than a historical hard-coded rollout count.
+        $this->assertSame(
+            $summary['prepared_count'] === $summary['forced_count'],
+            $summary['enforcement_active']
+        );
+
+        $this->assertLessThanOrEqual(
+            $summary['prepared_count'],
+            $summary['forced_count']
+        );
     }
 
     public function test_exact_registry_counts_reconcile(): void
@@ -172,7 +177,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertTrue($this->service->isForced('firm_users'));
         $this->assertTrue($this->service->isPrepared('firm_users'));
 
-        $this->assertFalse($this->service->isForced('firm_settings'));
+        $this->assertTrue($this->service->isForced('firm_settings'));
         $this->assertTrue($this->service->isPrepared('firm_settings'));
 
         $this->assertFalse($this->service->isForced('does_not_exist'));

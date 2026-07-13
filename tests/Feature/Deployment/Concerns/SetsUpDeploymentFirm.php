@@ -9,6 +9,7 @@ use App\Models\Firm;
 use App\Models\FirmLicense;
 use App\Models\PlatformAdmin;
 use App\Services\EncryptionKeyService;
+use App\Services\TenantContextService;
 use Illuminate\Support\Str;
 
 /**
@@ -34,10 +35,19 @@ trait SetsUpDeploymentFirm
 
         app(EncryptionKeyService::class)->provision($firm);
 
-        $firm->firmSettings()->create([
-            'payment_mode' => \App\Enums\PaymentMode::OperatingPaymentsOnly,
-            'ai_mode' => \App\Enums\AiMode::Disabled,
-        ]);
+        // Section 39A-3L, Checkpoint 19 — firm_settings gained permanent
+        // FORCE ROW LEVEL SECURITY in Checkpoint 18; this shared fixture
+        // trait's create() call had no ambient tenant context (a
+        // pre-existing gap surfaced empirically by this checkpoint's own
+        // Deployment suite run, not something firm_licenses itself
+        // caused). Wrapped narrowly, matching established precedent —
+        // no other line in this trait changed.
+        (new TenantContextService())->runWithFirmContext($firm, function () use ($firm) {
+            $firm->firmSettings()->create([
+                'payment_mode' => \App\Enums\PaymentMode::OperatingPaymentsOnly,
+                'ai_mode' => \App\Enums\AiMode::Disabled,
+            ]);
+        });
 
         return $firm->fresh(['firmSettings']);
     }

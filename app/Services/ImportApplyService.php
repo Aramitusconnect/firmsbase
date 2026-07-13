@@ -190,13 +190,13 @@ class ImportApplyService
                 'email' => $data['email'] ?? null,
                 'phone' => $data['phone'] ?? null,
             ])),
-            ImportEntityType::Contact => Contact::create([
+            ImportEntityType::Contact => (new TenantContextService())->runWithFirmContext($firm, fn () => Contact::create([
                 'firm_id' => $firm->id,
                 'client_id' => $data['client_id'] ?? null,
                 'name' => $data['name'] ?? throw new \InvalidArgumentException('name is required'),
                 'email' => $data['email'] ?? null,
                 'phone' => $data['phone'] ?? null,
-            ]),
+            ])),
             ImportEntityType::Matter => (new TenantContextService())->runWithFirmContext($firm, fn () => Matter::create([
                 'firm_id' => $firm->id,
                 'client_id' => $data['client_id'] ?? throw new \InvalidArgumentException('client_id is required'),
@@ -204,22 +204,22 @@ class ImportApplyService
                 'matter_type_id' => $data['matter_type_id'] ?? throw new \InvalidArgumentException('matter_type_id is required'),
                 'status' => $data['status'] ?? 'draft',
             ])),
-            ImportEntityType::Party => Party::create([
+            ImportEntityType::Party => (new TenantContextService())->runWithFirmContext($firm, fn () => Party::create([
                 'firm_id' => $firm->id,
                 'name' => $data['name'] ?? throw new \InvalidArgumentException('name is required'),
                 'entity_type' => $data['entity_type'] ?? 'individual',
                 'email' => $data['email'] ?? null,
                 'phone' => $data['phone'] ?? null,
-            ]),
+            ])),
             ImportEntityType::Document => $this->applyDocument($firm, $data, $row),
-            ImportEntityType::TimeEntry => TimeEntry::create([
+            ImportEntityType::TimeEntry => (new TenantContextService())->runWithFirmContext($firm, fn () => TimeEntry::create([
                 'firm_id' => $firm->id,
                 'user_id' => $data['user_id'] ?? throw new \InvalidArgumentException('user_id is required'),
                 'matter_id' => $data['matter_id'] ?? null,
                 'client_id' => $data['client_id'] ?? null,
                 'seconds' => $data['seconds'] ?? throw new \InvalidArgumentException('seconds is required'),
                 'worked_on' => $data['worked_on'] ?? throw new \InvalidArgumentException('worked_on is required'),
-            ]),
+            ])),
             ImportEntityType::Invoice => (new TenantContextService())->runWithFirmContext($firm, fn () => Invoice::create([
                 'firm_id' => $firm->id,
                 'client_id' => $data['client_id'] ?? throw new \InvalidArgumentException('client_id is required'),
@@ -227,14 +227,14 @@ class ImportApplyService
                 'total_cents' => $data['total_cents'] ?? 0,
                 'subtotal_cents' => $data['subtotal_cents'] ?? ($data['total_cents'] ?? 0),
             ])),
-            ImportEntityType::PaymentPlan => PaymentPlan::create([
+            ImportEntityType::PaymentPlan => (new TenantContextService())->runWithFirmContext($firm, fn () => PaymentPlan::create([
                 'firm_id' => $firm->id,
                 'client_id' => $data['client_id'] ?? throw new \InvalidArgumentException('client_id is required'),
                 'matter_id' => $data['matter_id'] ?? null,
                 'invoice_id' => $data['invoice_id'] ?? null,
                 'total_cents' => $data['total_cents'] ?? throw new \InvalidArgumentException('total_cents is required'),
                 'installment_count' => $data['installment_count'] ?? 1,
-            ]),
+            ])),
             default => throw new \InvalidArgumentException("Unsupported entity type for apply: {$entityType->value}"),
         };
     }

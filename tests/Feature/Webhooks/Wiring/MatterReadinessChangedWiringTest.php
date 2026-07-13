@@ -99,6 +99,14 @@ class MatterReadinessChangedWiringTest extends TestCase
         $score = $this->service->recompute($matter);
 
         $this->assertSame(MatterReadinessStatus::NotReady, $score->status);
-        $this->assertDatabaseHas('matter_readiness_scores', ['matter_id' => $matter->id]);
+
+        // Section 39A-3L, Checkpoint 14: matter_readiness_scores is now
+        // FORCE RLS. recompute() clears its own context wrap before
+        // returning, so this bare assertDatabaseHas() (outside any
+        // context) must be explicitly wrapped or it would incorrectly
+        // find no matching row.
+        $this->runWithFirmContext($firm, function () use ($matter) {
+            $this->assertDatabaseHas('matter_readiness_scores', ['matter_id' => $matter->id]);
+        });
     }
 }

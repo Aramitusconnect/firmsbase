@@ -17,6 +17,14 @@ use Illuminate\Support\Facades\DB;
  * while a member firm invites a user" -> block with a clear
  * pool-exhausted message) by checking SeatPool::remainingSeats() inside
  * the same transaction that increments seat_pools.allocated_seats.
+ *
+ * Section 39A-3L, Checkpoint 9 — seat_allocations now has FORCE ROW
+ * LEVEL SECURITY active. All three methods below previously had zero
+ * tenant-context wrapping, confirmed by three independent Phase A
+ * audits, and are each fixed here with a whole-method
+ * TenantContextService::runWithFirmContext() wrap. Confirmed no
+ * nested-wrap/decoy-wrap risk exists: nothing in this service calls
+ * another already-self-wrapping method.
  */
 class SeatAllocationService
 {
@@ -25,14 +33,14 @@ class SeatAllocationService
      */
     public function allocateDirect(Firm $firm, SeatClass $seatClass, int $seats, ?User $actor = null): SeatAllocation
     {
-        return SeatAllocation::create([
+        return (new TenantContextService())->runWithFirmContext($firm, fn () => SeatAllocation::create([
             'firm_id' => $firm->id,
             'seat_pool_id' => null,
             'seat_class' => $seatClass,
             'seats_allocated' => $seats,
             'status' => SeatAllocationStatus::Active,
             'created_by' => $actor?->id,
-        ]);
+        ]));
     }
 
     /**
@@ -40,7 +48,7 @@ class SeatAllocationService
      */
     public function allocateFromPool(Firm $firm, SeatPool $pool, int $seats, ?User $actor = null): SeatAllocation
     {
-        return DB::transaction(function () use ($firm, $pool, $seats, $actor) {
+        return (new TenantContextService())->runWithFirmContext($firm, fn () => DB::transaction(function () use ($firm, $pool, $seats, $actor) {
             $lockedPool = SeatPool::query()->whereKey($pool->id)->lockForUpdate()->firstOrFail();
 
             if ($lockedPool->remainingSeats() < $seats) {
@@ -59,12 +67,12 @@ class SeatAllocationService
                 'status' => SeatAllocationStatus::Active,
                 'created_by' => $actor?->id,
             ]);
-        });
+        }));
     }
 
     public function revoke(SeatAllocation $allocation): SeatAllocation
     {
-        return DB::transaction(function () use ($allocation) {
+        return (new TenantContextService())->runWithFirmContext($allocation->firm_id, fn () => DB::transaction(function () use ($allocation) {
             if ($allocation->isPooled() && $allocation->status === SeatAllocationStatus::Active) {
                 $pool = SeatPool::query()->whereKey($allocation->seat_pool_id)->lockForUpdate()->first();
 
@@ -76,6 +84,6 @@ class SeatAllocationService
             $allocation->update(['status' => SeatAllocationStatus::Revoked]);
 
             return $allocation->fresh();
-        });
+        }));
     }
 }

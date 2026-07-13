@@ -88,10 +88,19 @@ class NotificationDispatchServiceTest extends TestCase
         $this->assertSame(NotificationEventStatus::Blocked, $result->status);
         $this->assertStringContainsString('sender domain not verified', $result->reason);
 
-        $blockedEvent = \App\Models\NotificationEvent::query()
-            ->where('firm_id', $firm->id)
-            ->where('status', NotificationEventStatus::Blocked->value)
-            ->first();
+        // Section 39A-3L, Checkpoint 24: notification_events is now
+        // FORCE RLS, and dispatch()'s whole-method runWithFirmContext()
+        // wrap clears app.current_firm_id before dispatch() returns.
+        // This bare read (outside any context) must be explicitly
+        // wrapped or it would incorrectly see zero rows regardless of
+        // correctness.
+        $blockedEvent = $this->runWithFirmContext(
+            $firm,
+            fn () => \App\Models\NotificationEvent::query()
+                ->where('firm_id', $firm->id)
+                ->where('status', NotificationEventStatus::Blocked->value)
+                ->first(),
+        );
 
         $this->assertNotNull($blockedEvent);
         $this->assertStringContainsString('sender domain not verified', $blockedEvent->reason);
@@ -117,6 +126,19 @@ class NotificationDispatchServiceTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    /**
+     * Section 39A-3L, Checkpoint 24 — dispatch() wraps its entire body
+     * in one runWithFirmContext() call (it receives $firm directly, and
+     * none of its three collaborators self-wrap), so it correctly
+     * establishes context before ClientCommunicationPreference's
+     * do_not_contact lookup and holds it through the whole gate chain.
+     * An earlier version of this checkpoint's wiring (four independent
+     * per-recordEvent() wraps) briefly broke this by clearing context
+     * before the eligibility gate ran; that was found and fixed before
+     * this checkpoint was reviewed — see tests/Feature/Security/
+     * RlsForceRollout/NotificationEventsForceRlsActivationTest.php's
+     * class docblock for the full history.
+     */
     public function test_dispatch_is_blocked_when_do_not_contact_is_set(): void
     {
         Queue::fake();
@@ -143,6 +165,14 @@ class NotificationDispatchServiceTest extends TestCase
         $this->assertStringContainsString('do_not_contact', $result->reason);
     }
 
+    /**
+     * Section 39A-3L, Checkpoint 24 — dispatch() wraps its entire body
+     * in one runWithFirmContext() call, so ConsentService::isGranted()
+     * correctly sees this test's grantConsent() row and dispatch()
+     * genuinely reaches accepted=true/Queued. See
+     * test_dispatch_is_blocked_when_do_not_contact_is_set's docblock
+     * above for the fix history.
+     */
     public function test_dispatch_succeeds_and_queues_a_job_when_every_gate_passes(): void
     {
         Queue::fake();
@@ -172,9 +202,18 @@ class NotificationDispatchServiceTest extends TestCase
 
         $this->service->dispatch($firm, $client, ConsentChannel::Email, $client->email, 'document_reminder');
 
-        $this->assertSame(1, \App\Models\NotificationEvent::query()
-            ->where('firm_id', $firm->id)
-            ->where('status', NotificationEventStatus::Attempted->value)
-            ->count());
+        // Section 39A-3L, Checkpoint 24: same bare-read wrap reasoning
+        // as test_dispatch_is_blocked_when_the_sender_domain_is_not_
+        // verified above — dispatch()'s whole-method wrap clears
+        // context before returning, so this read must be explicit.
+        $count = $this->runWithFirmContext(
+            $firm,
+            fn () => \App\Models\NotificationEvent::query()
+                ->where('firm_id', $firm->id)
+                ->where('status', NotificationEventStatus::Attempted->value)
+                ->count(),
+        );
+
+        $this->assertSame(1, $count);
     }
 }

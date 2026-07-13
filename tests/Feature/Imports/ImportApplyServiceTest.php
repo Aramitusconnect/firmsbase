@@ -90,6 +90,60 @@ class ImportApplyServiceTest extends TestCase
         $this->assertDatabaseCount('clients', 0);
     }
 
+    /**
+     * Section 39A-3L Phase B5 proof: createRecordFor()'s Contact/Party
+     * create arms are each now wrapped in runWithFirmContext() (in
+     * preparation for a future FORCE ROW LEVEL SECURITY activation on
+     * those two tables, not yet active in this batch). No existing
+     * test in this file exercised the Contact or Party entity types at
+     * all before this batch — only Client. Assert the wrap did not
+     * break normal apply behavior for either type.
+     */
+    public function test_confirmed_contact_row_applies_and_creates_a_production_contact_record(): void
+    {
+        $firm = Firm::factory()->create();
+        $batch = $this->batchService->create($firm, ImportEntityType::Contact, ImportSourceType::CsvUpload);
+        $this->batchService->stageRows($batch, [['name' => 'Applied Contact', 'email' => 'applied.contact@example.test']]);
+        $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
+
+        $this->service->confirmBatch($batch->fresh());
+        $applied = $this->service->apply($batch->fresh());
+
+        $this->assertSame(ImportBatchStatus::Applied, $applied->status);
+        $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('contacts', [
+            'firm_id' => $firm->id,
+            'name' => 'Applied Contact',
+            'email' => 'applied.contact@example.test',
+        ]));
+
+        $row = $batch->rows()->first();
+        $this->assertSame(ImportRowStatus::Applied, $row->status);
+        $this->assertSame(\App\Models\Contact::class, $row->applied_record_type);
+        $this->assertNotNull($row->applied_record_id);
+    }
+
+    public function test_confirmed_party_row_applies_and_creates_a_production_party_record(): void
+    {
+        $firm = Firm::factory()->create();
+        $batch = $this->batchService->create($firm, ImportEntityType::Party, ImportSourceType::CsvUpload);
+        $this->batchService->stageRows($batch, [['name' => 'Applied Party', 'entity_type' => 'individual']]);
+        $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
+
+        $this->service->confirmBatch($batch->fresh());
+        $applied = $this->service->apply($batch->fresh());
+
+        $this->assertSame(ImportBatchStatus::Applied, $applied->status);
+        $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('parties', [
+            'firm_id' => $firm->id,
+            'name' => 'Applied Party',
+        ]));
+
+        $row = $batch->rows()->first();
+        $this->assertSame(ImportRowStatus::Applied, $row->status);
+        $this->assertSame(\App\Models\Party::class, $row->applied_record_type);
+        $this->assertNotNull($row->applied_record_id);
+    }
+
     public function test_conflict_record_and_template_rows_are_skipped_not_fabricated(): void
     {
         $firm = Firm::factory()->create();

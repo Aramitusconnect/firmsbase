@@ -3,6 +3,7 @@
 namespace Tests\Feature\MobilePortal;
 
 use App\Enums\InvoiceStatus;
+use App\Models\Client;
 use App\Models\DocumentRequest;
 use App\Models\Invoice;
 use App\Models\Matter;
@@ -43,9 +44,23 @@ class MobilePortalReadinessServiceTest extends TestCase
 
         $this->assertFalse($this->service->documentChecklistAvailable($matter));
 
-        DocumentRequest::factory()->create(['matter_id' => $matter->id]);
+        // Section 39A-3L, Checkpoint 10: document_requests is now FORCE
+        // RLS and documentChecklistAvailable() correctly wraps its
+        // query in the matter's own firm context, so the created
+        // DocumentRequest must genuinely belong to the matter's own
+        // firm (via a Client that belongs to that firm) or it becomes
+        // invisible to the query under test.
+        $client = Client::factory()->forFirm($matter->firm)->create();
+        DocumentRequest::factory()->forClient($client)->create(['matter_id' => $matter->id]);
 
-        $this->assertTrue($this->service->documentChecklistAvailable($this->runWithFirmContext($matter->firm, fn () => $matter->fresh())));
+        // The runWithFirmContext() wrap must surround the actual
+        // service call under test, not merely the $matter->fresh()
+        // fetch — otherwise context has already cleared by the time
+        // documentChecklistAvailable() runs its own internal wrap
+        // attempt (which itself doesn't need an ambient context, since
+        // it establishes its own — but this call site must still prove
+        // the real return value, not an artifact of a stale wrap).
+        $this->assertTrue($this->runWithFirmContext($matter->firm, fn () => $this->service->documentChecklistAvailable($matter)));
     }
 
     public function test_payment_link_readiness_true_for_a_sent_invoice_with_an_outstanding_balance(): void

@@ -73,7 +73,31 @@ class LoginPolicyFirewallTest extends TestCase
                 && $path !== 'database/migrations/2026_08_20_920002_force_rls_on_document_chase_rules_table.php'
                 && $path !== 'database/migrations/2026_08_20_920003_force_rls_on_employee_rates_table.php'
                 && $path !== 'database/migrations/2026_08_20_920004_force_rls_on_calendar_events_table.php'
-                && $path !== 'database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php',
+                && $path !== 'database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php'
+                // Section 39A-3L, Checkpoint 10, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a document_requests-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930010_force_rls_on_document_requests_table.php'
+                // Section 39A-3L, Checkpoint 11, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a communication_consents-
+                // only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php'
+                // Section 39A-3L, Checkpoint 22, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a payment_plans-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php'
+                // Section 39A-3L, Checkpoint 23, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a payment_plan_events-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php'
+                // Section 39A-3L, Checkpoint 24 (this batch, a later,
+                // distinct staged-FORCE-activation branch) legitimately
+                // added a notification_events-only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39D must add no migrations, but found: '.implode(', ', $changed));
@@ -167,7 +191,15 @@ class LoginPolicyFirewallTest extends TestCase
             'app/Services/SupportAccessRequestService.php',
             'app/Services/EmergencyAccessGovernanceGapService.php',
             'app/Services/SeedDataSecurityAuditService.php',
-            'app/Services/FirmUser2faPolicyService.php',
+            // FirmUser2faPolicyService.php is deliberately NOT in this
+            // list any more — Section 39A-3L, Checkpoint 18 (a later,
+            // distinct staged-FORCE-activation branch) found a genuine
+            // need to correct a stale docblock claim ("no login route/
+            // UI surface yet") once User::canAccessPanel() became a
+            // live consumer of this service, wrapped in tenant context
+            // because firm_settings gained permanent FORCE ROW LEVEL
+            // SECURITY in that checkpoint. Only the docblock changed —
+            // no method logic in this file was touched.
             'database/seeders/DatabaseSeeder.php',
             'app/Services/RowLevelSecurityCoverageMappingService.php',
             // PaymentClassificationService.php is deliberately NOT in
@@ -176,9 +208,21 @@ class LoginPolicyFirewallTest extends TestCase
             // wire recordDecision()'s $payment->update() call with
             // explicit tenant context, since payments now has
             // permanent FORCE ROW LEVEL SECURITY.
-            'app/Services/TrustEligibilityService.php',
+            // TrustEligibilityService.php is deliberately NOT in this
+            // list any more — Section 39A-3L, Checkpoint 18 (a later,
+            // distinct staged-FORCE-activation branch) found a genuine
+            // need to wrap evaluate()'s $firm->firmSettings read in
+            // runWithFirmContext(), since firm_settings now has
+            // permanent FORCE ROW LEVEL SECURITY. Only the single
+            // $settings read line changed — decision logic, order, and
+            // return values are byte-for-byte identical.
             'app/Services/AiRetrievalIsolationService.php',
-            'app/Services/ConsentService.php',
+            // ConsentService.php is deliberately NOT in this list any
+            // more — Section 39A-3L, Checkpoint 11 (a later, distinct
+            // staged-FORCE-activation branch) found a genuine need to
+            // wrap capture()/revoke()'s bodies in runWithFirmContext(),
+            // since communication_consents now has permanent FORCE ROW
+            // LEVEL SECURITY.
             // User.php is deliberately NOT in this list any more —
             // internal login/panel access wiring (a later, distinct
             // section) found a genuine need to add

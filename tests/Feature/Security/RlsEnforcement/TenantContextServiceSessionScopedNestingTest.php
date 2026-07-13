@@ -111,4 +111,69 @@ class TenantContextServiceSessionScopedNestingTest extends TestCase
             'With no outer context active, runWithFirmContext() must still leave the database session setting cleared.'
         );
     }
+
+    public function test_run_without_firm_context_restores_database_only_outer_context(): void
+    {
+        $this->assertSame(
+            0,
+            DB::transactionLevel(),
+            'This test must remain outside a transaction so the outer database context is session scoped.'
+        );
+
+        $this->assertNull(
+            $this->tenantContext->currentFirmId(),
+            'The regression setup must begin without PHP-memory tenant context.'
+        );
+
+        // Establish only the PostgreSQL context. PHP-memory context
+        // intentionally remains null.
+        $this->tenantContext->setDatabaseTenantContextForFirmId(
+            $this->outerFirm->id
+        );
+
+        $before = DB::selectOne(
+            'select current_setting(?, true) as value',
+            ['app.current_firm_id']
+        )->value;
+
+        $this->assertSame(
+            (string) $this->outerFirm->id,
+            $before,
+            'The database-only outer context must be active before the callback.'
+        );
+
+        $this->tenantContext->runWithoutFirmContext(function (): void {
+            $this->assertNull(
+                $this->tenantContext->currentFirmId(),
+                'runWithoutFirmContext() must keep PHP-memory context cleared.'
+            );
+
+            $during = DB::selectOne(
+                'select current_setting(?, true) as value',
+                ['app.current_firm_id']
+            )->value;
+
+            $this->assertTrue(
+                $during === null || $during === '',
+                'runWithoutFirmContext() must clear the database context inside the callback.'
+            );
+        });
+
+        $this->assertNull(
+            $this->tenantContext->currentFirmId(),
+            'Restoring a database-only outer context must not invent PHP-memory context.'
+        );
+
+        $after = DB::selectOne(
+            'select current_setting(?, true) as value',
+            ['app.current_firm_id']
+        )->value;
+
+        $this->assertSame(
+            (string) $this->outerFirm->id,
+            $after,
+            'runWithoutFirmContext() must restore the original database-only outer context.'
+        );
+    }
+
 }

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\BackupRestoreTest;
 use App\Models\Firm;
 use App\Services\BackupRestore\BackupRestoreDrillRunner;
+use App\Services\TenantContextService;
 
 /**
  * BackupRestoreTestService — the only place backup_restore_tests rows
@@ -26,7 +27,7 @@ class BackupRestoreTestService
         $startedAt = now();
         $result = $runner->run($firm);
 
-        return BackupRestoreTest::create([
+        $create = fn () => BackupRestoreTest::create([
             'firm_id' => $firm?->id,
             'status' => $result->status,
             'components_verified_json' => $result->componentsVerified,
@@ -38,6 +39,12 @@ class BackupRestoreTestService
             'completed_at' => now(),
             'notes' => $result->notes,
         ]);
+
+        $tenantContext = app(TenantContextService::class);
+
+        return $firm
+            ? $tenantContext->runWithFirmContext($firm, $create)
+            : $tenantContext->runWithoutFirmContext($create);
     }
 
     /**
@@ -47,13 +54,24 @@ class BackupRestoreTestService
      * timestamp-only ordering is not deterministic in that case. Row
      * insertion order (the bigint id) is the reliable "most recent"
      * signal.
+     *
+     * Section 39A-3L Phase B6: only the firm-scoped branch needs a
+     * context wrap. Under the new tenant-read policy, firm_id IS NULL
+     * rows are visible unconditionally on the read side regardless of
+     * the caller's own context (that is the entire point of the
+     * platform-wide-visible design decision) — only the WITH CHECK
+     * (write) side is asymmetric.
      */
     public function latestFor(?Firm $firm): ?BackupRestoreTest
     {
-        return BackupRestoreTest::query()
+        $query = fn () => BackupRestoreTest::query()
             ->when($firm, fn ($q) => $q->where('firm_id', $firm->id), fn ($q) => $q->whereNull('firm_id'))
             ->orderByDesc('id')
             ->first();
+
+        return $firm
+            ? app(TenantContextService::class)->runWithFirmContext($firm, $query)
+            : $query();
     }
 
     /**

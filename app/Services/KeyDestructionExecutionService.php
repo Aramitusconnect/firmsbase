@@ -31,19 +31,21 @@ class KeyDestructionExecutionService
 
         $destroyedCount = $this->encryptionKeyService->destroy($fresh->firm, $fresh->id);
 
-        $fresh->update([
-            'status' => KeyDestructionRequestStatus::Executed,
-            'executed_at' => now(),
-        ]);
+        return (new TenantContextService())->runWithFirmContext($fresh->firm, function () use ($fresh, $destroyedCount) {
+            $fresh->update([
+                'status' => KeyDestructionRequestStatus::Executed,
+                'executed_at' => now(),
+            ]);
 
-        $this->timelineEventRecorder->record(
-            $fresh->firm,
-            'key_destruction.executed',
-            $fresh,
-            null,
-            ['key_destruction_request_id' => $fresh->id, 'keys_destroyed' => $destroyedCount],
-        );
+            $this->timelineEventRecorder->record(
+                $fresh->firm,
+                'key_destruction.executed',
+                $fresh,
+                null,
+                ['key_destruction_request_id' => $fresh->id, 'keys_destroyed' => $destroyedCount],
+            );
 
-        return $fresh->fresh();
+            return $fresh->fresh();
+        });
     }
 }

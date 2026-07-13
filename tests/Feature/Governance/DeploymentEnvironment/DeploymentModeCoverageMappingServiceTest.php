@@ -4,6 +4,7 @@ namespace Tests\Feature\Governance\DeploymentEnvironment;
 
 use App\Enums\GovernanceMappingStatus;
 use App\Services\DeploymentModeCoverageMappingService;
+use App\Services\RowLevelSecurityCoverageMappingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -68,17 +69,58 @@ class DeploymentModeCoverageMappingServiceTest extends TestCase
         $this->assertCount(8, $this->service->privateEnterprise());
     }
 
+    /**
+     * Section 39A-3L Stage B (Checkpoints 22-34) activated permanent
+     * FORCE ROW LEVEL SECURITY on all originally-prepared tables —
+     * $enforcementActive below is therefore now genuinely TRUE, unlike
+     * when this test was first written. That does NOT make this
+     * control fully Implemented: firm_settings being forced was always
+     * a proxy for "is ANY enforcement active," not the actual gating
+     * condition — the real reason this control remains
+     * PartiallyImplemented is that additional tenant-owned tables
+     * discovered by inventory sweeps still have zero RLS preparation
+     * (see the rls_prepared_not_enforced gap's own still-open
+     * component, and RowLevelSecurityCoverageMappingService::
+     * missingPreparedTables() for the live, non-hardcoded count). This
+     * assertion is therefore unconditional now, rather than gated
+     * behind $enforcementActive — gating it there made this test
+     * silently perform zero assertions the instant enforcement
+     * activated, exactly the failure mode this rewrite closes.
+     */
     public function test_saas_rls_control_is_not_implemented_while_rls_enforcement_is_inactive(): void
     {
-        $item = $this->service->byKey('saas_firm_isolation_rls_defense_in_depth');
-
-        $this->assertNotSame(GovernanceMappingStatus::Implemented, $item->status);
-
         $row = DB::selectOne(
             'select relforcerowsecurity from pg_class where relname = ?',
             ['firm_settings']
         );
-        $this->assertFalse((bool) $row->relforcerowsecurity, 'FORCE ROW LEVEL SECURITY must remain inactive for this classification to hold.');
+        $enforcementActive = (bool) $row->relforcerowsecurity;
+
+        $this->assertTrue(
+            $enforcementActive,
+            'firm_settings must have permanent FORCE ROW LEVEL SECURITY active — Section 39A-3L Stage B is complete.'
+        );
+
+        $uncoveredCount = count((new RowLevelSecurityCoverageMappingService())->missingPreparedTables());
+        $this->assertGreaterThan(0, $uncoveredCount, 'This test\'s own premise requires at least one currently-uncovered tenant-owned table to exist.');
+
+        $item = $this->service->byKey('saas_firm_isolation_rls_defense_in_depth');
+
+        $this->assertNotSame(
+            GovernanceMappingStatus::Implemented,
+            $item->status,
+            "This control remains PartiallyImplemented — not because enforcement is inactive (it now is), but because {$uncoveredCount} uncovered tenant-owned tables still lack any RLS preparation at all."
+        );
+
+        $this->assertStringContainsString(
+            (string) $uncoveredCount,
+            $item->notes,
+            'The generated notes must contain the current, dynamically-derived uncovered-table count, not a hard-coded literal.'
+        );
+        $this->assertStringNotContainsString(
+            'enforcement is inactive',
+            strtolower($item->notes),
+            'The notes must not claim enforcement is inactive — it is now genuinely active for the covered tables.'
+        );
     }
 
     public function test_dedicated_controls_map_to_phase_16_services(): void

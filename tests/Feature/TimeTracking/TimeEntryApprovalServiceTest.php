@@ -61,9 +61,16 @@ class TimeEntryApprovalServiceTest extends TestCase
         (new EmployeeRateService())->setRate($firm, $user, billingRateCents: 30000, costRateCents: 15000);
 
         $entry = TimeEntry::factory()->forFirm($firm)->forUser($user)->create(['status' => TimeEntryStatus::Draft]);
-        $this->service->submit($entry);
+        // Section 39A-3L, Checkpoint 21 — time_entries is now FORCE RLS
+        // protected, so $entry->fresh() would return null here with no
+        // ambient tenant context active (the exact fail-closed behavior
+        // this checkpoint activates). submit() already returns a fresh,
+        // persisted TimeEntry (built inside its own internal context
+        // wrap) — use that directly instead of re-fetching with no
+        // context.
+        $submitted = $this->service->submit($entry);
 
-        $approved = $this->service->approve($entry->fresh(), $approver);
+        $approved = $this->service->approve($submitted, $approver);
 
         $this->assertSame(TimeEntryStatus::Approved, $approved->status);
         $this->assertSame(30000, $approved->billing_rate_cents_snapshot);
@@ -84,9 +91,15 @@ class TimeEntryApprovalServiceTest extends TestCase
     {
         $entry = TimeEntry::factory()->create();
         $approver = User::factory()->create();
-        $this->service->submit($entry);
+        // Section 39A-3L, Checkpoint 21 — same reasoning as
+        // test_approve_snapshots_the_employees_current_billing_rate()
+        // above: use submit()'s own returned (already-fresh) TimeEntry
+        // rather than re-fetching via $entry->fresh() with no ambient
+        // context active, which would return null now that time_entries
+        // is FORCE RLS protected.
+        $submitted = $this->service->submit($entry);
 
-        $rejected = $this->service->reject($entry->fresh(), $approver, 'Missing matter reference');
+        $rejected = $this->service->reject($submitted, $approver, 'Missing matter reference');
 
         $this->assertSame(TimeEntryStatus::Rejected, $rejected->status);
         $this->assertSame('Missing matter reference', $rejected->rejected_reason);

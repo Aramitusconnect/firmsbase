@@ -29,11 +29,19 @@ class EncryptionKeyServiceTest extends TestCase
 
         $this->assertSame(1, $key->key_version);
         $this->assertSame(TenantEncryptionKeyStatus::Active, $key->status);
-        $this->assertDatabaseHas('tenant_encryption_keys', [
-            'firm_id' => $firm->id,
-            'key_version' => 1,
-            'status' => 'active',
-        ]);
+
+        // Section 39A-3L, Checkpoint 16: tenant_encryption_keys is now
+        // FORCE RLS. provision() clears its own context wrap before
+        // returning, so this bare assertDatabaseHas() (outside any
+        // context) must be explicitly wrapped or it would incorrectly
+        // find no matching row.
+        $this->runWithFirmContext($firm, function () use ($firm) {
+            $this->assertDatabaseHas('tenant_encryption_keys', [
+                'firm_id' => $firm->id,
+                'key_version' => 1,
+                'status' => 'active',
+            ]);
+        });
     }
 
     public function test_provision_throws_when_firm_already_has_active_key(): void
@@ -54,10 +62,15 @@ class EncryptionKeyServiceTest extends TestCase
         $plaintext = $this->service->decryptActiveKey($firm);
 
         $this->assertNotEmpty($plaintext);
-        $this->assertNotSame(
-            TenantEncryptionKey::where('firm_id', $firm->id)->first()->encrypted_key,
-            $plaintext
+
+        // Section 39A-3L, Checkpoint 16: same bare-read wrap reasoning
+        // as above.
+        $encryptedKey = $this->runWithFirmContext(
+            $firm,
+            fn () => TenantEncryptionKey::where('firm_id', $firm->id)->first()->encrypted_key,
         );
+
+        $this->assertNotSame($encryptedKey, $plaintext);
     }
 
     public function test_decrypt_active_key_throws_when_no_active_key_exists(): void
@@ -78,14 +91,22 @@ class EncryptionKeyServiceTest extends TestCase
 
         $this->assertSame(2, $rotated->key_version);
         $this->assertSame(TenantEncryptionKeyStatus::Active, $rotated->status);
-        $this->assertSame(TenantEncryptionKeyStatus::Rotated, $original->fresh()->status);
 
-        $this->assertSame(
-            1,
-            TenantEncryptionKey::where('firm_id', $firm->id)
+        // Section 39A-3L, Checkpoint 16: same bare-read wrap reasoning
+        // as above — both fresh() and the count query run outside any
+        // context after rotate() returns.
+        $this->runWithFirmContext($firm, function () use ($original) {
+            $this->assertSame(TenantEncryptionKeyStatus::Rotated, $original->fresh()->status);
+        });
+
+        $activeCount = $this->runWithFirmContext(
+            $firm,
+            fn () => TenantEncryptionKey::where('firm_id', $firm->id)
                 ->where('status', TenantEncryptionKeyStatus::Active->value)
-                ->count()
+                ->count(),
         );
+
+        $this->assertSame(1, $activeCount);
     }
 
     public function test_rotate_produces_different_plaintext_key_material(): void

@@ -44,10 +44,21 @@ class EmailBodyEncryptionService
 
     public function encrypt(Firm $firm, string $plaintext): EmailBodyEncryptionResult
     {
-        $activeKey = TenantEncryptionKey::query()
-            ->where('firm_id', $firm->id)
-            ->where('status', TenantEncryptionKeyStatus::Active)
-            ->first();
+        // Section 39A-3L, Checkpoint 16: tenant_encryption_keys is now
+        // FORCE RLS. This query is wrapped in its own, standalone
+        // runWithFirmContext() call — deliberately NOT nested inside a
+        // wrap that also covers the decryptActiveKey() call below,
+        // since decryptActiveKey() establishes and clears its own
+        // context internally; nesting would let the inner call's
+        // finally-block clear context this method still needed. The
+        // two DB accesses are sequential, not nested.
+        $activeKey = (new TenantContextService())->runWithFirmContext(
+            $firm->id,
+            fn () => TenantEncryptionKey::query()
+                ->where('firm_id', $firm->id)
+                ->where('status', TenantEncryptionKeyStatus::Active)
+                ->first()
+        );
 
         if (! $activeKey) {
             return EmailBodyEncryptionResult::failure("firm {$firm->id} has no active tenant encryption key");
@@ -66,10 +77,16 @@ class EmailBodyEncryptionService
 
     public function decrypt(Firm $firm, string $ciphertext, int $encryptionKeyId): string
     {
-        $key = TenantEncryptionKey::query()
-            ->where('id', $encryptionKeyId)
-            ->where('firm_id', $firm->id)
-            ->first();
+        // Section 39A-3L, Checkpoint 16: same standalone-wrap reasoning
+        // as encrypt() above — sequential, not nested, with the
+        // decryptActiveKey() call further down.
+        $key = (new TenantContextService())->runWithFirmContext(
+            $firm->id,
+            fn () => TenantEncryptionKey::query()
+                ->where('id', $encryptionKeyId)
+                ->where('firm_id', $firm->id)
+                ->first()
+        );
 
         if (! $key) {
             throw new \RuntimeException("Encryption key {$encryptionKeyId} does not belong to firm {$firm->id}.");

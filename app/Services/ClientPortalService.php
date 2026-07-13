@@ -27,13 +27,18 @@ class ClientPortalService
      */
     public function invite(Client $client): Client
     {
-        if (! $this->consentService->isGranted($client->firm, $client->id, ConsentChannel::Portal)) {
-            throw new \RuntimeException(
-                'Cannot invite client to the portal without a granted, unrevoked portal consent record.'
-            );
-        }
-
         return (new TenantContextService())->runWithFirmContext($client->firm_id, function () use ($client) {
+            // Section 39A-3L, Checkpoint 11 — moved inside this same
+            // runWithFirmContext() wrap: communication_consents is now
+            // FORCE-RLS protected, so this isGranted() read must share
+            // the write's active context (checking it before the wrap
+            // began would always read zero rows once FORCE is active).
+            if (! $this->consentService->isGranted($client->firm, $client->id, ConsentChannel::Portal)) {
+                throw new \RuntimeException(
+                    'Cannot invite client to the portal without a granted, unrevoked portal consent record.'
+                );
+            }
+
             $client->update([
                 'portal_status' => ClientPortalStatus::Invited,
                 'portal_invitation_token' => (string) Str::uuid7(),

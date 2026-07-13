@@ -99,10 +99,10 @@ class InvoiceDraftingService
 
             $this->recomputeTotals($invoice);
 
-            $this->timeline->record($firm, 'invoice_drafted', $invoice, $createdBy, [
+            (new TenantContextService())->runWithFirmContext($firm, fn () => $this->timeline->record($firm, 'invoice_drafted', $invoice, $createdBy, [
                 'invoice_id' => $invoice->id,
                 'invoice_type' => InvoiceType::TimeAndExpense->value,
-            ]);
+            ]));
 
             $invoice = (new TenantContextService())->runWithFirmContext($firm, fn () => $invoice->fresh('lines'));
 
@@ -148,10 +148,10 @@ class InvoiceDraftingService
 
             $this->recomputeTotals($invoice);
 
-            $this->timeline->record($firm, 'invoice_drafted', $invoice, $createdBy, [
+            (new TenantContextService())->runWithFirmContext($firm, fn () => $this->timeline->record($firm, 'invoice_drafted', $invoice, $createdBy, [
                 'invoice_id' => $invoice->id,
                 'invoice_type' => InvoiceType::FlatFee->value,
-            ]);
+            ]));
 
             $invoice = (new TenantContextService())->runWithFirmContext($firm, fn () => $invoice->fresh('lines'));
 

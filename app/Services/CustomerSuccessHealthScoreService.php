@@ -23,6 +23,16 @@ use App\Models\ProductAnalyticsEvent;
  * open_tickets_count is always null — no support ticketing table
  * exists in this project yet; a later phase that adds one should wire
  * its count in here rather than this service inventing one.
+ *
+ * Section 39A-3L, Checkpoint 22 — payment_plans is now FORCE-RLS
+ * protected; $firm->paymentPlans()->count() is wrapped in its own
+ * tight runWithFirmContext() call below. The sibling active-users/
+ * matters/clients/documents/invoices/payments counts in this same
+ * method remain unwrapped — a pre-existing gap from when those tables
+ * were force-activated in earlier checkpoints, left untouched here as
+ * out of this checkpoint's narrow payment_plans scope (compute() has
+ * no production caller today, only tests/governance mapping
+ * references, which is why this has not yet surfaced as a live bug).
  */
 class CustomerSuccessHealthScoreService
 {
@@ -38,7 +48,7 @@ class CustomerSuccessHealthScoreService
         $clientsCount = $firm->clients()->count();
         $documentsCount = $firm->documents()->count();
         $invoicesCount = $firm->invoices()->count();
-        $paymentPlansCount = $firm->paymentPlans()->count();
+        $paymentPlansCount = (new TenantContextService())->runWithFirmContext($firm, fn () => $firm->paymentPlans()->count());
         $paymentsCount = $firm->payments()->count();
 
         $aiUsageCount = ProductAnalyticsEvent::query()

@@ -84,10 +84,15 @@ class SupportAccessPolicyServiceTest extends TestCase
 
         $this->policyService->logNotification($request, 'support_access_emergency_granted');
 
-        $this->assertDatabaseHas('security_events', [
+        // security_events has permanent FORCE ROW LEVEL SECURITY (Section
+        // 39A-3L, Phase B6, Checkpoint 34) — logNotification() writes a
+        // real, non-null firm_id row, only visible under that same
+        // firm's own context, so this read-time assertion needs a
+        // context wrap.
+        $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('security_events', [
             'firm_id' => $firm->id,
             'event_type' => 'support_access_emergency_granted',
             'category' => 'support_access',
-        ]);
+        ]));
     }
 }

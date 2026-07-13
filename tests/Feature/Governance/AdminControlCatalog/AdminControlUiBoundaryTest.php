@@ -217,7 +217,95 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== 'tests/Feature/Deadlines/CalendarEventServiceTest.php'
                 && $path !== 'tests/Feature/Deadlines/DeadlineServiceTest.php'
                 && $path !== 'tests/Feature/DocumentChase/DocumentChaseSchedulerServiceTest.php'
-                && $path !== 'tests/Feature/Rates/EmployeeRateServiceTest.php',
+                && $path !== 'tests/Feature/Rates/EmployeeRateServiceTest.php'
+                // Section 39A-3L, Checkpoint 10, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a document_requests-only
+                // FORCE RLS migration, a DocumentRequestFactory fix
+                // (app/Services/ is already excluded above, so only
+                // the migration/factory/affected tests need listing
+                // here), and updated the tests it affected.
+                && $path !== 'database/migrations/2026_08_25_930010_force_rls_on_document_requests_table.php'
+                && $path !== 'database/factories/DocumentRequestFactory.php'
+                && $path !== 'tests/Feature/Documents/DocumentRequestServiceTest.php'
+                && $path !== 'tests/Feature/DocumentChase/DocumentChaseServiceTest.php'
+                && $path !== 'tests/Feature/Readiness/MatterReadinessServiceTest.php'
+                // Section 39A-3L, Checkpoint 11, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a communication_consents-
+                // only FORCE RLS migration and a CommunicationConsentFactory
+                // context-hold fix (app/Services/ is already excluded
+                // above, so only the migration/factory/affected tests
+                // need listing here), and updated the tests it affected.
+                && $path !== 'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php'
+                && $path !== 'database/factories/CommunicationConsentFactory.php'
+                && $path !== 'tests/Feature/Activation/ConsentServiceTest.php'
+                && $path !== 'tests/Feature/PaymentPlans/PaymentPlanDunningServiceTest.php'
+                // Section 39A-3L Stage A (a later, distinct test-
+                // harness-safety branch) legitimately added disposable-
+                // database tooling under tools/rls-test/, a PHPUnit
+                // bootstrap guard, and reviewed config/gitignore
+                // corrections.
+                && ! str_starts_with($path, 'tools/rls-test/')
+                && $path !== 'tests/bootstrap.php'
+                && $path !== 'tests/bootstrap-verify-test-database.php'
+                && $path !== '.env.testing.example'
+                && $path !== '.gitignore'
+                && $path !== 'phpunit.xml'
+                // Section 39A-3L Stage A also legitimately fixed a
+                // missing-tenant-context bug in four existing
+                // tests/Feature/Ai/ files.
+                && $path !== 'tests/Feature/Ai/Concerns/SetsUpAiEntitledFirm.php'
+                && $path !== 'tests/Feature/Ai/Entitlement/AiEntitlementAndModeBlockingTest.php'
+                && $path !== 'tests/Feature/Ai/Foundation/AiModeEnumReplacementTest.php'
+                && $path !== 'tests/Feature/Ai/Usage/AiUsageRecorderServiceTest.php'
+                // Section 39A-3L, Checkpoint 22, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a payment_plans-only
+                // FORCE RLS migration, a PaymentPlanFactory
+                // context-hold + firm/client consistency fix, and
+                // updated the one existing test that genuinely needed
+                // explicit tenant context after this activation.
+                && $path !== 'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php'
+                && $path !== 'database/factories/PaymentPlanFactory.php'
+                && $path !== 'tests/Feature/PaymentPlans/PaymentPlanServiceTest.php'
+                // Section 39A-3L, Checkpoint 23, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a payment_plan_events-only
+                // FORCE RLS migration, a PaymentPlanEventFactory
+                // context-hold + firm/plan consistency fix, and updated
+                // the same existing test file (already allowed above)
+                // to explicitly wrap two assertDatabaseHas() calls in
+                // tenant context after this activation.
+                && $path !== 'database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php'
+                && $path !== 'database/factories/PaymentPlanEventFactory.php'
+                // Section 39A-3L, Checkpoint 24 (this batch, a later,
+                // distinct staged-FORCE-activation branch) legitimately
+                // added a notification_events-only FORCE RLS migration
+                // and a NotificationEventFactory context-hold fix
+                // (app/Services/ is already excluded above, so only the
+                // migration/factory/affected tests need listing here),
+                // and updated the two existing tests that legitimately
+                // needed explicit tenant context after this activation.
+                && $path !== 'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php'
+                && $path !== 'database/factories/NotificationEventFactory.php'
+                && $path !== 'tests/Feature/Notifications/NotificationDispatchServiceTest.php'
+                && $path !== 'tests/Feature/Notifications/SuppressionServiceTest.php'
+                // Section 39A-3L Phase B5 (this batch, a later, distinct
+                // contacts/parties FORCE-RLS-prerequisite branch —
+                // contacts and parties are NOT yet FORCE-enabled by this
+                // batch, only prepared for it) legitimately added
+                // ContactFactory/PartyFactory context-hold fixes
+                // (app/Services/ is already excluded above, so
+                // ConflictCheckService.php/ImportApplyService.php/
+                // ImportDuplicateDetectionService.php needed no new
+                // entry here), and extended
+                // ImportDuplicateDetectionServiceTest.php with Contact/
+                // Party duplicate-detection coverage that did not exist
+                // before this batch.
+                && $path !== 'database/factories/ContactFactory.php'
+                && $path !== 'database/factories/PartyFactory.php'
+                && $path !== 'tests/Feature/Imports/ImportDuplicateDetectionServiceTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

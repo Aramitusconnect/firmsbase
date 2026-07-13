@@ -96,11 +96,25 @@ class LicenseFileValidationService
             return $this->record($licenseFile, LicenseValidationEventType::Validated, LicenseValidationResult::Valid, $now);
         }
 
-        if ($now < $graceExpiresAt) {
-            $alreadyInGrace = $licenseFile->firmLicense?->license_status === LicenseStatus::GracePeriod;
+        // Section 39A-3L, Checkpoint 19 - firm_licenses is FORCE-RLS
+        // protected as of this checkpoint. $licenseFile->firmLicense is
+        // read three times below with no ambient tenant context; an
+        // unwrapped read against a FORCE-protected table silently
+        // resolves to null rather than raising, which would skip the
+        // GracePeriod/Restricted transitions entirely. Resolved once,
+        // under a tight context wrap keyed on $licenseFile->firm_id
+        // (LicenseFile itself is not RLS-protected and always
+        // readable), and cached below rather than re-read at each use.
+        // changeStatus() is already self-contained (Checkpoint 19 fix
+        // in FirmLicenseCommercialService), so it does not additionally
+        // need to be wrapped here.
+        $firmLicense = (new TenantContextService())->runWithFirmContext($licenseFile->firm_id, fn () => $licenseFile->firmLicense);
 
-            if (! $alreadyInGrace && $licenseFile->firmLicense) {
-                $this->firmLicenseCommercial->changeStatus($licenseFile->firmLicense, LicenseStatus::GracePeriod, 'License expired; entering grace period.');
+        if ($now < $graceExpiresAt) {
+            $alreadyInGrace = $firmLicense?->license_status === LicenseStatus::GracePeriod;
+
+            if (! $alreadyInGrace && $firmLicense) {
+                $this->firmLicenseCommercial->changeStatus($firmLicense, LicenseStatus::GracePeriod, 'License expired; entering grace period.');
             }
 
             $eventType = $alreadyInGrace ? LicenseValidationEventType::Expired : LicenseValidationEventType::EnteredGrace;
@@ -108,10 +122,10 @@ class LicenseFileValidationService
             return $this->record($licenseFile, $eventType, LicenseValidationResult::Grace, $now, 'License is within its grace period.');
         }
 
-        if ($licenseFile->firmLicense
-            && $licenseFile->firmLicense->license_status !== LicenseStatus::Restricted
+        if ($firmLicense
+            && $firmLicense->license_status !== LicenseStatus::Restricted
         ) {
-            $this->firmLicenseCommercial->changeStatus($licenseFile->firmLicense, LicenseStatus::Restricted, 'License grace period has lapsed.');
+            $this->firmLicenseCommercial->changeStatus($firmLicense, LicenseStatus::Restricted, 'License grace period has lapsed.');
         }
 
         return $this->record($licenseFile, LicenseValidationEventType::GraceExpired, LicenseValidationResult::Invalid, $now, 'License grace period has lapsed.');

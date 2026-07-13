@@ -4,6 +4,7 @@ namespace Tests\Feature\HealthCheck;
 
 use App\Enums\HealthCheckStatus;
 use App\Models\Firm;
+use App\Services\TenantContextService;
 use App\Services\TenantIsolationAnomalyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -30,10 +31,12 @@ class TenantIsolationAnomalyServiceTest extends TestCase
     public function test_unhealthy_immediately_after_an_anomaly_is_recorded(): void
     {
         $firm = Firm::factory()->create();
+        $this->service->recordAnomaly($firm, 'Query returned rows from a different firm_id'); // standalone, already self-wrapped
 
-        $this->service->recordAnomaly($firm, 'Query returned rows from a different firm_id');
-
-        $result = $this->service->checkForKnownAnomalyPatterns();
+        $result = app(TenantContextService::class)->runWithFirmContext(
+            $firm,
+            fn () => $this->service->checkForKnownAnomalyPatterns()
+        );
 
         $this->assertSame(HealthCheckStatus::Unhealthy, $result->status);
         $this->assertStringContainsString('different firm_id', $result->detail);
@@ -42,10 +45,13 @@ class TenantIsolationAnomalyServiceTest extends TestCase
     public function test_healthy_again_once_the_anomaly_falls_outside_the_lookback_window(): void
     {
         $firm = Firm::factory()->create();
-        $anomaly = $this->service->recordAnomaly($firm, 'Old anomaly');
-        $anomaly->update(['checked_at' => now()->subHours(3)]);
+        $anomaly = $this->service->recordAnomaly($firm, 'Old anomaly'); // standalone, already self-wrapped
 
-        $result = $this->service->checkForKnownAnomalyPatterns(lookbackMinutes: 60);
+        $result = app(TenantContextService::class)->runWithFirmContext($firm, function () use ($anomaly) {
+            $anomaly->update(['checked_at' => now()->subHours(3)]);
+
+            return $this->service->checkForKnownAnomalyPatterns(lookbackMinutes: 60);
+        });
 
         $this->assertSame(HealthCheckStatus::Healthy, $result->status);
     }

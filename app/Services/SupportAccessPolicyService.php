@@ -60,35 +60,39 @@ class SupportAccessPolicyService
      */
     public function logNotification(SupportAccessRequest $request, string $eventType): void
     {
-        DB::table('security_events')->insert([
-            'firm_id' => $request->firm_id,
-            'actor_type' => \App\Models\PlatformAdmin::class,
-            'actor_id' => $request->requested_by,
-            'event_type' => $eventType,
-            'category' => 'support_access',
-            'metadata' => json_encode([
-                'support_access_request_id' => $request->id,
-                'access_type' => $request->access_type->value,
-                'reason' => $request->reason,
-                'emergency_justification' => $request->emergency_justification,
-            ]),
-            'created_at' => now(),
-        ]);
+        (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $eventType) {
+            DB::table('security_events')->insert([
+                'firm_id' => $request->firm_id,
+                'actor_type' => \App\Models\PlatformAdmin::class,
+                'actor_id' => $request->requested_by,
+                'event_type' => $eventType,
+                'category' => 'support_access',
+                'metadata' => json_encode([
+                    'support_access_request_id' => $request->id,
+                    'access_type' => $request->access_type->value,
+                    'reason' => $request->reason,
+                    'emergency_justification' => $request->emergency_justification,
+                ]),
+                'created_at' => now(),
+            ]);
+        });
     }
 
     public function logSessionAudit(SupportAccessSession $session, string $eventType): void
     {
-        DB::table('security_events')->insert([
-            'firm_id' => $session->firm_id,
-            'actor_type' => \App\Models\PlatformAdmin::class,
-            'actor_id' => $session->platform_admin_id,
-            'event_type' => $eventType,
-            'category' => 'support_access',
-            'metadata' => json_encode([
-                'support_access_session_id' => $session->id,
-                'expires_at' => $session->expires_at?->toIso8601String(),
-            ]),
-            'created_at' => now(),
-        ]);
+        (new TenantContextService())->runWithFirmContext($session->firm_id, function () use ($session, $eventType) {
+            DB::table('security_events')->insert([
+                'firm_id' => $session->firm_id,
+                'actor_type' => \App\Models\PlatformAdmin::class,
+                'actor_id' => $session->platform_admin_id,
+                'event_type' => $eventType,
+                'category' => 'support_access',
+                'metadata' => json_encode([
+                    'support_access_session_id' => $session->id,
+                    'expires_at' => $session->expires_at?->toIso8601String(),
+                ]),
+                'created_at' => now(),
+            ]);
+        });
     }
 }

@@ -49,7 +49,19 @@ class TrustLedgerEntryReversalService
             throw new \RuntimeException('This entry has already been reversed.');
         }
 
-        $matter = $originalEntry->matter;
+        // Section 39A-3L, Checkpoint 4 - matters is already a FORCE-RLS
+        // table from an earlier checkpoint (trust_ledgers is not yet
+        // RLS-enabled at all). This read used to work only by accident,
+        // relying on ambient database session context left active by
+        // MatterFactory's context-hold create() pattern earlier in the
+        // caller's flow (this method is reached via
+        // TrustChargebackService::reverse(), whose own assertEligible()
+        // call now routes through the fixed EntitlementService::
+        // resolve() and correctly clears any such ambient context
+        // before returning here). With $matter silently null, the
+        // `if ($matter)` gates below would silently SKIP
+        // recomputeForMatter() instead of failing closed.
+        $matter = (new TenantContextService())->runWithFirmContext($firm, fn () => $originalEntry->matter);
         $oppositeAmount = -1 * $originalEntry->amount_cents;
 
         return $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance) use (

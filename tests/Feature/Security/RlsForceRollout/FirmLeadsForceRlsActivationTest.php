@@ -164,10 +164,89 @@ class FirmLeadsForceRlsActivationTest extends TestCase
      */
     public function test_exactly_eighteen_intended_tables_are_force_enabled(): void
     {
+        // Section 39A-3L, Checkpoint 1, Table Phase C (a later, distinct
+        // staged-FORCE-activation branch) legitimately activated FORCE
+        // for payment_classification_events too — this test's own scope
+        // only introduced eighteen, but the exact-count assertion below
+        // must still account for that later, legitimate addition rather
+        // than falsely reporting it as unexpected.
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 2, Table
+        // Phase C (this repo's twentieth staged FORCE activation batch,
+        // covering activation_checklists) for the same reason — additive
+        // only, no existing assertion removed or weakened.
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 3, Table
+        // Phase C (this repo's twenty-first staged FORCE activation
+        // batch, covering firm_activation_events) for the same reason —
+        // additive only, no existing assertion removed or weakened.
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 4, Table
+        // Phase C (this repo's twenty-second staged FORCE activation
+        // batch, covering firm_entitlements) for the same reason —
+        // additive only, no existing assertion removed or weakened.
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 5, Table
+        // Phase C (this repo's twenty-third staged FORCE activation
+        // batch, covering firm_entitlement_events) for the same reason —
+        // additive only, no existing assertion removed or weakened.
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 6, Table
+        // Phase C (this repo's twenty-fourth staged FORCE activation
+        // batch, covering installed_template_packs) for the same reason
+        // — additive only, no existing assertion removed or weakened.
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 9, Table
+        // Phase C (this repo's twenty-seventh staged FORCE activation
+        // batch, covering seat_allocations) for the same reason —
+        // additive only, no existing assertion removed or weakened.
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 10, Table
+        // Phase C (this repo's twenty-eighth staged FORCE activation
+        // batch, covering document_requests) for the same reason —
+        // additive only, no existing assertion removed or weakened.
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 11, Table
+        // Phase C (this repo's twenty-ninth staged FORCE activation
+        // batch, covering communication_consents) for the same reason —
+        // additive only, no existing assertion removed or weakened.
         $expectedForced = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
+            'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
+            'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 13,
+            // Table Phase C (this repo's thirty-first staged FORCE
+            // activation batch, covering intake_submissions) for the
+            // same reason — additive only, no existing assertion
+            // removed or weakened.
+            'communication_consents', 'communication_consent_events', 'intake_submissions',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 14,
+            // Table Phase C (this repo's thirty-second staged FORCE
+            // activation batch, covering matter_readiness_scores) for
+            // the same reason — additive only, no existing assertion
+            // removed or weakened.
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 15,
+            // Table Phase C (this repo's thirty-third staged FORCE
+            // activation batch, covering readiness_score_events) for
+            // the same reason — additive only, no existing assertion
+            // removed or weakened.
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 16,
+            // Table Phase C (this repo's thirty-fourth staged FORCE
+            // activation batch, covering tenant_encryption_keys) for
+            // the same reason — additive only, no existing assertion
+            // removed or weakened.
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 22,
+            // Table Phase C (this repo's fortieth staged FORCE
+            // activation batch, covering payment_plans) for the same
+            // reason — additive only, no existing assertion removed or
+            // weakened.
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 23,
+            // Table Phase C (this repo's forty-first staged FORCE
+            // activation batch, covering payment_plan_events) for the
+            // same reason — additive only, no existing assertion
+            // removed or weakened.
+            // Narrowly updated by Section 39A-3L, Checkpoint 24 (this
+            // repo's forty-second staged FORCE activation batch,
+            // covering notification_events) for the same reason as
+            // above — additive only, no existing assertion removed or
+            // weakened.
+            // Narrowly updated by Section 39A-3L, Checkpoint 27 (this repo's forty-fifth staged FORCE activation batch, covering backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events',             // Narrowly updated by Section 39A-3L, Checkpoint 28 (this repo's forty-sixth staged FORCE activation batch, covering health_checks) for the same reason — additive only, no existing assertion removed or weakened.
+'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events',
         ];
 
         $rows = DB::select(
@@ -178,17 +257,90 @@ class FirmLeadsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the eighteen intended tables must be FORCE RLS enabled — no more, no fewer.');
+        $this->assertSame($expectedForced, $actuallyForced, 'Exactly the eighteen tables introduced by 39A-3A..39A-3K, plus payment_classification_events (39A-3L Checkpoint 1), activation_checklists (39A-3L Checkpoint 2), and firm_activation_events (39A-3L Checkpoint 3), and firm_entitlements (39A-3L Checkpoint 4), and firm_entitlement_events (39A-3L Checkpoint 5), and installed_template_packs (39A-3L Checkpoint 6), and template_upgrade_logs (39A-3L Checkpoint 7), and template_upgrade_previews (39A-3L Checkpoint 8), and seat_allocations (39A-3L Checkpoint 9), and document_requests (39A-3L Checkpoint 10), and communication_consents (39A-3L Checkpoint 11), and communication_consent_events (39A-3L Checkpoint 12), and intake_submissions (39A-3L Checkpoint 13), must be FORCE RLS enabled — no more, no fewer.');
     }
 
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new \App\Services\RowLevelSecurityCoverageMappingService();
+        // Section 39A-3L, Checkpoint 1, Table Phase C (a later, distinct
+        // staged-FORCE-activation branch) legitimately activated FORCE
+        // for payment_classification_events too. Narrowly updated AGAIN
+        // by Section 39A-3L, Checkpoint 2, Table Phase C for
+        // activation_checklists, for the same reason. Narrowly updated
+        // AGAIN by Section 39A-3L, Checkpoint 3, Table Phase C for
+        // firm_activation_events, for the same reason.
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 9, Table
+        // Phase C (this repo's twenty-seventh staged FORCE activation
+        // batch, covering seat_allocations) for the same reason —
+        // additive only, no existing assertion removed or weakened.
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 10, Table
+        // Phase C (this repo's twenty-eighth staged FORCE activation
+        // batch, covering document_requests) for the same reason —
+        // additive only, no existing assertion removed or weakened.
+        // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 11, Table
+        // Phase C (this repo's twenty-ninth staged FORCE activation
+        // batch, covering communication_consents) for the same reason —
+        // additive only, no existing assertion removed or weakened.
         $forced = [
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
+            'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
+            'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 13,
+            // Table Phase C (this repo's thirty-first staged FORCE
+            // activation batch, covering intake_submissions) for the
+            // same reason — additive only, no existing assertion
+            // removed or weakened.
+            'communication_consents', 'communication_consent_events', 'intake_submissions',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 14,
+            // Table Phase C (this repo's thirty-second staged FORCE
+            // activation batch, covering matter_readiness_scores) for
+            // the same reason — additive only, no existing assertion
+            // removed or weakened.
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 15,
+            // Table Phase C (this repo's thirty-third staged FORCE
+            // activation batch, covering readiness_score_events) for
+            // the same reason — additive only, no existing assertion
+            // removed or weakened.
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 16,
+            // Table Phase C (this repo's thirty-fourth staged FORCE
+            // activation batch, covering tenant_encryption_keys) for
+            // the same reason — additive only, no existing assertion
+            // removed or weakened.
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 22,
+            // Table Phase C (this repo's fortieth staged FORCE
+            // activation batch, covering payment_plans) for the same
+            // reason — additive only, no existing assertion removed or
+            // weakened.
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 23,
+            // Table Phase C (this repo's forty-first staged FORCE
+            // activation batch, covering payment_plan_events) for the
+            // same reason — additive only, no existing assertion
+            // removed or weakened.
+            // Narrowly updated by Section 39A-3L, Checkpoint 24 (this
+            // repo's forty-second staged FORCE activation batch,
+            // covering notification_events) for the same reason as
+            // above — additive only, no existing assertion removed or
+            // weakened.
+            // Narrowly updated by Section 39A-3L, Checkpoint 27 (this repo's forty-fifth staged FORCE activation batch, covering backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events',             // Narrowly updated by Section 39A-3L, Checkpoint 28 (this repo's forty-sixth staged FORCE activation batch, covering health_checks) for the same reason — additive only, no existing assertion removed or weakened.
+'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events',
         ];
+
+        // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is
+        // the final checkpoint in this arc: $forced now equals the FULL
+        // preparedTables() set exactly, so the per-table loop below
+        // legitimately has zero remaining iterations (a real, positive
+        // end state, not a lost assertion). This explicit equality
+        // check keeps the test genuinely assertive regardless of loop
+        // iteration count.
+        $forcedSorted = $forced;
+        sort($forcedSorted);
+        $preparedTablesSorted = $coverage->preparedTables();
+        sort($preparedTablesSorted);
+        $this->assertSame($forcedSorted, $preparedTablesSorted, 'Every originally "prepared" table must now be force-enabled, no more, no fewer.');
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

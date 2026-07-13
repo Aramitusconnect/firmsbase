@@ -60,7 +60,17 @@ class DowngradeEvaluationService
             [SeatClass::Staff, PlanLimitMetric::SeatsStaff],
             [SeatClass::ReadOnly, PlanLimitMetric::SeatsReadOnly],
         ] as [$seatClass, $metric]) {
-            $usage = $this->seatEnforcement->usageFor($firm, $seatClass);
+            // Section 39A-3L, Checkpoint 9 — seat_allocations now has
+            // FORCE ROW LEVEL SECURITY active, and firm_users already
+            // does. SeatEnforcementService::usageFor() is a pure read
+            // with no internal context handling (see that service's own
+            // docblock), so this call site wraps the whole call itself,
+            // matching the ad-hoc local-wrap pattern used below for
+            // currentEntitlements in this same method.
+            $usage = (new TenantContextService())->runWithFirmContext(
+                $firm,
+                fn () => $this->seatEnforcement->usageFor($firm, $seatClass)
+            );
             $newLimit = $this->planLimitService->limitValue($newPlan, $metric);
 
             $seatFindings[$seatClass->value] = [
@@ -107,7 +117,22 @@ class DowngradeEvaluationService
 
         $moduleBlockingReasons = [];
 
-        foreach ($firm->entitlements()->where('enabled', true)->get() as $entitlement) {
+        // Section 39A-3L, Checkpoint 4 - firm_entitlements now has FORCE
+        // ROW LEVEL SECURITY active. This is a direct read against
+        // firm_entitlements independent of EntitlementService::resolve()
+        // (it reads the raw rows to enumerate currently-enabled modules,
+        // not to resolve precedence for one specific module), so it
+        // needs its own whole-call wrap. Materialized here (not left as
+        // a lazy relation query inside the foreach) so the wrap's
+        // runWithFirmContext() call completes and clears before the
+        // loop calls EntitlementService::isEnabled() below, which
+        // self-wraps its own call.
+        $currentEntitlements = (new TenantContextService())->runWithFirmContext(
+            $firm,
+            fn () => $firm->entitlements()->where('enabled', true)->get()
+        );
+
+        foreach ($currentEntitlements as $entitlement) {
             if (! in_array($entitlement->module_code, $newlyGrantedModules, true)
                 && $this->entitlementService->isEnabled($firm->id, $entitlement->module_code)) {
                 $moduleBlockingReasons[] = "module '{$entitlement->module_code}' is currently enabled and in use but is not granted by the new plan";

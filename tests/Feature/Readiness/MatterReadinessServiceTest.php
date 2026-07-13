@@ -6,6 +6,7 @@ use App\Enums\DocumentRequestItemStatus;
 use App\Enums\MatterReadinessStatus;
 use App\Enums\ReadinessComponentStatus;
 use App\Enums\TaskStatus;
+use App\Models\Client;
 use App\Models\DocumentRequest;
 use App\Models\DocumentRequestItem;
 use App\Models\Matter;
@@ -62,7 +63,15 @@ class MatterReadinessServiceTest extends TestCase
         $this->activateAllDefaultComponents();
         $matter = Matter::factory()->create(['assigned_attorney_id' => null]); // attorney_review_status fails
 
-        $request = DocumentRequest::factory()->create(['matter_id' => $matter->id]);
+        // Section 39A-3L, Checkpoint 10: document_requests is now FORCE
+        // RLS, and ReadinessScorecardRegistry's documents_approved
+        // component correctly wraps its query in the matter's own firm
+        // context. A bare DocumentRequest::factory()->create() derives
+        // its own unrelated firm/client pair, so the row must be
+        // explicitly created for a Client belonging to the matter's own
+        // firm or it becomes invisible to the query under test.
+        $client = Client::factory()->forFirm($matter->firm)->create();
+        $request = DocumentRequest::factory()->forClient($client)->create(['matter_id' => $matter->id]);
         DocumentRequestItem::factory()->create([
             'document_request_id' => $request->id,
             'is_required' => true,
@@ -84,7 +93,16 @@ class MatterReadinessServiceTest extends TestCase
         $this->service->recompute($matter);
         $this->service->recompute($matter);
 
-        $this->assertSame(2, \App\Models\ReadinessScoreEvent::query()->where('matter_id', $matter->id)->count());
+        // Section 39A-3L, Checkpoint 15: readiness_score_events is now
+        // FORCE RLS. recompute() clears its own context wrap before
+        // returning, so this bare read (outside any context) must be
+        // explicitly wrapped or it would incorrectly see zero rows.
+        $count = $this->runWithFirmContext(
+            $matter->firm,
+            fn () => \App\Models\ReadinessScoreEvent::query()->where('matter_id', $matter->id)->count(),
+        );
+
+        $this->assertSame(2, $count);
     }
 
     public function test_recompute_upserts_a_single_row_per_matter(): void
@@ -95,14 +113,29 @@ class MatterReadinessServiceTest extends TestCase
         $this->service->recompute($matter);
         $this->service->recompute($matter);
 
-        $this->assertSame(1, \App\Models\MatterReadinessScore::query()->where('matter_id', $matter->id)->count());
+        // Section 39A-3L, Checkpoint 14: matter_readiness_scores is now
+        // FORCE RLS. recompute() clears its own context wrap before
+        // returning, so this bare read (outside any context) must be
+        // explicitly wrapped or it would incorrectly see zero rows.
+        $count = $this->runWithFirmContext(
+            $matter->firm,
+            fn () => \App\Models\MatterReadinessScore::query()->where('matter_id', $matter->id)->count(),
+        );
+
+        $this->assertSame(1, $count);
     }
 
     public function test_documents_approved_fails_while_a_required_item_is_still_outstanding(): void
     {
         $this->activateAllDefaultComponents();
         $matter = Matter::factory()->create();
-        $request = DocumentRequest::factory()->create(['matter_id' => $matter->id]);
+        // Section 39A-3L, Checkpoint 10: same firm-ownership correction
+        // as above — this test's entire point is proving an outstanding
+        // required item is detected, which requires the DocumentRequest
+        // to genuinely belong to the matter's own firm now that
+        // documents_approved is context-wrapped under FORCE RLS.
+        $client = Client::factory()->forFirm($matter->firm)->create();
+        $request = DocumentRequest::factory()->forClient($client)->create(['matter_id' => $matter->id]);
         DocumentRequestItem::factory()->create([
             'document_request_id' => $request->id,
             'is_required' => true,

@@ -119,7 +119,15 @@ class LicenseFileSigningAndValidationServiceTest extends TestCase
 
         $this->assertTrue($outcome->isGrace());
         $this->assertSame(LicenseValidationEventType::EnteredGrace, $outcome->eventType);
-        $this->assertSame(LicenseStatus::GracePeriod, $firmLicense->fresh()->license_status);
+
+        // Section 39A-3L, Checkpoint 19 — firm_licenses gained permanent
+        // FORCE ROW LEVEL SECURITY in this checkpoint. This assertion's
+        // own re-read via fresh() had no ambient tenant context
+        // (validate() clears its own internal wrap before returning);
+        // wrapped narrowly, matching established precedent — no
+        // production code or other assertion in this test changed.
+        $refreshed = $this->runWithFirmContext($firm, fn () => $firmLicense->fresh());
+        $this->assertSame(LicenseStatus::GracePeriod, $refreshed->license_status);
     }
 
     public function test_grace_expired_becomes_invalid_and_restricted(): void
@@ -142,7 +150,14 @@ class LicenseFileSigningAndValidationServiceTest extends TestCase
 
         $this->assertFalse($outcome->isValid());
         $this->assertSame(LicenseValidationEventType::GraceExpired, $outcome->eventType);
-        $this->assertSame(LicenseStatus::Restricted, $firmLicense->fresh()->license_status);
+
+        // Section 39A-3L, Checkpoint 19 — same reasoning as
+        // test_an_expired_license_within_grace_period_enters_grace
+        // above: this assertion's own re-read via fresh() needs an
+        // explicit tenant context now that firm_licenses is FORCE-RLS
+        // protected.
+        $refreshed = $this->runWithFirmContext($firm, fn () => $firmLicense->fresh());
+        $this->assertSame(LicenseStatus::Restricted, $refreshed->license_status);
         // Never brick the instance / never delete legal data — this
         // service never deletes anything and the firm row is untouched.
         $this->assertDatabaseHas('firms', ['id' => $firm->id]);

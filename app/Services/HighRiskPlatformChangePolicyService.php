@@ -129,18 +129,20 @@ class HighRiskPlatformChangePolicyService
 
     private function audit(HighRiskChangeRequest $request, string $eventType, array $extraMetadata = []): void
     {
-        DB::table('security_events')->insert([
-            'firm_id' => null,
-            'actor_type' => PlatformAdmin::class,
-            'actor_id' => $request->requested_by,
-            'event_type' => $eventType,
-            'category' => 'high_risk_change',
-            'metadata' => json_encode(array_merge([
-                'high_risk_change_request_id' => $request->id,
-                'change_type' => $request->change_type->value,
-                'status' => $request->status->value,
-            ], $extraMetadata)),
-            'created_at' => now(),
-        ]);
+        (new TenantContextService())->runWithoutFirmContext(function () use ($request, $eventType, $extraMetadata) {
+            DB::table('security_events')->insert([
+                'firm_id' => null,
+                'actor_type' => PlatformAdmin::class,
+                'actor_id' => $request->requested_by,
+                'event_type' => $eventType,
+                'category' => 'high_risk_change',
+                'metadata' => json_encode(array_merge([
+                    'high_risk_change_request_id' => $request->id,
+                    'change_type' => $request->change_type->value,
+                    'status' => $request->status->value,
+                ], $extraMetadata)),
+                'created_at' => now(),
+            ]);
+        });
     }
 }

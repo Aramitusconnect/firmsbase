@@ -35,6 +35,15 @@ use Carbon\CarbonInterface;
  * built exclusively from real, existing models/enums confirmed by
  * direct repository inspection; nothing is invented. This class never
  * writes anything.
+ *
+ * Section 39A-3L, Checkpoint 22 — payment_plans is now FORCE-RLS
+ * protected. installmentsDueCount/installmentsMissedCount both filter
+ * PaymentPlanInstallment via whereHas('paymentPlan', ... firm_id ...),
+ * which reads payment_plans internally; each is now wrapped in its own
+ * tight runWithFirmContext() call, matching every sibling count below
+ * (each of which already wraps its own read independently — these are
+ * sequential, independent context activations via named constructor
+ * arguments, never nested).
  */
 class FirmCommandCenterAggregationService
 {
@@ -73,14 +82,14 @@ class FirmCommandCenterAggregationService
                 ->where('firm_id', $firm->id)
                 ->whereIn('status', [InvoiceStatus::Sent, InvoiceStatus::PartiallyPaid])
                 ->count()),
-            installmentsDueCount: PaymentPlanInstallment::query()
+            installmentsDueCount: (new TenantContextService())->runWithFirmContext($firm, fn () => PaymentPlanInstallment::query()
                 ->whereHas('paymentPlan', fn ($query) => $query->where('firm_id', $firm->id))
                 ->where('status', PaymentPlanInstallmentStatus::Due)
-                ->count(),
-            installmentsMissedCount: PaymentPlanInstallment::query()
+                ->count()),
+            installmentsMissedCount: (new TenantContextService())->runWithFirmContext($firm, fn () => PaymentPlanInstallment::query()
                 ->whereHas('paymentPlan', fn ($query) => $query->where('firm_id', $firm->id))
                 ->where('status', PaymentPlanInstallmentStatus::Missed)
-                ->count(),
+                ->count()),
             failedPaymentsCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Payment::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', PaymentStatus::Failed)
@@ -101,10 +110,10 @@ class FirmCommandCenterAggregationService
                 ->where('firm_id', $firm->id)
                 ->where('status', FormDraftStatus::ReadyForReview)
                 ->count(),
-            documentChaseEscalationsCount: DocumentChaseEvent::query()
+            documentChaseEscalationsCount: (new TenantContextService())->runWithFirmContext($firm, fn () => DocumentChaseEvent::query()
                 ->where('firm_id', $firm->id)
                 ->where('event_type', 'escalated')
-                ->count(),
+                ->count()),
             generatedAt: $asOf,
         );
     }

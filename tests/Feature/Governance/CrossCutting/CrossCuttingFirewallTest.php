@@ -179,7 +179,31 @@ class CrossCuttingFirewallTest extends TestCase
                 && $path !== 'database/migrations/2026_08_20_920002_force_rls_on_document_chase_rules_table.php'
                 && $path !== 'database/migrations/2026_08_20_920003_force_rls_on_employee_rates_table.php'
                 && $path !== 'database/migrations/2026_08_20_920004_force_rls_on_calendar_events_table.php'
-                && $path !== 'database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php',
+                && $path !== 'database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php'
+                // Section 39A-3L, Checkpoint 10, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a document_requests-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930010_force_rls_on_document_requests_table.php'
+                // Section 39A-3L, Checkpoint 11, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a communication_consents-
+                // only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php'
+                // Section 39A-3L, Checkpoint 22, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a payment_plans-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php'
+                // Section 39A-3L, Checkpoint 23, Table Phase C (this
+                // batch, a later, distinct staged-FORCE-activation
+                // branch) legitimately added a payment_plan_events-only
+                // FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php'
+                // Section 39A-3L, Checkpoint 24 (this batch, a later,
+                // distinct staged-FORCE-activation branch) legitimately
+                // added a notification_events-only FORCE RLS migration.
+                && $path !== 'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php',
         ));
     }
 

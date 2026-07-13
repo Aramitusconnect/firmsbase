@@ -1,7 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Section 39A-3L Stage A test-harness containment:
+    DB_CONNECTION/DB_HOST/DB_PORT/DB_DATABASE/DB_USERNAME/DB_PASSWORD are
+    deliberately NOT set here. They must be supplied by the process
+    environment (normally via tools/rls-test/run-artisan-test.sh, which
+    points at a uniquely named disposable database and the dedicated
+    rls_test_runner_39a3l role). tests/bootstrap.php hard-fails before any
+    test runs if they are missing or do not match the approved disposable
+    database naming pattern, so this file can never silently fall back to
+    a shared, hardcoded, or persistent database credential.
+-->
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
-         bootstrap="vendor/autoload.php"
+         bootstrap="tests/bootstrap.php"
          colors="true"
 >
     <testsuites>
@@ -23,13 +34,6 @@
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="CACHE_STORE" value="array"/>
-        <env name="DB_CONNECTION" value="pgsql"/>
-        <env name="DB_HOST" value="127.0.0.1"/>
-        <env name="DB_PORT" value="5432"/>
-        <env name="DB_DATABASE" value="firmsbase_test"/>
-        <env name="DB_USERNAME" value="firmsbase_user"/>
-        <env name="DB_PASSWORD" value="ChangeThisStrongPasswordNow"/>
-        <env name="DB_URL" value=""/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>

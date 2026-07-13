@@ -4,8 +4,10 @@ namespace Tests\Feature\Imports;
 
 use App\Enums\ImportEntityType;
 use App\Models\Client;
+use App\Models\Contact;
 use App\Models\Firm;
 use App\Models\ImportBatch;
+use App\Models\Party;
 use App\Services\ImportAuditService;
 use App\Services\ImportDuplicateDetectionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -35,6 +37,66 @@ class ImportDuplicateDetectionServiceTest extends TestCase
         $this->assertTrue($result->isDuplicate);
         $this->assertSame($existing->id, $result->matchedId);
         $this->assertDatabaseHas('import_audit_events', ['import_batch_id' => $batch->id, 'event_type' => 'duplicate_detected']);
+    }
+
+    /**
+     * Section 39A-3L Phase B5 proof: detectContact()/detectParty() are
+     * each now wrapped in runWithFirmContext() (preparing for a future
+     * FORCE ROW LEVEL SECURITY activation on contacts/parties, not yet
+     * active in this batch). No existing test in this file exercised
+     * Contact or Party duplicate detection at all before this batch —
+     * only Client, Invoice, ConflictRecord, and Template. Assert the
+     * wrap did not break normal detection behavior for either type.
+     */
+    public function test_contact_duplicate_detected_by_email(): void
+    {
+        $firm = Firm::factory()->create();
+        $existing = Contact::factory()->create(['firm_id' => $firm->id, 'email' => 'contact-dup@example.test']);
+        $batch = ImportBatch::factory()->forFirm($firm)->entityType(ImportEntityType::Contact)->create();
+        $row = $batch->rows()->create(['row_number' => 1, 'raw_data' => ['email' => 'contact-dup@example.test'], 'status' => 'validated']);
+
+        $result = $this->service->detect($row);
+
+        $this->assertTrue($result->isDuplicate);
+        $this->assertSame($existing->id, $result->matchedId);
+        $this->assertSame(Contact::class, $result->matchedType);
+        $this->assertDatabaseHas('import_audit_events', ['import_batch_id' => $batch->id, 'event_type' => 'duplicate_detected']);
+    }
+
+    public function test_contact_no_match_when_nothing_matches(): void
+    {
+        $firm = Firm::factory()->create();
+        $batch = ImportBatch::factory()->forFirm($firm)->entityType(ImportEntityType::Contact)->create();
+        $row = $batch->rows()->create(['row_number' => 1, 'raw_data' => ['email' => 'contact-unique@example.test'], 'status' => 'validated']);
+
+        $result = $this->service->detect($row);
+
+        $this->assertFalse($result->isDuplicate);
+    }
+
+    public function test_party_duplicate_detected_by_name_and_email(): void
+    {
+        $firm = Firm::factory()->create();
+        $existing = Party::factory()->create(['firm_id' => $firm->id, 'name' => 'Repeat Party', 'email' => 'party-dup@example.test']);
+        $batch = ImportBatch::factory()->forFirm($firm)->entityType(ImportEntityType::Party)->create();
+        $row = $batch->rows()->create(['row_number' => 1, 'raw_data' => ['name' => 'Repeat Party', 'email' => 'party-dup@example.test'], 'status' => 'validated']);
+
+        $result = $this->service->detect($row);
+
+        $this->assertTrue($result->isDuplicate);
+        $this->assertSame($existing->id, $result->matchedId);
+        $this->assertSame(Party::class, $result->matchedType);
+    }
+
+    public function test_party_no_match_when_nothing_matches(): void
+    {
+        $firm = Firm::factory()->create();
+        $batch = ImportBatch::factory()->forFirm($firm)->entityType(ImportEntityType::Party)->create();
+        $row = $batch->rows()->create(['row_number' => 1, 'raw_data' => ['name' => 'Nobody Here', 'email' => 'party-unique@example.test'], 'status' => 'validated']);
+
+        $result = $this->service->detect($row);
+
+        $this->assertFalse($result->isDuplicate);
     }
 
     public function test_no_match_when_nothing_matches(): void

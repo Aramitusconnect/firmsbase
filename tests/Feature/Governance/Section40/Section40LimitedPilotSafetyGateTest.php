@@ -129,7 +129,17 @@ class Section40LimitedPilotSafetyGateTest extends TestCase
         $this->assertSame(count($registry->all()), $result['gap_registry_count']);
         $this->assertCount(21, $registry->all());
         $this->assertTrue($registry->isTracked('rls_prepared_not_enforced'));
-        $this->assertGreaterThan(0, $result['remaining_prepared_unforced_count']);
+
+        // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is
+        // the fifty-second and FINAL of the originally-"prepared" tables
+        // to reach permanent FORCE ROW LEVEL SECURITY — a real, positive
+        // end state computed live from RowLevelSecurityCoverageMappingService
+        // (see Section40LimitedPilotSafetyGateService::remainingPreparedUnforcedTables()),
+        // not a hidden/suppressed gap. This assertion is deliberately
+        // exact (not "greater than zero") so that if a FUTURE regression
+        // ever un-forces one of these 52 tables, this test fails loudly
+        // rather than silently tolerating it.
+        $this->assertSame(0, $result['remaining_prepared_unforced_count']);
         $this->assertGreaterThan(0, $result['uncovered_tenant_table_count']);
         $this->assertNotEmpty($result['public_production_launch_limitations']);
     }

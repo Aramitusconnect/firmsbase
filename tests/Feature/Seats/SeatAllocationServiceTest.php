@@ -79,10 +79,20 @@ class SeatAllocationServiceTest extends TestCase
         $pool = $this->poolService->createPool($organization, SeatClass::Staff, 10);
         $allocation = $this->service->allocateFromPool($firm, $pool, 4);
 
-        $this->service->revoke($allocation);
+        // Section 39A-3L, Checkpoint 9 — revoke() now wraps its entire
+        // body in runWithFirmContext() and clears tenant context in a
+        // finally block before returning (seat_allocations is FORCE RLS
+        // as of this checkpoint). The prior bare $allocation->fresh()
+        // read below relied on ambient context leaking past revoke()'s
+        // return, which no longer happens. Using revoke()'s own return
+        // value (already re-fetched by the service, inside its own
+        // context wrap) is more idiomatic than re-wrapping a second read
+        // here, and matches this test's sibling
+        // test_revoke_a_direct_allocation_does_not_touch_any_pool below.
+        $revoked = $this->service->revoke($allocation);
 
         $this->assertSame(0, $pool->fresh()->allocated_seats);
-        $this->assertSame(SeatAllocationStatus::Revoked, $allocation->fresh()->status);
+        $this->assertSame(SeatAllocationStatus::Revoked, $revoked->status);
     }
 
     public function test_revoke_a_direct_allocation_does_not_touch_any_pool(): void

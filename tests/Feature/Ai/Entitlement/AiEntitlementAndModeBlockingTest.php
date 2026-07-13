@@ -6,6 +6,7 @@ use App\Enums\AiMode;
 use App\Enums\AiProvider;
 use App\Enums\AiUsageActionType;
 use App\Models\Firm;
+use App\Models\FirmSettings;
 use App\Models\User;
 use App\Services\AiUsageRecorderService;
 use App\ValueObjects\AiPromptRequest;
@@ -49,7 +50,12 @@ class AiEntitlementAndModeBlockingTest extends TestCase
         // Firm with NO 'ai' entitlement at all — a plain firm, not
         // routed through makeAiEntitledFirm().
         $firm = Firm::factory()->create();
-        $firm->firmSettings()->create([
+        // firm_settings has FORCE ROW LEVEL SECURITY (Section 39A-3L,
+        // Checkpoint 18) — a direct $firm->firmSettings()->create(...)
+        // relation call runs with no tenant context active and is
+        // rejected by the policy; route through FirmSettingsFactory's
+        // established context-hold fix instead.
+        FirmSettings::factory()->forFirm($firm)->create([
             'payment_mode' => \App\Enums\PaymentMode::OperatingPaymentsOnly,
             'ai_mode' => AiMode::PlatformManaged,
         ]);

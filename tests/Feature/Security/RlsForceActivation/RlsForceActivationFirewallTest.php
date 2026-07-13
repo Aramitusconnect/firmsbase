@@ -25,19 +25,129 @@ class RlsForceActivationFirewallTest extends TestCase
         $coverage = new RowLevelSecurityCoverageMappingService();
 
         // Section 39A-3B/39A-3C/39A-3D/39A-3E/39A-3F/39A-3G/39A-3H/39A-3I/
-        // 39A-3J/39A-3K (later, distinct staged-FORCE-activation
+        // 39A-3J/39A-3K/39A-3L (later, distinct staged-FORCE-activation
         // branches) legitimately activated FORCE for firm_users,
         // documents, deadlines, tasks, matters, invoices, payments,
         // conflict_check_runs, lead_sources, consultation_outcomes,
-        // firm_leads, consultations (Section 39A-3J), and (Section
-        // 39A-3K) firm_practice_areas, document_chase_rules,
-        // employee_rates, calendar_events,
-        // client_communication_preferences too — this test's own scope
-        // (39A-3A) only asserts clients here.
+        // firm_leads, consultations (Section 39A-3J), (Section 39A-3K)
+        // firm_practice_areas, document_chase_rules, employee_rates,
+        // calendar_events, client_communication_preferences, (Section
+        // 39A-3L, Checkpoint 1, Table Phase C)
+        // payment_classification_events, (Section 39A-3L, Checkpoint
+        // 2, Table Phase C) activation_checklists, (Section 39A-3L,
+        // Checkpoint 3, Table Phase C) firm_activation_events, (Section
+        // 39A-3L, Checkpoint 4, Table Phase C) firm_entitlements,
+        // (Section 39A-3L, Checkpoint 5, Table Phase C)
+        // firm_entitlement_events, (Section 39A-3L, Checkpoint 6,
+        // Table Phase C) installed_template_packs, (Section 39A-3L,
+        // Checkpoint 7, Table Phase C) template_upgrade_logs, and
+        // (Section 39A-3L, Checkpoint 8, Table Phase C)
+        // template_upgrade_previews, and (Section 39A-3L, Checkpoint 9,
+        // Table Phase C) seat_allocations, and (Section 39A-3L,
+        // Checkpoint 10, Table Phase C) document_requests, and (Section
+        // 39A-3L, Checkpoint 11, Table Phase C) communication_consents,
+        // and (Section 39A-3L, Checkpoint 12, Table Phase C)
+        // communication_consent_events, and (Section 39A-3L, Checkpoint
+        // 13, Table Phase C) intake_submissions, and (Section 39A-3L,
+        // Checkpoint 14, Table Phase C) matter_readiness_scores, and
+        // (Section 39A-3L, Checkpoint 15, Table Phase C)
+        // readiness_score_events, and (Section 39A-3L, Checkpoint 16,
+        // Table Phase C) tenant_encryption_keys too — this test's own
+        // scope (39A-3A) only asserts clients here.
         $forcedByLaterBranch = [
             'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
+            'payment_classification_events', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events',
+            'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests',
+            'communication_consents', 'communication_consent_events', 'intake_submissions',
+            'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 18
+            // (this repo's thirty-sixth staged FORCE activation batch,
+            // covering firm_settings) — this test's own scope (39A-3A)
+            // only asserts clients here.
+            'firm_settings',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 19
+            // (this repo's thirty-seventh staged FORCE activation
+            // batch, covering firm_licenses) — this test's own scope
+            // (39A-3A) only asserts clients here.
+            'firm_licenses',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 20
+            // (this repo's thirty-eighth staged FORCE activation
+            // batch, covering time_tracking_sessions) — this test's own
+            // scope (39A-3A) only asserts clients here.
+            'time_tracking_sessions',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 21
+            // (this repo's thirty-ninth staged FORCE activation batch,
+            // covering time_entries) — this test's own scope (39A-3A)
+            // only asserts clients here.
+            'time_entries',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 22
+            // (this repo's fortieth staged FORCE activation batch,
+            // covering payment_plans) — this test's own scope (39A-3A)
+            // only asserts clients here.
+            'payment_plans',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 23
+            // (this repo's forty-first staged FORCE activation batch,
+            // covering payment_plan_events) — this test's own scope
+            // (39A-3A) only asserts clients here.
+            'payment_plan_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 24
+            // (this repo's forty-second staged FORCE activation batch,
+            // covering notification_events) — this test's own scope
+            // (39A-3A) only asserts clients here.
+            'notification_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 25
+            // (this repo's forty-third staged FORCE activation batch,
+            // covering contacts) — this test's own scope (39A-3A) only
+            // asserts clients here.
+            'contacts',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 26
+            // (this repo's forty-fourth staged FORCE activation batch,
+            // covering parties) — this test's own scope (39A-3A) only
+            // asserts clients here.
+            'parties',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 27
+            // (this repo's forty-fifth staged FORCE activation batch,
+            // covering backup_restore_tests) — this test's own scope
+            // (39A-3A) only asserts clients here.
+            'backup_restore_tests',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 28
+            // (this repo's forty-sixth staged FORCE activation batch,
+            // covering health_checks) — this test's own scope (39A-3A)
+            // only asserts clients here.
+            'health_checks',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 29
+            // (this repo's forty-seventh staged FORCE activation
+            // batch, covering incident_events) — this test's own
+            // scope (39A-3A) only asserts clients here.
+            'incident_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 30
+            // (this repo's forty-eighth staged FORCE activation
+            // batch, covering maintenance_windows) — this test's own
+            // scope (39A-3A) only asserts clients here.
+            'maintenance_windows',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 31,
+            // Phase B6 (this repo's forty-ninth staged FORCE
+            // activation batch, covering notification_templates) —
+            // this test's own scope (39A-3A) only asserts clients
+            // here.
+            'notification_templates',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 32,
+            // Phase B6 (this repo's fiftieth staged FORCE activation
+            // batch, covering pilot_feedback_items) — this test's own
+            // scope (39A-3A) only asserts clients here.
+            'pilot_feedback_items',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 33,
+            // Phase B6 (this repo's fifty-first staged FORCE activation
+            // batch, covering timeline_events) — this test's own scope
+            // (39A-3A) only asserts clients here.
+            'timeline_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 34,
+            // Phase B6 (this repo's fifty-second and FINAL staged FORCE
+            // activation batch in this arc, covering security_events) —
+            // this test's own scope (39A-3A) only asserts clients here.
+            'security_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

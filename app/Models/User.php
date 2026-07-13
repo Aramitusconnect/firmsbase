@@ -107,7 +107,22 @@ class User extends Authenticatable implements FilamentUser
 
         $twoFactorPolicy = new FirmUser2faPolicyService();
 
-        if ($twoFactorPolicy->isRequiredForFirmUser($firmUser) && ! $twoFactorPolicy->isCompliant($firmUser)) {
+        // Section 39A-3L, Checkpoint 18 - firm_settings is FORCE-RLS
+        // protected as of this checkpoint, and no per-request middleware
+        // establishes tenant context before canAccessPanel() runs. Both
+        // isRequiredForFirmUser() and isCompliant() (which internally
+        // re-calls isRequiredForFirmUser()) read $firm->firmSettings, so
+        // the entire decision is wrapped in one whole-call context here
+        // rather than wrapping only one of the two calls - an unwrapped
+        // second read would still fail open (firmSettings resolves to
+        // null, isRequiredForFirm() returns false) for a firm configured
+        // with firm_user_2fa_mode = Required.
+        $twoFactorBlocksAccess = (new TenantContextService())->runWithFirmContext(
+            $firmUser->firm_id,
+            fn () => $twoFactorPolicy->isRequiredForFirmUser($firmUser) && ! $twoFactorPolicy->isCompliant($firmUser)
+        );
+
+        if ($twoFactorBlocksAccess) {
             return false;
         }
 

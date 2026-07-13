@@ -6,7 +6,10 @@ use App\Enums\PaymentPlanStatus;
 use App\Models\Client;
 use App\Models\Firm;
 use App\Models\PaymentPlan;
+use App\Services\TenantContextService;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
 
 /**
  * @extends Factory<PaymentPlan>
@@ -15,11 +18,53 @@ class PaymentPlanFactory extends Factory
 {
     protected $model = PaymentPlan::class;
 
+    /**
+     * Section 39A-3L, Checkpoint 22 — context-hold pattern (matching
+     * every prior FORCE-RLS factory since 39A-3A): groups resolved
+     * models by firm_id and activates the matching PostgreSQL session
+     * context per group before inserting, so a bare
+     * PaymentPlan::factory()->create() works correctly even called from
+     * outside any already-active tenant context.
+     */
+    public function create($attributes = [], ?Model $parent = null)
+    {
+        if (! empty($attributes)) {
+            return $this->state($attributes)->create([], $parent);
+        }
+
+        $results = $this->make($attributes, $parent);
+        $models = $results instanceof Model ? new Collection([$results]) : $results;
+        $service = new TenantContextService();
+
+        $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
+            $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
+            $this->store($group);
+        });
+
+        $this->callAfterCreating($models, $parent);
+
+        return $results;
+    }
+
+    /**
+     * The plan and its nested client are always tied to the SAME firm —
+     * generating one firm here up front (rather than letting firm_id
+     * and client_id resolve as two independent Firm::factory()/
+     * Client::factory() calls) is deliberate: a bare
+     * PaymentPlan::factory()->create() with no state must never produce
+     * a plan whose client belongs to an unrelated firm. client_id is
+     * NOT NULL on this table, so this fix matters even for the bare
+     * default path (unlike a table with only nullable relations).
+     * Matches the same root-cause fix already applied to
+     * InvoiceFactory/MatterFactory.
+     */
     public function definition(): array
     {
+        $firm = Firm::factory()->create();
+
         return [
-            'firm_id' => Firm::factory(),
-            'client_id' => Client::factory(),
+            'firm_id' => $firm->id,
+            'client_id' => Client::factory()->forFirm($firm),
             'matter_id' => null,
             'invoice_id' => null,
             'status' => PaymentPlanStatus::Draft,

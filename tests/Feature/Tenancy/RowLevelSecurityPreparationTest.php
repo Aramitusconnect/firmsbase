@@ -64,8 +64,79 @@ class RowLevelSecurityPreparationTest extends TestCase
         // activation branch) legitimately activated permanent FORCE ROW
         // LEVEL SECURITY on client_communication_preferences — see
         // database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php.
+        //
+        // GAP FOUND AND FIXED during Section 39A-3L, Checkpoint 4's own
+        // audit (not caused by Checkpoint 4 — discovered here): Section
+        // 39A-3L, Checkpoint 2, Table Phase C legitimately activated
+        // permanent FORCE ROW LEVEL SECURITY on activation_checklists
+        // (see
+        // database/migrations/2026_08_25_930002_force_rls_on_activation_checklists_table.php)
+        // but this exception list was never updated to reflect that —
+        // meaning this test silently asserted the WRONG expectation for
+        // activation_checklists (that it remained un-forced) ever since
+        // Checkpoint 2 landed. Added here, alongside firm_entitlements
+        // (Section 39A-3L, Checkpoint 4's own table — see
+        // database/migrations/2026_08_25_930004_force_rls_on_firm_entitlements_table.php),
+        // which is why this fix landed in the same pass as the new
+        // table's own checkpoint.
+        //
+        // Section 39A-3L, Checkpoint 5, Table Phase C (this repo's
+        // twenty-third staged FORCE activation batch) legitimately
+        // activated permanent FORCE ROW LEVEL SECURITY on
+        // firm_entitlement_events too — see
+        // database/migrations/2026_08_25_930005_force_rls_on_firm_entitlement_events_table.php.
+        // Added to the exception list in the same pass as this
+        // checkpoint's own table, following the exact same pattern as
+        // Checkpoint 4's own fix above.
+        //
+        // Section 39A-3L, Checkpoint 11, Table Phase B legitimately
+        // activated permanent FORCE ROW LEVEL SECURITY on
+        // communication_consents — see
+        // database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php.
+        // Added to the exception list in the SAME commit as that
+        // migration, per this file's own docblock lesson above (a table
+        // forced without updating this list going silently red for a
+        // whole cycle) — not deferred to a later pass.
+        //
+        // Section 39A-3L, Checkpoint 12, Table Phase B legitimately
+        // activated permanent FORCE ROW LEVEL SECURITY on
+        // communication_consent_events — see
+        // database/migrations/2026_08_25_930012_force_rls_on_communication_consent_events_table.php.
+        // Added to the exception list in the SAME commit as that
+        // migration, again per this file's own docblock lesson above.
+        //
+        // Section 39A-3L, Checkpoint 16, Table Phase B legitimately
+        // activated permanent FORCE ROW LEVEL SECURITY on
+        // tenant_encryption_keys — see
+        // database/migrations/2026_08_25_930016_force_rls_on_tenant_encryption_keys_table.php.
+        // Added to the exception list in the SAME commit as that
+        // migration, again per this file's own docblock lesson above.
+        //
+        // GAP FOUND AND FIXED during Section 39A-3L Stage A (test-
+        // harness containment, 2026-07-12; not caused by Stage A —
+        // discovered here): Checkpoint 18 (firm_settings) and
+        // Checkpoint 19 (firm_licenses) each legitimately activated
+        // permanent FORCE ROW LEVEL SECURITY — see
+        // database/migrations/2026_08_25_930018_force_rls_on_firm_settings_table.php
+        // and
+        // database/migrations/2026_08_25_930019_force_rls_on_firm_licenses_table.php
+        // — but, exactly like the activation_checklists gap this file's
+        // own docblock above already documents, this exception list was
+        // never updated for either at the time, so this test silently
+        // asserted the WRONG expectation for both tables from
+        // Checkpoint 18/19 onward.
+        //
+        // Section 39A-3L, Phase B6, Checkpoint 34 (this repo's fifty-
+        // second and FINAL staged FORCE activation batch in this arc)
+        // legitimately activated permanent FORCE ROW LEVEL SECURITY on
+        // security_events — see database/migrations/2026_08_25_930034_
+        // force_rls_on_security_events_table.php. Added to the exception
+        // list in the SAME commit as that migration, per this file's own
+        // docblock lesson above (a table forced without updating this
+        // list going silently red for a whole cycle).
+        //
         // Every other Phase 1 table here remains prepared-but-not-forced.
-        if ($table === 'firm_users' || $table === 'client_communication_preferences') {
+        if (in_array($table, ['firm_users', 'client_communication_preferences', 'activation_checklists', 'firm_entitlements', 'firm_entitlement_events', 'communication_consents', 'communication_consent_events', 'tenant_encryption_keys', 'firm_settings', 'firm_licenses', 'security_events'], true)) {
             $this->assertTrue((bool) $row->relforcerowsecurity, "{$table} must have permanent FORCE ROW LEVEL SECURITY active.");
 
             return;

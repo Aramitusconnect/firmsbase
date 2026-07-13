@@ -9,13 +9,17 @@ use App\Models\FirmUser;
 use Illuminate\Support\Collection;
 
 /**
- * FirmUser2faPolicyService — Section 39B backend policy only. There is
- * no login route/UI surface yet (confirmed by direct inspection:
- * routes/web.php has only the default welcome route, no Fortify/
- * Breeze/auth scaffolding exists) — this service defines and evaluates
- * the policy so a future auth surface can consume it safely. It never
- * enforces anything at a login route, never sends a notification, and
- * never generates a 2FA secret/recovery code.
+ * FirmUser2faPolicyService — Section 39B backend policy. As of Section
+ * 39A-3L, Checkpoint 18, User::canAccessPanel() is a live consumer:
+ * it calls isRequiredForFirmUser() and isCompliant() to gate Filament
+ * panel access, with both calls wrapped in a single
+ * TenantContextService::runWithFirmContext() closure (required because
+ * firm_settings became FORCE-RLS protected in that checkpoint, and no
+ * ambient tenant context otherwise exists at that point in the auth
+ * flow). This service still never enforces anything at a login ROUTE
+ * (there is no dedicated login route/UI surface — Filament's own panel
+ * middleware is what calls canAccessPanel()), never sends a
+ * notification, and never generates a 2FA secret/recovery code.
  *
  * Reuses the EXISTING TwoFactorMode enum (Optional/Required/Disabled)
  * exactly as firm_settings.client_2fa_mode already does — no new enum

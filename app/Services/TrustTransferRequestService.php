@@ -143,9 +143,24 @@ class TrustTransferRequestService
             throw new \RuntimeException('Only an Approved transfer request can be applied.');
         }
 
-        $ledger = $request->trustLedger;
-        $matter = $request->matter;
-        $invoice = (new TenantContextService())->runWithFirmContext($firm, fn () => $request->invoice);
+        // Section 39A-3L, Checkpoint 4 - matters/invoices are already
+        // FORCE-RLS tables from earlier checkpoints (trust_ledgers is
+        // not yet RLS-enabled at all — confirmed via pg_class:
+        // relrowsecurity=false, relforcerowsecurity=false — so reading
+        // it here is unaffected either way). These three reads used to
+        // work only by accident, relying on
+        // ambient database session context left active by
+        // MatterFactory's context-hold create() pattern earlier in the
+        // caller's flow. EntitlementService::resolve() now correctly
+        // clears any such ambient context when the eligibility check
+        // above returns, so these three reads are combined into one
+        // explicit whole-call wrap here rather than left unwrapped (and
+        // rather than each getting its own separate wrap).
+        [$ledger, $matter, $invoice] = (new TenantContextService())->runWithFirmContext($firm, fn () => [
+            $request->trustLedger,
+            $request->matter,
+            $request->invoice,
+        ]);
 
         $this->tenantSafePolicy->assertTrustLedgerBelongsToFirm($ledger, $firm);
         $this->crossMatterProtection->assertMatterEligibleForLedger($matter, $ledger);
@@ -192,8 +207,20 @@ class TrustTransferRequestService
                 'recorded_by' => $appliedBy->user_id,
             ]));
 
-            $result = $this->classification->classify($firm, PaymentClassification::OperatingPayment);
-            $payment = (new TenantContextService())->runWithFirmContext($firm, function () use ($payment, $result, $appliedBy) {
+            // Section 39A-3L, Checkpoint 18 - firm_settings is FORCE-RLS
+            // protected as of this checkpoint, and classify() reads
+            // firm_settings.payment_mode. classify() used to run here
+            // unwrapped, between the Payment::create() wrap above (whose
+            // finally already cleared context) and this wrap - once
+            // forced, that unwrapped read would silently resolve
+            // firm_settings to null and mis-classify the payment for a
+            // firm configured with payment_mode = Blocked. Moved inside
+            // this wrap (merged with recordDecision(), since $result is
+            // only ever used here) rather than given its own separate
+            // wrap, since a second consecutive wrap for the very next
+            // line would be pure boilerplate with no isolation benefit.
+            $payment = (new TenantContextService())->runWithFirmContext($firm, function () use ($payment, $firm, $appliedBy) {
+                $result = $this->classification->classify($firm, PaymentClassification::OperatingPayment);
                 $this->classification->recordDecision($payment, PaymentClassification::OperatingPayment, $result, $appliedBy->user);
 
                 return $payment->fresh();

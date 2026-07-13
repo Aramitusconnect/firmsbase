@@ -120,8 +120,13 @@ class DeletionGovernanceLifecycleTest extends TestCase
         $finalRequest = $request->fresh();
         $this->assertSame(DeletionRequestStatus::ReadyForExecution, $finalRequest->status);
 
-        // Phase 17 never physically deletes the target row.
-        $this->assertDatabaseHas('matters', ['id' => $matter->id]);
+        // Phase 17 never physically deletes the target row. matters
+        // has FORCE ROW LEVEL SECURITY (Section 39A-3F, predating this
+        // test's own governance work); a bare assertDatabaseHas() with
+        // no ambient tenant context silently sees zero rows rather than
+        // the row it means to confirm still exists — wrap narrowly
+        // around just this read.
+        $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('matters', ['id' => $matter->id]));
     }
 
     public function test_deletion_approval_uses_production_data_deletion_change_type(): void

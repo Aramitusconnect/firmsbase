@@ -25,9 +25,12 @@ namespace App\Services;
  * every forced table's write paths. This is real, partial enforcement
  * — it is NOT schema-wide: prepared tables that have no FORCE
  * migration yet are still inert for the app's own database connection
- * (table-owner role is exempt from non-forced RLS), and the 61 tables
- * in MISSING_PREPARED_TABLES have no RLS policy of any kind yet. Do
- * not read this docblock as "RLS is fully enforced" — it is not.
+ * (table-owner role is exempt from non-forced RLS), and the currently
+ * inventoried unprepared tables in MISSING_PREPARED_TABLES have no RLS
+ * policy of any kind yet — see missingPreparedTables() for the live
+ * count, rather than hardcoding it here where it would go stale as
+ * MISSING_PREPARED_TABLES changes. Do not read this docblock as "RLS
+ * is fully enforced" — it is not.
  *
  * Source of truth: the 6 RLS-preparation migrations
  * (2026_07_04_500001 through 2026_07_09_900024) cover only Phases 1-6.

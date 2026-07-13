@@ -130,15 +130,31 @@ class TrustHighRiskAdjustmentService
             throw new \RuntimeException('A second approval requires an AdjustmentFirstApproved trust_approval_events row.');
         }
 
-        $firstApprover = $firstApprovedEvent->actor;
+        // Section 39A-3L, Checkpoint 4 - firm_users/matters are already
+        // FORCE-RLS tables from earlier checkpoints (trust_ledgers is
+        // not yet RLS-enabled at all — confirmed via pg_class:
+        // relrowsecurity=false, relforcerowsecurity=false — so reading
+        // it here is unaffected either way). These three reads used to
+        // work only by accident, relying on
+        // ambient database session context left active by an earlier
+        // factory's context-hold create() pattern in the caller's flow.
+        // EntitlementService::resolve() now correctly clears any such
+        // ambient context when the eligibility check above returns, so
+        // these three reads are combined into one explicit whole-call
+        // wrap here rather than left unwrapped (and rather than each
+        // getting its own separate wrap).
+        [$firstApprover, $ledger, $matter] = (new TenantContextService())->runWithFirmContext($firm, fn () => [
+            $firstApprovedEvent->actor,
+            $firstApprovedEvent->trustLedger,
+            $firstApprovedEvent->matter,
+        ]);
+
         $this->accessPolicy->assertDistinctApprovers($firstApprover, $secondApprover);
 
         if (TrustLedgerEntry::query()->where('trust_approval_event_id', $firstApprovedEvent->id)->exists()) {
             throw new \RuntimeException('This adjustment approval has already been posted.');
         }
 
-        $ledger = $firstApprovedEvent->trustLedger;
-        $matter = $firstApprovedEvent->matter;
         $amountCentsDelta = $firstApprovedEvent->amount_cents;
 
         if ($matter) {

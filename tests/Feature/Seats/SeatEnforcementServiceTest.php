@@ -26,6 +26,19 @@ class SeatEnforcementServiceTest extends TestCase
         $this->allocationService = new SeatAllocationService();
     }
 
+    /**
+     * Section 39A-3L, Checkpoint 9 — SeatEnforcementService::usageFor()/
+     * canInvite() are deliberately NOT self-wrapped (both seat_allocations
+     * and firm_users are FORCE RLS tables; see that service's own
+     * docblock). Every test below now wraps its usageFor()/canInvite()
+     * call in the test's own tenant context — matching
+     * DowngradeEvaluationService::evaluate()'s local-wrap pattern —
+     * instead of relying on ambient context left over from a preceding
+     * FirmUser::factory()->forFirm($firm)->create() call in the same
+     * test, which is exactly the fragile behavior that stopped working
+     * correctly the instant allocateDirect() started properly clearing
+     * its own context in a finally block.
+     */
     public function test_firm_owner_and_attorney_roles_default_to_attorney_seat_class(): void
     {
         $firm = Firm::factory()->create();
@@ -33,7 +46,7 @@ class SeatEnforcementServiceTest extends TestCase
         FirmUser::factory()->forFirm($firm)->role(FirmUserRole::Attorney)->create();
         $this->allocationService->allocateDirect($firm, SeatClass::Attorney, 5);
 
-        $usage = $this->service->usageFor($firm, SeatClass::Attorney);
+        $usage = $this->runWithFirmContext($firm, fn () => $this->service->usageFor($firm, SeatClass::Attorney));
 
         $this->assertSame(2, $usage->used);
     }
@@ -47,7 +60,7 @@ class SeatEnforcementServiceTest extends TestCase
         FirmUser::factory()->forFirm($firm)->role(FirmUserRole::BillingStaff)->create();
         $this->allocationService->allocateDirect($firm, SeatClass::Staff, 10);
 
-        $usage = $this->service->usageFor($firm, SeatClass::Staff);
+        $usage = $this->runWithFirmContext($firm, fn () => $this->service->usageFor($firm, SeatClass::Staff));
 
         $this->assertSame(4, $usage->used);
     }
@@ -60,8 +73,8 @@ class SeatEnforcementServiceTest extends TestCase
         $this->allocationService->allocateDirect($firm, SeatClass::ReadOnly, 2);
         $this->allocationService->allocateDirect($firm, SeatClass::Attorney, 5);
 
-        $readOnlyUsage = $this->service->usageFor($firm, SeatClass::ReadOnly);
-        $attorneyUsage = $this->service->usageFor($firm, SeatClass::Attorney);
+        $readOnlyUsage = $this->runWithFirmContext($firm, fn () => $this->service->usageFor($firm, SeatClass::ReadOnly));
+        $attorneyUsage = $this->runWithFirmContext($firm, fn () => $this->service->usageFor($firm, SeatClass::Attorney));
 
         $this->assertSame(1, $readOnlyUsage->used);
         $this->assertSame(0, $attorneyUsage->used, 'An explicit read_only seat_class must not also count as attorney.');
@@ -75,7 +88,7 @@ class SeatEnforcementServiceTest extends TestCase
         Client::factory()->create(['firm_id' => $firm->id]);
         $this->allocationService->allocateDirect($firm, SeatClass::Attorney, 5);
 
-        $usage = $this->service->usageFor($firm, SeatClass::Attorney);
+        $usage = $this->runWithFirmContext($firm, fn () => $this->service->usageFor($firm, SeatClass::Attorney));
 
         $this->assertSame(1, $usage->used, 'Client rows must never contribute to seat usage.');
     }
@@ -86,7 +99,7 @@ class SeatEnforcementServiceTest extends TestCase
         $this->allocationService->allocateDirect($firm, SeatClass::Attorney, 1);
         FirmUser::factory()->forFirm($firm)->role(FirmUserRole::Attorney)->create();
 
-        $this->assertFalse($this->service->canInvite($firm, SeatClass::Attorney));
+        $this->assertFalse($this->runWithFirmContext($firm, fn () => $this->service->canInvite($firm, SeatClass::Attorney)));
     }
 
     public function test_can_invite_is_true_when_seats_remain(): void
@@ -95,6 +108,6 @@ class SeatEnforcementServiceTest extends TestCase
         $this->allocationService->allocateDirect($firm, SeatClass::Attorney, 2);
         FirmUser::factory()->forFirm($firm)->role(FirmUserRole::Attorney)->create();
 
-        $this->assertTrue($this->service->canInvite($firm, SeatClass::Attorney));
+        $this->assertTrue($this->runWithFirmContext($firm, fn () => $this->service->canInvite($firm, SeatClass::Attorney)));
     }
 }

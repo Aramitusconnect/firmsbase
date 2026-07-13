@@ -4,6 +4,7 @@ namespace Tests\Feature\Trust\Ledgers;
 
 use App\Enums\TrustLedgerEntryType;
 use App\Models\Client;
+use App\Models\Matter;
 use App\Services\TrustAccountService;
 use App\Services\TrustLedgerEntryReversalService;
 use App\Services\TrustLedgerService;
@@ -90,5 +91,71 @@ class TrustLedgerEntryReversalServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->service->reverse($firm, $ledger, $reversal->fresh());
+    }
+
+    /**
+     * Regression test for the Section 39A-3L Checkpoint 4 Phase D bug:
+     * reverse() previously read $originalEntry->matter WITHOUT explicit
+     * tenant context. Since `matters` is a FORCE-RLS table, that
+     * unwrapped read silently resolved $matter to null (instead of
+     * throwing) whenever this method was reached with no ambient
+     * database session context active — which is exactly the real
+     * condition in production, since this method is reached through
+     * TrustChargebackService::reverse(), whose own eligibility check
+     * clears any ambient context before calling here (see the
+     * companion "reached via TrustChargebackService::reverse()" proof
+     * in TrustChargebackServiceTest, which exercises the exact real
+     * call path with no manual context manipulation at all). This test
+     * proves reverse() itself, in isolation, correctly resolves the
+     * real matter and posts a reversal entry whose matter_id matches
+     * the original entry's matter_id — not null — even when no ambient
+     * context is left over from MatterFactory's own context-hold
+     * create() pattern. The explicit clearDatabaseTenantContext() call
+     * below is what makes this a genuine proof rather than a
+     * tautology: MatterFactory::create() leaves session-scoped context
+     * behind it (RefreshDatabase's outer transaction means it is NOT
+     * auto-reverted at statement end), so without this explicit clear
+     * the ambient context would still be active by accident and this
+     * test would pass even with the bug reintroduced.
+     */
+    public function test_reversal_entry_matter_id_matches_the_original_entrys_matter_and_recomputes_the_matter_balance(): void
+    {
+        $firm = $this->makeTrustEligibleFirm();
+        $account = app(TrustAccountService::class)->open($firm, 'Firm IOLTA Trust Account');
+        $client = Client::factory()->forFirm($firm)->create();
+        $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
+        $matter = Matter::factory()->forClient($client)->create();
+
+        $original = \App\Models\TrustLedgerEntry::create([
+            'firm_id' => $firm->id,
+            'trust_ledger_id' => $ledger->id,
+            'matter_id' => $matter->id,
+            'entry_type' => TrustLedgerEntryType::Deposit,
+            'amount_cents' => 10000,
+            'posted_at' => now(),
+        ]);
+        app(\App\Services\TrustBalanceService::class)->recomputeForLedger($ledger);
+        app(\App\Services\TrustBalanceService::class)->recomputeForMatter($ledger, $matter);
+
+        // Explicitly clear any ambient database tenant context left
+        // over from Matter::factory()->create()'s context-hold
+        // pattern above, so this test genuinely reproduces the
+        // no-context condition reverse() must fail-closed/succeed
+        // correctly under, rather than accidentally inheriting a
+        // still-active session setting.
+        (new \App\Services\TenantContextService())->clearDatabaseTenantContext();
+
+        $reversal = $this->service->reverse($firm, $ledger, $original->fresh());
+
+        $this->assertSame($matter->id, $reversal->matter_id);
+        $this->assertSame(TrustLedgerEntryType::Reversal, $reversal->entry_type);
+        $this->assertSame(-10000, $reversal->amount_cents);
+        $this->assertSame(0, $ledger->balance->fresh()->balance_cents);
+
+        $matterBalance = $this->runWithFirmContext($firm, fn () => \App\Models\MatterTrustBalance::query()
+            ->where('trust_ledger_id', $ledger->id)
+            ->where('matter_id', $matter->id)
+            ->firstOrFail());
+        $this->assertSame(0, $matterBalance->balance_cents);
     }
 }

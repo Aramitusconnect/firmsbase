@@ -149,6 +149,36 @@ class TenantContextService
     }
 
     /**
+     * Executes a callback with both PHP-memory and PostgreSQL tenant
+     * context explicitly cleared, then restores the exact context state
+     * that existed beforehand.
+     *
+     * Both layers are snapshotted independently because some legitimate
+     * internal callers deliberately set only the PostgreSQL context via
+     * setDatabaseTenantContextForFirmId() without activating PHP-memory
+     * tenant context. Restoring only currentFirmId() would silently wipe
+     * that database-only outer context.
+     */
+    public function runWithoutFirmContext(callable $callback): mixed
+    {
+        $previousContext = TenantContextResolver::current();
+        $previousDatabaseFirmId = $this->currentDatabaseTenantContextValue();
+
+        $this->clearFirmContext();
+
+        try {
+            return DB::transaction(function () use ($callback) {
+                $this->clearDatabaseTenantContext();
+
+                return $callback();
+            });
+        } finally {
+            $this->restoreDatabaseTenantContext($previousDatabaseFirmId);
+            $this->restoreFirmContext($previousContext);
+        }
+    }
+
+    /**
      * Reads the CURRENTLY active database session/transaction setting,
      * without touching it. Returns null for both "never set" and
      * "explicitly cleared to empty string" — the same equivalence the

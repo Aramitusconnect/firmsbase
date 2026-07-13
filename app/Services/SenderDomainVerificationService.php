@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\SenderDomainStatus;
 use App\Models\NotificationTemplate;
+use App\Services\TenantContextService;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -23,26 +24,44 @@ class SenderDomainVerificationService
 
     public function markVerified(NotificationTemplate $template): NotificationTemplate
     {
-        $template->update([
-            'spf_status' => SenderDomainStatus::Verified,
-            'dkim_status' => SenderDomainStatus::Verified,
-            'dmarc_status' => SenderDomainStatus::Verified,
-            'domain_verified_at' => now(),
-        ]);
+        $tenantContext = app(TenantContextService::class);
+        $firmId = $template->firm_id;
 
-        return $template->fresh();
+        $body = function () use ($template) {
+            $template->update([
+                'spf_status' => SenderDomainStatus::Verified,
+                'dkim_status' => SenderDomainStatus::Verified,
+                'dmarc_status' => SenderDomainStatus::Verified,
+                'domain_verified_at' => now(),
+            ]);
+
+            return $template->fresh();
+        };
+
+        return $firmId !== null
+            ? $tenantContext->runWithFirmContext($firmId, $body)
+            : $tenantContext->runWithoutFirmContext($body);
     }
 
     public function markFailed(NotificationTemplate $template, ?string $reason = null): NotificationTemplate
     {
-        $template->update([
-            'spf_status' => SenderDomainStatus::Failed,
-            'dkim_status' => SenderDomainStatus::Failed,
-            'dmarc_status' => SenderDomainStatus::Failed,
-            'domain_verified_at' => null,
-        ]);
+        $tenantContext = app(TenantContextService::class);
+        $firmId = $template->firm_id;
 
-        return $template->fresh();
+        $body = function () use ($template) {
+            $template->update([
+                'spf_status' => SenderDomainStatus::Failed,
+                'dkim_status' => SenderDomainStatus::Failed,
+                'dmarc_status' => SenderDomainStatus::Failed,
+                'domain_verified_at' => null,
+            ]);
+
+            return $template->fresh();
+        };
+
+        return $firmId !== null
+            ? $tenantContext->runWithFirmContext($firmId, $body)
+            : $tenantContext->runWithoutFirmContext($body);
     }
 
     /**
@@ -52,7 +71,9 @@ class SenderDomainVerificationService
      */
     public function syncVerificationAcrossFirmTemplates(?int $firmId, string $fromDomain, bool $verified): int
     {
-        return DB::table('notification_templates')
+        $tenantContext = app(TenantContextService::class);
+
+        $body = fn () => DB::table('notification_templates')
             ->where('firm_id', $firmId)
             ->where('from_domain', $fromDomain)
             ->update($verified
@@ -69,5 +90,9 @@ class SenderDomainVerificationService
                     'domain_verified_at' => null,
                 ]
             );
+
+        return $firmId !== null
+            ? $tenantContext->runWithFirmContext($firmId, $body)
+            : $tenantContext->runWithoutFirmContext($body);
     }
 }

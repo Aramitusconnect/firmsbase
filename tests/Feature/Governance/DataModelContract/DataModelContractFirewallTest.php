@@ -335,6 +335,88 @@ class DataModelContractFirewallTest extends TestCase
             'app/Services/ReadinessScorecardRegistry.php',
             'tests/Feature/Tasks/TaskDependencyServiceTest.php',
             'tests/Feature/Webhooks/Wiring/TaskCompletedWiringTest.php',
+            // Section 39A-3L, Checkpoint 10, Table Phase C (this
+            // batch, a later, distinct staged-FORCE-activation
+            // branch) legitimately added a document_requests-only
+            // FORCE RLS migration, a DocumentRequestFactory
+            // firm/client consistency + context-hold fix, wrapped
+            // DocumentRequestService's create() and its 7
+            // single-item mutators and DocumentChaseService's
+            // checkAndLog()/escalate()/pause()/resume() each in
+            // their own runWithFirmContext() call, and updated the
+            // tests it affected.
+            'database/migrations/2026_08_25_930010_force_rls_on_document_requests_table.php',
+            'database/factories/DocumentRequestFactory.php',
+            'app/Services/DocumentRequestService.php',
+            'app/Services/DocumentChaseService.php',
+            'app/Services/MobilePortalReadinessService.php',
+            'tests/Feature/Documents/DocumentRequestServiceTest.php',
+            'tests/Feature/DocumentChase/DocumentChaseServiceTest.php',
+            'tests/Feature/Readiness/MatterReadinessServiceTest.php',
+            'tests/Feature/Governance/MarketReadyValueMultipliers/FirmCommandCenterAggregationServiceTest.php',
+            // Section 39A-3L, Checkpoint 11, Table Phase C (this batch,
+            // a later, distinct staged-FORCE-activation branch)
+            // legitimately added a communication_consents-only FORCE
+            // RLS migration, wrapped ConsentService's capture()/
+            // revoke() in their own runWithFirmContext() call, moved
+            // ClientPortalService::invite()'s isGranted() precondition
+            // inside its existing runWithFirmContext() wrap, added a
+            // CommunicationConsentFactory context-hold fix, and updated
+            // the tests it affected.
+            'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php',
+            'database/factories/CommunicationConsentFactory.php',
+            'app/Services/ConsentService.php',
+            'tests/Feature/Activation/ConsentServiceTest.php',
+            'tests/Feature/PaymentPlans/PaymentPlanDunningServiceTest.php',
+            // Section 39A-3L, Checkpoint 22, Table Phase C (this
+            // batch, a later, distinct staged-FORCE-activation
+            // branch) legitimately added a payment_plans-only FORCE
+            // RLS migration, wrapped PaymentPlanService's create()/
+            // edit()/activate()/renegotiate()/cancel()/
+            // markDefaulted() each in their own runWithFirmContext()
+            // call, added a PaymentPlanFactory context-hold +
+            // firm/client consistency fix, and updated the one
+            // existing test that genuinely needed explicit tenant
+            // context after this activation.
+            'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php',
+            'database/factories/PaymentPlanFactory.php',
+            'app/Services/PaymentPlanService.php',
+            'tests/Feature/PaymentPlans/PaymentPlanServiceTest.php',
+            // Section 39A-3L, Checkpoint 23, Table Phase C (this
+            // batch, a later, distinct staged-FORCE-activation
+            // branch) legitimately added a payment_plan_events-only
+            // FORCE RLS migration and a PaymentPlanEventFactory
+            // context-hold + firm/plan consistency fix — no
+            // production service file required any wiring change
+            // this checkpoint. The same PaymentPlanServiceTest.php
+            // (already allowed above) was updated again to wrap two
+            // assertDatabaseHas() calls in tenant context.
+            'database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php',
+            'database/factories/PaymentPlanEventFactory.php',
+            // Section 39A-3L, Checkpoint 24 (this batch, a later,
+            // distinct staged-FORCE-activation branch) legitimately
+            // added a notification_events-only FORCE RLS migration,
+            // wrapped NotificationDispatchService::dispatch()'s
+            // entire body in one runWithFirmContext() call (its
+            // recordSent()/recordFailed() methods each keep their own
+            // independent tight wrap), and wrapped SuppressionService's
+            // recordBounce()/recordComplaint() methods each in their
+            // own runWithFirmContext() call, and
+            // added a NotificationEventFactory context-hold fix — the
+            // entire write pathway remains dormant in production today
+            // (no live caller of dispatch()/recordFailed()/
+            // recordBounce()/recordComplaint() exists yet). Also
+            // updated tests/Feature/Notifications/
+            // NotificationDispatchServiceTest.php and
+            // tests/Feature/Notifications/SuppressionServiceTest.php
+            // to wrap reads that legitimately need explicit tenant
+            // context after this activation.
+            'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php',
+            'database/factories/NotificationEventFactory.php',
+            'app/Services/NotificationDispatchService.php',
+            'app/Services/SuppressionService.php',
+            'tests/Feature/Notifications/NotificationDispatchServiceTest.php',
+            'tests/Feature/Notifications/SuppressionServiceTest.php',
         ];
 
         return array_values(array_filter(

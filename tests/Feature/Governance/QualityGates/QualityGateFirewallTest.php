@@ -3,6 +3,7 @@
 namespace Tests\Feature\Governance\QualityGates;
 
 use App\Enums\GovernanceMappingStatus;
+use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TestCoverageMappingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -137,7 +138,15 @@ class QualityGateFirewallTest extends TestCase
                 && ! str_starts_with($path, 'tests/Feature/SupportAccess/')
                 // Section 39A-2 legitimately added test helper methods
                 // to tests/TestCase.php.
-                && $path !== 'tests/TestCase.php',
+                && $path !== 'tests/TestCase.php'
+                // Section 39A-3L Stage A legitimately added a PHPUnit
+                // bootstrap guard outside the governance-mapping tree.
+                && $path !== 'tests/bootstrap.php'
+                && $path !== 'tests/bootstrap-verify-test-database.php'
+                && $path !== 'tests/Feature/Ai/Concerns/SetsUpAiEntitledFirm.php'
+                && $path !== 'tests/Feature/Ai/Entitlement/AiEntitlementAndModeBlockingTest.php'
+                && $path !== 'tests/Feature/Ai/Foundation/AiModeEnumReplacementTest.php'
+                && $path !== 'tests/Feature/Ai/Usage/AiUsageRecorderServiceTest.php',
         );
 
         $unexpected = array_values(array_diff($changedTestFiles, self::ALLOWED_MODIFIED_TEST_FILES));
@@ -168,6 +177,24 @@ class QualityGateFirewallTest extends TestCase
         $this->assertEmpty($violations, implode("\n", $violations));
     }
 
+    /**
+     * Section 39A-3L Stage B (Checkpoints 22-34) activated permanent
+     * FORCE ROW LEVEL SECURITY on all originally-prepared tables —
+     * $enforcementActive below is therefore now genuinely TRUE, unlike
+     * when this test was first written. That does NOT make this
+     * control fully Implemented: firm_settings being forced was always
+     * a proxy for "is ANY enforcement active," not the actual gating
+     * condition — the real reason this control remains
+     * PartiallyImplemented is that additional tenant-owned tables
+     * discovered by inventory sweeps still have zero RLS preparation
+     * at all (see the rls_prepared_not_enforced gap's own still-open
+     * component, and RowLevelSecurityCoverageMappingService::
+     * missingPreparedTables() for the live, non-hardcoded count). This
+     * assertion is therefore unconditional now, rather than gated
+     * behind $enforcementActive — gating it there made this test
+     * silently perform zero assertions the instant enforcement
+     * activated, exactly the failure mode this rewrite closes.
+     */
     public function test_test_coverage_mapping_service_does_not_claim_rls_broken_scope_is_implemented_while_enforcement_is_inactive(): void
     {
         $row = DB::selectOne(
@@ -176,11 +203,32 @@ class QualityGateFirewallTest extends TestCase
         );
         $enforcementActive = (bool) $row->relforcerowsecurity;
 
+        $this->assertTrue(
+            $enforcementActive,
+            'firm_settings must have permanent FORCE ROW LEVEL SECURITY active — Section 39A-3L Stage B is complete.'
+        );
+
+        $uncoveredCount = count((new RowLevelSecurityCoverageMappingService())->missingPreparedTables());
+        $this->assertGreaterThan(0, $uncoveredCount, 'This test\'s own premise requires at least one currently-uncovered tenant-owned table to exist.');
+
         $item = (new TestCoverageMappingService())->byKey('tenant_isolation_broken_scope_caught_by_rls');
 
-        if (! $enforcementActive) {
-            $this->assertNotSame(GovernanceMappingStatus::Implemented, $item->status);
-        }
+        $this->assertNotSame(
+            GovernanceMappingStatus::Implemented,
+            $item->status,
+            "This control remains PartiallyImplemented — not because enforcement is inactive (it now is), but because {$uncoveredCount} uncovered tenant-owned tables still lack any RLS preparation at all."
+        );
+
+        $this->assertStringContainsString(
+            (string) $uncoveredCount,
+            $item->notes,
+            'The generated notes must contain the current, dynamically-derived uncovered-table count, not a hard-coded literal.'
+        );
+        $this->assertStringNotContainsString(
+            'enforcement is inactive',
+            strtolower($item->notes),
+            'The notes must not claim enforcement is inactive — it is now genuinely active for the covered tables.'
+        );
     }
 
     /**
@@ -389,6 +437,103 @@ class QualityGateFirewallTest extends TestCase
             'app/Services/ReadinessScorecardRegistry.php',
             'tests/Feature/Tasks/TaskDependencyServiceTest.php',
             'tests/Feature/Webhooks/Wiring/TaskCompletedWiringTest.php',
+            // Section 39A-3L, Checkpoint 10, Table Phase C (this
+            // batch, a later, distinct staged-FORCE-activation
+            // branch) legitimately added a document_requests-only
+            // FORCE RLS migration, a DocumentRequestFactory
+            // firm/client consistency + context-hold fix, wrapped
+            // DocumentRequestService's create() and its 7
+            // single-item mutators and DocumentChaseService's
+            // checkAndLog()/escalate()/pause()/resume() each in
+            // their own runWithFirmContext() call, and updated the
+            // tests it affected.
+            'database/migrations/2026_08_25_930010_force_rls_on_document_requests_table.php',
+            'database/factories/DocumentRequestFactory.php',
+            'app/Services/DocumentRequestService.php',
+            'app/Services/DocumentChaseService.php',
+            'app/Services/MobilePortalReadinessService.php',
+            'tests/Feature/Documents/DocumentRequestServiceTest.php',
+            'tests/Feature/DocumentChase/DocumentChaseServiceTest.php',
+            'tests/Feature/Readiness/MatterReadinessServiceTest.php',
+            'tests/Feature/Governance/MarketReadyValueMultipliers/FirmCommandCenterAggregationServiceTest.php',
+            // Section 39A-3L, Checkpoint 11, Table Phase C (this batch,
+            // a later, distinct staged-FORCE-activation branch)
+            // legitimately added a communication_consents-only FORCE
+            // RLS migration, wrapped ConsentService's capture()/
+            // revoke() in their own runWithFirmContext() call, moved
+            // ClientPortalService::invite()'s isGranted() precondition
+            // inside its existing runWithFirmContext() wrap, added a
+            // CommunicationConsentFactory context-hold fix, and updated
+            // the tests it affected.
+            'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php',
+            'database/factories/CommunicationConsentFactory.php',
+            'app/Services/ConsentService.php',
+            'tests/Feature/Activation/ConsentServiceTest.php',
+            'tests/Feature/PaymentPlans/PaymentPlanDunningServiceTest.php',
+            // Section 39A-3L, Checkpoint 22, Table Phase C (this
+            // batch, a later, distinct staged-FORCE-activation
+            // branch) legitimately added a payment_plans-only FORCE
+            // RLS migration, wrapped PaymentPlanService's create()/
+            // edit()/activate()/renegotiate()/cancel()/
+            // markDefaulted() each in their own runWithFirmContext()
+            // call, added a PaymentPlanFactory context-hold +
+            // firm/client consistency fix, and updated the one
+            // existing test that genuinely needed explicit tenant
+            // context after this activation.
+            'database/migrations/2026_08_25_930022_force_rls_on_payment_plans_table.php',
+            'database/factories/PaymentPlanFactory.php',
+            'app/Services/PaymentPlanService.php',
+            'tests/Feature/PaymentPlans/PaymentPlanServiceTest.php',
+            // Section 39A-3L, Checkpoint 23, Table Phase C (this
+            // batch, a later, distinct staged-FORCE-activation
+            // branch) legitimately added a payment_plan_events-only
+            // FORCE RLS migration and a PaymentPlanEventFactory
+            // context-hold + firm/plan consistency fix — no
+            // production service file required any wiring change
+            // this checkpoint. The same PaymentPlanServiceTest.php
+            // (already allowed above) was updated again to wrap two
+            // assertDatabaseHas() calls in tenant context.
+            'database/migrations/2026_08_25_930023_force_rls_on_payment_plan_events_table.php',
+            'database/factories/PaymentPlanEventFactory.php',
+            // Section 39A-3L, Checkpoint 24 (this batch, a later,
+            // distinct staged-FORCE-activation branch) legitimately
+            // added a notification_events-only FORCE RLS migration,
+            // wrapped NotificationDispatchService::dispatch()'s
+            // entire body in one runWithFirmContext() call (its
+            // recordSent()/recordFailed() methods each keep their own
+            // independent tight wrap), and wrapped SuppressionService's
+            // recordBounce()/recordComplaint() methods each in their
+            // own runWithFirmContext() call, and
+            // added a NotificationEventFactory context-hold fix — the
+            // entire write pathway remains dormant in production today
+            // (no live caller of dispatch()/recordFailed()/
+            // recordBounce()/recordComplaint() exists yet). Also
+            // updated tests/Feature/Notifications/
+            // NotificationDispatchServiceTest.php and
+            // tests/Feature/Notifications/SuppressionServiceTest.php
+            // to wrap reads that legitimately need explicit tenant
+            // context after this activation.
+            'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php',
+            'database/factories/NotificationEventFactory.php',
+            'app/Services/NotificationDispatchService.php',
+            'app/Services/SuppressionService.php',
+            'tests/Feature/Notifications/NotificationDispatchServiceTest.php',
+            'tests/Feature/Notifications/SuppressionServiceTest.php',
+            // Section 39A-3L Phase B5 (this batch, a later, distinct
+            // contacts/parties FORCE-RLS-prerequisite branch — contacts
+            // and parties are NOT yet FORCE-enabled by this batch, only
+            // prepared for it) legitimately added ContactFactory/
+            // PartyFactory context-hold fixes (app/Services/
+            // ConflictCheckService.php, ImportApplyService.php, and
+            // ImportDuplicateDetectionService.php were already allowed
+            // above from Section 39A-3A and needed no new entry here),
+            // and extended tests/Feature/Imports/
+            // ImportDuplicateDetectionServiceTest.php with Contact/
+            // Party duplicate-detection coverage that did not exist
+            // before this batch.
+            'database/factories/ContactFactory.php',
+            'database/factories/PartyFactory.php',
+            'tests/Feature/Imports/ImportDuplicateDetectionServiceTest.php',
         ];
 
         return array_values(array_filter(

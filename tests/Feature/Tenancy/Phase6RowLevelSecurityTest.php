@@ -59,6 +59,37 @@ class Phase6RowLevelSecurityTest extends TestCase
 
         $this->assertNotNull($row, "Table {$table} not found in pg_class.");
         $this->assertTrue((bool) $row->relrowsecurity, "RLS is not enabled on {$table}.");
+
+        // GAP FOUND AND FIXED during Section 39A-3L, Checkpoint 8's own
+        // audit (not caused by Checkpoint 8 — discovered here): Section
+        // 39A-3L, Checkpoint 7, Table Phase B legitimately activated
+        // permanent FORCE ROW LEVEL SECURITY on template_upgrade_logs
+        // (see
+        // database/migrations/2026_08_25_930007_force_rls_on_template_upgrade_logs_table.php)
+        // but this exception list was never updated to reflect that —
+        // meaning this test silently asserted the WRONG expectation for
+        // template_upgrade_logs ever since Checkpoint 7 landed. Fixed
+        // here, in the same pass as Checkpoint 8's own table,
+        // template_upgrade_previews (see
+        // database/migrations/2026_08_25_930008_force_rls_on_template_upgrade_previews_table.php),
+        // following the exact same "exception list" pattern already
+        // established in RowLevelSecurityPreparationTest.
+        //
+        // Section 39A-3L, Checkpoint 9, Table Phase B — seat_allocations
+        // now also has permanent FORCE ROW LEVEL SECURITY active (see
+        // database/migrations/2026_08_25_930009_force_rls_on_seat_allocations_table.php).
+        // Added to this exception list in the SAME commit as that
+        // migration, per both prior Phase A security-reviewer and
+        // rls-inventory-analyst findings: missing this update in the
+        // same commit is exactly how the Checkpoint 7 gap happened (a
+        // table forced without updating this test, silently red for a
+        // whole checkpoint cycle).
+        if (in_array($table, ['template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations'], true)) {
+            $this->assertTrue((bool) $row->relforcerowsecurity, "{$table} must have permanent FORCE ROW LEVEL SECURITY active.");
+
+            return;
+        }
+
         $this->assertFalse((bool) $row->relforcerowsecurity, "FORCE ROW LEVEL SECURITY unexpectedly enabled on {$table}.");
     }
 
