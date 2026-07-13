@@ -71,7 +71,7 @@ class WebhookReplayService
             'new_webhook_delivery_id' => $newDelivery->id,
         ]));
 
-        $this->auditSecurityEvent($firm, $originalDelivery, $newDelivery, $actor);
+        (new TenantContextService())->runWithFirmContext($firm, fn () => $this->auditSecurityEvent($firm, $originalDelivery, $newDelivery, $actor));
 
         return $newDelivery;
     }

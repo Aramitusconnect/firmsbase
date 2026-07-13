@@ -2,10 +2,10 @@
 
 namespace App\Providers;
 
-use App\Enums\FirmUserStatus;
 use App\Models\PlatformAdmin;
 use App\Models\SecurityEvent;
 use App\Models\User;
+use App\Services\TenantContextService;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Support\Facades\Event;
@@ -43,38 +43,61 @@ class AppServiceProvider extends ServiceProvider
     private function registerAuthenticationAuditLogging(): void
     {
         Event::listen(Login::class, function (Login $event): void {
+            // Fix #0 (Section 39A-3L Phase B6): activeFirmUser() correctly
+            // bootstraps via app.current_user_id, unlike a raw firmUsers()
+            // query, which returns NULL under firm_users' own FORCE RLS
+            // regardless of whether a real active membership exists.
             $firmId = $event->user instanceof User
-                ? $event->user->firmUsers()->where('status', FirmUserStatus::Active->value)->value('firm_id')
+                ? $event->user->activeFirmUser()?->firm_id
                 : null;
 
-            SecurityEvent::create([
-                'firm_id' => $firmId,
-                'actor_type' => get_class($event->user),
-                'actor_id' => $event->user->getAuthIdentifier(),
-                'event_type' => 'login_succeeded',
-                'category' => 'authentication',
-                'ip_address' => request()->ip(),
-                'user_agent' => request()->userAgent(),
-                'metadata' => ['guard' => $event->guard],
-            ]);
+            $context = new TenantContextService();
+
+            if ($firmId !== null) {
+                $context->setDatabaseTenantContextForFirmId($firmId);
+            } else {
+                $context->clearDatabaseTenantContext();
+            }
+
+            try {
+                SecurityEvent::create([
+                    'firm_id' => $firmId,
+                    'actor_type' => get_class($event->user),
+                    'actor_id' => $event->user->getAuthIdentifier(),
+                    'event_type' => 'login_succeeded',
+                    'category' => 'authentication',
+                    'ip_address' => request()->ip(),
+                    'user_agent' => request()->userAgent(),
+                    'metadata' => ['guard' => $event->guard],
+                ]);
+            } finally {
+                $context->clearDatabaseTenantContext();
+            }
         });
 
         Event::listen(Failed::class, function (Failed $event): void {
-            SecurityEvent::create([
-                'firm_id' => null,
-                'actor_type' => $event->user !== null
-                    ? get_class($event->user)
-                    : ($event->guard === 'platform_admin' ? PlatformAdmin::class : User::class),
-                'actor_id' => $event->user?->getAuthIdentifier(),
-                'event_type' => 'login_failed',
-                'category' => 'authentication',
-                'ip_address' => request()->ip(),
-                'user_agent' => request()->userAgent(),
-                'metadata' => [
-                    'guard' => $event->guard,
-                    'attempted_email' => $event->credentials['email'] ?? null,
-                ],
-            ]);
+            $context = new TenantContextService();
+            $context->clearDatabaseTenantContext();
+
+            try {
+                SecurityEvent::create([
+                    'firm_id' => null,
+                    'actor_type' => $event->user !== null
+                        ? get_class($event->user)
+                        : ($event->guard === 'platform_admin' ? PlatformAdmin::class : User::class),
+                    'actor_id' => $event->user?->getAuthIdentifier(),
+                    'event_type' => 'login_failed',
+                    'category' => 'authentication',
+                    'ip_address' => request()->ip(),
+                    'user_agent' => request()->userAgent(),
+                    'metadata' => [
+                        'guard' => $event->guard,
+                        'attempted_email' => $event->credentials['email'] ?? null,
+                    ],
+                ]);
+            } finally {
+                $context->clearDatabaseTenantContext();
+            }
         });
     }
 }

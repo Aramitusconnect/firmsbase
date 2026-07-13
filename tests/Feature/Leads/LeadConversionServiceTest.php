@@ -80,18 +80,31 @@ class LeadConversionServiceTest extends TestCase
 
         $client = $this->service->convert($lead, ['display_name' => 'Jane Doe']);
 
-        $this->assertDatabaseHas('timeline_events', [
-            'firm_id' => $lead->firm_id,
-            'subject_type' => FirmLead::class,
-            'subject_id' => $lead->id,
-            'event_type' => 'lead_converted',
-        ]);
+        // timeline_events has permanent FORCE ROW LEVEL SECURITY (Section
+        // 39A-3L, Checkpoint 33) — convert()'s own tenant-context wrap
+        // around its timeline->record() calls clears before returning,
+        // so these read-time assertions need their own context wrap to
+        // see the rows just written, matching this file's own sibling
+        // tests' already-established pattern. Pre-existing gap in this
+        // one test surfaced by the first full unfiltered suite run since
+        // Checkpoint 33 landed (this test's service wasn't among the six
+        // whose own test files were re-run at that checkpoint, since
+        // LeadConversionService's own call sites were already correct
+        // and untouched).
+        $this->runWithFirmContext($lead->firm_id, function () use ($lead, $client) {
+            $this->assertDatabaseHas('timeline_events', [
+                'firm_id' => $lead->firm_id,
+                'subject_type' => FirmLead::class,
+                'subject_id' => $lead->id,
+                'event_type' => 'lead_converted',
+            ]);
 
-        $this->assertDatabaseHas('timeline_events', [
-            'firm_id' => $lead->firm_id,
-            'subject_type' => \App\Models\Client::class,
-            'subject_id' => $client->id,
-            'event_type' => 'client_created',
-        ]);
+            $this->assertDatabaseHas('timeline_events', [
+                'firm_id' => $lead->firm_id,
+                'subject_type' => \App\Models\Client::class,
+                'subject_id' => $client->id,
+                'event_type' => 'client_created',
+            ]);
+        });
     }
 }
