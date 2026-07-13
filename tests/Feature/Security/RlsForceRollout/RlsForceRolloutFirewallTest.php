@@ -268,6 +268,21 @@ use Tests\TestCase;
  * timeline_events' existing single-clause policy was already exactly
  * correct (no IS NULL branch needed or wanted; see this batch's own
  * TimelineEventsForceRlsActivationTest for the full proof).
+ *
+ * Narrowly updated AGAIN by Section 39A-3L, Phase B6, Checkpoint 34
+ * (this repo's fifty-second and FINAL staged FORCE activation batch in
+ * this arc, covering security_events, database/migrations/2026_08_25_
+ * 930034_force_rls_on_security_events_table.php) to extend the
+ * "exactly these tables are forced" list from fifty-one to fifty-two
+ * tables and add this batch's own migration-existence check — same
+ * additive-only pattern, no existing assertion removed or weakened.
+ * The highest production-blast-radius checkpoint in the whole mission
+ * (two of this table's four write call sites fire synchronously inside
+ * Laravel's own authentication flow); see this batch's own
+ * SecurityEventsForceRlsActivationTest for the full proof, including
+ * the new read/write policy shape (a third distinct nullable-firm_id
+ * design, different from both the six "easy" tables and
+ * timeline_events).
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -430,6 +445,14 @@ class RlsForceRolloutFirewallTest extends TestCase
             // tables — same additive-only pattern, no existing
             // assertion removed or weakened.
             'timeline_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Phase B6,
+            // Checkpoint 34 (this repo's fifty-second and FINAL staged
+            // FORCE activation batch in this arc, covering
+            // security_events) to extend the "exactly these tables are
+            // forced" list from fifty-one to fifty-two tables — same
+            // additive-only pattern, no existing assertion removed or
+            // weakened.
+            'security_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -813,6 +836,16 @@ class RlsForceRolloutFirewallTest extends TestCase
         // no DROP POLICY/CREATE POLICY at all (bare FORCE flip only) —
         // its existence is still proven here the same way.
         $this->assertFileExists(base_path('database/migrations/2026_08_25_930033_force_rls_on_timeline_events_table.php'));
+    }
+
+    public function test_the_security_events_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-3L, Phase B6, Checkpoint 34's own migration — same
+        // file-existence reasoning as the checks above. This is the
+        // eighth and final nullable-firm_id table in this arc, and the
+        // highest production-blast-radius checkpoint in the whole
+        // mission.
+        $this->assertFileExists(base_path('database/migrations/2026_08_25_930034_force_rls_on_security_events_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

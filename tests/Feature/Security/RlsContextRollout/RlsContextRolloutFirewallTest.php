@@ -145,7 +145,24 @@ class RlsContextRolloutFirewallTest extends TestCase
             // batch, covering timeline_events). This test's own scope
             // (39A-2) never touched FORCE state.
             'timeline_events',
+            // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 34,
+            // Phase B6 (this repo's fifty-second and FINAL staged FORCE
+            // activation batch in this arc, covering security_events).
+            // This test's own scope (39A-2) never touched FORCE state.
+            'security_events',
         ];
+
+        // security_events is the final checkpoint in this arc: every
+        // originally-prepared table is now accounted for in
+        // $forcedByLaterBranch, so the loop below legitimately has zero
+        // remaining iterations — a real, positive end state, not a lost
+        // assertion. This explicit equality check keeps the test
+        // genuinely assertive regardless of loop iteration count.
+        $forcedSorted = $forcedByLaterBranch;
+        sort($forcedSorted);
+        $preparedTablesSorted = $coverage->preparedTables();
+        sort($preparedTablesSorted);
+        $this->assertSame($forcedSorted, $preparedTablesSorted, 'Every originally "prepared" table must now be force-enabled, no more, no fewer.');
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forcedByLaterBranch, true)) {

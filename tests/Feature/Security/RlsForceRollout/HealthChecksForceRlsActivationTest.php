@@ -145,7 +145,7 @@ class HealthChecksForceRlsActivationTest extends TestCase
         $coverage = new RowLevelSecurityCoverageMappingService();
 
         // Narrowly updated by Section 39A-3L, Checkpoint 29 (incident_events) for the same reason — additive only, no existing assertion removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
 
         $actuallyForced = [];
 
@@ -162,7 +162,7 @@ class HealthChecksForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(51, count($actuallyForced), 'Exactly forty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 28 — no more, no less.');
+        $this->assertSame(52, count($actuallyForced), 'Exactly forty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 28 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -173,7 +173,20 @@ class HealthChecksForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
         // Narrowly updated by Section 39A-3L, Checkpoint 29 (incident_events) for the same reason — additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
+
+        // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is
+        // the final checkpoint in this arc: $forced now equals the FULL
+        // preparedTables() set exactly, so the per-table loop below
+        // legitimately has zero remaining iterations (a real, positive
+        // end state, not a lost assertion). This explicit equality
+        // check keeps the test genuinely assertive regardless of loop
+        // iteration count.
+        $forcedSorted = $forced;
+        sort($forcedSorted);
+        $preparedTablesSorted = $coverage->preparedTables();
+        sort($preparedTablesSorted);
+        $this->assertSame($forcedSorted, $preparedTablesSorted, 'Every originally "prepared" table must now be force-enabled, no more, no fewer.');
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

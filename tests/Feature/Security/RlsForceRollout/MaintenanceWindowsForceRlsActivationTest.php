@@ -152,7 +152,7 @@ class MaintenanceWindowsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
 
         $actuallyForced = [];
 
@@ -169,7 +169,7 @@ class MaintenanceWindowsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(51, count($actuallyForced), 'Exactly forty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 30 — no more, no less.');
+        $this->assertSame(52, count($actuallyForced), 'Exactly forty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 30 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -179,7 +179,20 @@ class MaintenanceWindowsForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
+
+        // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is
+        // the final checkpoint in this arc: $forced now equals the FULL
+        // preparedTables() set exactly, so the per-table loop below
+        // legitimately has zero remaining iterations (a real, positive
+        // end state, not a lost assertion). This explicit equality
+        // check keeps the test genuinely assertive regardless of loop
+        // iteration count.
+        $forcedSorted = $forced;
+        sort($forcedSorted);
+        $preparedTablesSorted = $coverage->preparedTables();
+        sort($preparedTablesSorted);
+        $this->assertSame($forcedSorted, $preparedTablesSorted, 'Every originally "prepared" table must now be force-enabled, no more, no fewer.');
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

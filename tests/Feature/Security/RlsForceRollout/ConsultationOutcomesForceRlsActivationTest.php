@@ -237,7 +237,7 @@ class ConsultationOutcomesForceRlsActivationTest extends TestCase
             // weakened.
             // Narrowly updated by Section 39A-3L, Checkpoint 27 (this repo's forty-fifth staged FORCE activation batch, covering backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
             'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events',             // Narrowly updated by Section 39A-3L, Checkpoint 28 (this repo's forty-sixth staged FORCE activation batch, covering health_checks) for the same reason — additive only, no existing assertion removed or weakened.
-'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events',
+'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events',
         ];
 
         $rows = DB::select(
@@ -317,8 +317,21 @@ class ConsultationOutcomesForceRlsActivationTest extends TestCase
             // weakened.
             // Narrowly updated by Section 39A-3L, Checkpoint 27 (this repo's forty-fifth staged FORCE activation batch, covering backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
             'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events',             // Narrowly updated by Section 39A-3L, Checkpoint 28 (this repo's forty-sixth staged FORCE activation batch, covering health_checks) for the same reason — additive only, no existing assertion removed or weakened.
-'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events',
+'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events',
         ];
+
+        // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is
+        // the final checkpoint in this arc: $forced now equals the FULL
+        // preparedTables() set exactly, so the per-table loop below
+        // legitimately has zero remaining iterations (a real, positive
+        // end state, not a lost assertion). This explicit equality
+        // check keeps the test genuinely assertive regardless of loop
+        // iteration count.
+        $forcedSorted = $forced;
+        sort($forcedSorted);
+        $preparedTablesSorted = $coverage->preparedTables();
+        sort($preparedTablesSorted);
+        $this->assertSame($forcedSorted, $preparedTablesSorted, 'Every originally "prepared" table must now be force-enabled, no more, no fewer.');
 
         foreach ($coverage->preparedTables() as $table) {
             if (in_array($table, $forced, true)) {

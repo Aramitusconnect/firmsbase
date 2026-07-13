@@ -126,8 +126,17 @@ class RowLevelSecurityPreparationTest extends TestCase
         // asserted the WRONG expectation for both tables from
         // Checkpoint 18/19 onward.
         //
+        // Section 39A-3L, Phase B6, Checkpoint 34 (this repo's fifty-
+        // second and FINAL staged FORCE activation batch in this arc)
+        // legitimately activated permanent FORCE ROW LEVEL SECURITY on
+        // security_events — see database/migrations/2026_08_25_930034_
+        // force_rls_on_security_events_table.php. Added to the exception
+        // list in the SAME commit as that migration, per this file's own
+        // docblock lesson above (a table forced without updating this
+        // list going silently red for a whole cycle).
+        //
         // Every other Phase 1 table here remains prepared-but-not-forced.
-        if (in_array($table, ['firm_users', 'client_communication_preferences', 'activation_checklists', 'firm_entitlements', 'firm_entitlement_events', 'communication_consents', 'communication_consent_events', 'tenant_encryption_keys', 'firm_settings', 'firm_licenses'], true)) {
+        if (in_array($table, ['firm_users', 'client_communication_preferences', 'activation_checklists', 'firm_entitlements', 'firm_entitlement_events', 'communication_consents', 'communication_consent_events', 'tenant_encryption_keys', 'firm_settings', 'firm_licenses', 'security_events'], true)) {
             $this->assertTrue((bool) $row->relforcerowsecurity, "{$table} must have permanent FORCE ROW LEVEL SECURITY active.");
 
             return;
