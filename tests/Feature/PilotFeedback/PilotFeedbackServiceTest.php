@@ -6,7 +6,9 @@ use App\Enums\PilotFeedbackCategory;
 use App\Enums\PilotFeedbackPriority;
 use App\Enums\PilotFeedbackSource;
 use App\Enums\PilotFeedbackStatus;
+use App\Models\Client;
 use App\Models\Firm;
+use App\Models\Matter;
 use App\Services\PilotFeedbackService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -83,6 +85,79 @@ class PilotFeedbackServiceTest extends TestCase
 
         $this->assertTrue($followedUp->follow_up_required);
         $this->assertSame($followUpAt->copy()->startOfSecond()->timestamp, $followedUp->follow_up_at->timestamp);
+    }
+
+    public function test_submit_rejects_a_client_owned_by_a_different_firm(): void
+    {
+        $firm = Firm::factory()->create();
+        $otherFirmClient = Client::factory()->create();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Client does not belong to the same firm as the pilot feedback item.');
+
+        $this->service->submit(
+            PilotFeedbackSource::Client,
+            PilotFeedbackCategory::Bug,
+            'Title',
+            'Description',
+            firm: $firm,
+            client: $otherFirmClient,
+        );
+    }
+
+    public function test_submit_rejects_a_matter_owned_by_a_different_firm(): void
+    {
+        $firm = Firm::factory()->create();
+        $otherFirmMatter = Matter::factory()->create();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Matter does not belong to the same firm as the pilot feedback item.');
+
+        $this->service->submit(
+            PilotFeedbackSource::Client,
+            PilotFeedbackCategory::Bug,
+            'Title',
+            'Description',
+            firm: $firm,
+            matter: $otherFirmMatter,
+        );
+    }
+
+    public function test_submit_allows_a_client_and_matter_belonging_to_the_same_firm(): void
+    {
+        $firm = Firm::factory()->create();
+        $client = Client::factory()->forFirm($firm)->create();
+        $matter = Matter::factory()->forClient($client)->create();
+
+        $item = $this->service->submit(
+            PilotFeedbackSource::Client,
+            PilotFeedbackCategory::Bug,
+            'Title',
+            'Description',
+            firm: $firm,
+            client: $client,
+            matter: $matter,
+        );
+
+        $this->assertSame($firm->id, $item->firm_id);
+        $this->assertSame($client->id, $item->client_id);
+        $this->assertSame($matter->id, $item->matter_id);
+    }
+
+    public function test_submit_allows_a_client_with_no_firm_supplied(): void
+    {
+        $client = Client::factory()->create();
+
+        $item = $this->service->submit(
+            PilotFeedbackSource::Client,
+            PilotFeedbackCategory::Bug,
+            'Title',
+            'Description',
+            client: $client,
+        );
+
+        $this->assertNull($item->firm_id);
+        $this->assertSame($client->id, $item->client_id);
     }
 
     public function test_mark_wont_fix_and_duplicate(): void
