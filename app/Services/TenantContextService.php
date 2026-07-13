@@ -139,6 +139,53 @@ class TenantContextService
     }
 
     /**
+     * Section 39A-3L Phase B6 — the deliberate inverse of
+     * runWithFirmContext(): proves NO tenant context is active at the
+     * database-session level (not merely relying on it having never
+     * been set) for the duration of the callback, then restores
+     * whatever PHP-memory/DB-level context was active before, if any.
+     * Needed for tables (like backup_restore_tests) whose asymmetric
+     * RLS WITH CHECK requires a genuinely context-free session to
+     * write a firm_id = NULL platform-wide row — a future caller could
+     * invoke such a write from inside another firm-scoped operation,
+     * and the platform-wide write must not silently inherit that
+     * ambient context.
+     *
+     * The finally block re-pushes the DB-level session setting via
+     * setDatabaseTenantContextForFirmId() BEFORE PHP-memory context
+     * (the reverse of runWithFirmContext()'s own order, but harmless
+     * here since setDatabaseTenantContextForFirmId() takes the firm id
+     * directly and never reads PHP-memory state). This re-push is
+     * required, not merely PHP-memory restoration: when this method is
+     * nested inside an outer runWithFirmContext($firmA, ...), this
+     * method's own DB::transaction() is only a savepoint (not a true
+     * transaction boundary), and Postgres scopes SET LOCAL to the
+     * enclosing real transaction — a normal savepoint release does NOT
+     * revert SET LOCAL, only ROLLBACK TO SAVEPOINT does. Without the
+     * explicit re-push, the outer caller's DB-level context would stay
+     * cleared for the rest of its transaction even though PHP-memory
+     * context looked restored.
+     */
+    public function runWithoutFirmContext(callable $callback): mixed
+    {
+        $previousFirmId = $this->currentFirmId();
+        $this->clearFirmContext();
+
+        try {
+            return DB::transaction(function () use ($callback) {
+                $this->clearDatabaseTenantContext();
+
+                return $callback();
+            });
+        } finally {
+            if ($previousFirmId !== null) {
+                $this->setDatabaseTenantContextForFirmId($previousFirmId);
+                $this->setFirmContext($previousFirmId);
+            }
+        }
+    }
+
+    /**
      * Section 39A-3A — pushes the PostgreSQL session setting for a
      * KNOWN firm id WITHOUT touching PHP-memory context
      * (TenantContextResolver). Deliberately decoupled from
