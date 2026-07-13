@@ -83,7 +83,28 @@ class SecretPatternScanTest extends TestCase
 
     public function test_no_custom_artisan_command_exists_that_could_seed_production_data(): void
     {
-        $this->assertDirectoryDoesNotExist(base_path('app/Console'));
+        $commandsDir = base_path('app/Console/Commands');
+
+        if (! is_dir($commandsDir)) {
+            $this->assertTrue(true, 'No app/Console/Commands directory exists.');
+
+            return;
+        }
+
+        // Section 39A-4B added two reviewed, read-only reporting
+        // commands; neither writes/seeds any production data row.
+        $allowlist = [
+            'SchemaTenantFirewallCommand.php',
+            'RlsSecurityReportCommand.php',
+        ];
+
+        $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);
+        $unexpected = array_values(array_diff($files, $allowlist));
+
+        $this->assertEmpty(
+            $unexpected,
+            'Unreviewed console command(s) found: '.implode(', ', $unexpected).'. Any new command must be reviewed for production-data-seeding risk and added to this allowlist explicitly.'
+        );
     }
 
     public function test_test_only_fixtures_are_allowed_when_isolated_to_the_tests_directory(): void
