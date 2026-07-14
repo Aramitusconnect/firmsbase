@@ -134,7 +134,7 @@ class SchemaTenantFirewallTest extends TestCase
         foreach ($forced as $table) {
             $expectedFilename = Str::studly($table).'ForceRlsActivationTest.php';
 
-            if (! $this->testFileExistsAnywhereUnderTests($expectedFilename)) {
+            if (! $this->test_file_exists_anywhere_under_tests($expectedFilename)) {
                 $missing[] = "{$table} (expected {$expectedFilename})";
             }
         }
