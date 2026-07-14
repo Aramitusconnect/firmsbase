@@ -52,7 +52,7 @@ class RlsSecurityReportCommandTest extends TestCase
 
     public function test_summary_counts_match_the_coverage_registry(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         Artisan::call('security:rls-report', ['--json' => true]);
 
@@ -66,7 +66,7 @@ class RlsSecurityReportCommandTest extends TestCase
 
     public function test_every_tracked_table_appears_exactly_once_with_a_valid_classification(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         Artisan::call('security:rls-report', ['--json' => true]);
 
@@ -87,7 +87,7 @@ class RlsSecurityReportCommandTest extends TestCase
 
     public function test_forced_tables_report_force_activation_test_evidence_and_non_forced_tables_report_null(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         Artisan::call('security:rls-report', ['--json' => true]);
 

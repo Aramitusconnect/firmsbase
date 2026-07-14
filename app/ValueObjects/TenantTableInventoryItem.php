@@ -26,6 +26,5 @@ final readonly class TenantTableInventoryItem
          */
         public ?string $ownershipPath,
         public string $notes,
-    ) {
-    }
+    ) {}
 }

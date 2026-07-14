@@ -18,7 +18,7 @@ class SecretPatternScanTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new SeedDataSecurityAuditService();
+        $this->service = new SeedDataSecurityAuditService;
     }
 
     public function test_env_example_contains_no_real_looking_secret_values(): void

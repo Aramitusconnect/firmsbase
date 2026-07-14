@@ -111,7 +111,7 @@ class QueueConsoleTenantContextTest extends TestCase
         // (see its own docblock) — clear that baseline so the "no
         // context is active outside the loop" assertion below proves
         // what it actually claims to, rather than passing by accident.
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         DB::statement('ALTER TABLE clients FORCE ROW LEVEL SECURITY');
 

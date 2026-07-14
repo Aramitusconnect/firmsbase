@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\Governance\DataModelContract;
 
+use App\Enums\TenantOwnershipClassification;
 use App\Services\RowLevelSecurityCoverageMappingService;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class RowLevelSecurityCoverageMappingServiceTest extends TestCase
@@ -12,7 +14,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new RowLevelSecurityCoverageMappingService();
+        $this->service = new RowLevelSecurityCoverageMappingService;
     }
 
     public function test_prepared_tables_is_non_empty(): void
@@ -206,7 +208,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
      */
     public function test_every_table_with_a_not_null_firm_id_column_is_tracked_in_the_registry(): void
     {
-        $rows = \Illuminate\Support\Facades\DB::select(<<<'SQL'
+        $rows = DB::select(<<<'SQL'
             select c.table_name
             from information_schema.columns c
             join information_schema.tables t
@@ -311,15 +313,15 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
     {
         $summary = $this->service->classificationSummary();
 
-        $this->assertSame(113, $summary[\App\Enums\TenantOwnershipClassification::DirectTenant->value]);
-        $this->assertSame(24, $summary[\App\Enums\TenantOwnershipClassification::InheritedTenant->value]);
-        $this->assertSame(3, $summary[\App\Enums\TenantOwnershipClassification::Pivot->value]);
-        $this->assertSame(10, $summary[\App\Enums\TenantOwnershipClassification::Hybrid->value]);
-        $this->assertSame(44, $summary[\App\Enums\TenantOwnershipClassification::Global->value]);
-        $this->assertSame(4, $summary[\App\Enums\TenantOwnershipClassification::Audit->value]);
-        $this->assertSame(8, $summary[\App\Enums\TenantOwnershipClassification::System->value]);
-        $this->assertSame(1, $summary[\App\Enums\TenantOwnershipClassification::RootTenant->value]);
-        $this->assertSame(1, $summary[\App\Enums\TenantOwnershipClassification::Uncertain->value]);
+        $this->assertSame(113, $summary[TenantOwnershipClassification::DirectTenant->value]);
+        $this->assertSame(24, $summary[TenantOwnershipClassification::InheritedTenant->value]);
+        $this->assertSame(3, $summary[TenantOwnershipClassification::Pivot->value]);
+        $this->assertSame(10, $summary[TenantOwnershipClassification::Hybrid->value]);
+        $this->assertSame(44, $summary[TenantOwnershipClassification::Global->value]);
+        $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
+        $this->assertSame(8, $summary[TenantOwnershipClassification::System->value]);
+        $this->assertSame(1, $summary[TenantOwnershipClassification::RootTenant->value]);
+        $this->assertSame(1, $summary[TenantOwnershipClassification::Uncertain->value]);
 
         $this->assertSame(208, array_sum($summary));
     }
@@ -327,10 +329,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void
     {
         $mustHavePath = [
-            \App\Enums\TenantOwnershipClassification::DirectTenant,
-            \App\Enums\TenantOwnershipClassification::InheritedTenant,
-            \App\Enums\TenantOwnershipClassification::Hybrid,
-            \App\Enums\TenantOwnershipClassification::Pivot,
+            TenantOwnershipClassification::DirectTenant,
+            TenantOwnershipClassification::InheritedTenant,
+            TenantOwnershipClassification::Hybrid,
+            TenantOwnershipClassification::Pivot,
         ];
 
         $violations = [];
@@ -347,7 +349,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
     public function test_firms_is_classified_root_tenant_with_ownership_path_self(): void
     {
         $this->assertSame(
-            \App\Enums\TenantOwnershipClassification::RootTenant,
+            TenantOwnershipClassification::RootTenant,
             $this->service->classificationOf('firms')
         );
         $this->assertSame('self', $this->service->ownershipPathOf('firms'));
@@ -356,7 +358,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
     public function test_offboarding_exports_is_classified_uncertain_with_no_invented_ownership_path(): void
     {
         $this->assertSame(
-            \App\Enums\TenantOwnershipClassification::Uncertain,
+            TenantOwnershipClassification::Uncertain,
             $this->service->classificationOf('offboarding_exports')
         );
         $this->assertNull($this->service->ownershipPathOf('offboarding_exports'));
@@ -389,7 +391,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
             $this->assertNotEmpty($meta->expectedReaders);
             $this->assertNotEmpty($meta->authorizedWriters);
             $this->assertSame(
-                \App\Enums\TenantOwnershipClassification::Global,
+                TenantOwnershipClassification::Global,
                 $this->service->classificationOf($table)
             );
         }
@@ -398,11 +400,11 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
     public function test_prepared_and_missing_tables_are_classified_direct_tenant(): void
     {
         foreach ($this->service->preparedTables() as $table) {
-            $this->assertSame(\App\Enums\TenantOwnershipClassification::DirectTenant, $this->service->classificationOf($table));
+            $this->assertSame(TenantOwnershipClassification::DirectTenant, $this->service->classificationOf($table));
         }
 
         foreach ($this->service->missingPreparedTables() as $table) {
-            $this->assertSame(\App\Enums\TenantOwnershipClassification::DirectTenant, $this->service->classificationOf($table));
+            $this->assertSame(TenantOwnershipClassification::DirectTenant, $this->service->classificationOf($table));
         }
     }
 }

@@ -20,6 +20,5 @@ final readonly class ExemptTableMetadata
         public string $reason,
         public array $expectedReaders,
         public array $authorizedWriters,
-    ) {
-    }
+    ) {}
 }

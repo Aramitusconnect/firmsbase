@@ -82,7 +82,7 @@ class SchemaTenantFirewallTest extends TestCase
         // migrations that silently drops a CREATE POLICY or
         // ENABLE ROW LEVEL SECURITY statement is caught here too, not
         // only inside the command's own internals.
-        $service = new RowLevelSecurityCoverageMappingService();
+        $service = new RowLevelSecurityCoverageMappingService;
         $prepared = $service->preparedTables();
 
         $migrationFiles = glob(database_path('migrations/*row_level_security*.php')) ?: [];
@@ -124,7 +124,7 @@ class SchemaTenantFirewallTest extends TestCase
 
     public function test_check_5_every_forced_table_has_a_matching_activation_test_file(): void
     {
-        $service = new RowLevelSecurityCoverageMappingService();
+        $service = new RowLevelSecurityCoverageMappingService;
         $forced = $service->forcedTables();
 
         $this->assertNotEmpty($forced, 'Expected at least one forced table to exist.');
@@ -209,7 +209,7 @@ class SchemaTenantFirewallTest extends TestCase
 
     public function test_check_1_agrees_with_the_registry_service_live_schema_diff(): void
     {
-        $service = new RowLevelSecurityCoverageMappingService();
+        $service = new RowLevelSecurityCoverageMappingService;
 
         $rows = DB::select(<<<'SQL'
             select c.table_name
@@ -241,7 +241,7 @@ class SchemaTenantFirewallTest extends TestCase
         );
     }
 
-    private function testFileExistsAnywhereUnderTests(string $filename): bool
+    private function test_file_exists_anywhere_under_tests(string $filename): bool
     {
         $root = base_path('tests');
 

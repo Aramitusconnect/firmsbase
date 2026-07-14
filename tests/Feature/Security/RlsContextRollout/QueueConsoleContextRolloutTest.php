@@ -77,7 +77,7 @@ class QueueConsoleContextRolloutTest extends TestCase
         // create() returns (see ClientFactory's own docblock) — clear
         // that baseline so "no context bleeds forward" below proves
         // what it actually claims to, rather than passing by accident.
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         DB::statement('ALTER TABLE clients FORCE ROW LEVEL SECURITY');
         DB::statement('ALTER TABLE matters FORCE ROW LEVEL SECURITY');
@@ -123,7 +123,7 @@ class QueueConsoleContextRolloutTest extends TestCase
         // that baseline so "no context is active outside the loop"
         // below proves what it actually claims to, rather than passing
         // by accident.
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         DB::statement('ALTER TABLE clients FORCE ROW LEVEL SECURITY');
         DB::statement('ALTER TABLE matters FORCE ROW LEVEL SECURITY');

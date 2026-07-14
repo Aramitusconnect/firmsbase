@@ -141,7 +141,7 @@ class DatabaseRoleProofTest extends TestCase
 
     public function test_every_forced_table_has_row_level_security_enabled_and_forced(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
         $forcedTables = $coverage->forcedTables();
 
         $this->assertNotEmpty($forcedTables, 'Expected at least one FORCE-activation migration to exist by this point in the rollout.');
@@ -182,14 +182,14 @@ class DatabaseRoleProofTest extends TestCase
             $this->assertSame(
                 $sortedExpected,
                 $actualPolicies,
-                "{$table} must have exactly its documented policy set (".implode(', ', $sortedExpected).") — an extra or missing policy here means either a stray undocumented policy was added, or a documented one was silently dropped/renamed."
+                "{$table} must have exactly its documented policy set (".implode(', ', $sortedExpected).') — an extra or missing policy here means either a stray undocumented policy was added, or a documented one was silently dropped/renamed.'
             );
         }
     }
 
     public function test_no_forced_table_has_an_unconditionally_permissive_policy(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         foreach ($coverage->forcedTables() as $table) {
             $rows = DB::select('select policyname, qual, with_check from pg_policies where tablename = ?', [$table]);
@@ -216,7 +216,7 @@ class DatabaseRoleProofTest extends TestCase
                     $this->assertStringContainsString(
                         'current_setting',
                         $normalized,
-                        "{$table}'s policy '{$policy->policyname}' has a clause that does not reference current_setting(...) at all (".$clause."), meaning it does not condition access on any tenant-context session variable — a stray permissive policy of exactly the kind this sweep exists to catch."
+                        "{$table}'s policy '{$policy->policyname}' has a clause that does not reference current_setting(...) at all (".$clause.'), meaning it does not condition access on any tenant-context session variable — a stray permissive policy of exactly the kind this sweep exists to catch.'
                     );
                 }
             }
@@ -228,7 +228,7 @@ class DatabaseRoleProofTest extends TestCase
         $firm = Firm::factory()->create();
         Client::factory()->forFirm($firm)->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(
             0,
@@ -242,7 +242,7 @@ class DatabaseRoleProofTest extends TestCase
         $firm = Firm::factory()->create();
         Document::factory()->create(['firm_id' => $firm->id]);
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(
             0,
@@ -256,7 +256,7 @@ class DatabaseRoleProofTest extends TestCase
         $firm = Firm::factory()->create();
         FirmUser::factory()->forFirm($firm)->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(
             0,

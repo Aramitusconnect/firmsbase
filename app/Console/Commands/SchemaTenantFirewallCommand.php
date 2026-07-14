@@ -7,9 +7,9 @@ use App\ValueObjects\ExemptTableMetadata;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use ReflectionClass;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
+use ReflectionClass;
 use Throwable;
 
 /**
@@ -113,7 +113,7 @@ class SchemaTenantFirewallCommand extends Command
     public function handle(): int
     {
         $skipDb = (bool) $this->option('skip-db');
-        $service = new RowLevelSecurityCoverageMappingService();
+        $service = new RowLevelSecurityCoverageMappingService;
 
         $this->info('Running schema tenant firewall (6 checks)...');
         $this->newLine();

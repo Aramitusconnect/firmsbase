@@ -270,7 +270,7 @@ class LoginPolicyFirewallTest extends TestCase
 
     public function test_gap_registry_still_tracks_the_login_policy_gap_and_count_remains_twenty_one(): void
     {
-        $registry = new ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
 
         $this->assertTrue($registry->isTracked('login_policy_wrappers_missing'));
         $this->assertCount(21, $registry->all());
