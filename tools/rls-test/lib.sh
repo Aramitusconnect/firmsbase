@@ -130,8 +130,10 @@ rls_verify_sentinel() {
   current_head="$(cd "$RLS_WORKTREE_ROOT" && git rev-parse HEAD)"
 
   local comment
-  comment="$(rls_admin_psql -Atc \
-    "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = '${db_name}';" 2>/dev/null || true)"
+  if ! comment="$(rls_admin_psql -Atc \
+    "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = '${db_name}';")"; then
+    rls_fail "could not query the mission sentinel comment for '${db_name}' — the admin connection itself failed (see the psql error above); this is a connectivity problem, not proof the database lacks a sentinel"
+  fi
 
   if [[ -z "$comment" ]]; then
     rls_fail "database '${db_name}' has no mission sentinel comment — refusing to treat it as a mission-owned disposable/template database"

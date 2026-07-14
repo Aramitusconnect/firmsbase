@@ -58,5 +58,11 @@ rls_log "writing mission sentinel (database-level COMMENT, survives a schema-lev
 sentinel="mission=${RLS_MISSION};purpose=${purpose};head=${current_head};run_id=${run_id};created=$(date -u +%FT%TZ)"
 rls_admin_psql -c "COMMENT ON DATABASE \"${db_name}\" IS '${sentinel}';"
 
+rls_log "verifying the sentinel was applied correctly (read-back check) before reporting success"
+written_comment="$(rls_admin_psql -Atc "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = '${db_name}';")"
+if [[ "$written_comment" != "$sentinel" ]]; then
+  rls_fail "sentinel read-back mismatch for '${db_name}': wrote '${sentinel}', read back '${written_comment}' — refusing to report success"
+fi
+
 rls_log "created and verified '${db_name}' (host=${RLS_TEST_HOST} port=${RLS_TEST_PORT} role=${RLS_TEST_ROLE})"
 echo "$db_name"
