@@ -302,7 +302,22 @@ jobs:
       # therefore the same sentinel/naming/blocklist guards) the real test
       # run uses, so this isn't a second, divergent code path. Never prints
       # APP_KEY or any derived ciphertext.
+      #
+      # This step calls run-artisan-test.sh, which checks the mission
+      # sentinel (rls_verify_sentinel, via rls_admin_psql) before running
+      # anything else — exactly like "Run test suite" below, it needs the
+      # same admin TCP connection vars, or rls_admin_psql falls back to a
+      # Unix-socket/peer-auth attempt that cannot work in this service
+      # container (this step previously omitted this block entirely,
+      # which is precisely what caused the observed
+      # `/var/run/postgresql/.s.PGSQL.5432` / `role "root" does not
+      # exist` failure).
       - name: Preflight — APP_KEY, Laravel boot, encryption round-trip, DB connectivity
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: ${{ job.services.postgres.ports['5432'] }}
+          PGUSER: postgres
+          PGPASSWORD: postgres
         run: |
           set -euo pipefail
           if [[ -z "${APP_KEY:-}" ]]; then
