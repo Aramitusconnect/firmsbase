@@ -338,13 +338,12 @@ RUN set -eu; \
 #     `libtinfo.so.6.5` being present. Fixed by walking and copying every
 #     hop of the symlink chain, not just its final target.
 #
-# $binaries and $extensions below are deliberately expanded unquoted
-# (word-split into separate arguments/loop items on purpose — each is a
-# space/newline-separated list of paths, not a single value) when passed
-# to collect_closure() and in the `for b in $binaries` loop. Quoting
-# either would collapse it into one argument and break the closure/copy
-# logic this stage depends on.
-# hadolint ignore=SC2086
+# binaries/extensions/all_libs are bash arrays (this stage's SHELL is
+# bash, set above) rather than space-joined strings — each element is
+# passed to collect_closure()/copy_with_symlink_chain() as its own exact
+# argument, with no word-splitting or globbing involved at all, so no
+# path (however it were named) could ever be silently mis-split or glob-
+# expanded.
 RUN set -eu; \
     mkdir -p /rootfs; \
     rewrite_top_level() { \
@@ -375,15 +374,15 @@ RUN set -eu; \
     collect_closure() { \
         ldd "$@" 2>/dev/null | awk '{print $3}' | grep -E '^/' | sort -u; \
     }; \
-    binaries="/usr/local/bin/frankenphp /usr/local/bin/php /bin/bash"; \
-    extensions="$(find /usr/local/lib/php/extensions/no-debug-zts-20230831 -name '*.so')"; \
-    all_libs="$(collect_closure $binaries $extensions)"; \
-    echo "$all_libs" | while read -r lib; do \
+    binaries=(/usr/local/bin/frankenphp /usr/local/bin/php /bin/bash); \
+    mapfile -t extensions < <(find /usr/local/lib/php/extensions/no-debug-zts-20230831 -name '*.so'); \
+    mapfile -t all_libs < <(collect_closure "${binaries[@]}" "${extensions[@]}"); \
+    for lib in "${all_libs[@]}"; do \
         [ -n "$lib" ] || continue; \
         copy_with_symlink_chain "$lib"; \
     done; \
     # The binaries and extension .so files themselves (not just their deps).
-    for b in $binaries; do \
+    for b in "${binaries[@]}"; do \
         copy_with_symlink_chain "$b"; \
     done; \
     mkdir -p /rootfs/usr/local/lib/php/extensions/no-debug-zts-20230831; \
