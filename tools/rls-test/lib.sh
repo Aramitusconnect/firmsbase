@@ -81,8 +81,15 @@ rls_require_template_pattern() {
 
 # Runs a psql command as the postgres administrative role. Coordinator-only —
 # never invoke this function's caller scripts from a subagent task prompt.
+# When PGHOST is set (e.g. CI with a Docker service container) it connects via
+# TCP using the standard libpq env vars; otherwise it falls back to the local
+# Unix-socket peer-auth path used during local development.
 rls_admin_psql() {
-  sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 "$@"
+  if [[ -n "${PGHOST:-}" ]]; then
+    psql -X -q -v ON_ERROR_STOP=1 -h "$PGHOST" "$@"
+  else
+    sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 "$@"
+  fi
 }
 
 # Runs a psql command as the dedicated mission test role against a specific
