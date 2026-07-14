@@ -191,17 +191,46 @@ jobs:
       # See the equivalent step's history for the tools/rls-test/ portability
       # note (RLS_LOCK_FILE hardcodes a sandbox-specific path) — unchanged
       # by this hardening pass, flagged not silently worked around here.
+      #
+      # tools/rls-test/lib.sh's rls_admin_psql() only has a Unix-socket
+      # (peer-auth, `sudo -u postgres psql`) code path unless PGHOST is set —
+      # this GitHub Actions Postgres *service container* has no local
+      # `postgres` OS user and no socket at all, only TCP. Exporting the
+      # standard libpq PGHOST/PGPORT/PGUSER/PGPASSWORD vars here switches
+      # rls_admin_psql (and the raw `psql` call below) onto a direct TCP
+      # connection using the same admin credentials already configured on
+      # the `postgres` service above.
       - name: Provision disposable test database via tools/rls-test/
         env:
+          PGHOST: 127.0.0.1
+          PGPORT: ${{ job.services.postgres.ports['5432'] }}
+          PGUSER: postgres
           PGPASSWORD: postgres
         run: |
           set -euo pipefail
           sudo mkdir -p /home/ubuntu/firmsbase/rls-checkpoints
           sudo chown "$(id -u):$(id -g)" /home/ubuntu/firmsbase/rls-checkpoints
+
+          echo "Waiting for PostgreSQL to accept TCP connections on ${PGHOST}:${PGPORT}..."
+          for attempt in $(seq 1 30); do
+            if pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" >/dev/null 2>&1; then
+              echo "PostgreSQL is ready (attempt ${attempt})."
+              break
+            fi
+            if [[ "$attempt" -eq 30 ]]; then
+              echo "::error::PostgreSQL did not become ready on ${PGHOST}:${PGPORT} after 30 attempts"
+              exit 1
+            fi
+            sleep 2
+          done
+
           RUN_PASSWORD="$(openssl rand -hex 24)"
-          psql -h 127.0.0.1 -U postgres -c "CREATE ROLE rls_test_runner_39a3l LOGIN PASSWORD '${RUN_PASSWORD}';"
+          psql -c "CREATE ROLE rls_test_runner_39a3l LOGIN PASSWORD '${RUN_PASSWORD}';"
           mkdir -p .rls-test-secrets
-          echo "127.0.0.1:5432:*:rls_test_runner_39a3l:${RUN_PASSWORD}" > .rls-test-secrets/rls_test_runner_39a3l.pgpass
+          # tools/rls-test/lib.sh's rls_test_role_password() reads this file
+          # verbatim as the password (a plain `cat`, not pgpass-field
+          # parsing) — it must contain ONLY the password, nothing else.
+          printf '%s' "${RUN_PASSWORD}" > .rls-test-secrets/rls_test_runner_39a3l.pgpass
           chmod 600 .rls-test-secrets/rls_test_runner_39a3l.pgpass
           DB_NAME="$(tools/rls-test/create-disposable-db.sh ci)"
           echo "DB_NAME=${DB_NAME}" >> "$GITHUB_ENV"
@@ -211,6 +240,11 @@ jobs:
 
       - name: Destroy disposable test database
         if: always()
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: ${{ job.services.postgres.ports['5432'] }}
+          PGUSER: postgres
+          PGPASSWORD: postgres
         run: tools/rls-test/destroy-disposable-db.sh "${DB_NAME}" || true
 
   # ---------------------------------------------------------------------
