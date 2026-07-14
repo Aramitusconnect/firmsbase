@@ -464,24 +464,48 @@ jobs:
             GIT_SHA=${{ inputs.commit_sha }}
             BUILD_DATE=${{ steps.builddate.outputs.value }}
 
-      - name: Scan image for vulnerabilities (Trivy) — 0 Critical, 0 High required
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+      # aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2
+      # (v0.28.0) is a composite action whose OWN action.yaml does
+      # `uses: aquasecurity/setup-trivy@v0.2.1` internally — a tag that no
+      # longer resolves on GitHub ("Unable to resolve action
+      # aquasecurity/setup-trivy@v0.2.1, unable to find version v0.2.1"),
+      # which failed this job during "Set up job" before any Docker build,
+      # scan, AWS auth, or ECR push ever ran. Rather than depend on a
+      # third-party action's own internal, unpinnable-by-us dependency,
+      # install Trivy directly via setup-trivy (pinned to its own current,
+      # verified release) and invoke the `trivy` CLI ourselves with the
+      # exact same flags trivy-action would have passed through
+      # (TRIVY_SCANNERS/TRIVY_SEVERITY/TRIVY_EXIT_CODE/TRIVY_FORMAT/
+      # TRIVY_OUTPUT env vars in trivy-action's entrypoint.sh correspond
+      # exactly to --scanners/--severity/--exit-code/--format/--output
+      # below) — same behavior, same thresholds, no dependency on
+      # trivy-action's own composite-action internals at all.
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
-          image-ref: ${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}
-          scanners: vuln
-          severity: CRITICAL,HIGH
-          exit-code: "1"
-          format: json
-          output: trivy-vuln-results.json
+          version: v0.71.0
+          cache: true
+
+      - name: Scan image for vulnerabilities (Trivy) — 0 Critical, 0 High required
+        run: |
+          set -euo pipefail
+          trivy image \
+            --scanners vuln \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --format json \
+            --output trivy-vuln-results.json \
+            "${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}"
 
       - name: Scan image for secrets (Trivy) — 0 findings required
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
-        with:
-          image-ref: ${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}
-          scanners: secret
-          exit-code: "1"
-          format: json
-          output: trivy-secret-results.json
+        run: |
+          set -euo pipefail
+          trivy image \
+            --scanners secret \
+            --exit-code 1 \
+            --format json \
+            --output trivy-secret-results.json \
+            "${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}"
 
       - name: Upload scan results
         if: always()
