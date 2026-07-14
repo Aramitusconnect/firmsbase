@@ -130,5 +130,29 @@ gone="$(rls_admin_psql -Atc "SELECT 1 FROM pg_database WHERE datname = '${PASS_D
 pass "destroy-disposable-db.sh correctly dropped the correctly-sentineled database '${PASS_DB}'"
 PASS_DB=""
 
+echo "=== 6. rls_admin_psql attempts TCP (never a Unix socket) whenever PGHOST is set ==="
+# Regression coverage for the exact CI failure this was written after: a
+# workflow step that calls run-artisan-test.sh / rls_verify_sentinel
+# without PGHOST/PGPORT/PGUSER/PGPASSWORD silently falls through
+# rls_admin_psql's "else" branch (peer auth over the default Unix
+# socket) instead of the TCP branch — which fails in a GitHub Actions
+# Postgres service container with exactly the symptom seen in that run:
+# "connection to server on socket ... failed" / "role \"root\" does not
+# exist". Deliberately point PGHOST at a real host but a port nothing is
+# listening on: if rls_admin_psql is genuinely using TCP, the failure
+# must look like a TCP connection failure (mentions the host/port,
+# "Connection refused"), never a Unix socket path.
+BOGUS_TCP_PORT=1
+if TCP_PROBE_ERR="$(PGHOST=127.0.0.1 PGPORT=$BOGUS_TCP_PORT PGUSER="$TEST_ADMIN_ROLE" PGPASSWORD="$TEST_ADMIN_PASSWORD" PGDATABASE=postgres rls_admin_psql -Atc 'SELECT 1;' 2>&1)"; then
+  fail "expected a connection attempt to a bogus TCP port to fail, but rls_admin_psql reported success"
+fi
+if echo "$TCP_PROBE_ERR" | grep -q '\.s\.PGSQL\.'; then
+  fail "rls_admin_psql attempted a Unix socket connection instead of TCP when PGHOST was set — this is exactly the regression this test guards against: ${TCP_PROBE_ERR}"
+fi
+if ! echo "$TCP_PROBE_ERR" | grep -qE '"127\.0\.0\.1".*port ('"$BOGUS_TCP_PORT"')|[Cc]onnection refused'; then
+  fail "rls_admin_psql's connection failure did not look like a TCP attempt at all: ${TCP_PROBE_ERR}"
+fi
+pass "rls_admin_psql attempted TCP (never a Unix socket) when PGHOST was set — failure was: ${TCP_PROBE_ERR}"
+
 echo
 echo "ALL SENTINEL LIFECYCLE REGRESSION CHECKS PASSED"

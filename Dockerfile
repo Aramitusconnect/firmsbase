@@ -111,6 +111,17 @@ RUN install-php-extensions \
 # breaks `gd.so`'s own dynamic linkage (confirmed: `gd_info()` becomes an
 # undefined function immediately afterward, because the extension fails to
 # load with its shared libraries missing, not because it failed to compile).
+#
+# Deliberately unpinned: this pulls Trixie's CURRENT security-patched
+# package versions rather than freezing a possibly-already-vulnerable
+# version at Dockerfile-authoring time. Safe because (1) the base image
+# above is pinned by exact digest (FRANKENPHP_BASE_DIGEST), so the Debian
+# release itself is fixed and reproducible even though individual package
+# versions float within it, and (2) this entire `vendor` stage is
+# discarded — only the compiled `.so` files are copied out of it below —
+# so no apt/dpkg metadata or package version from this RUN ever reaches
+# the shipped image.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get -y --no-install-recommends install \
         libjpeg62-turbo-dev \
@@ -130,6 +141,12 @@ RUN apt-get update \
 
 # Build-time assertion: GD must support JPEG/PNG/WebP and must NOT support
 # AVIF. Fails the build (non-zero exit) if either is false.
+#
+# The `$...` tokens below are PHP variables inside a single-quoted `php -r`
+# script, not shell variables — the single quotes are load-bearing
+# (deliberately preventing the shell from expanding them before PHP ever
+# sees the script); converting to double quotes would break this.
+# hadolint ignore=SC2016
 RUN php -r ' \
     $info = gd_info(); \
     $required = ["JPEG Support", "PNG Support", "WebP Support"]; \
@@ -166,6 +183,11 @@ RUN composer dump-autoload --no-dev --optimize --classmap-authoritative --no-int
 
 # Build-time assertion: every required extension loaded, curl supports
 # both http:// and https://, running as the expected extension set.
+#
+# Same as the gd assertion above: `$...` tokens are PHP variables inside a
+# single-quoted `php -r` script, not shell variables — single-quoting is
+# intentional and load-bearing here.
+# hadolint ignore=SC2016
 RUN php -r ' \
     $required = ["pdo_pgsql","pgsql","redis","bcmath","gd","intl","zip","pcntl","posix","sockets","soap","sodium","exif","igbinary","curl"]; \
     $missing = []; \
@@ -198,12 +220,35 @@ RUN php -r ' \
 # ---------------------------------------------------------------------------
 FROM dunglas/frankenphp:${FRANKENPHP_BASE_TAG}@${FRANKENPHP_BASE_DIGEST} AS runtime_libs
 
+# This stage's Debian base always has /bin/bash (confirmed: it's also
+# explicitly installed as a shipped runtime package below, and the final
+# distroless stage's own /bin/bash is copied FROM here via `ldd`'s
+# transitive closure — bash already has to exist and work in this stage
+# for that to be possible). Several RUN instructions below pipe commands
+# together (e.g. `dpkg -l | grep`, `ldd ... | awk ... | grep ... | sort`);
+# without pipefail, a failure in an earlier stage of such a pipeline is
+# masked by the last command's exit code. Scoped to this stage only — the
+# distroless final stage below has no shell at all and gets no SHELL
+# directive.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # Trixie package names (differ from Bookworm's libzip4/libicu72/libavif15 —
 # see docs/security/ecs-image-vulnerability-exceptions.md): libzip5,
 # libicu76, and libavif/libaom are deliberately NOT installed at all (GD was
 # built without AVIF support above, so nothing in this image needs them).
 # libssh2-1t64 is Trixie's fixed package (1.11.1-1+deb13u1 as of this pass —
 # verified below to actually be that version, not merely assumed).
+#
+# Deliberately unpinned, for the same reason as the `vendor` stage above:
+# this installs Trixie's CURRENT security-patched package versions rather
+# than a version frozen at authoring time (the libssh2 fix this whole
+# remediation pass exists for is itself a "current version" fix, not a
+# pinned one). Safe because (1) the base image is pinned by exact digest
+# (FRANKENPHP_BASE_DIGEST), and (2) this `runtime_libs` stage is never
+# shipped either — only the specific files assembled into /rootfs below
+# are copied into the distroless final stage; no apt/dpkg database or
+# package-version metadata from this RUN reaches the shipped image.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get -y --no-install-recommends install \
         libpq5 \
@@ -292,6 +337,14 @@ RUN set -eu; \
 #     failed with "libtinfo.so.6: cannot open shared object file" despite
 #     `libtinfo.so.6.5` being present. Fixed by walking and copying every
 #     hop of the symlink chain, not just its final target.
+#
+# $binaries and $extensions below are deliberately expanded unquoted
+# (word-split into separate arguments/loop items on purpose — each is a
+# space/newline-separated list of paths, not a single value) when passed
+# to collect_closure() and in the `for b in $binaries` loop. Quoting
+# either would collapse it into one argument and break the closure/copy
+# logic this stage depends on.
+# hadolint ignore=SC2086
 RUN set -eu; \
     mkdir -p /rootfs; \
     rewrite_top_level() { \
@@ -340,7 +393,9 @@ RUN set -eu; \
     # PHP's own default runtime files (php.ini-production baseline, if the
     # base image ships one under /usr/local/etc/php) and FrankenPHP's Caddy
     # binary support files.
-    [ -d /usr/local/php ] && cp -a /usr/local/php /rootfs/usr/local/php || true; \
+    if [ -d /usr/local/php ]; then \
+        cp -a /usr/local/php /rootfs/usr/local/php; \
+    fi; \
     # CA certs (outbound HTTPS/TLS verification) and timezone data.
     mkdir -p /rootfs/etc/ssl /rootfs/usr/share/zoneinfo; \
     cp -a /etc/ssl/certs /rootfs/etc/ssl/; \
@@ -405,8 +460,19 @@ RUN set -eu; \
 # Stage: runtime — the image every ECS task actually runs. Distroless: no
 # shell, no package manager, no dpkg, no Perl — only the exact files
 # assembled in `runtime_libs` above, plus the application itself.
+#
+# Pinned to the exact linux/amd64 digest (not merely a tag) — resolved and
+# verified during this remediation pass via:
+#   docker buildx imagetools inspect gcr.io/distroless/base-debian13:latest
+# which lists each platform's child-manifest digest under the `latest` tag's
+# multi-arch index; cross-checked by pulling that exact digest with
+# `--platform linux/amd64` and confirming
+# `docker inspect ... --format '{{.Architecture}}/{{.Os}}'` reports
+# `amd64/linux`. Re-resolve and re-verify on each future remediation pass
+# rather than floating silently (same policy as FRANKENPHP_BASE_DIGEST
+# above).
 # ---------------------------------------------------------------------------
-FROM gcr.io/distroless/base-debian13 AS runtime
+FROM gcr.io/distroless/base-debian13@sha256:5c53b546dd6721a33dc6288641a25e0b2c6274b237bcf27cf47393013604b549 AS runtime
 
 ARG GIT_SHA=unknown
 ARG BUILD_DATE=unknown
