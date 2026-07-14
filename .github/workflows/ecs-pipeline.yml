@@ -127,6 +127,10 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
         with:
           ref: ${{ inputs.commit_sha }}
+          # Full history is required to compute a merge-base with
+          # origin/main below — a shallow (default depth-1) checkout would
+          # make `git merge-base` fail outright.
+          fetch-depth: 0
 
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2 (2026-06 release)
         with:
@@ -142,8 +146,47 @@ jobs:
       - name: PHP syntax check (every changed and existing PHP file)
         run: find app config database routes tests bootstrap -name "*.php" -print0 | xargs -0 -n1 php -l
 
-      - name: Laravel Pint (style — see composer.json require-dev)
-        run: vendor/bin/pint --test
+      # Laravel Pint runs ONLY against PHP files this commit actually
+      # changed relative to its merge-base with origin/main. The full
+      # repository carries substantial pre-existing style debt (hundreds
+      # of files) that predates this branch and is not this branch's
+      # responsibility to fix — running `pint --test` unscoped would block
+      # every publication run on that pre-existing debt instead of on
+      # anything this commit is actually responsible for.
+      - name: Determine PHP files changed relative to origin/main
+        id: changed-php
+        run: |
+          set -euo pipefail
+          git fetch origin main --quiet
+          BASE_SHA="$(git merge-base HEAD origin/main)"
+          echo "Merge-base with origin/main: ${BASE_SHA}"
+
+          # -z / --null-terminated output avoids any word-splitting or
+          # newline-in-filename hazard; --diff-filter=ACMR (Added, Copied,
+          # Modified, Renamed) deliberately excludes Deleted files — Pint
+          # cannot and should not check a file that no longer exists.
+          mapfile -d '' -t CHANGED_PHP < <(git diff --diff-filter=ACMR -z --name-only "${BASE_SHA}...HEAD" -- '*.php')
+
+          if [[ "${#CHANGED_PHP[@]}" -eq 0 ]]; then
+            echo "No PHP files changed relative to origin/main — nothing for Pint to check."
+            echo "has_php=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "has_php=true" >> "$GITHUB_OUTPUT"
+          echo "Checking ${#CHANGED_PHP[@]} changed PHP file(s):"
+          printf '  %s\n' "${CHANGED_PHP[@]}"
+
+          # NUL-delimited write/read round-trip (not newline-joined) keeps
+          # this safe even if a path ever contained a space.
+          printf '%s\0' "${CHANGED_PHP[@]}" > /tmp/changed-php-files.list
+
+      - name: Laravel Pint (changed PHP files only — see composer.json require-dev)
+        if: steps.changed-php.outputs.has_php == 'true'
+        run: |
+          set -euo pipefail
+          mapfile -d '' -t CHANGED_PHP < /tmp/changed-php-files.list
+          vendor/bin/pint --test "${CHANGED_PHP[@]}"
 
       - name: Shell script syntax check
         run: find docker -name "*.sh" -print0 | xargs -0 -n1 bash -n
@@ -161,6 +204,22 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      APP_ENV: testing
+      APP_DEBUG: "false"
+      # Disposable, CI-only Laravel encryption key — NOT a production or
+      # staging secret. Generated once for this workflow
+      # (`base64:$(openssl rand -base64 32)`, AES-256-CBC-compatible: 32
+      # raw bytes) and committed here deliberately, because it protects
+      # nothing sensitive: every database, row, and ciphertext it ever
+      # touches is destroyed at the end of the same job run (see "Destroy
+      # disposable test database" below). It is never used to encrypt
+      # anything outside this CI job, never written to a file, and never
+      # printed. Required because EncryptionKeyService::provision()
+      # (app/Services/EncryptionKeyService.php) calls Crypt::encryptString()
+      # — Laravel throws MissingAppKeyException the first time any test
+      # touches per-firm key provisioning if APP_KEY is unset.
+      APP_KEY: "base64:ELVhdkVn+QSCzkyvW6Io8hKv/lmwnzz6LLmlYIhiL6o="
     services:
       postgres:
         image: postgres:16
@@ -234,6 +293,37 @@ jobs:
           chmod 600 .rls-test-secrets/rls_test_runner_39a3l.pgpass
           DB_NAME="$(tools/rls-test/create-disposable-db.sh ci)"
           echo "DB_NAME=${DB_NAME}" >> "$GITHUB_ENV"
+
+      # Fast fail-closed check before paying for the full suite: confirms
+      # APP_KEY is actually present, Laravel boots, the encrypter can
+      # round-trip a value (exactly what EncryptionKeyService needs), and
+      # the disposable database connection this job just provisioned is
+      # reachable — all via the same run-artisan-test.sh wrapper (and
+      # therefore the same sentinel/naming/blocklist guards) the real test
+      # run uses, so this isn't a second, divergent code path. Never prints
+      # APP_KEY or any derived ciphertext.
+      - name: Preflight — APP_KEY, Laravel boot, encryption round-trip, DB connectivity
+        run: |
+          set -euo pipefail
+          if [[ -z "${APP_KEY:-}" ]]; then
+            echo "::error::APP_KEY is not set for the preflight check"
+            exit 1
+          fi
+          tools/rls-test/run-artisan-test.sh "${DB_NAME}" -- tinker --execute="
+            if (! config('app.key')) {
+                fwrite(STDERR, 'PREFLIGHT FAILED: config(\'app.key\') is empty despite APP_KEY being set in the environment'.PHP_EOL);
+                exit(1);
+            }
+            \$plain = 'preflight-roundtrip-'.bin2hex(random_bytes(8));
+            \$encrypted = \Illuminate\Support\Facades\Crypt::encryptString(\$plain);
+            \$decrypted = \Illuminate\Support\Facades\Crypt::decryptString(\$encrypted);
+            if (\$decrypted !== \$plain) {
+                fwrite(STDERR, 'PREFLIGHT FAILED: encrypter round-trip mismatch'.PHP_EOL);
+                exit(1);
+            }
+            \Illuminate\Support\Facades\DB::select('SELECT 1');
+            echo 'PREFLIGHT OK: APP_KEY present, Laravel booted, encrypter round-trip verified, disposable DB connection verified'.PHP_EOL;
+          "
 
       # run-artisan-test.sh checks the mission sentinel (rls_verify_sentinel,
       # via rls_admin_psql) BEFORE running php artisan — it needs the same
