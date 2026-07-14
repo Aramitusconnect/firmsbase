@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # ECS "scheduler" role. Runs as a single long-lived ECS SERVICE (desiredCount
 # fixed at 1, no autoscaling — see docs/ecs/infrastructure-architecture.md)
 # rather than a task triggered every minute, so Laravel's own in-process

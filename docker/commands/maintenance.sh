@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # ECS "maintenance" role — a dedicated ONE-OFF ECS task (RunTask) for ad hoc
 # operational Artisan commands (e.g. `queue:prune-failed`, `cache:clear`,
 # `tinker` for a supervised one-off script, a future backup/restore drill

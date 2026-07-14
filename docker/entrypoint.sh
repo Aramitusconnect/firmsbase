@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Image ENTRYPOINT — runs as PID 1 in every container regardless of role.
 # See docs/ecs/container-architecture.md "Entrypoint behavior" for the full
 # rationale behind each step below.

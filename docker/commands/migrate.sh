@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # ECS "migrate" role — a dedicated ONE-OFF ECS task (RunTask, never a
 # service), never invoked as a side effect of web/worker/scheduler startup.
 # See docs/ecs/database-migrations.md for the full migration runbook,

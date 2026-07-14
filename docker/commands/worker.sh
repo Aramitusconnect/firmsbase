@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # ECS "worker" role — general or critical queue worker, selected entirely by
 # which queue name(s) the ECS task's WORKER_QUEUES env var lists (same
 # image, same command, different task definition — see
