@@ -1,0 +1,538 @@
+name: ECS image publication (manual, OIDC)
+
+# Hardened image-publication pipeline. See docs/ecs/container-architecture.md
+# and docs/security/ecs-image-vulnerability-exceptions.md for the full
+# narrative. This workflow's ENTIRE scope, deliberately:
+#
+#   1. Validate the exact requested commit (full 40-char SHA required).
+#   2. Lint and test that exact commit.
+#   3. Build ONE linux/amd64 image from it (no provenance/SBOM attestation
+#      manifests — a single-platform image, not an OCI index).
+#   4. Scan it (vulnerabilities + secrets) before it is ever pushed.
+#   5. Smoke-test all six container roles against disposable local
+#      Postgres/Redis service containers.
+#   6. Confirm the immutable tag does not already exist, then publish.
+#   7. Verify the pushed digest and ECR scan status.
+#   8. Stop.
+#
+# This workflow does NOT, anywhere, in any job:
+#   - register an ECS task definition
+#   - update an ECS service
+#   - run a database migration against a real environment
+#   - modify the ALB
+#   - retrieve any application secret value
+#
+# Deployment is a SEPARATE, not-yet-implemented, approval-gated phase — the
+# `deploy-staging` job below exists only as a structural placeholder for
+# that future work and is gated on a repository variable
+# (`vars.ENABLE_STAGING_DEPLOY == 'true'`) that does not exist yet, so it is
+# unreachable until it is actually built out. It intentionally uses a
+# DIFFERENT IAM role
+# (`AWS_DEPLOY_ROLE_ARN`) than image publication (`AWS_ECR_PUBLISH_ROLE_ARN`)
+# so the publishing identity can never itself deploy.
+#
+# Required repository configuration (none of this is created by this
+# change — see docs/security/ecs-image-vulnerability-exceptions.md):
+#   - AWS_ECR_PUBLISH_ROLE_ARN (repo variable) — OIDC-federated IAM role,
+#     scoped ONLY to ECR push/describe on the `firmsbase-staging`
+#     repository. Trust policy subject must be exactly:
+#       repo:Aramitusconnect/firmsbase:ref:refs/heads/feature/ecs-staging-validation
+#   - AWS_REGION (repo variable) — must equal `us-east-1`; this workflow
+#     fails the run otherwise rather than silently using a different region.
+#   - ECR_REPOSITORY_URL (repo variable) — full URI, e.g.
+#     603013471426.dkr.ecr.us-east-1.amazonaws.com/firmsbase-staging
+#   - AWS_DEPLOY_ROLE_ARN — NOT required for this workflow to run (only
+#     referenced by the disabled deploy-staging stub). Its OIDC trust
+#     subject, when that job is eventually built out, must be exactly:
+#       repo:Aramitusconnect/firmsbase:environment:staging
+#   - ECS_CLUSTER_NAME / STAGING_URL are NOT required by this workflow at
+#     all — those only matter once deploy-staging is implemented for real.
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character commit SHA to build and publish (not a branch, tag, or short SHA)."
+        required: true
+        type: string
+
+env:
+  PHP_VERSION: "8.3"
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Gate 0: the requested commit must be an exact, real, full-length SHA.
+  # Every later job re-checks out this exact commit independently (each
+  # runs on its own fresh runner) rather than trusting this job's checkout
+  # to persist.
+  # ---------------------------------------------------------------------
+  validate-commit:
+    name: Validate requested commit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      short_sha: ${{ steps.shortsha.outputs.short_sha }}
+    steps:
+      - name: Reject anything that is not a full 40-character hex commit SHA
+        run: |
+          set -euo pipefail
+          SHA="${{ inputs.commit_sha }}"
+          if ! [[ "$SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::commit_sha must be exactly 40 hex characters (a full commit SHA, not a branch, tag, or abbreviated SHA). Got: '$SHA'"
+            exit 1
+          fi
+          echo "Format OK: $SHA"
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
+        with:
+          fetch-depth: 0
+
+      - name: Confirm the commit actually exists in this repository
+        run: |
+          set -euo pipefail
+          SHA="${{ inputs.commit_sha }}"
+          if ! git cat-file -e "${SHA}^{commit}" 2>/dev/null; then
+            echo "::error::commit $SHA does not exist in this repository"
+            exit 1
+          fi
+          echo "Confirmed: $SHA exists as a commit object."
+
+      - name: Checkout the exact requested commit and verify HEAD matches
+        run: |
+          set -euo pipefail
+          SHA="${{ inputs.commit_sha }}"
+          git checkout --quiet "$SHA"
+          ACTUAL="$(git rev-parse HEAD)"
+          if [ "$ACTUAL" != "$SHA" ]; then
+            echo "::error::HEAD ($ACTUAL) does not exactly equal the requested commit_sha ($SHA) after checkout"
+            exit 1
+          fi
+          echo "Confirmed: HEAD exactly equals requested commit $SHA"
+
+      - name: Compute the 7-character short SHA used as the ECR tag
+        id: shortsha
+        run: |
+          SHA="${{ inputs.commit_sha }}"
+          echo "short_sha=${SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------
+  lint:
+    name: Lint requested commit
+    needs: validate-commit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2 (2026-06 release)
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          tools: composer:v2
+
+      - name: Composer validate
+        run: composer validate --strict
+
+      - name: Install dependencies (with dev, for lint tooling)
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: PHP syntax check (every changed and existing PHP file)
+        run: find app config database routes tests bootstrap -name "*.php" -print0 | xargs -0 -n1 php -l
+
+      - name: Laravel Pint (style — see composer.json require-dev)
+        run: vendor/bin/pint --test
+
+      - name: Shell script syntax check
+        run: find docker -name "*.sh" -print0 | xargs -0 -n1 bash -n
+
+      - name: Dockerfile lint (hadolint)
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+
+  # ---------------------------------------------------------------------
+  test:
+    name: Run tests (disposable CI database)
+    needs: validate-commit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2 (2026-06 release)
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: pdo_pgsql, pgsql, redis, bcmath, gd, intl, zip, opcache, pcntl, posix, sockets, soap, sodium, exif, igbinary
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      # See the equivalent step's history for the tools/rls-test/ portability
+      # note (RLS_LOCK_FILE hardcodes a sandbox-specific path) — unchanged
+      # by this hardening pass, flagged not silently worked around here.
+      - name: Provision disposable test database via tools/rls-test/
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /home/ubuntu/firmsbase/rls-checkpoints
+          sudo chown "$(id -u):$(id -g)" /home/ubuntu/firmsbase/rls-checkpoints
+          RUN_PASSWORD="$(openssl rand -hex 24)"
+          psql -h 127.0.0.1 -U postgres -c "CREATE ROLE rls_test_runner_39a3l LOGIN PASSWORD '${RUN_PASSWORD}';"
+          mkdir -p .rls-test-secrets
+          echo "127.0.0.1:5432:*:rls_test_runner_39a3l:${RUN_PASSWORD}" > .rls-test-secrets/rls_test_runner_39a3l.pgpass
+          chmod 600 .rls-test-secrets/rls_test_runner_39a3l.pgpass
+          DB_NAME="$(tools/rls-test/create-disposable-db.sh ci)"
+          echo "DB_NAME=${DB_NAME}" >> "$GITHUB_ENV"
+
+      - name: Run test suite
+        run: tools/rls-test/run-artisan-test.sh "${DB_NAME}" -- test
+
+      - name: Destroy disposable test database
+        if: always()
+        run: tools/rls-test/destroy-disposable-db.sh "${DB_NAME}" || true
+
+  # ---------------------------------------------------------------------
+  # Gate 1-7: build exactly the requested commit, scan it, smoke-test all
+  # six roles, confirm the tag is free, publish, verify. Uses ONLY the
+  # ECR-publish identity — never AWS_DEPLOY_ROLE_ARN.
+  # ---------------------------------------------------------------------
+  build-scan-and-publish:
+    name: Build, scan, smoke-test, and publish image
+    needs: [validate-commit, lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC — no static AWS credentials anywhere in this job
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: firmsbase
+          POSTGRES_PASSWORD: smokepass
+          POSTGRES_DB: firmsbase_smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Re-confirm HEAD equals the requested commit in this job too
+        run: |
+          set -euo pipefail
+          ACTUAL="$(git rev-parse HEAD)"
+          if [ "$ACTUAL" != "${{ inputs.commit_sha }}" ]; then
+            echo "::error::HEAD ($ACTUAL) does not equal requested commit_sha (${{ inputs.commit_sha }}) in build-scan-and-publish"
+            exit 1
+          fi
+
+      - name: Require AWS_REGION to be exactly us-east-1
+        run: |
+          set -euo pipefail
+          if [ "${{ vars.AWS_REGION }}" != "us-east-1" ]; then
+            echo "::error::AWS_REGION repository variable must be exactly 'us-east-1', got '${{ vars.AWS_REGION }}'"
+            exit 1
+          fi
+
+      - name: Require ECR_REPOSITORY_URL to point at firmsbase-staging
+        run: |
+          set -euo pipefail
+          if [[ "${{ vars.ECR_REPOSITORY_URL }}" != *"/firmsbase-staging" ]]; then
+            echo "::error::ECR_REPOSITORY_URL must end in /firmsbase-staging, got '${{ vars.ECR_REPOSITORY_URL }}'"
+            exit 1
+          fi
+
+      - name: Compute BUILD_DATE (UTC RFC3339)
+        id: builddate
+        run: echo "value=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (ECR publish role only — never AWS_DEPLOY_ROLE_ARN)
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_ECR_PUBLISH_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.0.1
+
+      - name: Confirm the immutable tag does not already exist — refuse to overwrite
+        run: |
+          set -euo pipefail
+          REPO_NAME="$(basename "${{ vars.ECR_REPOSITORY_URL }}")"
+          TAG="${{ needs.validate-commit.outputs.short_sha }}"
+          if aws ecr describe-images --repository-name "$REPO_NAME" --image-ids imageTag="$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists in ECR repository $REPO_NAME. Immutable tags are never overwritten — refusing to publish."
+            exit 1
+          fi
+          echo "Confirmed: tag $TAG does not yet exist in $REPO_NAME. Safe to publish."
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.11.1
+
+      - name: Build image (linux/amd64 only, no provenance/SBOM attestation — not pushed yet)
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v6.18.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          provenance: false
+          sbom: false
+          tags: ${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}
+          build-args: |
+            GIT_SHA=${{ inputs.commit_sha }}
+            BUILD_DATE=${{ steps.builddate.outputs.value }}
+
+      - name: Scan image for vulnerabilities (Trivy) — 0 Critical, 0 High required
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          image-ref: ${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          format: json
+          output: trivy-vuln-results.json
+
+      - name: Scan image for secrets (Trivy) — 0 findings required
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          image-ref: ${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}
+          scanners: secret
+          exit-code: "1"
+          format: json
+          output: trivy-secret-results.json
+
+      - name: Upload scan results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vulnerability-and-secret-scan
+          path: |
+            trivy-vuln-results.json
+            trivy-secret-results.json
+
+      # ---------------------------------------------------------------
+      # Smoke test all six roles + every hardening property, against the
+      # locally-built image (not yet pushed), before it is ever published.
+      # Mirrors exactly what was verified interactively during the
+      # container-hardening pass — see docs/security/
+      # ecs-image-vulnerability-exceptions.md for the manual equivalent.
+      # ---------------------------------------------------------------
+      - name: Smoke-test all six roles and hardening properties
+        run: |
+          set -euo pipefail
+          IMG="${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}"
+          APP_KEY="base64:$(openssl rand -base64 32)"
+          COMMON_ENV=(-e APP_KEY="$APP_KEY" -e APP_ENV=production -e DB_CONNECTION=pgsql \
+            -e DB_HOST=127.0.0.1 -e DB_PORT=5432 -e DB_DATABASE=firmsbase_smoke \
+            -e DB_USERNAME=firmsbase -e DB_PASSWORD=smokepass -e REDIS_HOST=127.0.0.1)
+
+          echo "=== migrate ==="
+          docker run --rm --network host "${COMMON_ENV[@]}" "$IMG" migrate
+
+          echo "=== web ==="
+          docker run -d --name smoke-web --network host "${COMMON_ENV[@]}" "$IMG" web
+          sleep 5
+          UP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/up)
+          READY_CODE=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/readyz)
+          [ "$UP_CODE" = "200" ] || { echo "::error::/up returned $UP_CODE, expected 200"; exit 1; }
+          [ "$READY_CODE" = "200" ] || { echo "::error::/readyz returned $READY_CODE, expected 200"; exit 1; }
+          echo "/up=$UP_CODE /readyz=$READY_CODE"
+
+          UID_GID=$(docker exec smoke-web /usr/local/bin/php -r "echo posix_getuid(),' ',posix_getgid();")
+          [ "$UID_GID" = "1000 1000" ] || { echo "::error::expected uid/gid 1000 1000, got $UID_GID"; exit 1; }
+          echo "uid/gid confirmed: $UID_GID"
+
+          echo "=== default worker ==="
+          docker run -d --name smoke-worker --network host "${COMMON_ENV[@]}" "$IMG" worker
+
+          echo "=== trust worker (must scope to --queue=trust only) ==="
+          docker run -d --name smoke-trust --network host "${COMMON_ENV[@]}" -e WORKER_QUEUES=trust "$IMG" worker
+          sleep 3
+          docker top smoke-trust | grep -q -- '--queue=trust' || { echo "::error::trust worker did not scope to --queue=trust"; exit 1; }
+
+          echo "=== scheduler ==="
+          docker run -d --name smoke-sched --network host "${COMMON_ENV[@]}" "$IMG" scheduler
+          sleep 3
+          docker ps --filter name=smoke-sched --format '{{.Status}}' | grep -q "Up" || { echo "::error::scheduler did not stay running"; exit 1; }
+
+          echo "=== maintenance ==="
+          docker run --rm --network host "${COMMON_ENV[@]}" "$IMG" maintenance list
+
+          echo "=== SIGTERM: web/worker/trust/scheduler must exit 0 ==="
+          for c in smoke-web smoke-worker smoke-trust smoke-sched; do
+            docker stop -t 15 "$c"
+            CODE=$(docker inspect "$c" --format '{{.State.ExitCode}}')
+            [ "$CODE" = "0" ] || { echo "::error::$c exited $CODE on SIGTERM, expected 0"; exit 1; }
+          done
+          echo "All four long-running roles exited 0 on SIGTERM."
+
+          echo "=== filesystem checks: no Terraform artifacts, no libaom/libavif, no perl/apt/dpkg, libssh2 present ==="
+          CID=$(docker create "$IMG")
+          EXPORT_LIST=$(docker export "$CID" | tar -tv)
+          docker rm "$CID" >/dev/null
+
+          echo "$EXPORT_LIST" | grep -qiE "terraform-provider-|\.tfstate$|\.tfplan$|\.terraform/|infrastructure/" \
+            && { echo "::error::Terraform/infrastructure artifacts found in image"; exit 1; } || echo "OK: no Terraform artifacts"
+
+          echo "$EXPORT_LIST" | grep -qiE "libaom|libavif" \
+            && { echo "::error::libaom/libavif found in image"; exit 1; } || echo "OK: no libaom/libavif"
+
+          echo "$EXPORT_LIST" | grep -iE "perl" | grep -v "vendor/scrivo/highlight.php" \
+            && { echo "::error::an unexpected perl-related file was found in the image"; exit 1; } || echo "OK: no perl interpreter (only the harmless syntax-highlight data file, if present)"
+
+          echo "$EXPORT_LIST" | grep -qiE "/usr/bin/apt|/usr/bin/dpkg|/var/lib/dpkg" \
+            && { echo "::error::apt or dpkg found in image"; exit 1; } || echo "OK: no apt/dpkg"
+
+          echo "$EXPORT_LIST" | grep -qi "libssh2" \
+            || { echo "::error::libssh2 not found in image"; exit 1; }
+          echo "OK: libssh2 present"
+
+          echo "=== GD: JPEG/PNG/WebP yes, AVIF function absent ==="
+          docker run --rm --network host "${COMMON_ENV[@]}" "$IMG" maintenance tinker --execute="
+            \$i = gd_info();
+            if (!\$i['JPEG Support'] || !\$i['PNG Support'] || !\$i['WebP Support']) { fwrite(STDERR, 'GD missing required format support'.PHP_EOL); exit(1); }
+            if (function_exists('imagecreatefromavif')) { fwrite(STDERR, 'AVIF support must not be compiled in'.PHP_EOL); exit(1); }
+            echo 'GD OK: jpeg/png/webp present, avif absent'.PHP_EOL;
+          "
+
+          echo "All smoke tests passed."
+
+      - name: Clean up smoke-test containers
+        if: always()
+        run: docker rm -f smoke-web smoke-worker smoke-trust smoke-sched 2>/dev/null || true
+
+      - name: Push to ECR (only after every gate above has passed)
+        id: push
+        run: |
+          set -euo pipefail
+          IMAGE="${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}"
+          docker push "$IMAGE"
+          DIGEST="$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE" | cut -d'@' -f2)"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "image_ref=${{ vars.ECR_REPOSITORY_URL }}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the pushed digest via the ECR API (not just Docker's local output)
+        run: |
+          set -euo pipefail
+          REPO_NAME="$(basename "${{ vars.ECR_REPOSITORY_URL }}")"
+          TAG="${{ needs.validate-commit.outputs.short_sha }}"
+          REMOTE_DIGEST="$(aws ecr describe-images --repository-name "$REPO_NAME" --image-ids imageTag="$TAG" --query 'imageDetails[0].imageDigest' --output text)"
+          LOCAL_DIGEST="${{ steps.push.outputs.digest }}"
+          if [ "$REMOTE_DIGEST" != "$LOCAL_DIGEST" ]; then
+            echo "::error::ECR-reported digest ($REMOTE_DIGEST) does not match the digest Docker reported locally ($LOCAL_DIGEST)"
+            exit 1
+          fi
+          echo "Confirmed via ECR API: digest $REMOTE_DIGEST matches for tag $TAG"
+
+      - name: Report ECR scan-on-push status (best-effort — does not gate this job)
+        run: |
+          set +e
+          REPO_NAME="$(basename "${{ vars.ECR_REPOSITORY_URL }}")"
+          TAG="${{ needs.validate-commit.outputs.short_sha }}"
+          for i in $(seq 1 12); do
+            STATUS=$(aws ecr describe-image-scan-findings --repository-name "$REPO_NAME" --image-id imageTag="$TAG" --query 'imageScanStatus.status' --output text 2>/dev/null)
+            [ "$STATUS" = "COMPLETE" ] && break
+            sleep 15
+          done
+          echo "Final ECR scan status: ${STATUS:-UNKNOWN}"
+          aws ecr describe-image-scan-findings --repository-name "$REPO_NAME" --image-id imageTag="$TAG" --query 'imageScanFindings.findingSeverityCounts' --output json 2>/dev/null || echo "Scan findings not yet available."
+
+    outputs:
+      image_digest: ${{ steps.push.outputs.digest }}
+      image_ref: ${{ steps.push.outputs.image_ref }}
+
+  # ---------------------------------------------------------------------
+  release-evidence:
+    name: Produce release evidence
+    needs: [validate-commit, build-scan-and-publish]
+    if: always() && needs.build-scan-and-publish.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Assemble evidence
+        run: |
+          cat <<EOF > release-evidence.json
+          {
+            "git_commit": "${{ inputs.commit_sha }}",
+            "short_sha": "${{ needs.validate-commit.outputs.short_sha }}",
+            "image_digest": "${{ needs.build-scan-and-publish.outputs.image_digest }}",
+            "image_ref": "${{ needs.build-scan-and-publish.outputs.image_ref }}",
+            "build_id": "${{ github.run_id }}",
+            "build_and_publish_job_result": "${{ needs.build-scan-and-publish.result }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          cat release-evidence.json
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-evidence
+          path: release-evidence.json
+
+  # ---------------------------------------------------------------------
+  # INTENTIONALLY UNREACHABLE. Deployment is a separate, not-yet-built,
+  # approval-gated phase. This stub exists only to document the intended
+  # future shape (separate IAM identity, separate GitHub Environment).
+  # Gated on a repository variable that does not exist yet
+  # (ENABLE_STAGING_DEPLOY is deliberately absent from the required-variable
+  # list in this workflow's header comment) — an unset vars.* reference
+  # evaluates to an empty string, so this condition is always false today,
+  # with no bare constant for actionlint to flag. The job stays unreachable
+  # until a real deployment approval phase deliberately sets that variable
+  # to "true" as part of implementing this job for real.
+  # ---------------------------------------------------------------------
+  deploy-staging:
+    name: "[DISABLED] Deploy to staging — not yet implemented"
+    needs: build-scan-and-publish
+    if: vars.ENABLE_STAGING_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Configure AWS credentials (deploy role — never the ECR publish role)
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Not implemented
+        run: |
+          echo "Deployment is intentionally not implemented in this workflow."
+          echo "See docs/ecs/database-migrations.md and docs/ecs/staging-readiness-report.md"
+          echo "for what a real deploy-staging job requires before this stub can be built out."
+          exit 1
