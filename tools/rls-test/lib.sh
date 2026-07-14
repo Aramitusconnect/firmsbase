@@ -81,8 +81,18 @@ rls_require_template_pattern() {
 
 # Runs a psql command as the postgres administrative role. Coordinator-only —
 # never invoke this function's caller scripts from a subagent task prompt.
+#
+# When PGHOST is set (e.g. GitHub Actions service container with TCP-only
+# access), connects via TCP using the standard libpq env vars
+# PGHOST/PGPORT/PGUSER/PGPASSWORD. Falls back to peer-auth `sudo -u postgres`
+# for local dev where a Unix socket is available.
 rls_admin_psql() {
-  sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 "$@"
+  if [[ -n "${PGHOST:-}" ]]; then
+    PGPASSWORD="${PGPASSWORD:-}" psql -X -q -v ON_ERROR_STOP=1 \
+      -h "$PGHOST" -p "${PGPORT:-5432}" -U "${PGUSER:-postgres}" "$@"
+  else
+    sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 "$@"
+  fi
 }
 
 # Runs a psql command as the dedicated mission test role against a specific
@@ -115,7 +125,7 @@ rls_verify_sentinel() {
 
   local comment
   comment="$(rls_admin_psql -Atc \
-    "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = '${db_name}';" 2>/dev/null || true)"
+    "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = '${db_name}';")"
 
   if [[ -z "$comment" ]]; then
     rls_fail "database '${db_name}' has no mission sentinel comment — refusing to treat it as a mission-owned disposable/template database"
