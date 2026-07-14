@@ -6,18 +6,28 @@
 # never by building a different image. See docs/ecs/container-architecture.md
 # for the full rationale behind every decision in this file.
 #
-# NOTE: this Dockerfile has not been built with a real `docker build` in the
-# environment this branch was authored in (no Docker daemon available in that
-# sandbox — see docs/ecs/staging-readiness-report.md). It has been reviewed
-# line-by-line against documented FrankenPHP/Composer/Laravel conventions and
-# validated with `docker build --check`-equivalent static reasoning, but a
-# real build on a Docker-capable host is a required step before this image is
-# used for anything beyond review. Package names in `install-php-extensions`
-# and the exact FrankenPHP base tag should be reconfirmed against the
-# registry at that time.
+# Container-vulnerability remediation pass (see docs/ecs/staging-readiness-report.md
+# "Container vulnerability remediation"): this image has now been built with a
+# real `docker build` and scanned. Root cause established for the bulk of the
+# scan volume: the upstream `dunglas/frankenphp` base image ships a full
+# build toolchain (gcc/g++/make/binutils/libc6-dev/linux-libc-dev), the full
+# `perl` interpreter, and the `curl` CLI baked into its own layers — none of
+# this is something our own build steps introduced, and none of it is needed
+# by the running application. The runtime stage below now explicitly purges
+# this toolchain (confirmed via `ldd` afterward that no PHP extension or the
+# frankenphp binary itself loses a required shared library) instead of
+# re-installing PHP extensions a second time redundantly (extensions are
+# compiled once, in the `vendor` stage, and copied into `runtime`).
 
 ARG PHP_VERSION=8.3
 ARG FRANKENPHP_BASE_TAG=1-php8.3-bookworm
+# Pinned to the digest verified during the container-vulnerability
+# remediation pass (docs/ecs/staging-readiness-report.md) — confirmed via
+# `docker pull` + `docker inspect` against the live Docker Hub registry to be
+# the current image published for this exact tag (PHP 8.3 line, Bookworm,
+# amd64) at that time. Re-verify and re-pin deliberately on each future
+# remediation pass rather than floating silently.
+ARG FRANKENPHP_BASE_DIGEST=sha256:4b48ba0f64da96bb079268e148f563e52ac9e35ac548bf294fafba98e2e0438b
 # Vite 8 / laravel-vite-plugin 3.1 / @tailwindcss/oxide require Node >=20.19
 # (see package.json "engines" and docs/ecs/ec2-dependency-audit.md) — this is
 # a HARD requirement, not just a pin-for-consistency choice; the reference
@@ -54,7 +64,7 @@ RUN npm run build
 # invocations so Docker layer caching skips the (slow) dependency download
 # whenever only application source changed, not composer.json/composer.lock.
 # ---------------------------------------------------------------------------
-FROM dunglas/frankenphp:${FRANKENPHP_BASE_TAG} AS vendor
+FROM dunglas/frankenphp:${FRANKENPHP_BASE_TAG}@${FRANKENPHP_BASE_DIGEST} AS vendor
 COPY --from=composer_bin /usr/bin/composer /usr/bin/composer
 WORKDIR /var/www/html
 
@@ -106,7 +116,7 @@ RUN composer dump-autoload --no-dev --optimize --classmap-authoritative --no-int
 # ---------------------------------------------------------------------------
 # Stage: runtime — the image every ECS task actually runs.
 # ---------------------------------------------------------------------------
-FROM dunglas/frankenphp:${FRANKENPHP_BASE_TAG} AS runtime
+FROM dunglas/frankenphp:${FRANKENPHP_BASE_TAG}@${FRANKENPHP_BASE_DIGEST} AS runtime
 
 ARG GIT_SHA=unknown
 ARG BUILD_DATE=unknown
@@ -116,22 +126,62 @@ LABEL org.opencontainers.image.revision="${GIT_SHA}" \
       org.opencontainers.image.description="FirmsBase application image — web/worker/scheduler/migrate/maintenance, selected by command" \
       org.opencontainers.image.source="https://github.com/Aramitusconnect/firmsbase"
 
-RUN install-php-extensions \
-    pdo_pgsql \
-    pgsql \
-    redis \
-    bcmath \
-    gd \
-    intl \
-    zip \
-    opcache \
-    pcntl \
-    posix \
-    sockets \
-    soap \
-    sodium \
-    exif \
-    igbinary
+# Extensions are compiled exactly once, in the `vendor` stage above — copied
+# here rather than re-running `install-php-extensions` a second time, which
+# previously duplicated the (slow) compile step and, more importantly, left
+# behind extension-specific `-dev` header packages this stage never cleaned
+# up itself. The extension_dir path (`no-debug-zts-20230831`) is this
+# FrankenPHP/PHP 8.3 build's own fixed identifier, not something we invent —
+# reconfirm it if the pinned base digest above ever changes.
+COPY --from=vendor /usr/local/lib/php/extensions/no-debug-zts-20230831/ /usr/local/lib/php/extensions/no-debug-zts-20230831/
+COPY --from=vendor /usr/local/etc/php/conf.d/docker-php-ext-*.ini /usr/local/etc/php/conf.d/
+
+# Security-update and build-toolchain-removal pass (container-vulnerability
+# remediation, docs/ecs/staging-readiness-report.md). The upstream
+# dunglas/frankenphp base image ships a full compiler toolchain (gcc/g++/
+# cpp/make/binutils), libc6-dev + linux-libc-dev (kernel headers — needed
+# only to compile against, never executed), and the full `perl` interpreter
+# baked into its own layers, none of which this runtime stage needs: PHP
+# extensions are now compiled once in `vendor` and copied in above, not
+# compiled here. `perl-base` (Debian-Essential, dpkg/apt's own internal
+# tooling depends on it) is deliberately NOT touched — attempting to remove
+# an Essential package risks breaking dpkg itself for no runtime benefit,
+# since nothing in this image's own entrypoint/command scripts invokes perl
+# in any form (verified by grep across docker/entrypoint.sh and
+# docker/commands/*.sh). The `curl` CLI binary is removed for the same
+# reason (never invoked by our own scripts — the inherited base-image
+# HEALTHCHECK that needed it is disabled below); `libcurl4` and its
+# dependency `libssh2-1` are deliberately KEPT, since PHP's `curl` extension
+# (compiled into the frankenphp binary itself, not a separate loadable .so)
+# links against libcurl4 at runtime and Laravel's HTTP client depends on it.
+# See docs/security/ecs-image-vulnerability-exceptions.md for the residual
+# libssh2/perl-base findings this cannot resolve (no fixed Bookworm package
+# exists for either at the time of this pass) and their reachability analysis.
+RUN apt-get update \
+    && apt-get -y --no-install-recommends install \
+        libpq5 \
+        libzip4 \
+        libicu72 \
+        libsodium23 \
+        libavif15 \
+        libwebp7 \
+        libpng16-16 \
+        libxpm4 \
+        libfreetype6 \
+        libjpeg62-turbo \
+    && apt-get -y upgrade \
+    && apt-get -y purge --autoremove \
+        gcc gcc-12 \
+        g++ g++-12 \
+        cpp cpp-12 \
+        make \
+        binutils binutils-common binutils-x86-64-linux-gnu libbinutils \
+        libc6-dev \
+        linux-libc-dev \
+        perl perl-modules-5.36 \
+        curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY docker/php/production.ini /usr/local/etc/php/conf.d/zz-firmsbase-production.ini
 COPY docker/php/opcache.ini /usr/local/etc/php/conf.d/zz-firmsbase-opcache.ini
