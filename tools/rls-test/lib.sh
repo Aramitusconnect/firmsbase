@@ -81,8 +81,21 @@ rls_require_template_pattern() {
 
 # Runs a psql command as the postgres administrative role. Coordinator-only —
 # never invoke this function's caller scripts from a subagent task prompt.
+#
+# Two connection paths:
+#   TCP  — used when PGHOST is set in the caller's environment (e.g. GitHub
+#          Actions Postgres service containers, which expose only a TCP port
+#          and have no local Unix socket).  PGPASSWORD, PGPORT, and PGUSER
+#          are read from the environment; sudo is not involved.
+#   Unix socket (peer-auth) — fallback when PGHOST is unset, for local
+#          developer machines where PostgreSQL is installed natively.
 rls_admin_psql() {
-  sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 "$@"
+  if [[ -n "${PGHOST:-}" ]]; then
+    PGPASSWORD="${PGPASSWORD:-}" psql -X -q -v ON_ERROR_STOP=1 \
+      -h "$PGHOST" -p "${PGPORT:-5432}" -U "${PGUSER:-postgres}" "$@"
+  else
+    sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 "$@"
+  fi
 }
 
 # Runs a psql command as the dedicated mission test role against a specific
@@ -115,7 +128,8 @@ rls_verify_sentinel() {
 
   local comment
   comment="$(rls_admin_psql -Atc \
-    "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = '${db_name}';" 2>/dev/null || true)"
+    "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = '${db_name}';")" || \
+    rls_fail "could not query the mission sentinel comment for '${db_name}' — the admin connection itself failed (see the psql error above); this is a connectivity problem, not proof the database lacks a sentinel"
 
   if [[ -z "$comment" ]]; then
     rls_fail "database '${db_name}' has no mission sentinel comment — refusing to treat it as a mission-owned disposable/template database"
