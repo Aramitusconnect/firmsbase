@@ -5,6 +5,56 @@
 .gitattributes
 .github
 
+# Terraform IaC — see docs/security/ecs-image-vulnerability-exceptions.md
+# "Image-context remediation". A prior local `terraform init`/`validate`
+# pass under infrastructure/ecs/environments/staging/.terraform/ left real
+# provider binaries (terraform-provider-aws, terraform-provider-null) on
+# disk. `COPY . .` swept them into a production image, where a vulnerability
+# scan attributed two CRITICAL findings (CVE-2026-33186, CVE-2025-68121) to
+# those inert, never-executed files — not to anything the application
+# actually runs. `infrastructure/` contains only Terraform modules and
+# environment configs: no PHP source, nothing config/routes/bootstrap ever
+# reference (confirmed via repo-wide grep), and the Dockerfile itself never
+# reads from it. Excluding the whole directory is correct, not just the
+# `.terraform/` cache within it — the rest of `infrastructure/` (module
+# .tf files, docs) is equally irrelevant to what actually ships and runs.
+infrastructure/
+
+# Defense in depth even with infrastructure/ fully excluded above — these
+# patterns cover any other location a local `terraform`/`tofu` invocation,
+# or a future infra directory, might leave the same class of artifact.
+**/.terraform/
+**/terraform.tfstate
+**/terraform.tfstate.*
+**/*.tfplan
+**/.terraform.tfstate.lock.info
+**/crash.log
+**/crash.*.log
+
+# Credentials/keys that must never reach an image layer regardless of
+# where they happen to appear in a local checkout. None currently exist in
+# this repository (verified by a full-tree search during this pass) — kept
+# here proactively, matching the same "never ship a real secret" principle
+# already applied to .env above.
+.aws/
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+credentials
+credentials.json
+
+# Test/coverage output and local scratch artifacts — none currently exist
+# in this repository (verified during this pass); excluded proactively so
+# a future local test run's output can't silently ship in an image layer.
+coverage/
+*.cover
+clover.xml
+junit.xml
+*.tmp
+*.sqlite
+*.sqlite3
+
 # Environment files — never copied into the image. Runtime config comes
 # exclusively from ECS task-definition environment/secrets.
 .env
