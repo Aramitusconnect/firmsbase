@@ -532,6 +532,27 @@ jobs:
             -e DB_HOST=127.0.0.1 -e DB_PORT=5432 -e DB_DATABASE=firmsbase_smoke \
             -e DB_USERNAME=firmsbase -e DB_PASSWORD=smokepass -e REDIS_HOST=127.0.0.1)
 
+          # Prints container state + logs before a long-running-role
+          # assertion fails, so a future failure shows the real exception
+          # and exit code instead of only the generic "did not stay
+          # running" message. Deliberately prints ONLY .State.* fields
+          # (never .Config.Env, which would include APP_KEY/DB_PASSWORD)
+          # plus container logs — never the container's environment.
+          dump_role_diagnostics() {
+            local name="$1"
+            echo "--- diagnostics: $name ---"
+            docker inspect "$name" --format '
+          status={{.State.Status}}
+          running={{.State.Running}}
+          exit_code={{.State.ExitCode}}
+          error={{.State.Error}}
+          started={{.State.StartedAt}}
+          finished={{.State.FinishedAt}}
+          ' 2>&1 || true
+            echo "--- logs: $name (last 200 lines) ---"
+            docker logs --tail 200 "$name" 2>&1 || true
+          }
+
           echo "=== migrate ==="
           docker run --rm --network host "${COMMON_ENV[@]}" "$IMG" migrate
 
@@ -554,12 +575,20 @@ jobs:
           echo "=== trust worker (must scope to --queue=trust only) ==="
           docker run -d --name smoke-trust --network host "${COMMON_ENV[@]}" -e WORKER_QUEUES=trust "$IMG" worker
           sleep 3
-          docker top smoke-trust | grep -q -- '--queue=trust' || { echo "::error::trust worker did not scope to --queue=trust"; exit 1; }
+          if ! docker top smoke-trust | grep -q -- '--queue=trust'; then
+            echo "::error::trust worker did not scope to --queue=trust"
+            dump_role_diagnostics smoke-trust
+            exit 1
+          fi
 
           echo "=== scheduler ==="
           docker run -d --name smoke-sched --network host "${COMMON_ENV[@]}" "$IMG" scheduler
           sleep 3
-          docker ps --filter name=smoke-sched --format '{{.Status}}' | grep -q "Up" || { echo "::error::scheduler did not stay running"; exit 1; }
+          if ! docker ps --filter name=smoke-sched --format '{{.Status}}' | grep -q "Up"; then
+            echo "::error::scheduler did not stay running"
+            dump_role_diagnostics smoke-sched
+            exit 1
+          fi
 
           echo "=== maintenance ==="
           docker run --rm --network host "${COMMON_ENV[@]}" "$IMG" maintenance list
@@ -568,7 +597,11 @@ jobs:
           for c in smoke-web smoke-worker smoke-trust smoke-sched; do
             docker stop -t 15 "$c"
             CODE=$(docker inspect "$c" --format '{{.State.ExitCode}}')
-            [ "$CODE" = "0" ] || { echo "::error::$c exited $CODE on SIGTERM, expected 0"; exit 1; }
+            if [ "$CODE" != "0" ]; then
+              echo "::error::$c exited $CODE on SIGTERM, expected 0"
+              dump_role_diagnostics "$c"
+              exit 1
+            fi
           done
           echo "All four long-running roles exited 0 on SIGTERM."
 

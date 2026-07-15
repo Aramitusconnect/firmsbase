@@ -321,6 +321,20 @@ RUN set -eu; \
 # for the gd.so libpng/libXpm/libfreetype miss this exact pattern would have
 # caught up front).
 #
+# /bin/sh (-> dash) is included alongside /bin/bash for the same reason
+# `docker/entrypoint.sh` needs bash: PHP's `proc_open()`
+# (used internally by Symfony Process, which Laravel's `schedule:work`
+# calls once per minute-tick to spawn `schedule:run` as a child process,
+# even when zero Schedule:: entries are registered) execs commands via
+# `/bin/sh` through `posix_spawn()`, not through PHP itself. Proven by a
+# real failed smoke test: without `/bin/sh` present, the scheduler role
+# booted fine but crashed on its first internal tick with
+# "proc_open(): posix_spawn() failed: No such file or directory" —
+# looking exactly like a hang/crash from the smoke test's point of view
+# ("scheduler did not stay running"), not an obviously missing-shell
+# error, because the failure happens deep inside a framework-spawned
+# subprocess rather than at container startup.
+#
 # Two separate symlink problems, two separate fixes:
 #  1. Trixie (like the distroless target) uses merged-/usr: /bin, /lib,
 #     /lib64, /sbin are symlinks to their /usr/... counterparts. A bare
@@ -374,7 +388,7 @@ RUN set -eu; \
     collect_closure() { \
         ldd "$@" 2>/dev/null | awk '{print $3}' | grep -E '^/' | sort -u; \
     }; \
-    binaries=(/usr/local/bin/frankenphp /usr/local/bin/php /bin/bash); \
+    binaries=(/usr/local/bin/frankenphp /usr/local/bin/php /bin/bash /bin/sh); \
     mapfile -t extensions < <(find /usr/local/lib/php/extensions/no-debug-zts-20230831 -name '*.so'); \
     mapfile -t all_libs < <(collect_closure "${binaries[@]}" "${extensions[@]}"); \
     for lib in "${all_libs[@]}"; do \
@@ -452,8 +466,12 @@ RUN set -eu; \
         find /rootfs -iname 'perl*' >&2; \
         fail=1; \
     fi; \
+    if [ ! -e /rootfs/usr/bin/sh ]; then \
+        echo "BUILD ASSERTION FAILED: /usr/bin/sh (rewritten from /bin/sh) is missing from the assembled rootfs — Symfony Process (used by Laravel's schedule:work to spawn schedule:run each tick) execs via posix_spawn()/proc_open() through /bin/sh, not through PHP itself; without it the scheduler role boots but crashes on its first tick" >&2; \
+        fail=1; \
+    fi; \
     if [ "$fail" -eq 1 ]; then exit 1; fi; \
-    echo "OK: rootfs closure is complete, no avif/aom/dav1d/perl present"
+    echo "OK: rootfs closure is complete, no avif/aom/dav1d/perl present, /bin/sh present"
 
 # ---------------------------------------------------------------------------
 # Stage: runtime — the image every ECS task actually runs. Distroless: no
