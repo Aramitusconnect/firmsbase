@@ -27,8 +27,23 @@ class PaymentPlanInstallmentDueDeferredTest extends TestCase
             return;
         }
 
-        $files = glob($commandsDir.'/*.php');
-        $this->assertEmpty($files, 'A Console Command was introduced, but payment_plan.installment_due is intentionally deferred in Phase 14b — no scheduler/command infrastructure may be added.');
+        // Section 39A-4B added two commands unrelated to payment plans
+        // (schema/RLS governance reporting). This test's real invariant
+        // is narrower than "zero commands ever": no command may
+        // reference payment-plan installment due-transition logic,
+        // since that specific scheduler/command infrastructure remains
+        // deferred.
+        foreach (glob($commandsDir.'/*.php') ?: [] as $file) {
+            $source = file_get_contents($file);
+
+            foreach (['PaymentPlanInstallmentService', 'markDue', 'checkDue', 'installment_due', 'PaymentPlanDunningService'] as $needle) {
+                $this->assertStringNotContainsString(
+                    $needle,
+                    $source,
+                    basename($file)." must not reference {$needle} — payment_plan.installment_due scheduler/command infrastructure is intentionally deferred (Phase 14b)."
+                );
+            }
+        }
     }
 
     public function test_payment_plan_installment_service_still_has_no_due_transition_method(): void

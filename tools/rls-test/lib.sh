@@ -81,8 +81,24 @@ rls_require_template_pattern() {
 
 # Runs a psql command as the postgres administrative role. Coordinator-only —
 # never invoke this function's caller scripts from a subagent task prompt.
+#
+# Two supported connection modes:
+#   - Local sandbox (default, PGHOST unset): the OS `postgres` user over the
+#     default Unix domain socket via `sudo -u postgres psql` (peer auth) —
+#     unchanged from the original design.
+#   - CI service container (PGHOST set): a GitHub Actions Postgres *service
+#     container* has no local `postgres` OS user and no Unix socket at all —
+#     only TCP is reachable, and `sudo` resets the environment by default, so
+#     a sudo'd psql can never see PGHOST/PGPORT/PGUSER/PGPASSWORD from the
+#     calling shell regardless. When PGHOST is set, connect directly (no
+#     sudo) instead and let libpq pick up PGHOST/PGPORT/PGUSER/PGPASSWORD
+#     from the environment the calling workflow step already exported.
 rls_admin_psql() {
-  sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 "$@"
+  if [[ -n "${PGHOST:-}" ]]; then
+    psql -X -q -v ON_ERROR_STOP=1 "$@"
+  else
+    sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 "$@"
+  fi
 }
 
 # Runs a psql command as the dedicated mission test role against a specific
@@ -114,8 +130,10 @@ rls_verify_sentinel() {
   current_head="$(cd "$RLS_WORKTREE_ROOT" && git rev-parse HEAD)"
 
   local comment
-  comment="$(rls_admin_psql -Atc \
-    "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = '${db_name}';" 2>/dev/null || true)"
+  if ! comment="$(rls_admin_psql -Atc \
+    "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = '${db_name}';")"; then
+    rls_fail "could not query the mission sentinel comment for '${db_name}' — the admin connection itself failed (see the psql error above); this is a connectivity problem, not proof the database lacks a sentinel"
+  fi
 
   if [[ -z "$comment" ]]; then
     rls_fail "database '${db_name}' has no mission sentinel comment — refusing to treat it as a mission-owned disposable/template database"

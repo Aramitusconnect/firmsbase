@@ -1,0 +1,121 @@
+# Never let a real environment file, credential, or Git history reach a
+# build context / image layer. See docs/ecs/container-architecture.md.
+
+.git
+.gitattributes
+.github
+
+# Terraform IaC — see docs/security/ecs-image-vulnerability-exceptions.md
+# "Image-context remediation". A prior local `terraform init`/`validate`
+# pass under infrastructure/ecs/environments/staging/.terraform/ left real
+# provider binaries (terraform-provider-aws, terraform-provider-null) on
+# disk. `COPY . .` swept them into a production image, where a vulnerability
+# scan attributed two CRITICAL findings (CVE-2026-33186, CVE-2025-68121) to
+# those inert, never-executed files — not to anything the application
+# actually runs. `infrastructure/` contains only Terraform modules and
+# environment configs: no PHP source, nothing config/routes/bootstrap ever
+# reference (confirmed via repo-wide grep), and the Dockerfile itself never
+# reads from it. Excluding the whole directory is correct, not just the
+# `.terraform/` cache within it — the rest of `infrastructure/` (module
+# .tf files, docs) is equally irrelevant to what actually ships and runs.
+infrastructure/
+
+# Defense in depth even with infrastructure/ fully excluded above — these
+# patterns cover any other location a local `terraform`/`tofu` invocation,
+# or a future infra directory, might leave the same class of artifact.
+**/.terraform/
+**/terraform.tfstate
+**/terraform.tfstate.*
+**/*.tfplan
+**/.terraform.tfstate.lock.info
+**/crash.log
+**/crash.*.log
+
+# Credentials/keys that must never reach an image layer regardless of
+# where they happen to appear in a local checkout. None currently exist in
+# this repository (verified by a full-tree search during this pass) — kept
+# here proactively, matching the same "never ship a real secret" principle
+# already applied to .env above.
+.aws/
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+credentials
+credentials.json
+
+# Test/coverage output and local scratch artifacts — none currently exist
+# in this repository (verified during this pass); excluded proactively so
+# a future local test run's output can't silently ship in an image layer.
+coverage/
+*.cover
+clover.xml
+junit.xml
+*.tmp
+*.sqlite
+*.sqlite3
+
+# Environment files — never copied into the image. Runtime config comes
+# exclusively from ECS task-definition environment/secrets.
+.env
+.env.*
+!.env.example
+!.env.testing.example
+
+# Local secrets used only by tools/rls-test/ tooling, never shipped.
+.rls-test-secrets/
+
+# Dependency directories — reinstalled inside the image by the vendor/
+# frontend build stages, never copied in from the host.
+/vendor
+/node_modules
+
+# Build output the frontend stage regenerates; a stale host copy must not
+# leak into the image and silently shadow a real build.
+/public/build
+/public/hot
+/public/storage
+
+# Local runtime/cache state — must not carry host-machine artifacts into the
+# image; the Dockerfile creates these directories fresh and empty.
+/storage/framework/cache/data/*
+/storage/framework/sessions/*
+/storage/framework/testing/*
+/storage/framework/views/*
+/storage/logs/*
+/bootstrap/cache/*.php
+!/storage/framework/cache/data/.gitignore
+!/storage/framework/sessions/.gitignore
+!/storage/framework/testing/.gitignore
+!/storage/framework/views/.gitignore
+!/storage/logs/.gitignore
+!/bootstrap/cache/.gitignore
+
+# Test/dev-only content — not needed at runtime; keeps the image smaller and
+# ensures test fixtures/credentials never ship in a production layer.
+/tests
+/tools
+/docs
+/.claude
+phpunit.xml
+.phpunit.result.cache
+.phpunit.cache
+
+# Editor/IDE and OS cruft.
+.DS_Store
+Thumbs.db
+.idea
+.vscode
+.nova
+.zed
+.cursor
+_ide_helper.php
+Homestead.json
+Homestead.yaml
+
+# Local dev tooling not relevant inside the image. NOTE: .npmrc is NOT
+# ignored — the frontend build stage COPYs it in (it only sets
+# ignore-scripts/audit flags, no secrets) and needs it present in the build
+# context.
+.editorconfig
+README.md

@@ -1,0 +1,13 @@
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform/
+terraform.tfvars
+*.auto.tfvars
+crash.log
+crash.*.log
+
+# NOTE: .terraform.lock.hcl is intentionally NOT ignored — it was generated
+# by a real `terraform init` against the public Terraform registry (see
+# docs/ecs/infrastructure-architecture.md "Validated, not applied") and is
+# committed so provider versions stay reproducible across machines/CI.

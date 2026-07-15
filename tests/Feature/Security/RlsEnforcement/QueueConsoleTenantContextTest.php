@@ -35,7 +35,32 @@ class QueueConsoleTenantContextTest extends TestCase
 
     public function test_no_custom_console_commands_exist_that_could_silently_bypass_rls(): void
     {
-        $this->assertDirectoryDoesNotExist(base_path('app/Console/Commands'));
+        $commandsDir = base_path('app/Console/Commands');
+
+        if (! is_dir($commandsDir)) {
+            $this->assertTrue(true, 'No app/Console/Commands directory exists.');
+
+            return;
+        }
+
+        // Section 39A-4B added two reviewed, read-only governance/
+        // reporting commands (schema tenant-firewall + RLS enforcement
+        // report). Neither iterates tenant-owned data without explicit
+        // firm context — both operate purely on schema/catalog
+        // metadata. Any OTHER command appearing here has not been
+        // reviewed for the silent-bypass risk this test exists to catch.
+        $allowlist = [
+            'SchemaTenantFirewallCommand.php',
+            'RlsSecurityReportCommand.php',
+        ];
+
+        $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);
+        $unexpected = array_values(array_diff($files, $allowlist));
+
+        $this->assertEmpty(
+            $unexpected,
+            'Unreviewed console command(s) found: '.implode(', ', $unexpected).'. Any new command must be reviewed for RLS-bypass risk and added to this allowlist explicitly.'
+        );
     }
 
     public function test_tenant_aware_job_context_trait_requires_an_explicit_firm_not_a_guessed_model_id(): void
@@ -86,7 +111,7 @@ class QueueConsoleTenantContextTest extends TestCase
         // (see its own docblock) — clear that baseline so the "no
         // context is active outside the loop" assertion below proves
         // what it actually claims to, rather than passing by accident.
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         DB::statement('ALTER TABLE clients FORCE ROW LEVEL SECURITY');
 

@@ -177,8 +177,12 @@ class LoginPolicyFirewallTest extends TestCase
         $this->assertFileDoesNotExist(base_path('routes/api.php'));
         $this->assertDirectoryDoesNotExist(app_path('Http/Controllers/Auth'));
 
+        // ReadinessController.php (ECS readiness foundation) is a reviewed,
+        // narrow exception: a pure infra health-check endpoint with no
+        // login/session/auth logic of any kind — orthogonal to this
+        // test's actual concern (no auth controller was introduced).
         $controllerFiles = glob(app_path('Http/Controllers/*.php')) ?: [];
-        $this->assertSame(['Controller.php'], array_map('basename', $controllerFiles));
+        $this->assertSame(['Controller.php', 'ReadinessController.php'], array_map('basename', $controllerFiles));
     }
 
     public function test_no_protected_domain_behavior_files_were_modified(): void
@@ -266,7 +270,7 @@ class LoginPolicyFirewallTest extends TestCase
 
     public function test_gap_registry_still_tracks_the_login_policy_gap_and_count_remains_twenty_one(): void
     {
-        $registry = new ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
 
         $this->assertTrue($registry->isTracked('login_policy_wrappers_missing'));
         $this->assertCount(21, $registry->all());

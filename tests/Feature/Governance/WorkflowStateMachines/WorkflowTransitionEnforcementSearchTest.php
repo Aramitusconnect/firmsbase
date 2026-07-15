@@ -93,8 +93,12 @@ class WorkflowTransitionEnforcementSearchTest extends TestCase
         // controller has ever been added, so the meaningful check is
         // "no additional file exists here," not "the directory itself
         // is absent."
+        // ReadinessController.php (ECS readiness foundation) is a reviewed,
+        // narrow exception: a pure infra health-check endpoint that never
+        // touches a workflow-state-machine model or performs a status
+        // write — orthogonal to this test's actual concern.
         $controllerFiles = glob(base_path('app/Http/Controllers/*.php')) ?: [];
-        $this->assertSame(['Controller.php'], array_map('basename', $controllerFiles), 'No real controller should exist beyond the empty Laravel scaffold.');
+        $this->assertSame(['Controller.php', 'ReadinessController.php'], array_map('basename', $controllerFiles), 'No real controller should exist beyond the empty Laravel scaffold and the reviewed ECS readiness probe.');
 
         $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
         $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
