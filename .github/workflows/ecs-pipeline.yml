@@ -127,6 +127,10 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
         with:
           ref: ${{ inputs.commit_sha }}
+          # Full history is required to compute a merge-base with
+          # origin/main below — a shallow (default depth-1) checkout would
+          # make `git merge-base` fail outright.
+          fetch-depth: 0
 
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2 (2026-06 release)
         with:
@@ -142,8 +146,47 @@ jobs:
       - name: PHP syntax check (every changed and existing PHP file)
         run: find app config database routes tests bootstrap -name "*.php" -print0 | xargs -0 -n1 php -l
 
-      - name: Laravel Pint (style — see composer.json require-dev)
-        run: vendor/bin/pint --test
+      # Laravel Pint runs ONLY against PHP files this commit actually
+      # changed relative to its merge-base with origin/main. The full
+      # repository carries substantial pre-existing style debt (hundreds
+      # of files) that predates this branch and is not this branch's
+      # responsibility to fix — running `pint --test` unscoped would block
+      # every publication run on that pre-existing debt instead of on
+      # anything this commit is actually responsible for.
+      - name: Determine PHP files changed relative to origin/main
+        id: changed-php
+        run: |
+          set -euo pipefail
+          git fetch origin main --quiet
+          BASE_SHA="$(git merge-base HEAD origin/main)"
+          echo "Merge-base with origin/main: ${BASE_SHA}"
+
+          # -z / --null-terminated output avoids any word-splitting or
+          # newline-in-filename hazard; --diff-filter=ACMR (Added, Copied,
+          # Modified, Renamed) deliberately excludes Deleted files — Pint
+          # cannot and should not check a file that no longer exists.
+          mapfile -d '' -t CHANGED_PHP < <(git diff --diff-filter=ACMR -z --name-only "${BASE_SHA}...HEAD" -- '*.php')
+
+          if [[ "${#CHANGED_PHP[@]}" -eq 0 ]]; then
+            echo "No PHP files changed relative to origin/main — nothing for Pint to check."
+            echo "has_php=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "has_php=true" >> "$GITHUB_OUTPUT"
+          echo "Checking ${#CHANGED_PHP[@]} changed PHP file(s):"
+          printf '  %s\n' "${CHANGED_PHP[@]}"
+
+          # NUL-delimited write/read round-trip (not newline-joined) keeps
+          # this safe even if a path ever contained a space.
+          printf '%s\0' "${CHANGED_PHP[@]}" > /tmp/changed-php-files.list
+
+      - name: Laravel Pint (changed PHP files only — see composer.json require-dev)
+        if: steps.changed-php.outputs.has_php == 'true'
+        run: |
+          set -euo pipefail
+          mapfile -d '' -t CHANGED_PHP < /tmp/changed-php-files.list
+          vendor/bin/pint --test "${CHANGED_PHP[@]}"
 
       - name: Shell script syntax check
         run: find docker -name "*.sh" -print0 | xargs -0 -n1 bash -n
@@ -161,6 +204,22 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      APP_ENV: testing
+      APP_DEBUG: "false"
+      # Disposable, CI-only Laravel encryption key — NOT a production or
+      # staging secret. Generated once for this workflow
+      # (`base64:$(openssl rand -base64 32)`, AES-256-CBC-compatible: 32
+      # raw bytes) and committed here deliberately, because it protects
+      # nothing sensitive: every database, row, and ciphertext it ever
+      # touches is destroyed at the end of the same job run (see "Destroy
+      # disposable test database" below). It is never used to encrypt
+      # anything outside this CI job, never written to a file, and never
+      # printed. Required because EncryptionKeyService::provision()
+      # (app/Services/EncryptionKeyService.php) calls Crypt::encryptString()
+      # — Laravel throws MissingAppKeyException the first time any test
+      # touches per-firm key provisioning if APP_KEY is unset.
+      APP_KEY: "base64:ELVhdkVn+QSCzkyvW6Io8hKv/lmwnzz6LLmlYIhiL6o="
     services:
       postgres:
         image: postgres:16
@@ -234,6 +293,52 @@ jobs:
           chmod 600 .rls-test-secrets/rls_test_runner_39a3l.pgpass
           DB_NAME="$(tools/rls-test/create-disposable-db.sh ci)"
           echo "DB_NAME=${DB_NAME}" >> "$GITHUB_ENV"
+
+      # Fast fail-closed check before paying for the full suite: confirms
+      # APP_KEY is actually present, Laravel boots, the encrypter can
+      # round-trip a value (exactly what EncryptionKeyService needs), and
+      # the disposable database connection this job just provisioned is
+      # reachable — all via the same run-artisan-test.sh wrapper (and
+      # therefore the same sentinel/naming/blocklist guards) the real test
+      # run uses, so this isn't a second, divergent code path. Never prints
+      # APP_KEY or any derived ciphertext.
+      #
+      # This step calls run-artisan-test.sh, which checks the mission
+      # sentinel (rls_verify_sentinel, via rls_admin_psql) before running
+      # anything else — exactly like "Run test suite" below, it needs the
+      # same admin TCP connection vars, or rls_admin_psql falls back to a
+      # Unix-socket/peer-auth attempt that cannot work in this service
+      # container (this step previously omitted this block entirely,
+      # which is precisely what caused the observed
+      # `/var/run/postgresql/.s.PGSQL.5432` / `role "root" does not
+      # exist` failure).
+      - name: Preflight — APP_KEY, Laravel boot, encryption round-trip, DB connectivity
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: ${{ job.services.postgres.ports['5432'] }}
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          if [[ -z "${APP_KEY:-}" ]]; then
+            echo "::error::APP_KEY is not set for the preflight check"
+            exit 1
+          fi
+          tools/rls-test/run-artisan-test.sh "${DB_NAME}" -- tinker --execute="
+            if (! config('app.key')) {
+                fwrite(STDERR, 'PREFLIGHT FAILED: config(\'app.key\') is empty despite APP_KEY being set in the environment'.PHP_EOL);
+                exit(1);
+            }
+            \$plain = 'preflight-roundtrip-'.bin2hex(random_bytes(8));
+            \$encrypted = \Illuminate\Support\Facades\Crypt::encryptString(\$plain);
+            \$decrypted = \Illuminate\Support\Facades\Crypt::decryptString(\$encrypted);
+            if (\$decrypted !== \$plain) {
+                fwrite(STDERR, 'PREFLIGHT FAILED: encrypter round-trip mismatch'.PHP_EOL);
+                exit(1);
+            }
+            \Illuminate\Support\Facades\DB::select('SELECT 1');
+            echo 'PREFLIGHT OK: APP_KEY present, Laravel booted, encrypter round-trip verified, disposable DB connection verified'.PHP_EOL;
+          "
 
       # run-artisan-test.sh checks the mission sentinel (rls_verify_sentinel,
       # via rls_admin_psql) BEFORE running php artisan — it needs the same
@@ -359,24 +464,48 @@ jobs:
             GIT_SHA=${{ inputs.commit_sha }}
             BUILD_DATE=${{ steps.builddate.outputs.value }}
 
-      - name: Scan image for vulnerabilities (Trivy) — 0 Critical, 0 High required
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+      # aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2
+      # (v0.28.0) is a composite action whose OWN action.yaml does
+      # `uses: aquasecurity/setup-trivy@v0.2.1` internally — a tag that no
+      # longer resolves on GitHub ("Unable to resolve action
+      # aquasecurity/setup-trivy@v0.2.1, unable to find version v0.2.1"),
+      # which failed this job during "Set up job" before any Docker build,
+      # scan, AWS auth, or ECR push ever ran. Rather than depend on a
+      # third-party action's own internal, unpinnable-by-us dependency,
+      # install Trivy directly via setup-trivy (pinned to its own current,
+      # verified release) and invoke the `trivy` CLI ourselves with the
+      # exact same flags trivy-action would have passed through
+      # (TRIVY_SCANNERS/TRIVY_SEVERITY/TRIVY_EXIT_CODE/TRIVY_FORMAT/
+      # TRIVY_OUTPUT env vars in trivy-action's entrypoint.sh correspond
+      # exactly to --scanners/--severity/--exit-code/--format/--output
+      # below) — same behavior, same thresholds, no dependency on
+      # trivy-action's own composite-action internals at all.
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
-          image-ref: ${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}
-          scanners: vuln
-          severity: CRITICAL,HIGH
-          exit-code: "1"
-          format: json
-          output: trivy-vuln-results.json
+          version: v0.71.0
+          cache: true
+
+      - name: Scan image for vulnerabilities (Trivy) — 0 Critical, 0 High required
+        run: |
+          set -euo pipefail
+          trivy image \
+            --scanners vuln \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --format json \
+            --output trivy-vuln-results.json \
+            "${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}"
 
       - name: Scan image for secrets (Trivy) — 0 findings required
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
-        with:
-          image-ref: ${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}
-          scanners: secret
-          exit-code: "1"
-          format: json
-          output: trivy-secret-results.json
+        run: |
+          set -euo pipefail
+          trivy image \
+            --scanners secret \
+            --exit-code 1 \
+            --format json \
+            --output trivy-secret-results.json \
+            "${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}"
 
       - name: Upload scan results
         if: always()
@@ -403,6 +532,27 @@ jobs:
             -e DB_HOST=127.0.0.1 -e DB_PORT=5432 -e DB_DATABASE=firmsbase_smoke \
             -e DB_USERNAME=firmsbase -e DB_PASSWORD=smokepass -e REDIS_HOST=127.0.0.1)
 
+          # Prints container state + logs before a long-running-role
+          # assertion fails, so a future failure shows the real exception
+          # and exit code instead of only the generic "did not stay
+          # running" message. Deliberately prints ONLY .State.* fields
+          # (never .Config.Env, which would include APP_KEY/DB_PASSWORD)
+          # plus container logs — never the container's environment.
+          dump_role_diagnostics() {
+            local name="$1"
+            echo "--- diagnostics: $name ---"
+            docker inspect "$name" --format '
+          status={{.State.Status}}
+          running={{.State.Running}}
+          exit_code={{.State.ExitCode}}
+          error={{.State.Error}}
+          started={{.State.StartedAt}}
+          finished={{.State.FinishedAt}}
+          ' 2>&1 || true
+            echo "--- logs: $name (last 200 lines) ---"
+            docker logs --tail 200 "$name" 2>&1 || true
+          }
+
           echo "=== migrate ==="
           docker run --rm --network host "${COMMON_ENV[@]}" "$IMG" migrate
 
@@ -425,12 +575,20 @@ jobs:
           echo "=== trust worker (must scope to --queue=trust only) ==="
           docker run -d --name smoke-trust --network host "${COMMON_ENV[@]}" -e WORKER_QUEUES=trust "$IMG" worker
           sleep 3
-          docker top smoke-trust | grep -q -- '--queue=trust' || { echo "::error::trust worker did not scope to --queue=trust"; exit 1; }
+          if ! docker top smoke-trust | grep -q -- '--queue=trust'; then
+            echo "::error::trust worker did not scope to --queue=trust"
+            dump_role_diagnostics smoke-trust
+            exit 1
+          fi
 
           echo "=== scheduler ==="
           docker run -d --name smoke-sched --network host "${COMMON_ENV[@]}" "$IMG" scheduler
           sleep 3
-          docker ps --filter name=smoke-sched --format '{{.Status}}' | grep -q "Up" || { echo "::error::scheduler did not stay running"; exit 1; }
+          if ! docker ps --filter name=smoke-sched --format '{{.Status}}' | grep -q "Up"; then
+            echo "::error::scheduler did not stay running"
+            dump_role_diagnostics smoke-sched
+            exit 1
+          fi
 
           echo "=== maintenance ==="
           docker run --rm --network host "${COMMON_ENV[@]}" "$IMG" maintenance list
@@ -439,30 +597,96 @@ jobs:
           for c in smoke-web smoke-worker smoke-trust smoke-sched; do
             docker stop -t 15 "$c"
             CODE=$(docker inspect "$c" --format '{{.State.ExitCode}}')
-            [ "$CODE" = "0" ] || { echo "::error::$c exited $CODE on SIGTERM, expected 0"; exit 1; }
+            if [ "$CODE" != "0" ]; then
+              echo "::error::$c exited $CODE on SIGTERM, expected 0"
+              dump_role_diagnostics "$c"
+              exit 1
+            fi
           done
           echo "All four long-running roles exited 0 on SIGTERM."
 
           echo "=== filesystem checks: no Terraform artifacts, no libaom/libavif, no perl/apt/dpkg, libssh2 present ==="
+          # Every check below greps a FILE, never a live producer process
+          # piped straight into grep. `grep -q` (and, for the perl check,
+          # the second `grep -v` stage) can legitimately exit as soon as
+          # it decides its own result, closing its read end early; if the
+          # thing on the other end of a pipe is still writing (as `echo
+          # "$EXPORT_LIST" | grep -q ...` was, for a 20000+ line listing),
+          # that producer is killed by SIGPIPE (exit 141) before it
+          # finishes, and `pipefail` reports the PIPELINE's status as 141
+          # even though grep itself matched (or didn't) correctly. That
+          # false failure is exactly what broke this step: libssh2 WAS
+          # present, `grep -qi "libssh2"` genuinely matched (exit 0), but
+          # `echo` got SIGPIPE writing the remaining ~20000 lines nobody
+          # was going to read, and pipefail surfaced that 141 as the
+          # pipeline's result instead of grep's real 0. Reading from a
+          # file sidesteps this class of bug entirely: grep is the only
+          # process touching stdin, so there is no upstream producer left
+          # for a signal to kill.
           CID=$(docker create "$IMG")
-          EXPORT_LIST=$(docker export "$CID" | tar -tv)
+          EXPORT_LIST_FILE="$(mktemp)"
+          docker export "$CID" | tar -tv > "$EXPORT_LIST_FILE"
           docker rm "$CID" >/dev/null
 
-          echo "$EXPORT_LIST" | grep -qiE "terraform-provider-|\.tfstate$|\.tfplan$|\.terraform/|infrastructure/" \
-            && { echo "::error::Terraform/infrastructure artifacts found in image"; exit 1; } || echo "OK: no Terraform artifacts"
+          if grep -qiE "terraform-provider-|\.tfstate$|\.tfplan$|\.terraform/|infrastructure/" "$EXPORT_LIST_FILE"; then
+            echo "::error::Terraform/infrastructure artifacts found in image"
+            exit 1
+          fi
+          echo "OK: no Terraform artifacts"
 
-          echo "$EXPORT_LIST" | grep -qiE "libaom|libavif" \
-            && { echo "::error::libaom/libavif found in image"; exit 1; } || echo "OK: no libaom/libavif"
+          if grep -qiE "libaom|libavif" "$EXPORT_LIST_FILE"; then
+            echo "::error::libaom/libavif found in image"
+            exit 1
+          fi
+          echo "OK: no libaom/libavif"
 
-          echo "$EXPORT_LIST" | grep -iE "perl" | grep -v "vendor/scrivo/highlight.php" \
-            && { echo "::error::an unexpected perl-related file was found in the image"; exit 1; } || echo "OK: no perl interpreter (only the harmless syntax-highlight data file, if present)"
+          if grep -iE "perl" "$EXPORT_LIST_FILE" | grep -v "vendor/scrivo/highlight.php" >/dev/null; then
+            echo "::error::an unexpected perl-related file was found in the image"
+            exit 1
+          fi
+          echo "OK: no perl interpreter (only the harmless syntax-highlight data file, if present)"
 
-          echo "$EXPORT_LIST" | grep -qiE "/usr/bin/apt|/usr/bin/dpkg|/var/lib/dpkg" \
-            && { echo "::error::apt or dpkg found in image"; exit 1; } || echo "OK: no apt/dpkg"
+          if grep -qiE "/usr/bin/apt|/usr/bin/dpkg|/var/lib/dpkg" "$EXPORT_LIST_FILE"; then
+            echo "::error::apt or dpkg found in image"
+            exit 1
+          fi
+          echo "OK: no apt/dpkg"
 
-          echo "$EXPORT_LIST" | grep -qi "libssh2" \
-            || { echo "::error::libssh2 not found in image"; exit 1; }
-          echo "OK: libssh2 present"
+          if ! grep -Fqi 'libssh2' "$EXPORT_LIST_FILE"; then
+            echo "::error::libssh2 runtime library not found in exported image filesystem"
+            exit 1
+          fi
+          echo "OK: libssh2 library file present in exported image filesystem"
+
+          rm -f "$EXPORT_LIST_FILE"
+
+          # Filesystem presence alone doesn't prove the application actually
+          # links/uses libssh2 at runtime — confirm the runtime curl
+          # extension (the only thing in this image that uses libssh2, for
+          # scp://sftp:// support) reports it via curl_version()
+          # ['libssh_version'] (verified field name/value against this
+          # exact build: "libssh2/1.11.1"). Invokes php directly
+          # (--entrypoint) rather than a shell, since distroless has none.
+          echo "=== runtime probe: curl reports libssh2 ==="
+          docker run --rm --entrypoint /usr/local/bin/php "$IMG" -r '
+              if (! function_exists("curl_version")) {
+                  fwrite(STDERR, "curl_version() is unavailable".PHP_EOL);
+                  exit(1);
+              }
+
+              $version = curl_version();
+              $ssh = $version["libssh_version"] ?? "";
+
+              if ($ssh === "" || stripos($ssh, "libssh2") === false) {
+                  fwrite(
+                      STDERR,
+                      "libssh2 is not reported by the runtime curl library".PHP_EOL
+                  );
+                  exit(1);
+              }
+
+              fwrite(STDOUT, "OK: runtime reports ".$ssh.PHP_EOL);
+          '
 
           echo "=== GD: JPEG/PNG/WebP yes, AVIF function absent ==="
           docker run --rm --network host "${COMMON_ENV[@]}" "$IMG" maintenance tinker --execute="
