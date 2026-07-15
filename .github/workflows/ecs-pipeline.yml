@@ -573,25 +573,87 @@ jobs:
           echo "All four long-running roles exited 0 on SIGTERM."
 
           echo "=== filesystem checks: no Terraform artifacts, no libaom/libavif, no perl/apt/dpkg, libssh2 present ==="
+          # Every check below greps a FILE, never a live producer process
+          # piped straight into grep. `grep -q` (and, for the perl check,
+          # the second `grep -v` stage) can legitimately exit as soon as
+          # it decides its own result, closing its read end early; if the
+          # thing on the other end of a pipe is still writing (as `echo
+          # "$EXPORT_LIST" | grep -q ...` was, for a 20000+ line listing),
+          # that producer is killed by SIGPIPE (exit 141) before it
+          # finishes, and `pipefail` reports the PIPELINE's status as 141
+          # even though grep itself matched (or didn't) correctly. That
+          # false failure is exactly what broke this step: libssh2 WAS
+          # present, `grep -qi "libssh2"` genuinely matched (exit 0), but
+          # `echo` got SIGPIPE writing the remaining ~20000 lines nobody
+          # was going to read, and pipefail surfaced that 141 as the
+          # pipeline's result instead of grep's real 0. Reading from a
+          # file sidesteps this class of bug entirely: grep is the only
+          # process touching stdin, so there is no upstream producer left
+          # for a signal to kill.
           CID=$(docker create "$IMG")
-          EXPORT_LIST=$(docker export "$CID" | tar -tv)
+          EXPORT_LIST_FILE="$(mktemp)"
+          docker export "$CID" | tar -tv > "$EXPORT_LIST_FILE"
           docker rm "$CID" >/dev/null
 
-          echo "$EXPORT_LIST" | grep -qiE "terraform-provider-|\.tfstate$|\.tfplan$|\.terraform/|infrastructure/" \
-            && { echo "::error::Terraform/infrastructure artifacts found in image"; exit 1; } || echo "OK: no Terraform artifacts"
+          if grep -qiE "terraform-provider-|\.tfstate$|\.tfplan$|\.terraform/|infrastructure/" "$EXPORT_LIST_FILE"; then
+            echo "::error::Terraform/infrastructure artifacts found in image"
+            exit 1
+          fi
+          echo "OK: no Terraform artifacts"
 
-          echo "$EXPORT_LIST" | grep -qiE "libaom|libavif" \
-            && { echo "::error::libaom/libavif found in image"; exit 1; } || echo "OK: no libaom/libavif"
+          if grep -qiE "libaom|libavif" "$EXPORT_LIST_FILE"; then
+            echo "::error::libaom/libavif found in image"
+            exit 1
+          fi
+          echo "OK: no libaom/libavif"
 
-          echo "$EXPORT_LIST" | grep -iE "perl" | grep -v "vendor/scrivo/highlight.php" \
-            && { echo "::error::an unexpected perl-related file was found in the image"; exit 1; } || echo "OK: no perl interpreter (only the harmless syntax-highlight data file, if present)"
+          if grep -iE "perl" "$EXPORT_LIST_FILE" | grep -v "vendor/scrivo/highlight.php" >/dev/null; then
+            echo "::error::an unexpected perl-related file was found in the image"
+            exit 1
+          fi
+          echo "OK: no perl interpreter (only the harmless syntax-highlight data file, if present)"
 
-          echo "$EXPORT_LIST" | grep -qiE "/usr/bin/apt|/usr/bin/dpkg|/var/lib/dpkg" \
-            && { echo "::error::apt or dpkg found in image"; exit 1; } || echo "OK: no apt/dpkg"
+          if grep -qiE "/usr/bin/apt|/usr/bin/dpkg|/var/lib/dpkg" "$EXPORT_LIST_FILE"; then
+            echo "::error::apt or dpkg found in image"
+            exit 1
+          fi
+          echo "OK: no apt/dpkg"
 
-          echo "$EXPORT_LIST" | grep -qi "libssh2" \
-            || { echo "::error::libssh2 not found in image"; exit 1; }
-          echo "OK: libssh2 present"
+          if ! grep -Fqi 'libssh2' "$EXPORT_LIST_FILE"; then
+            echo "::error::libssh2 runtime library not found in exported image filesystem"
+            exit 1
+          fi
+          echo "OK: libssh2 library file present in exported image filesystem"
+
+          rm -f "$EXPORT_LIST_FILE"
+
+          # Filesystem presence alone doesn't prove the application actually
+          # links/uses libssh2 at runtime — confirm the runtime curl
+          # extension (the only thing in this image that uses libssh2, for
+          # scp://sftp:// support) reports it via curl_version()
+          # ['libssh_version'] (verified field name/value against this
+          # exact build: "libssh2/1.11.1"). Invokes php directly
+          # (--entrypoint) rather than a shell, since distroless has none.
+          echo "=== runtime probe: curl reports libssh2 ==="
+          docker run --rm --entrypoint /usr/local/bin/php "$IMG" -r '
+              if (! function_exists("curl_version")) {
+                  fwrite(STDERR, "curl_version() is unavailable".PHP_EOL);
+                  exit(1);
+              }
+
+              $version = curl_version();
+              $ssh = $version["libssh_version"] ?? "";
+
+              if ($ssh === "" || stripos($ssh, "libssh2") === false) {
+                  fwrite(
+                      STDERR,
+                      "libssh2 is not reported by the runtime curl library".PHP_EOL
+                  );
+                  exit(1);
+              }
+
+              fwrite(STDOUT, "OK: runtime reports ".$ssh.PHP_EOL);
+          '
 
           echo "=== GD: JPEG/PNG/WebP yes, AVIF function absent ==="
           docker run --rm --network host "${COMMON_ENV[@]}" "$IMG" maintenance tinker --execute="
