@@ -72,6 +72,49 @@ class StagingDeploymentPackageTest extends TestCase
         'schema:drop',
     ];
 
+    private const DELETED_SUPERSEDED_SCRIPTS = [
+        'create-service-web.sh',
+        'create-service-worker.sh',
+        'create-service-critical-worker.sh',
+        'create-service-scheduler.sh',
+    ];
+
+    private const APPROVED_CREATE_SERVICE_SCRIPTS = [
+        '02-launch-web-service.sh',
+        '04-launch-critical-worker.sh',
+        '05-launch-worker.sh',
+        '06-launch-scheduler.sh',
+    ];
+
+    private const APPROVED_REGISTER_TASK_DEFINITION_SCRIPTS = [
+        '01-register-runtime-task-definitions.sh',
+    ];
+
+    /**
+     * migration-sequence.sh registers and runs the one-shot migrate task
+     * definition — a historical, already-executed action (see
+     * staging-deploy/REPORT.md) that is explicitly out of Stage B's scope.
+     * The completed migration must not be rerun and its record must not be
+     * altered, so this file is deliberately excluded from the repo-wide
+     * "only 01 may register, only 02/04/05/06 may create-service" scan
+     * rather than modified to make that scan pass.
+     */
+    private const HISTORICAL_MIGRATION_SCRIPT_EXCLUDED_FROM_SCAN = 'migration-sequence.sh';
+
+    /**
+     * Strips full-line shell comments before invocation detection, so a
+     * script's own explanatory prose (e.g. a deprecation notice describing
+     * what an old, deleted script used to run) is never mistaken for an
+     * actual command invocation.
+     */
+    private function stripShellComments(string $contents): string
+    {
+        return implode("\n", array_filter(
+            explode("\n", $contents),
+            static fn (string $line): bool => ! (bool) preg_match('/^\s*#/', $line)
+        ));
+    }
+
     private function taskDefinitionPath(string $role): string
     {
         return base_path("staging-deploy/firmsbase-staging-{$role}.json");
@@ -80,6 +123,28 @@ class StagingDeploymentPackageTest extends TestCase
     private function scriptPath(string $script): string
     {
         return base_path("staging-deploy/{$script}");
+    }
+
+    /**
+     * @return array<string> basenames of every .sh file directly under staging-deploy/
+     */
+    private function allShellScriptsUnderStagingDeploy(): array
+    {
+        $files = glob(base_path('staging-deploy/*.sh'));
+        $this->assertNotEmpty($files, 'Expected at least one .sh file under staging-deploy/.');
+
+        return array_map('basename', $files);
+    }
+
+    /**
+     * @return array<string> basenames of every file (any type) directly under staging-deploy/
+     */
+    private function allFilesUnderStagingDeploy(): array
+    {
+        $files = array_filter(glob(base_path('staging-deploy/*')), 'is_file');
+        $this->assertNotEmpty($files, 'Expected at least one file under staging-deploy/.');
+
+        return array_map('basename', $files);
     }
 
     private function decodeTaskDefinition(string $role): array
@@ -362,5 +427,201 @@ class StagingDeploymentPackageTest extends TestCase
         $this->assertStringContainsString('database-migrator', $contents);
         $this->assertStringContainsString('RUNTIME_SERVICES_VERIFIED', $contents);
         $this->assertStringContainsString('HTTP_SYNTHETIC_ONLY_HTTPS_STILL_REQUIRED', $contents);
+    }
+
+    /*
+     * -------------------------------------------------------------------
+     * Repository-wide governance checks (staging-deploy/, not just the
+     * eight new files). These must fail if a future contributor adds
+     * another unreviewed create-service/register-task-definition script,
+     * or resurrects one of the four deleted superseded scripts, anywhere
+     * under staging-deploy/.
+     * -------------------------------------------------------------------
+     */
+
+    public function test_superseded_create_service_scripts_no_longer_exist(): void
+    {
+        foreach (self::DELETED_SUPERSEDED_SCRIPTS as $script) {
+            $this->assertFileDoesNotExist(
+                base_path("staging-deploy/{$script}"),
+                "{$script} is superseded and must not exist in staging-deploy/ — it used --enable-execute-command false and a family-only task-definition reference."
+            );
+        }
+    }
+
+    public function test_no_shell_script_under_staging_deploy_uses_the_boolean_false_execute_command_form(): void
+    {
+        foreach ($this->allShellScriptsUnderStagingDeploy() as $script) {
+            $contents = file_get_contents($this->scriptPath($script));
+            $this->assertStringNotContainsString(
+                '--enable-execute-command false',
+                $contents,
+                "{$script} must never use the --enable-execute-command false form."
+            );
+        }
+    }
+
+    public function test_no_old_digest_in_any_deployable_json_or_shell_script_under_staging_deploy(): void
+    {
+        foreach ($this->allShellScriptsUnderStagingDeploy() as $script) {
+            $this->assertStringNotContainsString(
+                self::OLD_DIGEST,
+                file_get_contents($this->scriptPath($script)),
+                "{$script} must not reference the previous, superseded digest."
+            );
+        }
+
+        foreach (self::ALL_ROLES as $role) {
+            $this->assertStringNotContainsString(
+                self::OLD_DIGEST,
+                file_get_contents($this->taskDefinitionPath($role)),
+                "firmsbase-staging-{$role}.json must not reference the previous, superseded digest."
+            );
+        }
+    }
+
+    public function test_no_placeholder_value_exists_anywhere_under_staging_deploy(): void
+    {
+        foreach ($this->allFilesUnderStagingDeploy() as $file) {
+            $contents = file_get_contents(base_path("staging-deploy/{$file}"));
+
+            foreach (self::PLACEHOLDER_PATTERNS as $pattern) {
+                $this->assertStringNotContainsString(
+                    $pattern,
+                    $contents,
+                    "staging-deploy/{$file} must not contain the placeholder pattern '{$pattern}'."
+                );
+            }
+        }
+    }
+
+    public function test_no_shell_script_under_staging_deploy_invokes_a_destructive_migration_command(): void
+    {
+        foreach ($this->allShellScriptsUnderStagingDeploy() as $script) {
+            $contents = file_get_contents($this->scriptPath($script));
+
+            foreach (self::FORBIDDEN_MIGRATION_COMMANDS as $forbidden) {
+                $this->assertStringNotContainsString(
+                    $forbidden,
+                    $contents,
+                    "staging-deploy/{$script} must never invoke '{$forbidden}'."
+                );
+            }
+        }
+    }
+
+    public function test_no_shell_script_under_staging_deploy_passes_a_bare_task_definition_family_to_create_service(): void
+    {
+        foreach ($this->allShellScriptsUnderStagingDeploy() as $script) {
+            if ($script === self::HISTORICAL_MIGRATION_SCRIPT_EXCLUDED_FROM_SCAN) {
+                continue;
+            }
+
+            $contents = file_get_contents($this->scriptPath($script));
+
+            $this->assertDoesNotMatchRegularExpression(
+                '/--task-definition\s+firmsbase-staging-[a-z-]+["\'\s]/',
+                $contents,
+                "staging-deploy/{$script} must never pass a family-only task-definition reference to create-service."
+            );
+        }
+    }
+
+    /**
+     * Only the numbered scripts explicitly reviewed to include the full
+     * ARN-manifest / secret / shape / live-gate preflight may invoke
+     * `aws ecs create-service`. migration-sequence.sh is excluded because
+     * it never calls create-service in the first place (it only registers
+     * and runs the one-shot migrate task) — see
+     * HISTORICAL_MIGRATION_SCRIPT_EXCLUDED_FROM_SCAN for why it is excluded
+     * from the sibling register-task-definition check below.
+     */
+    public function test_only_the_approved_numbered_scripts_invoke_create_service(): void
+    {
+        $invokers = [];
+        foreach ($this->allShellScriptsUnderStagingDeploy() as $script) {
+            $contents = $this->stripShellComments(file_get_contents($this->scriptPath($script)));
+            if (preg_match('/aws\s+ecs\s+create-service\b/', $contents) === 1) {
+                $invokers[] = $script;
+            }
+        }
+
+        sort($invokers);
+        $expected = self::APPROVED_CREATE_SERVICE_SCRIPTS;
+        sort($expected);
+
+        $this->assertSame(
+            $expected,
+            $invokers,
+            'Exactly 02/04/05/06 (and no other script under staging-deploy) may invoke `aws ecs create-service`. '
+            .'Found: '.implode(', ', $invokers)
+        );
+    }
+
+    public function test_every_create_service_invocation_uses_disable_execute_command_and_the_manifest_arn(): void
+    {
+        foreach (self::APPROVED_CREATE_SERVICE_SCRIPTS as $script) {
+            $contents = file_get_contents($this->scriptPath($script));
+
+            $this->assertMatchesRegularExpression(
+                '/aws\s+ecs\s+create-service\b/',
+                $contents,
+                "{$script} was expected to invoke aws ecs create-service."
+            );
+            $this->assertStringContainsString(
+                '--disable-execute-command',
+                $contents,
+                "{$script} must pass --disable-execute-command to create-service."
+            );
+            $this->assertStringContainsString(
+                'runtime-task-definitions.manifest.json',
+                $contents,
+                "{$script} must read its exact task-definition ARN from runtime-task-definitions.manifest.json."
+            );
+        }
+    }
+
+    /**
+     * Only 01 may register the four runtime task definitions.
+     * migration-sequence.sh also calls register-task-definition, but for
+     * the migrate task definition specifically, as a historical,
+     * already-executed action predating this Stage B package (see
+     * HISTORICAL_MIGRATION_SCRIPT_EXCLUDED_FROM_SCAN) — it is deliberately
+     * excluded rather than rewritten, since rewriting it would risk
+     * implying the completed migration should be (or was) rerun.
+     */
+    public function test_only_01_and_the_historical_migration_script_invoke_register_task_definition(): void
+    {
+        $invokers = [];
+        foreach ($this->allShellScriptsUnderStagingDeploy() as $script) {
+            $contents = $this->stripShellComments(file_get_contents($this->scriptPath($script)));
+            if (preg_match('/aws\s+ecs\s+register-task-definition\b/', $contents) === 1) {
+                $invokers[] = $script;
+            }
+        }
+
+        sort($invokers);
+        $expected = [...self::APPROVED_REGISTER_TASK_DEFINITION_SCRIPTS, self::HISTORICAL_MIGRATION_SCRIPT_EXCLUDED_FROM_SCAN];
+        sort($expected);
+
+        $this->assertSame(
+            $expected,
+            $invokers,
+            'Only 01-register-runtime-task-definitions.sh (runtime roles) and the historical '
+            .'migration-sequence.sh (migrate role only) may invoke `aws ecs register-task-definition`. '
+            .'Found: '.implode(', ', $invokers)
+        );
+    }
+
+    public function test_all_six_task_definition_json_files_reference_only_the_new_digest(): void
+    {
+        foreach (self::ALL_ROLES as $role) {
+            $raw = file_get_contents($this->taskDefinitionPath($role));
+            $this->assertSame(
+                1,
+                substr_count($raw, self::APPROVED_DIGEST),
+                "firmsbase-staging-{$role}.json must reference the approved digest exactly once."
+            );
+        }
     }
 }

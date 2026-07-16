@@ -1,5 +1,11 @@
 # Rollback / Containment Procedure (prepared, NOT executed)
 
+> **Superseded (historical record only, do not follow):** `runtime-verification-commands.sh`
+> and the `create-service-*.sh` files it called have been deleted. The
+> approved workflow is `staging-deploy/00-http-exposure-preflight.sh`
+> through `staging-deploy/07-final-runtime-verification.sh`; each of those
+> scripts prints its own containment commands on failure.
+
 Applies to first-deployment failure at any stage of
 `runtime-verification-commands.sh`. Does NOT apply to the migration step —
 migration failure is handled entirely inside `migration-sequence.sh`'s own

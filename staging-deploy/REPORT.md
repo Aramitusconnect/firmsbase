@@ -6,6 +6,17 @@ Image: `603013471426.dkr.ecr.us-east-1.amazonaws.com/firmsbase-staging@sha256:8b
 **Nothing in this package has been executed.** No AWS API call was made
 from this sandbox. All artifacts below are reviewable files only.
 
+> **Superseded (historical record only, do not follow):** the digest above
+> and the `create-service-web.sh` / `create-service-worker.sh` /
+> `create-service-critical-worker.sh` / `create-service-scheduler.sh`
+> scripts referenced throughout this report have been deleted from the
+> repository — they used `--enable-execute-command false` and family-only
+> task-definition references with no manifest pinning or live gates. The
+> only approved runtime service workflow is
+> `staging-deploy/00-http-exposure-preflight.sh` through
+> `staging-deploy/07-final-runtime-verification.sh`, using the current
+> approved digest in the committed `firmsbase-staging-*.json` files.
+
 ---
 
 ## 1. Secret JSON-key schema found in repository evidence
