@@ -22,7 +22,52 @@ return Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Trust the AWS ALB in front of this container for exactly the
+        // header set AWS ELB/ALB actually sends: X-Forwarded-For,
+        // X-Forwarded-Port, X-Forwarded-Proto — deliberately NOT
+        // X-Forwarded-Host (AWS ALB never sends it; see Symfony's own
+        // comment on Request::HEADER_X_FORWARDED_AWS_ELB). This is what
+        // lets Request::isSecure()/url()/route() correctly report "https"
+        // once the ALB terminates TLS in front of this always-plain-HTTP
+        // container (docker/web/Caddyfile disables auto_https — TLS never
+        // terminates here).
         //
+        // Proxy address policy — reviewed, not a framework default. Two
+        // DIFFERENT layers of protection are in play here; do not conflate
+        // them:
+        //
+        // 1. Application layer (what `at: '*'` actually does): Laravel
+        //    trusts the AWS-ELB header set — including X-Forwarded-Proto —
+        //    from ANY source IP that reaches this app over HTTP. This does
+        //    NOT prevent a direct, unauthorized HTTP client from setting
+        //    X-Forwarded-Proto: https and being believed; Laravel has no
+        //    way to distinguish that from genuine ALB traffic once `at` is
+        //    '*'. The one header this app never trusts regardless of `at`
+        //    is X-Forwarded-Host (excluded from
+        //    Request::HEADER_X_FORWARDED_AWS_ELB), which is the
+        //    independent, header-scoped defense against host-spoofing —
+        //    see tests/Feature/Http/TrustedProxyTest.php.
+        //
+        // 2. Network layer (what actually makes `at: '*'` safe here): the
+        //    ECS task security group (sg-0db14e50ea5c5466c) is intended to
+        //    permit inbound :8080 exclusively from the ALB's own security
+        //    group — never from the public internet or any other ENI in
+        //    the VPC — so an unauthorized client can never reach this
+        //    container to exploit point 1 in the first place. PHPUnit has
+        //    no network layer and CANNOT prove this boundary; it must be
+        //    verified LIVE against the real AWS security-group
+        //    configuration before the web service is launched. Fargate
+        //    targets have no fixed, publishable IP range to pin to instead
+        //    of `at: '*'` (task ENIs are dynamic), so IP-list trust inside
+        //    the app would add ongoing maintenance risk without additional
+        //    security value the security group doesn't already provide. If
+        //    that security-group rule is ever loosened to a CIDR-based
+        //    rule instead of an SG-reference rule, `at: '*'` must be
+        //    revisited alongside it.
+        $middleware->trustProxies(
+            at: '*',
+            headers: Request::HEADER_X_FORWARDED_AWS_ELB,
+        );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
