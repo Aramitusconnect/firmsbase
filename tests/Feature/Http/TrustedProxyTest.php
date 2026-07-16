@@ -7,28 +7,47 @@ use Tests\TestCase;
 
 /**
  * Proves the AWS-ALB trusted-proxy configuration in bootstrap/app.php
- * behaves correctly. The app trusts the AWS-ELB header set
- * (X-Forwarded-For/Port/Proto — NOT X-Forwarded-Host) from any source IP
- * (`at: '*'`) because the actual security boundary is the ECS task
- * security group (only the ALB's own security group may reach port 8080
- * at all, per the live staging network configuration) — not an IP
- * allowlist inside the application. See the docblock in bootstrap/app.php
- * for the full rationale.
+ * (Request::HEADER_X_FORWARDED_AWS_ELB, at: '*') behaves correctly at the
+ * APPLICATION layer only. See bootstrap/app.php for the full rationale.
  *
- * Because `at: '*'` trusts every source at the HTTP layer, PHPUnit cannot
- * exercise the actual network-level defense (the security group) — that
- * boundary is entirely outside the application. What these tests DO prove
- * at the application layer:
- *  - the trusted header set is honored (isSecure, URL generation, no
- *    scheme downgrade on redirect, session cookie compatibility);
- *  - the one header AWS ALB never sends and this app never trusts
- *    (X-Forwarded-Host) cannot be used to spoof the request's host, no
- *    matter what the proxy-IP policy is set to — the header-scoped defense
- *    that holds independent of the IP-trust decision.
+ * This suite deliberately covers two DIFFERENT kinds of protection, and
+ * does not blur them:
+ *
+ * 1. Application-layer protection (this is what these tests prove):
+ *    - the app trusts exactly the AWS-ELB header set — X-Forwarded-For,
+ *      X-Forwarded-Port, X-Forwarded-Proto;
+ *    - X-Forwarded-Host is NEVER part of that trusted set, so no request —
+ *      trusted proxy or not — can use it to spoof Request::getHost();
+ *    - when X-Forwarded-Proto=https is present, the app correctly reports
+ *      the request as secure, generates https:// URLs, does not downgrade
+ *      redirects to http, and issues a Secure session cookie without
+ *      erroring;
+ *    - when no X-Forwarded-Proto header is present, the app correctly
+ *      falls back to treating the request as plain HTTP.
+ *
+ * 2. Network-layer protection (this suite does NOT and CANNOT prove this):
+ *    - because `at: '*'` is configured, Laravel trusts the AWS-ELB header
+ *      set from ANY source IP that reaches it at the HTTP layer — that
+ *      includes X-Forwarded-Proto. A direct, unauthorized HTTP client that
+ *      somehow reached this container could set X-Forwarded-Proto: https
+ *      and Laravel would believe it, exactly like the ALB's own traffic.
+ *    - what actually prevents an unauthorized client from ever reaching
+ *      this container is the ECS task security group
+ *      (sg-0db14e50ea5c5466c), which is intended to permit inbound :8080
+ *      exclusively from the reviewed ALB security group — not the public
+ *      internet, and not any other ENI in the VPC.
+ *    - PHPUnit has no network layer to exercise and therefore cannot prove
+ *      that security-group boundary holds. It must be verified LIVE
+ *      against the real AWS resources (e.g. via a security-group preflight
+ *      script) before the web service is ever launched — see
+ *      staging-deploy/08-http-exposure-preflight.sh once the deployment
+ *      package exists. If that security-group rule is ever loosened to a
+ *      CIDR-based rule instead of an SG-reference rule, `at: '*'` must be
+ *      revisited alongside it.
  */
 class TrustedProxyTest extends TestCase
 {
-    public function test_request_through_trusted_proxy_with_forwarded_https_is_detected_as_secure(): void
+    public function test_request_carrying_forwarded_proto_https_is_detected_as_secure(): void
     {
         Route::get('/__test/is-secure', fn () => response()->json(['secure' => request()->isSecure()]));
 
@@ -102,7 +121,15 @@ class TrustedProxyTest extends TestCase
         $this->assertTrue($sessionCookie->isSecure(), 'session cookie is not marked Secure despite session.secure=true');
     }
 
-    public function test_forwarded_host_header_is_never_trusted_regardless_of_proxy_ip_policy(): void
+    /**
+     * X-Forwarded-Host is excluded from Request::HEADER_X_FORWARDED_AWS_ELB,
+     * so it is never trusted no matter what the request looks like — this
+     * is an application-layer, header-scoped defense. It does NOT depend
+     * on (and does not prove anything about) which IP addresses are
+     * allowed to reach this endpoint over the network; that is a separate
+     * property enforced by the ECS security group, not by this test.
+     */
+    public function test_forwarded_host_header_is_never_trusted_because_it_is_excluded_from_the_trusted_header_set(): void
     {
         Route::get('/__test/host', fn () => response()->json(['host' => request()->getHost()]));
 
