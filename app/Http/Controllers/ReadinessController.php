@@ -33,20 +33,33 @@ class ReadinessController extends Controller
 {
     public function __invoke(): JsonResponse
     {
-        $checks = [
-            'database' => $this->checkDatabase(),
-        ];
+        // The whole action is wrapped in a top-level catch as a last-resort
+        // safety net: checkDatabase()/checkRedis() already catch every
+        // Throwable individually, but this guarantees that literally
+        // nothing this action does — now or after a future change — can
+        // ever escape to Laravel's default exception handler and render an
+        // HTML 500 page on an unauthenticated, load-balancer-polled route.
+        try {
+            $checks = [
+                'database' => $this->checkDatabase(),
+            ];
 
-        if ($this->redisIsRequired()) {
-            $checks['redis'] = $this->checkRedis();
+            if ($this->redisIsRequired()) {
+                $checks['redis'] = $this->checkRedis();
+            }
+
+            $ready = ! in_array('error', $checks, true);
+
+            return response()->json([
+                'status' => $ready ? 'ready' : 'not_ready',
+                'checks' => $checks,
+            ], $ready ? 200 : 503);
+        } catch (Throwable) {
+            return response()->json([
+                'status' => 'not_ready',
+                'checks' => ['unknown' => 'error'],
+            ], 503);
         }
-
-        $ready = ! in_array('error', $checks, true);
-
-        return response()->json([
-            'status' => $ready ? 'ready' : 'not_ready',
-            'checks' => $checks,
-        ], $ready ? 200 : 503);
     }
 
     private function checkDatabase(): string

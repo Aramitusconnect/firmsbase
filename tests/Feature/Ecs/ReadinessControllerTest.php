@@ -25,6 +25,23 @@ class ReadinessControllerTest extends TestCase
         $this->get('/up')->assertOk();
     }
 
+    public function test_liveness_endpoint_stays_ok_even_when_the_database_connection_is_broken(): void
+    {
+        // Proves /up is truly independent of readiness — it must never be
+        // affected by the same database failure that makes /readyz report
+        // not_ready, since /up existing (registered by Laravel's own
+        // `health: '/up'` option in bootstrap/app.php) is a pure liveness
+        // check with no dependency checks at all.
+        $originalDefault = config('database.default');
+        config(['database.default' => 'nonexistent_connection_for_test']);
+
+        try {
+            $this->get('/up')->assertOk();
+        } finally {
+            config(['database.default' => $originalDefault]);
+        }
+    }
+
     public function test_readiness_endpoint_reports_ready_when_database_is_reachable(): void
     {
         // The test database connection is always reachable by the time a

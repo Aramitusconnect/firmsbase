@@ -115,20 +115,43 @@ UP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://${ALB_DNS}/up" || echo 
 echo "/up status: $UP_CODE"
 [ "$UP_CODE" = "200" ] || fail "/up did not return 200 (got $UP_CODE)"
 
-READYZ_BODY=$(curl -s "http://${ALB_DNS}/readyz" || echo '{}')
-READYZ_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://${ALB_DNS}/readyz" || echo "000")
-echo "/readyz status: $READYZ_CODE"
-[ "$READYZ_CODE" = "200" ] || fail "/readyz did not return 200 (got $READYZ_CODE)"
+# Single request captures status, headers, and body together — a non-200
+# /readyz response (e.g. a Laravel HTML error page, or nothing at all) is
+# never valid JSON, so jq is only ever invoked once that's confirmed; this
+# avoids the confusing secondary "jq: parse error" that a blind `jq -r`
+# against a non-JSON body used to produce.
+READYZ_BODY_FILE=$(mktemp)
+READYZ_HEADERS_FILE=$(mktemp)
+READYZ_CODE=$(curl -s -o "$READYZ_BODY_FILE" -D "$READYZ_HEADERS_FILE" -w "%{http_code}" "http://${ALB_DNS}/readyz" || echo "000")
+READYZ_CONTENT_TYPE=$(grep -i '^content-type:' "$READYZ_HEADERS_FILE" 2>/dev/null | tail -1 | cut -d: -f2- | tr -d '\r' | xargs || echo "unknown")
+READYZ_BODY=$(cat "$READYZ_BODY_FILE" 2>/dev/null || echo "")
+rm -f "$READYZ_BODY_FILE" "$READYZ_HEADERS_FILE"
 
-# ReadinessController's response body only ever contains the fixed tokens
-# "ok"/"error" per check — never a connection string, exception message,
-# or secret.
-DB_CHECK=$(echo "$READYZ_BODY" | jq -r '.checks.database // "missing"')
-REDIS_CHECK=$(echo "$READYZ_BODY" | jq -r '.checks.redis // "not_required"')
-echo "readyz database check: $DB_CHECK"
-echo "readyz redis check: $REDIS_CHECK"
-[ "$DB_CHECK" = "ok" ] || fail "/readyz database check is not ok"
-[ "$REDIS_CHECK" = "ok" ] || [ "$REDIS_CHECK" = "not_required" ] || fail "/readyz redis check is not ok"
+echo "/readyz status: $READYZ_CODE"
+echo "/readyz content-type: $READYZ_CONTENT_TYPE"
+
+# Sanitized, bounded (first 300 bytes) — never assume the body is safe to
+# print in full; a non-JSON failure body could in principle be an
+# upstream/proxy error page rather than anything ReadinessController wrote.
+READYZ_BODY_BOUNDED=$(printf '%s' "$READYZ_BODY" | head -c 300)
+READYZ_BODY_IS_JSON=0
+echo "$READYZ_BODY" | jq empty >/dev/null 2>&1 && READYZ_BODY_IS_JSON=1
+
+if [ "$READYZ_CODE" != "200" ]; then
+  fail "/readyz did not return 200 (got $READYZ_CODE); sanitized body (first 300 bytes, content-type=${READYZ_CONTENT_TYPE}): ${READYZ_BODY_BOUNDED}"
+elif [ "$READYZ_BODY_IS_JSON" != "1" ]; then
+  fail "/readyz returned 200 but the body is not valid JSON; sanitized body (first 300 bytes, content-type=${READYZ_CONTENT_TYPE}): ${READYZ_BODY_BOUNDED}"
+else
+  # ReadinessController's response body only ever contains the fixed tokens
+  # "ok"/"error" per check — never a connection string, exception message,
+  # or secret.
+  DB_CHECK=$(echo "$READYZ_BODY" | jq -r '.checks.database // "missing"')
+  REDIS_CHECK=$(echo "$READYZ_BODY" | jq -r '.checks.redis // "not_required"')
+  echo "readyz database check: $DB_CHECK"
+  echo "readyz redis check: $REDIS_CHECK"
+  [ "$DB_CHECK" = "ok" ] || fail "/readyz database check is not ok"
+  [ "$REDIS_CHECK" = "ok" ] || [ "$REDIS_CHECK" = "not_required" ] || fail "/readyz redis check is not ok"
+fi
 
 echo ""
 echo "=== Check 6: recent CloudWatch logs free of high-severity markers ==="
