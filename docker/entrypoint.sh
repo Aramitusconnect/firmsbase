@@ -45,6 +45,36 @@ if [[ ${#missing[@]} -gt 0 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# 1b. When Redis is required and configured for TLS, fail fast if the CA
+# bundle config/database.php will ask PhpRedis to verify against isn't
+# actually present and readable — a broken/missing CA file otherwise
+# surfaces only much later as an opaque "SSL operation failed: certificate
+# verify failed" from inside a request. Resolution order matches
+# config/database.php exactly: REDIS_TLS_CA_FILE, then SSL_CERT_FILE, then
+# the distro default. REDIS_TLS_PEER_NAME is NOT required here — the
+# application derives a safe default from REDIS_HOST when it's absent.
+# Never prints REDIS_PASSWORD, any secret ARN, or a credential-bearing URL.
+# ---------------------------------------------------------------------------
+redis_required=0
+if [[ "${CACHE_STORE:-}" == "redis" || "${SESSION_DRIVER:-}" == "redis" || "${QUEUE_CONNECTION:-}" == "redis" ]]; then
+  redis_required=1
+fi
+
+if [[ "$redis_required" -eq 1 && "${REDIS_HOST:-}" == tls://* ]]; then
+  redis_ca_file="${REDIS_TLS_CA_FILE:-${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}}"
+
+  if [[ ! -f "$redis_ca_file" ]]; then
+    fail "Redis TLS CA file '${redis_ca_file}' does not exist — cannot start with an unverifiable Redis TLS connection"
+  fi
+
+  if [[ ! -r "$redis_ca_file" ]]; then
+    fail "Redis TLS CA file '${redis_ca_file}' exists but is not readable by the current user (uid=$(id -u)) — cannot start with an unverifiable Redis TLS connection"
+  fi
+
+  log "Redis TLS CA file verified present and readable: ${redis_ca_file}"
+fi
+
+# ---------------------------------------------------------------------------
 # 2. Defensive re-assertion that the writable paths the image prepared at
 # build time are actually writable at runtime (catches a bad volume mount,
 # a wrong ECS task role... no, a wrong filesystem mode, or a build defect —

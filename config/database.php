@@ -3,6 +3,38 @@
 use Illuminate\Support\Str;
 use Pdo\Mysql;
 
+// Shared Redis host + TLS stream context for the 'default', 'cache', and
+// 'queue' connections below — computed once here rather than duplicated
+// three times. AWS ElastiCache (and most managed Redis providers) present
+// a certificate that PHP's default SSL context cannot always verify
+// without an explicit `cafile` + `peer_name`, even when a valid CA bundle
+// is present on disk — hence the explicit context below rather than
+// relying on PHP's implicit defaults. Only built when REDIS_HOST actually
+// uses the tls:// scheme, so local/non-TLS development is unaffected.
+$redisHost = env('REDIS_HOST', '127.0.0.1');
+
+$redisTlsContext = null;
+
+if (str_starts_with($redisHost, 'tls://')) {
+    $redisPeerName = env('REDIS_TLS_PEER_NAME')
+        ?: parse_url($redisHost, PHP_URL_HOST)
+        ?: Str::after($redisHost, 'tls://');
+
+    $redisCaFile = env('REDIS_TLS_CA_FILE')
+        ?: env('SSL_CERT_FILE')
+        ?: '/etc/ssl/certs/ca-certificates.crt';
+
+    $redisTlsContext = [
+        'stream' => [
+            'verify_peer' => true,
+            'verify_peer_name' => true,
+            'allow_self_signed' => false,
+            'cafile' => $redisCaFile,
+            'peer_name' => $redisPeerName,
+        ],
+    ];
+}
+
 return [
 
     /*
@@ -155,11 +187,12 @@ return [
 
         'default' => [
             'url' => env('REDIS_URL'),
-            'host' => env('REDIS_HOST', '127.0.0.1'),
+            'host' => $redisHost,
             'username' => env('REDIS_USERNAME'),
             'password' => env('REDIS_PASSWORD'),
             'port' => env('REDIS_PORT', '6379'),
             'database' => env('REDIS_DB', '0'),
+            'context' => $redisTlsContext,
             'max_retries' => env('REDIS_MAX_RETRIES', 3),
             'backoff_algorithm' => env('REDIS_BACKOFF_ALGORITHM', 'decorrelated_jitter'),
             'backoff_base' => env('REDIS_BACKOFF_BASE', 100),
@@ -168,11 +201,12 @@ return [
 
         'cache' => [
             'url' => env('REDIS_URL'),
-            'host' => env('REDIS_HOST', '127.0.0.1'),
+            'host' => $redisHost,
             'username' => env('REDIS_USERNAME'),
             'password' => env('REDIS_PASSWORD'),
             'port' => env('REDIS_PORT', '6379'),
             'database' => env('REDIS_CACHE_DB', '1'),
+            'context' => $redisTlsContext,
             'max_retries' => env('REDIS_MAX_RETRIES', 3),
             'backoff_algorithm' => env('REDIS_BACKOFF_ALGORITHM', 'decorrelated_jitter'),
             'backoff_base' => env('REDIS_BACKOFF_BASE', 100),
@@ -189,11 +223,12 @@ return [
         // isolated connection instead. See docs/ecs/queue-and-redis-architecture.md.
         'queue' => [
             'url' => env('REDIS_URL'),
-            'host' => env('REDIS_HOST', '127.0.0.1'),
+            'host' => $redisHost,
             'username' => env('REDIS_USERNAME'),
             'password' => env('REDIS_PASSWORD'),
             'port' => env('REDIS_PORT', '6379'),
             'database' => env('REDIS_QUEUE_DB', '2'),
+            'context' => $redisTlsContext,
             'max_retries' => env('REDIS_MAX_RETRIES', 3),
             'backoff_algorithm' => env('REDIS_BACKOFF_ALGORITHM', 'decorrelated_jitter'),
             'backoff_base' => env('REDIS_BACKOFF_BASE', 100),
