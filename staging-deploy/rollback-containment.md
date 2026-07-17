@@ -5,6 +5,10 @@
 > approved workflow is `staging-deploy/00-http-exposure-preflight.sh`
 > through `staging-deploy/07-final-runtime-verification.sh`; each of those
 > scripts prints its own containment commands on failure.
+> `migration-sequence.sh` has also been deleted — the migration it
+> describes already completed successfully; see
+> `staging-deploy/migration-sequence-historical.md` for the historical
+> record. `connectivity-probes.sh` is now a non-executing stub.
 
 Applies to first-deployment failure at any stage of
 `runtime-verification-commands.sh`. Does NOT apply to the migration step —

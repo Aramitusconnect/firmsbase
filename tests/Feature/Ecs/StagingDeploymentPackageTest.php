@@ -72,6 +72,22 @@ class StagingDeploymentPackageTest extends TestCase
         'schema:drop',
     ];
 
+    /**
+     * A bare `migrate` artisan invocation is checked separately from
+     * FORBIDDEN_MIGRATION_COMMANDS, and deliberately NOT as a raw
+     * substring match on "migrate" — every approved script legitimately
+     * references the migrate ROLE/family/JSON filename
+     * (firmsbase-staging-migrate, firmsbase-staging-migrate.json) as part
+     * of proving migrate is NOT registered/running, e.g.
+     * 01-register-runtime-task-definitions.sh explicitly skips it and
+     * 07-final-runtime-verification.sh asserts no migrate task is
+     * RUNNING/PENDING. A raw "migrate" substring ban would fail those
+     * safe, already-reviewed checks. This pattern instead matches only an
+     * actual `php artisan migrate` (or `artisan migrate`) command
+     * invocation.
+     */
+    private const BARE_ARTISAN_MIGRATE_PATTERN = '/\bartisan\s+migrate\b(?!:)/';
+
     private const DELETED_SUPERSEDED_SCRIPTS = [
         'create-service-web.sh',
         'create-service-worker.sh',
@@ -89,17 +105,6 @@ class StagingDeploymentPackageTest extends TestCase
     private const APPROVED_REGISTER_TASK_DEFINITION_SCRIPTS = [
         '01-register-runtime-task-definitions.sh',
     ];
-
-    /**
-     * migration-sequence.sh registers and runs the one-shot migrate task
-     * definition — a historical, already-executed action (see
-     * staging-deploy/REPORT.md) that is explicitly out of Stage B's scope.
-     * The completed migration must not be rerun and its record must not be
-     * altered, so this file is deliberately excluded from the repo-wide
-     * "only 01 may register, only 02/04/05/06 may create-service" scan
-     * rather than modified to make that scan pass.
-     */
-    private const HISTORICAL_MIGRATION_SCRIPT_EXCLUDED_FROM_SCAN = 'migration-sequence.sh';
 
     /**
      * Strips full-line shell comments before invocation detection, so a
@@ -369,6 +374,12 @@ class StagingDeploymentPackageTest extends TestCase
             $this->assertStringNotContainsString($forbidden, $contents, "{$script} must never invoke '{$forbidden}'.");
         }
 
+        $this->assertDoesNotMatchRegularExpression(
+            self::BARE_ARTISAN_MIGRATE_PATTERN,
+            $this->stripShellComments($contents),
+            "{$script} must never invoke a bare artisan migrate command."
+        );
+
         // 01 registers the migrate task definition's *sibling* runtime
         // definitions but must never itself execute the migrate command.
         $this->assertDoesNotMatchRegularExpression('/aws\s+ecs\s+run-task\b/', $contents, "{$script} must never run an ECS task directly.");
@@ -507,16 +518,18 @@ class StagingDeploymentPackageTest extends TestCase
                     "staging-deploy/{$script} must never invoke '{$forbidden}'."
                 );
             }
+
+            $this->assertDoesNotMatchRegularExpression(
+                self::BARE_ARTISAN_MIGRATE_PATTERN,
+                $this->stripShellComments($contents),
+                "staging-deploy/{$script} must never invoke a bare artisan migrate command."
+            );
         }
     }
 
     public function test_no_shell_script_under_staging_deploy_passes_a_bare_task_definition_family_to_create_service(): void
     {
         foreach ($this->allShellScriptsUnderStagingDeploy() as $script) {
-            if ($script === self::HISTORICAL_MIGRATION_SCRIPT_EXCLUDED_FROM_SCAN) {
-                continue;
-            }
-
             $contents = file_get_contents($this->scriptPath($script));
 
             $this->assertDoesNotMatchRegularExpression(
@@ -530,11 +543,10 @@ class StagingDeploymentPackageTest extends TestCase
     /**
      * Only the numbered scripts explicitly reviewed to include the full
      * ARN-manifest / secret / shape / live-gate preflight may invoke
-     * `aws ecs create-service`. migration-sequence.sh is excluded because
-     * it never calls create-service in the first place (it only registers
-     * and runs the one-shot migrate task) — see
-     * HISTORICAL_MIGRATION_SCRIPT_EXCLUDED_FROM_SCAN for why it is excluded
-     * from the sibling register-task-definition check below.
+     * `aws ecs create-service`. No filename is exempted from this scan —
+     * the historical migration script and the old connectivity-probe
+     * script were removed/neutered specifically so this check could apply
+     * to every .sh file under staging-deploy/ with no exceptions.
      */
     public function test_only_the_approved_numbered_scripts_invoke_create_service(): void
     {
@@ -582,15 +594,14 @@ class StagingDeploymentPackageTest extends TestCase
     }
 
     /**
-     * Only 01 may register the four runtime task definitions.
-     * migration-sequence.sh also calls register-task-definition, but for
-     * the migrate task definition specifically, as a historical,
-     * already-executed action predating this Stage B package (see
-     * HISTORICAL_MIGRATION_SCRIPT_EXCLUDED_FROM_SCAN) — it is deliberately
-     * excluded rather than rewritten, since rewriting it would risk
-     * implying the completed migration should be (or was) rerun.
+     * Only 01 may register any task definition, with no filename
+     * exception. The historical migration script (which used to register
+     * the migrate task definition) has been deleted and replaced by
+     * staging-deploy/migration-sequence-historical.md, which contains no
+     * executable commands — so this scan can require exact equality with
+     * a single-element list rather than carving out an exemption.
      */
-    public function test_only_01_and_the_historical_migration_script_invoke_register_task_definition(): void
+    public function test_only_01_invokes_register_task_definition(): void
     {
         $invokers = [];
         foreach ($this->allShellScriptsUnderStagingDeploy() as $script) {
@@ -601,16 +612,52 @@ class StagingDeploymentPackageTest extends TestCase
         }
 
         sort($invokers);
-        $expected = [...self::APPROVED_REGISTER_TASK_DEFINITION_SCRIPTS, self::HISTORICAL_MIGRATION_SCRIPT_EXCLUDED_FROM_SCAN];
+        $expected = self::APPROVED_REGISTER_TASK_DEFINITION_SCRIPTS;
         sort($expected);
 
         $this->assertSame(
             $expected,
             $invokers,
-            'Only 01-register-runtime-task-definitions.sh (runtime roles) and the historical '
-            .'migration-sequence.sh (migrate role only) may invoke `aws ecs register-task-definition`. '
+            'Only 01-register-runtime-task-definitions.sh may invoke `aws ecs register-task-definition`. '
             .'Found: '.implode(', ', $invokers)
         );
+    }
+
+    /**
+     * No shell script anywhere under staging-deploy/ may invoke
+     * `aws ecs run-task`, with no filename exception. The historical
+     * migration script and the old connectivity-probe script both used
+     * run-task and have been deleted/neutered so this holds unconditionally.
+     */
+    public function test_no_shell_script_under_staging_deploy_invokes_run_task(): void
+    {
+        foreach ($this->allShellScriptsUnderStagingDeploy() as $script) {
+            $contents = $this->stripShellComments(file_get_contents($this->scriptPath($script)));
+
+            $this->assertDoesNotMatchRegularExpression(
+                '/aws\s+ecs\s+run-task\b/',
+                $contents,
+                "staging-deploy/{$script} must never invoke aws ecs run-task."
+            );
+        }
+    }
+
+    public function test_historical_migration_script_no_longer_exists_as_an_executable_shell_script(): void
+    {
+        $this->assertFileDoesNotExist(
+            base_path('staging-deploy/migration-sequence.sh'),
+            'migration-sequence.sh must not exist as an executable script — the completed migration is '
+            .'recorded, with no executable commands, in migration-sequence-historical.md.'
+        );
+
+        $historicalDoc = base_path('staging-deploy/migration-sequence-historical.md');
+        $this->assertFileExists($historicalDoc, 'migration-sequence-historical.md must exist as the historical record.');
+
+        $contents = file_get_contents($historicalDoc);
+        $this->assertStringContainsString('275', $contents, 'Historical record must retain the verified migration-file count.');
+        $this->assertStringContainsString('firmsbase-staging-db-pre-migration-20260716-055138', $contents, 'Historical record must retain the recovery snapshot ID.');
+        $this->assertStringNotContainsString('aws ecs register-task-definition', $contents);
+        $this->assertStringNotContainsString('aws ecs run-task', $contents);
     }
 
     public function test_all_six_task_definition_json_files_reference_only_the_new_digest(): void

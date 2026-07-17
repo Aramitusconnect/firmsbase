@@ -16,6 +16,13 @@ from this sandbox. All artifacts below are reviewable files only.
 > `staging-deploy/00-http-exposure-preflight.sh` through
 > `staging-deploy/07-final-runtime-verification.sh`, using the current
 > approved digest in the committed `firmsbase-staging-*.json` files.
+> `migration-sequence.sh` has also been deleted — the completed migration
+> it documents is now recorded, with no executable commands, in
+> `staging-deploy/migration-sequence-historical.md`.
+> `connectivity-probes.sh` has been reduced to a non-executing stub — its
+> `run-task` diagnostic probes are superseded by the DB/Redis checks
+> already performed live by `03-verify-web-health.sh` and
+> `07-final-runtime-verification.sh`.
 
 ---
 

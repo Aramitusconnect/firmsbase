@@ -11,6 +11,9 @@ registration, no migration, no service creation, no IAM change.
 > repository. The approved runtime service workflow is
 > `staging-deploy/00-http-exposure-preflight.sh` through
 > `staging-deploy/07-final-runtime-verification.sh`.
+> `migration-sequence.sh` has also been deleted (see
+> `staging-deploy/migration-sequence-historical.md`) and
+> `connectivity-probes.sh` is now a non-executing stub.
 
 ---
 
