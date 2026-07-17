@@ -6,6 +6,15 @@ formats are now confirmed and applied. Nothing in this package has been
 executed. No AWS access, no secret retrieval, no task-definition
 registration, no migration, no service creation, no IAM change.
 
+> **Superseded (historical record only, do not follow):** the
+> `create-service-*.sh` files referenced below have been deleted from the
+> repository. The approved runtime service workflow is
+> `staging-deploy/00-http-exposure-preflight.sh` through
+> `staging-deploy/07-final-runtime-verification.sh`.
+> `migration-sequence.sh` has also been deleted (see
+> `staging-deploy/migration-sequence-historical.md`) and
+> `connectivity-probes.sh` is now a non-executing stub.
+
 ---
 
 ## Confirmed secret schemas (final)
