@@ -39,6 +39,46 @@ use Illuminate\Support\Facades\DB;
  * (FirmUserRole), mirroring FormAndDocumentAccessPolicyService's
  * APPROVAL_ROLES exactly — same roles, same reasoning: no AI actor
  * type exists, so this can never be satisfied by an AI approval.
+ *
+ * Tenant-context wiring (ai_approval_requests/ai_approval_events FORCE
+ * ROW LEVEL SECURITY activation, see
+ * database/migrations/2026_08_27_950016_prepare_row_level_security_and_force_rls_on_ai_approval_requests_table.php
+ * and .../950017_..._ai_approval_events_table.php): approve()/reject()
+ * both check the resolving actor's own firm_id against
+ * $request->firm_id — mirroring EmailMessageLinkingService::unlink()'s
+ * exact fix pattern — as a pure in-memory check that runs BEFORE any
+ * tenant context is established or any DB statement executes, so a
+ * mismatched actor throws with zero side effects. Only once that check
+ * (and assertPending()) has passed do the update-the-request and
+ * create-the-event writes run, together, inside a single outer
+ * runWithFirmContext() call keyed on $request->firm_id.
+ * runWithFirmContext() already opens its own internal DB::transaction,
+ * so the previously separate bare DB::transaction(...) wrapper in each
+ * method was removed rather than nested inside it. Neither method is
+ * ever called from inside another runWithFirmContext() call elsewhere
+ * in the codebase today, but wrapping the whole call (rather than only
+ * its arguments) at each call site is still the correct, nesting-safe
+ * convention per runWithFirmContext()'s own docblock. submit() is
+ * deliberately left unchanged, retaining its own bare DB::transaction():
+ * its only caller, AiUsageRecorderService::record(), already wraps its
+ * ENTIRE method body (including the call to submit()) in a single
+ * outer runWithFirmContext() call, and that method's own docblock
+ * explicitly states this wrap is "ALREADY comprehensive for the
+ * ai_usage_events/ai_approval_requests/ai_approval_events/
+ * ai_tool_actions writes performed inside this same method body" and
+ * that a later wave activating FORCE on those tables "must NOT re-wrap
+ * this method again." Adding a second runWithFirmContext() call inside
+ * submit() itself would be exactly the forbidden nested self-wrap
+ * (its own finally would clear the outer, already-active context
+ * before AiUsageRecorderService::record() finishes) — so submit() is
+ * correctly left untouched, not merely deferred.
+ *
+ * Known, deliberately-deferred gap (see the FORCE migrations above):
+ * no database-layer check ties ai_approval_requests.ai_usage_event_id/
+ * matter_id, or ai_approval_events.ai_approval_request_id's OWN parent
+ * firm_id, back to the row's own firm_id. That gap is not addressed by
+ * this wiring — it is an accepted, stated gap in the same class as
+ * matter_expenses'.
  */
 class AiApprovalWorkflowService
 {
@@ -92,9 +132,14 @@ class AiApprovalWorkflowService
     public function approve(AiApprovalRequest $request, FirmUser $actor, ?string $reason = null): AiApprovalRequest
     {
         $this->assertActorMayResolve($actor);
+
+        if ($actor->firm_id !== $request->firm_id) {
+            throw new \RuntimeException('Actor does not belong to the same firm as this AI approval request.');
+        }
+
         $this->assertPending($request);
 
-        return DB::transaction(function () use ($request, $actor, $reason) {
+        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $actor, $reason) {
             $request->update([
                 'status' => AiApprovalRequestStatus::Approved,
                 'resolved_at' => now(),
@@ -115,9 +160,14 @@ class AiApprovalWorkflowService
     public function reject(AiApprovalRequest $request, FirmUser $actor, ?string $reason = null): AiApprovalRequest
     {
         $this->assertActorMayResolve($actor);
+
+        if ($actor->firm_id !== $request->firm_id) {
+            throw new \RuntimeException('Actor does not belong to the same firm as this AI approval request.');
+        }
+
         $this->assertPending($request);
 
-        return DB::transaction(function () use ($request, $actor, $reason) {
+        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $actor, $reason) {
             $request->update([
                 'status' => AiApprovalRequestStatus::Rejected,
                 'resolved_at' => now(),
