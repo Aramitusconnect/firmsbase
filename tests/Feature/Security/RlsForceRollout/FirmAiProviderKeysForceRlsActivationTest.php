@@ -128,19 +128,21 @@ class FirmAiProviderKeysForceRlsActivationTest extends TestCase
      * forcedTables() is derived at call time from every
      * database/migrations/*_force_rls_on_*_table.php migration file
      * present in the repository (see
-     * RowLevelSecurityCoverageMappingService::discoverForcedTables()) —
-     * this checkpoint's own migration file adds exactly one to that
-     * count. As of this checkpoint, exactly 61 such migration files
-     * exist (60 from every prior checkpoint plus this one) — no more,
-     * no less.
+     * RowLevelSecurityCoverageMappingService::discoverForcedTables()).
+     * This checkpoint's own migration file was originally the only new
+     * one present when this test was first written (60 -> 61). Once
+     * integrated alongside its four Section 39A-5 Wave 3 siblings
+     * (ai_usage_events, ai_tool_actions, ai_approval_requests,
+     * ai_approval_events), the count reflects all five together
+     * (60 -> 65).
      */
-    public function test_exactly_sixty_one_tables_have_force_row_level_security_active_no_more_no_less(): void
+    public function test_exactly_sixty_five_tables_have_force_row_level_security_active_no_more_no_less(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService;
         $forced = $coverage->forcedTables();
 
         $this->assertContains('firm_ai_provider_keys', $forced, 'firm_ai_provider_keys must be discoverable as FORCE-active by forcedTables().');
-        $this->assertCount(61, $forced, 'Exactly 61 tables must have a FORCE-activation migration after this checkpoint — no more, no less.');
+        $this->assertCount(65, $forced, 'Exactly 65 tables must have a FORCE-activation migration after Section 39A-5 Wave 3 — no more, no less.');
     }
 
     public function test_the_policy_has_both_an_explicit_using_and_with_check_clause(): void

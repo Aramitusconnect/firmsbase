@@ -75,10 +75,13 @@ class PrivateEnterpriseSettingsForceRlsActivationTest extends TestCase
         // the subsequent Section 39A-5 Wave 2 integration commit did,
         // together with its three sibling tables (email_visibility_rules,
         // matter_expenses, email_message_links), bringing the count from
-        // fifty-six to sixty. This test now runs against the integrated
-        // state.
+        // fifty-six to sixty. Section 39A-5 Wave 3 integration then
+        // added five more (ai_usage_events, ai_tool_actions,
+        // firm_ai_provider_keys, ai_approval_requests,
+        // ai_approval_events), bringing it to sixty-five. This test now
+        // runs against the fully-integrated state.
         $preparedTables = $coverage->preparedTables();
-        $this->assertCount(60, $preparedTables, 'Section 39A-5 Wave 2 integration must have moved private_enterprise_settings and its three sibling tables into PREPARED_TABLES together.');
+        $this->assertCount(65, $preparedTables, 'Section 39A-5 Wave 2 and Wave 3 integration must have moved private_enterprise_settings and every sibling table from both waves into PREPARED_TABLES.');
 
         foreach ($preparedTables as $table) {
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);
@@ -101,10 +104,12 @@ class PrivateEnterpriseSettingsForceRlsActivationTest extends TestCase
         $forced = $coverage->forcedTables();
 
         $this->assertContains('private_enterprise_settings', $forced);
-        // Sixty after Section 39A-5 Wave 2 integration (fifty-six prior
-        // plus this table's three siblings from the same wave:
-        // email_visibility_rules, matter_expenses, email_message_links).
-        $this->assertCount(60, $forced, 'Exactly 60 tables must have a FORCE-activation migration after Section 39A-5 Wave 2 — no more, no less.');
+        // Sixty-five after Section 39A-5 Wave 3 integration (sixty
+        // after Wave 2 — fifty-six prior plus this table's three
+        // siblings from that wave — plus five more from Wave 3:
+        // ai_usage_events, ai_tool_actions, firm_ai_provider_keys,
+        // ai_approval_requests, ai_approval_events).
+        $this->assertCount(65, $forced, 'Exactly 65 tables must have a FORCE-activation migration after Section 39A-5 Wave 3 — no more, no less.');
 
         foreach ($forced as $table) {
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);

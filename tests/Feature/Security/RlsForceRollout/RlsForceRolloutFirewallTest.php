@@ -502,6 +502,7 @@ class RlsForceRolloutFirewallTest extends TestCase
             // fifty-six to sixty — same additive-only pattern, no
             // existing assertion removed or weakened.
             'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links',
+            'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -928,6 +929,18 @@ class RlsForceRolloutFirewallTest extends TestCase
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950005_prepare_row_level_security_and_force_rls_on_email_visibility_rules_table.php'));
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950011_prepare_row_level_security_and_force_rls_on_private_enterprise_settings_table.php'));
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950012_prepare_row_level_security_and_force_rls_on_matter_expenses_table.php'));
+    }
+
+    public function test_the_wave_3_force_rls_migration_files_exist(): void
+    {
+        // Section 39A-5 Wave 3 — the third coordinated multi-table
+        // wave (AI governance domain), five combined prepare+force
+        // migrations landed together via a wave-integration commit.
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950013_prepare_row_level_security_and_force_rls_on_ai_usage_events_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950014_prepare_row_level_security_and_force_rls_on_ai_tool_actions_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950015_prepare_row_level_security_and_force_rls_on_firm_ai_provider_keys_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950016_prepare_row_level_security_and_force_rls_on_ai_approval_requests_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950017_prepare_row_level_security_and_force_rls_on_ai_approval_events_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

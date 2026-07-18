@@ -155,7 +155,11 @@ class AiToolActionsForceRlsActivationTest extends TestCase
     public function test_missing_tenant_context_cannot_insert_ai_tool_actions(): void
     {
         $firm = Firm::factory()->create();
-        $usageEvent = AiUsageEvent::factory()->forFirm($firm)->create();
+        // ai_usage_events also has FORCE ROW LEVEL SECURITY active (no
+        // context-hold create() override of its own, by design), so
+        // this fixture row must be created under its own tenant
+        // context before context is cleared below for the actual test.
+        $usageEvent = $this->runWithFirmContext($firm, fn () => AiUsageEvent::factory()->forFirm($firm)->create());
 
         (new TenantContextService)->clearDatabaseTenantContext();
 

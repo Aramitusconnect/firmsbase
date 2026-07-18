@@ -169,7 +169,7 @@ class SecurityEventsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'customer_success_health_scores', 'security_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'customer_success_health_scores', 'security_events']);
 
         $actuallyForced = [];
 
@@ -186,7 +186,7 @@ class SecurityEventsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(60, count($actuallyForced), 'Exactly fifty-two prepared tables must be FORCE RLS enabled after Section 39A-3L, Phase B6, Checkpoint 34 — no more, no less.');
+        $this->assertSame(65, count($actuallyForced), 'Exactly fifty-two prepared tables must be FORCE RLS enabled after Section 39A-3L, Phase B6, Checkpoint 34 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -206,7 +206,7 @@ class SecurityEventsForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'customer_success_health_scores', 'security_events']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'customer_success_health_scores', 'security_events']);
 
         sort($forced);
         $preparedTables = $coverage->preparedTables();

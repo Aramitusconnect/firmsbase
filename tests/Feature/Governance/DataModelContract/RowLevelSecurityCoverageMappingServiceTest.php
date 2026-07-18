@@ -58,9 +58,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Phase 14 webhooks.
         $this->assertContains('webhook_events', $missing);
         $this->assertContains('webhook_subscriptions', $missing);
-        // Phase 15 AI governance.
-        $this->assertContains('ai_usage_events', $missing);
-        $this->assertContains('firm_ai_provider_keys', $missing);
+        // Phase 15 AI governance no longer has a spot-check example
+        // here: all five of its tables (ai_usage_events, ai_tool_actions,
+        // firm_ai_provider_keys, ai_approval_requests, ai_approval_events)
+        // were moved into PREPARED_TABLES by Section 39A-5 Wave 3.
         // Phase 17 governance.
         $this->assertContains('legal_holds', $missing);
         $this->assertContains('deletion_requests', $missing);
@@ -137,8 +138,13 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // matter_expenses, and email_message_links moved from
         // MISSING_PREPARED_TABLES into PREPARED_TABLES (56 -> 60,
         // 57 -> 53); tenantOwnedTables() remains unchanged (113).
-        $this->assertCount(60, $this->service->preparedTables());
-        $this->assertCount(53, $this->service->missingPreparedTables());
+        // Narrowly updated AGAIN by Section 39A-5 Wave 3 —
+        // ai_usage_events, ai_tool_actions, firm_ai_provider_keys,
+        // ai_approval_requests, and ai_approval_events moved from
+        // MISSING_PREPARED_TABLES into PREPARED_TABLES (60 -> 65,
+        // 53 -> 48); tenantOwnedTables() remains unchanged (113).
+        $this->assertCount(65, $this->service->preparedTables());
+        $this->assertCount(48, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
         $this->assertCount(24, $this->service->exemptTables());

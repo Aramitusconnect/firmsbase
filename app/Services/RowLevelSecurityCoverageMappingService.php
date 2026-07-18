@@ -137,6 +137,19 @@ class RowLevelSecurityCoverageMappingService
         // 2026_08_27_950012_prepare_row_level_security_and_force_rls_on_matter_expenses_table.php.
         // All four moved here from MISSING_PREPARED_TABLES below.
         'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links',
+        // Section 39A-5 Wave 3 (AI governance domain) — five tables:
+        // four independent (ai_usage_events, ai_tool_actions,
+        // firm_ai_provider_keys) plus a combined pair
+        // (ai_approval_requests, ai_approval_events) implemented as
+        // one unit since both are written exclusively by
+        // AiApprovalWorkflowService:
+        // 2026_08_27_950013_prepare_row_level_security_and_force_rls_on_ai_usage_events_table.php,
+        // 2026_08_27_950014_prepare_row_level_security_and_force_rls_on_ai_tool_actions_table.php,
+        // 2026_08_27_950015_prepare_row_level_security_and_force_rls_on_firm_ai_provider_keys_table.php,
+        // 2026_08_27_950016_prepare_row_level_security_and_force_rls_on_ai_approval_requests_table.php,
+        // 2026_08_27_950017_prepare_row_level_security_and_force_rls_on_ai_approval_events_table.php.
+        // All five moved here from MISSING_PREPARED_TABLES below.
+        'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events',
     ];
 
     /**
@@ -178,17 +191,22 @@ class RowLevelSecurityCoverageMappingService
      * email_message_links from this array (moved to PREPARED_TABLES
      * above) — the second coordinated multi-table wave.
      *
+     * Section 39A-5 Wave 3 removed ai_usage_events, ai_tool_actions,
+     * firm_ai_provider_keys, ai_approval_requests, and
+     * ai_approval_events from this array (moved to PREPARED_TABLES
+     * above) — the third coordinated multi-table wave, covering the
+     * AI governance domain.
+     *
      * @var array<int, string>
      */
     private const MISSING_PREPARED_TABLES = [
-        'accounting_export_batches', 'accounting_export_lines', 'ai_approval_events',
-        'ai_approval_requests', 'ai_tool_actions',
-        'ai_usage_events', 'chart_of_accounts',
+        'accounting_export_batches', 'accounting_export_lines',
+        'chart_of_accounts',
         'deletion_requests', 'deployment_health_checks',
         'document_hashes', 'email_accounts', 'email_attachments',
         'email_messages', 'email_sync_events',
         'expense_approvals', 'expense_categories',
-        'expense_receipts', 'expenses', 'export_jobs', 'firm_ai_provider_keys',
+        'expense_receipts', 'expenses', 'export_jobs',
         'fleet_migration_instance_status', 'form_drafts',
         'form_review_events', 'generated_document_events', 'generated_documents',
         'implementation_projects', 'import_batches', 'key_destruction_requests',

@@ -75,7 +75,18 @@ class AiToolActionFactory extends Factory
         return [
             'firm_id' => $firm->id,
             'matter_id' => null,
-            'ai_usage_event_id' => AiUsageEvent::factory()->forFirm($firm),
+            // Eagerly created and wrapped in its own tenant context
+            // (not passed as a lazy Factory instance) because
+            // ai_usage_events also has FORCE ROW LEVEL SECURITY with no
+            // context-hold create() override of its own (by design —
+            // see AiUsageEventFactory) — Laravel resolves a nested
+            // Factory value during make(), before this factory's own
+            // create() override establishes context below, so a lazy
+            // reference here would insert with no context active.
+            'ai_usage_event_id' => (new TenantContextService())->runWithFirmContext(
+                $firm,
+                fn () => AiUsageEvent::factory()->forFirm($firm)->create(),
+            )->id,
             'tool_name' => 'draft_summary_tool',
             'input_snapshot_json' => ['note' => 'fixture input'],
             'output_snapshot_json' => ['note' => 'fixture output'],
@@ -88,7 +99,18 @@ class AiToolActionFactory extends Factory
     {
         return $this->state(fn () => [
             'firm_id' => $firm->id,
-            'ai_usage_event_id' => AiUsageEvent::factory()->forFirm($firm),
+            // Eagerly created and wrapped in its own tenant context
+            // (not passed as a lazy Factory instance) because
+            // ai_usage_events also has FORCE ROW LEVEL SECURITY with no
+            // context-hold create() override of its own (by design —
+            // see AiUsageEventFactory) — Laravel resolves a nested
+            // Factory value during make(), before this factory's own
+            // create() override establishes context below, so a lazy
+            // reference here would insert with no context active.
+            'ai_usage_event_id' => (new TenantContextService())->runWithFirmContext(
+                $firm,
+                fn () => AiUsageEvent::factory()->forFirm($firm)->create(),
+            )->id,
         ]);
     }
 

@@ -152,7 +152,7 @@ class MaintenanceWindowsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'customer_success_health_scores', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'customer_success_health_scores', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
 
         $actuallyForced = [];
 
@@ -169,7 +169,7 @@ class MaintenanceWindowsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(60, count($actuallyForced), 'Exactly forty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 30 — no more, no less.');
+        $this->assertSame(65, count($actuallyForced), 'Exactly forty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 30 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -179,7 +179,7 @@ class MaintenanceWindowsForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'customer_success_health_scores', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'customer_success_health_scores', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
 
         // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is
         // the final checkpoint in this arc: $forced now equals the FULL

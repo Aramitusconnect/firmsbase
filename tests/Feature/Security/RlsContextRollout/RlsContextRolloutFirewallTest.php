@@ -60,6 +60,7 @@ class RlsContextRolloutFirewallTest extends TestCase
             'customer_success_health_scores',
             'ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings',
             'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links',
+            'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events',
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
@@ -418,7 +419,17 @@ class RlsContextRolloutFirewallTest extends TestCase
                 && $path !== 'database/migrations/2026_08_27_950004_prepare_row_level_security_and_force_rls_on_email_message_links_table.php'
                 && $path !== 'database/migrations/2026_08_27_950005_prepare_row_level_security_and_force_rls_on_email_visibility_rules_table.php'
                 && $path !== 'database/migrations/2026_08_27_950011_prepare_row_level_security_and_force_rls_on_private_enterprise_settings_table.php'
-                && $path !== 'database/migrations/2026_08_27_950012_prepare_row_level_security_and_force_rls_on_matter_expenses_table.php',
+                && $path !== 'database/migrations/2026_08_27_950012_prepare_row_level_security_and_force_rls_on_matter_expenses_table.php'
+                // Section 39A-5 Wave 3 (this batch, a later, distinct
+                // arc, AI governance domain) legitimately added five
+                // combined prepare-and-force migrations together:
+                // ai_usage_events, ai_tool_actions, firm_ai_provider_keys,
+                // ai_approval_requests, and ai_approval_events.
+                && $path !== 'database/migrations/2026_08_27_950013_prepare_row_level_security_and_force_rls_on_ai_usage_events_table.php'
+                && $path !== 'database/migrations/2026_08_27_950014_prepare_row_level_security_and_force_rls_on_ai_tool_actions_table.php'
+                && $path !== 'database/migrations/2026_08_27_950015_prepare_row_level_security_and_force_rls_on_firm_ai_provider_keys_table.php'
+                && $path !== 'database/migrations/2026_08_27_950016_prepare_row_level_security_and_force_rls_on_ai_approval_requests_table.php'
+                && $path !== 'database/migrations/2026_08_27_950017_prepare_row_level_security_and_force_rls_on_ai_approval_events_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));

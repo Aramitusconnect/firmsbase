@@ -196,6 +196,7 @@ class ConsultationOutcomesForceRlsActivationTest extends TestCase
         $expectedForced = [
             'ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings',
             'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links',
+            'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events',
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'customer_success_health_scores',
@@ -279,6 +280,7 @@ class ConsultationOutcomesForceRlsActivationTest extends TestCase
         $forced = [
             'ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings',
             'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links',
+            'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events',
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'customer_success_health_scores',
