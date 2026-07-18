@@ -81,7 +81,11 @@ class SchemaTenantFirewallTest extends TestCase
         // 4 computes, so a future edit to the RLS-preparation
         // migrations that silently drops a CREATE POLICY or
         // ENABLE ROW LEVEL SECURITY statement is caught here too, not
-        // only inside the command's own internals.
+        // only inside the command's own internals. Recognizes both the
+        // original batch-style `private array $tables = [...]` shape
+        // and (Section 39A-5 onward) the single-table
+        // `private const TABLE = '...'` shape used by combined
+        // prepare+force migrations.
         $service = new RowLevelSecurityCoverageMappingService;
         $prepared = $service->preparedTables();
 
@@ -94,11 +98,13 @@ class SchemaTenantFirewallTest extends TestCase
             $source = file_get_contents($path);
             $this->assertNotFalse($source);
 
-            if (! preg_match('/private array \$tables\s*=\s*\[(.*?)\];/s', $source, $arrayMatch)) {
+            if (preg_match('/private array \$tables\s*=\s*\[(.*?)\];/s', $source, $arrayMatch)) {
+                preg_match_all("/'([a-z_][a-z0-9_]*)'/", $arrayMatch[1], $tableMatches);
+            } elseif (preg_match('/private const TABLE\s*=\s*\'([a-z_][a-z0-9_]*)\'/', $source, $constMatch)) {
+                $tableMatches = [1 => [$constMatch[1]]];
+            } else {
                 continue;
             }
-
-            preg_match_all("/'([a-z_][a-z0-9_]*)'/", $arrayMatch[1], $tableMatches);
 
             $hasEnable = stripos($source, 'ENABLE ROW LEVEL SECURITY') !== false;
             $hasPolicy = stripos($source, 'CREATE POLICY') !== false;

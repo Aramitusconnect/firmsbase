@@ -361,8 +361,13 @@ class SchemaTenantFirewallCommand extends Command
         $failed = false;
 
         // 4a — static migration-source check. Every RLS-preparation
-        // migration loops over a `private array $tables = [...]` list
-        // and must contain BOTH "ENABLE ROW LEVEL SECURITY" and
+        // migration declares which table(s) it covers either via the
+        // original batch-style `private array $tables = [...]` list, or
+        // (Section 39A-5 onward, for single-table combined prepare+force
+        // migrations closing one missingPreparedTables() gap at a time)
+        // the same single-table `private const TABLE = '...'` shape
+        // already used by every FORCE-only migration. Either way, the
+        // migration must contain BOTH "ENABLE ROW LEVEL SECURITY" and
         // "CREATE POLICY" in its up() method for the tables it covers.
         $migrationFiles = glob(database_path('migrations/'.self::RLS_PREPARATION_MIGRATION_GLOB)) ?: [];
         $tablesConfirmedByMigration = [];
@@ -373,12 +378,14 @@ class SchemaTenantFirewallCommand extends Command
                 continue;
             }
 
-            if (! preg_match('/private array \$tables\s*=\s*\[(.*?)\];/s', $source, $arrayMatch)) {
+            if (preg_match('/private array \$tables\s*=\s*\[(.*?)\];/s', $source, $arrayMatch)) {
+                preg_match_all("/'([a-z_][a-z0-9_]*)'/", $arrayMatch[1], $tableMatches);
+                $tablesInThisMigration = $tableMatches[1];
+            } elseif (preg_match('/private const TABLE\s*=\s*\'([a-z_][a-z0-9_]*)\'/', $source, $constMatch)) {
+                $tablesInThisMigration = [$constMatch[1]];
+            } else {
                 continue;
             }
-
-            preg_match_all("/'([a-z_][a-z0-9_]*)'/", $arrayMatch[1], $tableMatches);
-            $tablesInThisMigration = $tableMatches[1];
 
             $hasEnable = stripos($source, 'ENABLE ROW LEVEL SECURITY') !== false;
             $hasPolicy = stripos($source, 'CREATE POLICY') !== false;

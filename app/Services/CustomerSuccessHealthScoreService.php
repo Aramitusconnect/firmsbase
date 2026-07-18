@@ -33,6 +33,15 @@ use App\Models\ProductAnalyticsEvent;
  * out of this checkpoint's narrow payment_plans scope (compute() has
  * no production caller today, only tests/governance mapping
  * references, which is why this has not yet surfaced as a live bug).
+ *
+ * Section 39A-5, Checkpoint 1 — customer_success_health_scores itself
+ * is now FORCE-RLS protected. The final CustomerSuccessHealthScore::
+ * create() call below is now self-wrapped in its own tight
+ * runWithFirmContext($firm, ...) call — mirroring the payment_plans
+ * wrap immediately above exactly — so the INSERT succeeds under the
+ * new WITH CHECK policy. This is the only change this checkpoint makes
+ * to this method; every count computed above (including the
+ * still-unwrapped pre-existing gap noted above) is unchanged.
  */
 class CustomerSuccessHealthScoreService
 {
@@ -71,7 +80,9 @@ class CustomerSuccessHealthScoreService
             $failedJobsCount,
         );
 
-        return CustomerSuccessHealthScore::create([
+        $subscriptionStatus = $firm->billingAccount?->status?->value;
+
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => CustomerSuccessHealthScore::create([
             'firm_id' => $firm->id,
             'computed_at' => now(),
             'score' => $score,
@@ -89,9 +100,9 @@ class CustomerSuccessHealthScoreService
             'storage_bytes' => null,
             'failed_jobs_count' => $failedJobsCount,
             'open_tickets_count' => null,
-            'subscription_status' => $firm->billingAccount?->status?->value,
+            'subscription_status' => $subscriptionStatus,
             'risk_flags' => $riskFlags,
-        ]);
+        ]));
     }
 
     private function onboardingProgressPercent(Firm $firm): ?int

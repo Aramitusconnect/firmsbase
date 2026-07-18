@@ -113,6 +113,13 @@ class RowLevelSecurityCoverageMappingService
         'incident_events', 'maintenance_windows', 'pilot_feedback_items',
         // Phase 6 — 2026_07_09_900024_extend_row_level_security_to_phase_6_tenant_tables.php
         'seat_allocations', 'template_upgrade_previews', 'template_upgrade_logs',
+        // Section 39A-5, Checkpoint 1 — 2026_08_26_940001_prepare_row_level_security_and_force_rls_on_customer_success_health_scores_table.php.
+        // Unlike every table above, this one had NO prior RLS preparation
+        // migration; the policy was created and forced in the same
+        // migration (see that migration's own docblock). Moved here from
+        // MISSING_PREPARED_TABLES below, not merely appended — the table
+        // no longer belongs in that array at all.
+        'customer_success_health_scores',
     ];
 
     /**
@@ -138,12 +145,17 @@ class RowLevelSecurityCoverageMappingService
      * tracking correction: none of these 18 tables' live RLS state was
      * changed by that section.
      *
+     * Section 39A-5, Checkpoint 1 removed customer_success_health_scores
+     * from this array (moved to PREPARED_TABLES above) — it now has a
+     * real RLS policy and is FORCE-enforced; see that constant's own
+     * docblock note.
+     *
      * @var array<int, string>
      */
     private const MISSING_PREPARED_TABLES = [
         'accounting_export_batches', 'accounting_export_lines', 'ai_approval_events',
         'ai_approval_requests', 'ai_retrieval_indexes', 'ai_tool_actions',
-        'ai_usage_events', 'chart_of_accounts', 'customer_success_health_scores',
+        'ai_usage_events', 'chart_of_accounts',
         'deletion_requests', 'deployment_configs', 'deployment_health_checks',
         'document_hashes', 'email_accounts', 'email_attachments',
         'email_message_links', 'email_messages', 'email_sync_events',

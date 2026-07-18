@@ -6,9 +6,9 @@
 
 ---
 
-## 1. Primary ongoing gap: 61 uncovered tenant-owned tables
+## 1. Primary ongoing gap: 60 uncovered tenant-owned tables
 
-**Count: 61.** These are tenant-owned tables with **no RLS preparation at all** — no `ENABLE ROW LEVEL SECURITY`, no policy. This is a corrected, larger figure than the previously-documented "43 uncovered" snapshot from 2026-07-10 (see `docs/governance/section-40-limited-pilot-safety-gate.md` and `docs/security/section-39a-post-pilot-critical-rls-checkpoint.md` for the corrected historical record). The growth from 43 to 61 is a **scoping correction**, not a regression: a later Wave 0 inventory sweep found more true tenant-owned tables than the original 39A-4 scope had captured — no table that was previously covered lost its coverage.
+**Count: 60** (was 61 as of the Wave 0/1 snapshot this document was originally written against; Section 39A-5, Checkpoint 1 closed one of them — `customer_success_health_scores` — by giving it a real RLS policy and FORCE activation in the same batch; see `docs/governance/future-table-requirements.md` for the closure shape this followed). These are tenant-owned tables with **no RLS preparation at all** — no `ENABLE ROW LEVEL SECURITY`, no policy. The original 61 was a corrected, larger figure than the previously-documented "43 uncovered" snapshot from 2026-07-10 (see `docs/governance/section-40-limited-pilot-safety-gate.md` and `docs/security/section-39a-post-pilot-critical-rls-checkpoint.md` for the corrected historical record). The growth from 43 to 61 was a **scoping correction**, not a regression: a later Wave 0 inventory sweep found more true tenant-owned tables than the original 39A-4 scope had captured — no table that was previously covered lost its coverage.
 
 - **Severity:** High — matches the severity already assigned to `rls_prepared_not_enforced` in `ComplianceGapRegistryService`.
 - **Suggested owning gate:** the ongoing 39A-4-successor classification/preparation effort (Wave 1 and its successor waves).

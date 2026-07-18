@@ -198,6 +198,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
         // batch, covering communication_consents) for the same reason —
         // additive only, no existing assertion removed or weakened.
         $expectedForced = [
+            'customer_success_health_scores',
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
@@ -278,6 +279,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
         // batch, covering communication_consents) for the same reason —
         // additive only, no existing assertion removed or weakened.
         $forced = [
+            'customer_success_health_scores',
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',

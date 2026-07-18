@@ -160,7 +160,7 @@ class ContactsForceRlsActivationTest extends TestCase
 
         // Narrowly updated by Section 39A-3L, Checkpoint 27 (backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 28 (health_checks) for the same reason — additive only, no existing assertion removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['customer_success_health_scores', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
 
         $actuallyForced = [];
 
@@ -178,7 +178,7 @@ class ContactsForceRlsActivationTest extends TestCase
         sort($actuallyForced);
 
         // Narrowly updated by Section 39A-3L, Checkpoint 26 (parties) for the same reason — additive only, no existing assertion removed or weakened.
-        $this->assertSame(52, count($actuallyForced), 'Exactly forty-three prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 25 — no more, no less.');
+        $this->assertSame(53, count($actuallyForced), 'Exactly forty-three prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 25 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -190,7 +190,7 @@ class ContactsForceRlsActivationTest extends TestCase
         $coverage = new RowLevelSecurityCoverageMappingService();
         // Narrowly updated by Section 39A-3L, Checkpoint 27 (backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 28 (health_checks) for the same reason — additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['customer_success_health_scores', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
 
         // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is
         // the final checkpoint in this arc: $forced now equals the FULL

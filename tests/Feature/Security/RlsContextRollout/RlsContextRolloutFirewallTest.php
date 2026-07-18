@@ -57,6 +57,7 @@ class RlsContextRolloutFirewallTest extends TestCase
         // (Section 39A-2) never touched FORCE state; the remaining
         // prepared tables must still be unforced.
         $forcedByLaterBranch = [
+            'customer_success_health_scores',
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',

@@ -122,8 +122,13 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
     {
         // Locks in the Section 39A-4A.1 registry correction: 18 tables
         // moved from "untracked" into MISSING_PREPARED_TABLES.
-        $this->assertCount(52, $this->service->preparedTables());
-        $this->assertCount(61, $this->service->missingPreparedTables());
+        // Narrowly updated by Section 39A-5, Checkpoint 1 —
+        // customer_success_health_scores moved from
+        // MISSING_PREPARED_TABLES into PREPARED_TABLES (52 -> 53,
+        // 61 -> 60); tenantOwnedTables() is the union of both and is
+        // unchanged (113).
+        $this->assertCount(53, $this->service->preparedTables());
+        $this->assertCount(60, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
         $this->assertCount(24, $this->service->exemptTables());
@@ -142,11 +147,15 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
     {
         $missing = $this->service->missingPreparedTables();
 
+        // customer_success_health_scores removed from this list by
+        // Section 39A-5, Checkpoint 1 — it was moved into
+        // PREPARED_TABLES (and given a real RLS policy + FORCE
+        // activation) in the same batch, so it is no longer missing.
         foreach ([
             'trust_approval_events', 'document_hashes', 'webhook_deliveries',
             'signature_events', 'webhook_delivery_attempts', 'webhook_secrets',
             'matter_trust_balances', 'accounting_export_lines',
-            'customer_success_health_scores', 'email_sync_events',
+            'email_sync_events',
             'fleet_migration_instance_status', 'form_review_events',
             'generated_document_events', 'implementation_projects', 'matter_expenses',
             'pdf_view_events', 'support_access_requests', 'support_access_sessions',

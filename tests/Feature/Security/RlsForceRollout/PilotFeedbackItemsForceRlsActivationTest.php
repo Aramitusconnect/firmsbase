@@ -150,7 +150,7 @@ class PilotFeedbackItemsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['pilot_feedback_items', 'timeline_events', 'security_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['customer_success_health_scores', 'pilot_feedback_items', 'timeline_events', 'security_events']);
 
         $actuallyForced = [];
 
@@ -167,7 +167,7 @@ class PilotFeedbackItemsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(52, count($actuallyForced), 'Exactly fifty prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 32 — no more, no less.');
+        $this->assertSame(53, count($actuallyForced), 'Exactly fifty prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 32 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -177,7 +177,7 @@ class PilotFeedbackItemsForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['pilot_feedback_items', 'timeline_events', 'security_events']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['customer_success_health_scores', 'pilot_feedback_items', 'timeline_events', 'security_events']);
 
         // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is
         // the final checkpoint in this arc: $forced now equals the FULL

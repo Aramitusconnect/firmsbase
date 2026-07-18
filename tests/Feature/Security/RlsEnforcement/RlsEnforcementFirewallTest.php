@@ -193,7 +193,15 @@ class RlsEnforcementFirewallTest extends TestCase
                 // Section 39A-3L, Checkpoint 24 (this batch, a later,
                 // distinct staged-FORCE-activation branch) legitimately
                 // added a notification_events-only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php',
+                && $path !== 'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php'
+                // Section 39A-5, Checkpoint 1 (a later, distinct arc
+                // drawing from RowLevelSecurityCoverageMappingService::
+                // missingPreparedTables() rather than the now-fully-
+                // forced 39A-3 PREPARED_TABLES arc) legitimately added a
+                // combined prepare-and-force migration for
+                // customer_success_health_scores, the first uncovered
+                // table to be closed after 39A-3L completed.
+                && $path !== 'database/migrations/2026_08_26_940001_prepare_row_level_security_and_force_rls_on_customer_success_health_scores_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A must add no migrations in this pass, but found: '.implode(', ', $changed));

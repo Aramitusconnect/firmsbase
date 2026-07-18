@@ -14,15 +14,23 @@ use App\ValueObjects\OrganizationSuccessRollup;
  * (CustomerSuccessSnapshot/OrganizationSuccessRollup); never exposes
  * document content. No UI/controller/route exists for this in Phase 7
  * — this is backend-only, per the approved scope.
+ *
+ * Section 39A-5, Checkpoint 1 — customer_success_health_scores is now
+ * FORCE-RLS protected. snapshotFor() now self-wraps its read in
+ * runWithFirmContext($firm, ...) so the query succeeds under the new
+ * policy. The explicit ->where('firm_id', $firm->id)` filter is
+ * deliberately kept even though the database policy now also enforces
+ * it — RLS is the real enforcement boundary, the application filter
+ * remains as defense in depth, exactly as before this checkpoint.
  */
 class CustomerSuccessConsoleService
 {
     public function snapshotFor(Firm $firm): ?CustomerSuccessSnapshot
     {
-        $latest = CustomerSuccessHealthScore::query()
+        $latest = (new TenantContextService)->runWithFirmContext($firm, fn () => CustomerSuccessHealthScore::query()
             ->where('firm_id', $firm->id)
             ->orderByDesc('computed_at')
-            ->first();
+            ->first());
 
         if ($latest === null) {
             return null;

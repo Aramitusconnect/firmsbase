@@ -283,6 +283,23 @@ use Tests\TestCase;
  * the new read/write policy shape (a third distinct nullable-firm_id
  * design, different from both the six "easy" tables and
  * timeline_events).
+ *
+ * Narrowly updated AGAIN by Section 39A-5, Checkpoint 1 (this repo's
+ * fifty-third staged FORCE activation batch, and the FIRST drawn from
+ * missingPreparedTables() rather than the now-fully-forced 39A-3
+ * PREPARED_TABLES arc — every one of those 52 tables already had FORCE
+ * active as of the security_events checkpoint above) covering
+ * customer_success_health_scores, database/migrations/2026_08_26_
+ * 940001_prepare_row_level_security_and_force_rls_on_customer_success_health_scores_table.php,
+ * to extend the "exactly these tables are forced" list from
+ * fifty-two to fifty-three tables and add this batch's own
+ * migration-existence check — same additive-only pattern, no existing
+ * assertion removed or weakened. Unlike every prior checkpoint, this
+ * migration both prepares (ENABLE ROW LEVEL SECURITY + CREATE POLICY,
+ * with an explicit WITH CHECK clause) and forces the table in a single
+ * batch, since no prior preparation migration existed for it; see this
+ * batch's own CustomerSuccessHealthScoresForceRlsActivationTest for
+ * the full proof.
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -453,6 +470,20 @@ class RlsForceRolloutFirewallTest extends TestCase
             // additive-only pattern, no existing assertion removed or
             // weakened.
             'security_events',
+            // Narrowly updated AGAIN by Section 39A-5, Checkpoint 1 —
+            // the first staged FORCE activation batch drawn from
+            // missingPreparedTables() rather than the now-fully-forced
+            // 39A-3 PREPARED_TABLES arc, covering
+            // customer_success_health_scores (database/migrations/
+            // 2026_08_26_940001_prepare_row_level_security_and_force_
+            // rls_on_customer_success_health_scores_table.php) — extends the "exactly
+            // these tables are forced" list from fifty-two to
+            // fifty-three tables. Unlike every prior entry in this
+            // list, this table had no pre-existing RLS preparation;
+            // the migration both prepares and forces it in the same
+            // batch — same additive-only pattern, no existing
+            // assertion removed or weakened.
+            'customer_success_health_scores',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -846,6 +877,18 @@ class RlsForceRolloutFirewallTest extends TestCase
         // highest production-blast-radius checkpoint in the whole
         // mission.
         $this->assertFileExists(base_path('database/migrations/2026_08_25_930034_force_rls_on_security_events_table.php'));
+    }
+
+    public function test_the_customer_success_health_scores_force_rls_migration_file_exists(): void
+    {
+        // Section 39A-5, Checkpoint 1's own migration — same
+        // file-existence reasoning as the checks above. This is the
+        // first checkpoint in this file's own history to draw its
+        // table from missingPreparedTables() rather than the
+        // now-fully-forced PREPARED_TABLES arc, and the first migration
+        // to both prepare (ENABLE ROW LEVEL SECURITY + CREATE POLICY)
+        // and force a table in a single batch.
+        $this->assertFileExists(base_path('database/migrations/2026_08_26_940001_prepare_row_level_security_and_force_rls_on_customer_success_health_scores_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void
