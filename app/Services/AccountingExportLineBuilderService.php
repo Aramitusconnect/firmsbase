@@ -29,6 +29,22 @@ use Illuminate\Support\Collection;
  *
  * chart_of_accounts_id may resolve to null. The line is still created
  * as Pending and will fail during local simulation with a logged error.
+ *
+ * chart_of_accounts, expenses, and accounting_export_lines all now have
+ * permanent FORCE ROW LEVEL SECURITY (see
+ * database/migrations/2026_08_27_950018/950020/950024_*.php). Every
+ * constituent read/write path below (eligibleExpenses(),
+ * resolveActiveAccountByType(), buildLine() — plus the already-wrapped
+ * eligibleInvoices()/eligibleOperatingPayments(), unchanged) gets its
+ * OWN independent runWithFirmContext() wrap, called once per call site
+ * exactly as today. buildForBatch() itself gains NO wrap of its own —
+ * it remains a plain orchestrating loop; this deliberately introduces
+ * NO new cross-line/cross-method transaction/atomicity guarantee that
+ * doesn't already exist today (each of these units of work was already
+ * independent; this only extends the same "one independent transaction
+ * per unit of work" shape to the units that were missing it).
+ * assertExpensesEnabled() stays OUTSIDE any wrap, unchanged — see
+ * ExpenseService's own docblock for the full decoy-wrap rationale.
  */
 class AccountingExportLineBuilderService
 {
@@ -80,11 +96,12 @@ class AccountingExportLineBuilderService
 
     private function eligibleExpenses(AccountingExportBatch $batch): Collection
     {
-        return Expense::query()
+        return (new TenantContextService())->runWithFirmContext($batch->firm_id, fn () => Expense::query()
             ->where('firm_id', $batch->firm_id)
             ->where('status', ExpenseStatus::Approved->value)
             ->whereBetween('expense_date', [$batch->date_range_start, $batch->date_range_end])
-            ->get();
+            ->with('category.chartOfAccount')
+            ->get());
     }
 
     private function eligibleInvoices(AccountingExportBatch $batch): Collection
@@ -127,7 +144,7 @@ class AccountingExportLineBuilderService
         int $amountCents,
         ?ChartOfAccount $chartOfAccount,
     ): AccountingExportLine {
-        return AccountingExportLine::create([
+        return (new TenantContextService())->runWithFirmContext($batch->firm_id, fn () => AccountingExportLine::create([
             'accounting_export_batch_id' => $batch->id,
             'firm_id' => $batch->firm_id,
             'source_record_type' => $type,
@@ -137,15 +154,15 @@ class AccountingExportLineBuilderService
             'chart_of_accounts_id' => $chartOfAccount?->id,
             'mapped_amount_cents' => $amountCents,
             'status' => AccountingExportLineStatus::Pending,
-        ]);
+        ]));
     }
 
     private function resolveActiveAccountByType(AccountingExportBatch $batch, ChartOfAccountType $type): ?ChartOfAccount
     {
-        return ChartOfAccount::query()
+        return (new TenantContextService())->runWithFirmContext($batch->firm_id, fn () => ChartOfAccount::query()
             ->where('firm_id', $batch->firm_id)
             ->where('account_type', $type->value)
             ->where('is_active', true)
-            ->first();
+            ->first());
     }
 }

@@ -33,7 +33,16 @@ class ChartOfAccountsServiceTest extends TestCase
 
         $account = $this->service->create($firm, '6000', 'Office Supplies', ChartOfAccountType::Expense);
 
-        $this->assertDatabaseHas('chart_of_accounts', ['id' => $account->id, 'firm_id' => $firm->id, 'account_code' => '6000']);
+        // chart_of_accounts now has permanent FORCE ROW LEVEL SECURITY
+        // (see database/migrations/2026_08_27_950018_prepare_row_level_
+        // security_and_force_rls_on_chart_of_accounts_table.php).
+        // assertDatabaseHas() queries with no tenant context of its own,
+        // so it would (incorrectly) see zero rows against this now-forced
+        // table unless wrapped — matching this project's established
+        // convention (see e.g. MatterExpenseServiceTest).
+        $this->runWithFirmContext($firm, function () use ($account, $firm) {
+            $this->assertDatabaseHas('chart_of_accounts', ['id' => $account->id, 'firm_id' => $firm->id, 'account_code' => '6000']);
+        });
     }
 
     public function test_creation_blocked_when_module_disabled(): void

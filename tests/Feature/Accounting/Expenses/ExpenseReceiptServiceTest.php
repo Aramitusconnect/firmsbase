@@ -46,7 +46,16 @@ class ExpenseReceiptServiceTest extends TestCase
             'local', 'expense-receipts/abc.pdf', hash('sha256', 'abc'),
         );
 
-        $this->assertDatabaseHas('expense_receipts', ['id' => $receipt->id, 'expense_id' => $expense->id]);
+        // expense_receipts now has permanent FORCE ROW LEVEL SECURITY
+        // (see database/migrations/2026_08_27_950021_prepare_row_level_
+        // security_and_force_rls_on_expense_receipts_table.php).
+        // assertDatabaseHas() queries with no tenant context of its own,
+        // so it would (incorrectly) see zero rows against this now-forced
+        // table unless wrapped — matching this project's established
+        // convention (see e.g. MatterExpenseServiceTest).
+        $this->runWithFirmContext($firm, function () use ($receipt, $expense) {
+            $this->assertDatabaseHas('expense_receipts', ['id' => $receipt->id, 'expense_id' => $expense->id]);
+        });
 
         $otherFirm = Firm::factory()->create();
         $this->assertTrue($this->service->canAccess($receipt, $firm));

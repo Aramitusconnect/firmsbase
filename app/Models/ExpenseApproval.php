@@ -13,6 +13,18 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * ExpenseApproval — written exclusively by ExpenseApprovalService. The
  * approver role set (FirmOwner, BillingStaff only — correction #5) is
  * enforced at the service layer, not here.
+ *
+ * Append-only (mirrors AiApprovalEvent::booted() exactly): no writer
+ * service ever updates or deletes an existing row (ExpenseApprovalService
+ * only ever calls ExpenseApproval::create()), and this guard now makes
+ * that a real, enforced guarantee rather than a merely-conventional
+ * one. This is deliberately independent of, and unaffected by, this
+ * table's FORCE ROW LEVEL SECURITY policy (see
+ * database/migrations/2026_08_27_950022_prepare_row_level_security_and_
+ * force_rls_on_expense_approvals_table.php) — that policy's WITH CHECK
+ * clause governs INSERT-time firm ownership only, and is explicitly
+ * NOT the append-only enforcement mechanism for this table, per this
+ * codebase's established ai_approval_events precedent.
  */
 class ExpenseApproval extends Model
 {
@@ -33,6 +45,17 @@ class ExpenseApproval extends Model
             'status' => ExpenseApprovalStatus::class,
             'decided_at' => 'datetime',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::updating(function () {
+            throw new \LogicException('expense_approvals is append-only and cannot be updated.');
+        });
+
+        static::deleting(function () {
+            throw new \LogicException('expense_approvals is append-only and cannot be deleted.');
+        });
     }
 
     public function firm(): BelongsTo

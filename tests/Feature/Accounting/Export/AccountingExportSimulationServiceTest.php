@@ -63,7 +63,19 @@ class AccountingExportSimulationServiceTest extends TestCase
         $completed = $this->simulation->run($batch);
 
         $this->assertSame(AccountingExportBatchStatus::Completed, $completed->status);
-        $this->assertSame(1, $completed->lines()->where('status', AccountingExportLineStatus::Exported->value)->count());
+
+        // accounting_export_lines now has permanent FORCE ROW LEVEL
+        // SECURITY (see database/migrations/2026_08_27_950024_prepare_
+        // row_level_security_and_force_rls_on_accounting_export_lines_table.php).
+        // A bare relation query here has no tenant context of its own
+        // (run()'s internal wraps have already closed by the time this
+        // assertion executes), so it would (incorrectly) see zero rows
+        // unless wrapped explicitly.
+        $exportedCount = $this->runWithFirmContext(
+            $firm,
+            fn () => $completed->lines()->where('status', AccountingExportLineStatus::Exported->value)->count(),
+        );
+        $this->assertSame(1, $exportedCount);
     }
 
     /** Required: export line errors are reported per line. */
@@ -80,7 +92,18 @@ class AccountingExportSimulationServiceTest extends TestCase
         $completed = $this->simulation->run($batch);
 
         $this->assertSame(AccountingExportBatchStatus::CompletedWithErrors, $completed->status);
-        $failedLine = $completed->lines()->where('status', AccountingExportLineStatus::Failed->value)->first();
+
+        // Same FORCE ROW LEVEL SECURITY note as
+        // test_fake_export_creates_a_completed_logged_batch() above —
+        // the accounting_export_lines read must be explicitly wrapped.
+        // accounting_export_errors itself has no firm_id column and is
+        // not RLS-protected (scoped transitively through
+        // accounting_export_line_id only), so the ->errors()->count()
+        // call below needs no wrap of its own.
+        $failedLine = $this->runWithFirmContext(
+            $firm,
+            fn () => $completed->lines()->where('status', AccountingExportLineStatus::Failed->value)->first(),
+        );
         $this->assertNotNull($failedLine);
         $this->assertSame(1, $failedLine->errors()->count());
     }
@@ -98,8 +121,17 @@ class AccountingExportSimulationServiceTest extends TestCase
         $this->lineBuilder->buildForBatch($batch);
         $this->simulation->run($batch);
 
-        $exportedLine = $batch->lines()->where('status', AccountingExportLineStatus::Exported->value)->firstOrFail();
+        // Same FORCE ROW LEVEL SECURITY note as the tests above — the
+        // accounting_export_lines read must be explicitly wrapped.
+        $exportedLine = $this->runWithFirmContext(
+            $firm,
+            fn () => $batch->lines()->where('status', AccountingExportLineStatus::Exported->value)->firstOrFail(),
+        );
 
+        // AccountingExportLine::booted()'s append-only-once-exported
+        // guard fires purely in-memory (on Eloquent's "updating" event,
+        // before any UPDATE statement reaches the database), so it
+        // throws regardless of tenant context — no wrap needed here.
         $this->expectException(\LogicException::class);
         $exportedLine->update(['status' => AccountingExportLineStatus::Failed]);
     }

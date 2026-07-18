@@ -18,6 +18,20 @@ use App\ValueObjects\ExpenseApprovalDecision;
  * from persistence. Approver role set is fixed to FirmOwner/BillingStaff
  * (correction #5) — enforced via
  * AccountingEntitlementPolicyService::assertCanApprove().
+ *
+ * expense_approvals now has permanent FORCE ROW LEVEL SECURITY (see
+ * database/migrations/2026_08_27_950022_prepare_row_level_security_and_
+ * force_rls_on_expense_approvals_table.php); expenses is likewise
+ * forced (2026_08_27_950020). recordDecision() performs one write to
+ * EACH table (ExpenseApproval::create() and $expense->update()) inside
+ * ONE shared runWithFirmContext() call, mirroring MatterExpenseService::
+ * link()'s "read+write in one wrap" shape, here as "write+write in one
+ * wrap" — both must observe the same transactional context. decide()
+ * performs no DB access at all (pure in-memory status comparisons) and
+ * needs no wrap. assertExpensesEnabled(), assertExpenseBelongsToFirm(),
+ * and assertCanApprove() (a plain in-memory FirmUserRole enum
+ * comparison, no DB access) all stay OUTSIDE the wrap — see
+ * ExpenseService's own docblock for the full decoy-wrap rationale.
  */
 class ExpenseApprovalService
 {
@@ -58,22 +72,24 @@ class ExpenseApprovalService
             throw new \RuntimeException($decision->reason ?? 'Expense approval decision was not accepted.');
         }
 
-        $approval = ExpenseApproval::create([
-            'firm_id' => $firm->id,
-            'expense_id' => $expense->id,
-            'status' => $decision->status,
-            'decided_by_firm_user_id' => $approver->id,
-            'decided_at' => now(),
-            'reason' => $decision->reason,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $expense, $approver, $decision) {
+            $approval = ExpenseApproval::create([
+                'firm_id' => $firm->id,
+                'expense_id' => $expense->id,
+                'status' => $decision->status,
+                'decided_by_firm_user_id' => $approver->id,
+                'decided_at' => now(),
+                'reason' => $decision->reason,
+            ]);
 
-        $expense->update([
-            'status' => $decision->status === ExpenseApprovalStatus::Approved
-                ? ExpenseStatus::Approved
-                : ExpenseStatus::Rejected,
-        ]);
+            $expense->update([
+                'status' => $decision->status === ExpenseApprovalStatus::Approved
+                    ? ExpenseStatus::Approved
+                    : ExpenseStatus::Rejected,
+            ]);
 
-        return $approval;
+            return $approval;
+        });
     }
 
     /**

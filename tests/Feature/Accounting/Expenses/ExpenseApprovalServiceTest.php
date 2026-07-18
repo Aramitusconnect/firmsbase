@@ -47,8 +47,17 @@ class ExpenseApprovalServiceTest extends TestCase
 
         $approval = $this->service->approve($firm, $expense, $approver);
 
-        $this->assertSame(ExpenseStatus::Approved, $expense->fresh()->status);
-        $this->assertDatabaseHas('expense_approvals', ['id' => $approval->id, 'expense_id' => $expense->id]);
+        // expenses and expense_approvals now both have permanent FORCE
+        // ROW LEVEL SECURITY (see database/migrations/2026_08_27_950020
+        // and 2026_08_27_950022). fresh()/assertDatabaseHas() query with
+        // no tenant context of their own, so they would (incorrectly)
+        // see zero rows against these now-forced tables unless wrapped —
+        // matching this project's established convention (see e.g.
+        // MatterExpenseServiceTest).
+        $this->runWithFirmContext($firm, function () use ($expense, $approval) {
+            $this->assertSame(ExpenseStatus::Approved, $expense->fresh()->status);
+            $this->assertDatabaseHas('expense_approvals', ['id' => $approval->id, 'expense_id' => $expense->id]);
+        });
     }
 
     public function test_expense_can_be_rejected(): void
@@ -60,7 +69,9 @@ class ExpenseApprovalServiceTest extends TestCase
 
         $this->service->reject($firm, $expense, $approver, 'Missing documentation.');
 
-        $this->assertSame(ExpenseStatus::Rejected, $expense->fresh()->status);
+        $this->runWithFirmContext($firm, function () use ($expense) {
+            $this->assertSame(ExpenseStatus::Rejected, $expense->fresh()->status);
+        });
     }
 
     /**

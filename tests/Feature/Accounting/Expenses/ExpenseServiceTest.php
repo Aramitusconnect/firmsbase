@@ -50,7 +50,17 @@ class ExpenseServiceTest extends TestCase
         );
 
         $this->assertSame(ExpenseStatus::Draft, $expense->status);
-        $this->assertDatabaseHas('expenses', ['id' => $expense->id, 'firm_id' => $firm->id]);
+
+        // expenses now has permanent FORCE ROW LEVEL SECURITY (see
+        // database/migrations/2026_08_27_950020_prepare_row_level_
+        // security_and_force_rls_on_expenses_table.php). assertDatabaseHas()
+        // queries with no tenant context of its own, so it would
+        // (incorrectly) see zero rows against this now-forced table
+        // unless wrapped — matching this project's established
+        // convention (see e.g. MatterExpenseServiceTest).
+        $this->runWithFirmContext($firm, function () use ($expense, $firm) {
+            $this->assertDatabaseHas('expenses', ['id' => $expense->id, 'firm_id' => $firm->id]);
+        });
     }
 
     public function test_expense_creation_blocked_when_module_disabled(): void

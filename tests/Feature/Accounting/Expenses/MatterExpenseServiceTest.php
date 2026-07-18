@@ -144,7 +144,13 @@ class MatterExpenseServiceTest extends TestCase
 
         // Later, the expense's own reimbursable flag changes — the
         // snapshot on the already-created link must NOT change.
-        $expense->update(['reimbursable' => false]);
+        // expenses now ALSO has permanent FORCE ROW LEVEL SECURITY (see
+        // database/migrations/2026_08_27_950020_prepare_row_level_
+        // security_and_force_rls_on_expenses_table.php, landing in the
+        // same Wave 4 batch as this file's own regression fix), so this
+        // update must run under the owning firm's explicit context —
+        // it has none of its own here otherwise.
+        $this->runWithFirmContext($firm, fn () => $expense->update(['reimbursable' => false]));
 
         // matter_expenses now has permanent FORCE ROW LEVEL SECURITY —
         // ->fresh() re-queries with no tenant context of its own (link()
