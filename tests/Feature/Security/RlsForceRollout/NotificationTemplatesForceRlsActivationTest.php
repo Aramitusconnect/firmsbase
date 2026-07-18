@@ -164,7 +164,7 @@ class NotificationTemplatesForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['customer_success_health_scores', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'customer_success_health_scores', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
 
         $actuallyForced = [];
 
@@ -181,7 +181,7 @@ class NotificationTemplatesForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(53, count($actuallyForced), 'Exactly forty-nine prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 31 — no more, no less.');
+        $this->assertSame(56, count($actuallyForced), 'Exactly forty-nine prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 31 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -191,7 +191,7 @@ class NotificationTemplatesForceRlsActivationTest extends TestCase
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['customer_success_health_scores', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'customer_success_health_scores', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events']);
 
         // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is
         // the final checkpoint in this arc: $forced now equals the FULL

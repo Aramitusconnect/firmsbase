@@ -58,6 +58,7 @@ class RlsContextRolloutFirewallTest extends TestCase
         // prepared tables must still be unforced.
         $forcedByLaterBranch = [
             'customer_success_health_scores',
+            'ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings',
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
@@ -399,7 +400,15 @@ class RlsContextRolloutFirewallTest extends TestCase
                 // a later, distinct staged-FORCE-activation branch)
                 // legitimately added a timeline_events-only FORCE RLS
                 // migration.
-                && $path !== 'database/migrations/2026_08_25_930033_force_rls_on_timeline_events_table.php',
+                && $path !== 'database/migrations/2026_08_25_930033_force_rls_on_timeline_events_table.php'
+                // Section 39A-5 Wave 1 (this batch, a later, distinct
+                // arc) legitimately added three combined
+                // prepare-and-force migrations together:
+                // ai_retrieval_indexes, deployment_configs, and
+                // firm_ai_settings.
+                && $path !== 'database/migrations/2026_08_27_950001_prepare_row_level_security_and_force_rls_on_ai_retrieval_indexes_table.php'
+                && $path !== 'database/migrations/2026_08_27_950002_prepare_row_level_security_and_force_rls_on_deployment_configs_table.php'
+                && $path !== 'database/migrations/2026_08_27_950003_prepare_row_level_security_and_force_rls_on_firm_ai_settings_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A-2 must add no migrations, but found: '.implode(', ', $changed));

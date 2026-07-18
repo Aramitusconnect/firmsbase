@@ -201,7 +201,15 @@ class RlsEnforcementFirewallTest extends TestCase
                 // combined prepare-and-force migration for
                 // customer_success_health_scores, the first uncovered
                 // table to be closed after 39A-3L completed.
-                && $path !== 'database/migrations/2026_08_26_940001_prepare_row_level_security_and_force_rls_on_customer_success_health_scores_table.php',
+                && $path !== 'database/migrations/2026_08_26_940001_prepare_row_level_security_and_force_rls_on_customer_success_health_scores_table.php'
+                // Section 39A-5 Wave 1 (the first coordinated
+                // multi-table wave of this arc) legitimately added
+                // three combined prepare-and-force migrations together:
+                // ai_retrieval_indexes, deployment_configs, and
+                // firm_ai_settings.
+                && $path !== 'database/migrations/2026_08_27_950001_prepare_row_level_security_and_force_rls_on_ai_retrieval_indexes_table.php'
+                && $path !== 'database/migrations/2026_08_27_950002_prepare_row_level_security_and_force_rls_on_deployment_configs_table.php'
+                && $path !== 'database/migrations/2026_08_27_950003_prepare_row_level_security_and_force_rls_on_firm_ai_settings_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A must add no migrations in this pass, but found: '.implode(', ', $changed));

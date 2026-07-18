@@ -127,8 +127,13 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // MISSING_PREPARED_TABLES into PREPARED_TABLES (52 -> 53,
         // 61 -> 60); tenantOwnedTables() is the union of both and is
         // unchanged (113).
-        $this->assertCount(53, $this->service->preparedTables());
-        $this->assertCount(60, $this->service->missingPreparedTables());
+        // Narrowly updated AGAIN by Section 39A-5 Wave 1 —
+        // ai_retrieval_indexes, deployment_configs, and
+        // firm_ai_settings moved from MISSING_PREPARED_TABLES into
+        // PREPARED_TABLES (53 -> 56, 60 -> 57); tenantOwnedTables()
+        // remains unchanged (113).
+        $this->assertCount(56, $this->service->preparedTables());
+        $this->assertCount(57, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
         $this->assertCount(24, $this->service->exemptTables());

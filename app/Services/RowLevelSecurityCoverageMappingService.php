@@ -120,6 +120,15 @@ class RowLevelSecurityCoverageMappingService
         // MISSING_PREPARED_TABLES below, not merely appended — the table
         // no longer belongs in that array at all.
         'customer_success_health_scores',
+        // Section 39A-5 Wave 1 (this batch) — same combined
+        // prepare+force shape as Checkpoint 1 above, three independent
+        // tables activated together as the first parallelizable wave
+        // of the 60-table 39A-5 rollout:
+        // 2026_08_27_950001_prepare_row_level_security_and_force_rls_on_ai_retrieval_indexes_table.php,
+        // 2026_08_27_950002_prepare_row_level_security_and_force_rls_on_deployment_configs_table.php,
+        // 2026_08_27_950003_prepare_row_level_security_and_force_rls_on_firm_ai_settings_table.php.
+        // All three moved here from MISSING_PREPARED_TABLES below.
+        'ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings',
     ];
 
     /**
@@ -150,18 +159,24 @@ class RowLevelSecurityCoverageMappingService
      * real RLS policy and is FORCE-enforced; see that constant's own
      * docblock note.
      *
+     * Section 39A-5 Wave 1 removed ai_retrieval_indexes,
+     * deployment_configs, and firm_ai_settings from this array (moved
+     * to PREPARED_TABLES above) — the first coordinated multi-table
+     * wave of the 39A-5 uncovered-table rollout, chosen for minimal,
+     * mutually-independent blast radius.
+     *
      * @var array<int, string>
      */
     private const MISSING_PREPARED_TABLES = [
         'accounting_export_batches', 'accounting_export_lines', 'ai_approval_events',
-        'ai_approval_requests', 'ai_retrieval_indexes', 'ai_tool_actions',
+        'ai_approval_requests', 'ai_tool_actions',
         'ai_usage_events', 'chart_of_accounts',
-        'deletion_requests', 'deployment_configs', 'deployment_health_checks',
+        'deletion_requests', 'deployment_health_checks',
         'document_hashes', 'email_accounts', 'email_attachments',
         'email_message_links', 'email_messages', 'email_sync_events',
         'email_visibility_rules', 'expense_approvals', 'expense_categories',
         'expense_receipts', 'expenses', 'export_jobs', 'firm_ai_provider_keys',
-        'firm_ai_settings', 'fleet_migration_instance_status', 'form_drafts',
+        'fleet_migration_instance_status', 'form_drafts',
         'form_review_events', 'generated_document_events', 'generated_documents',
         'implementation_projects', 'import_batches', 'key_destruction_requests',
         'legal_holds', 'matter_expenses', 'matter_trust_balances',

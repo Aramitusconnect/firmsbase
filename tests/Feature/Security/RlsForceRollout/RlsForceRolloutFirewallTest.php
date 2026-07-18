@@ -484,6 +484,15 @@ class RlsForceRolloutFirewallTest extends TestCase
             // batch — same additive-only pattern, no existing
             // assertion removed or weakened.
             'customer_success_health_scores',
+            // Narrowly updated AGAIN by Section 39A-5 Wave 1 — the
+            // first coordinated multi-table wave of this arc, covering
+            // ai_retrieval_indexes, deployment_configs, and
+            // firm_ai_settings together (each with its own combined
+            // prepare+force migration) — extends the "exactly these
+            // tables are forced" list from fifty-three to fifty-six —
+            // same additive-only pattern, no existing assertion
+            // removed or weakened.
+            'ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -889,6 +898,16 @@ class RlsForceRolloutFirewallTest extends TestCase
         // to both prepare (ENABLE ROW LEVEL SECURITY + CREATE POLICY)
         // and force a table in a single batch.
         $this->assertFileExists(base_path('database/migrations/2026_08_26_940001_prepare_row_level_security_and_force_rls_on_customer_success_health_scores_table.php'));
+    }
+
+    public function test_the_wave_1_force_rls_migration_files_exist(): void
+    {
+        // Section 39A-5 Wave 1 — the first coordinated multi-table
+        // wave, three independent combined prepare+force migrations
+        // landed together via a wave-integration commit.
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950001_prepare_row_level_security_and_force_rls_on_ai_retrieval_indexes_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950002_prepare_row_level_security_and_force_rls_on_deployment_configs_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950003_prepare_row_level_security_and_force_rls_on_firm_ai_settings_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

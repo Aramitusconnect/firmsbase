@@ -169,6 +169,7 @@ class ConflictCheckRunsForceRlsActivationTest extends TestCase
         // batch, covering communication_consents) for the same reason —
         // additive only, no existing assertion removed or weakened.
         $expectedForced = [
+            'ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings',
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'customer_success_health_scores',
@@ -250,6 +251,7 @@ class ConflictCheckRunsForceRlsActivationTest extends TestCase
         // batch, covering communication_consents) for the same reason —
         // additive only, no existing assertion removed or weakened.
         $forced = [
+            'ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings',
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'customer_success_health_scores',

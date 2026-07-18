@@ -56,6 +56,7 @@ class RlsForceActivationFirewallTest extends TestCase
         // scope (39A-3A) only asserts clients here.
         $forcedByLaterBranch = [
             'customer_success_health_scores',
+            'ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings',
             'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',
