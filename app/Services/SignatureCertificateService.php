@@ -35,6 +35,24 @@ use Illuminate\Support\Facades\DB;
  * impossible, not just discouraged by convention. Not wrapped in an
  * explicit DB::transaction(); DB::afterCommit() runs the closure
  * immediately since there is no active transaction to defer past.
+ *
+ * Section 39A-7 Wave 7: signature_requests/signature_request_recipients/
+ * signature_events/signature_certificates are now FORCE RLS protected.
+ * generate() ends up with FOUR sibling (never nested, never
+ * overlapping) runWithFirmContext() calls, in this exact statement
+ * order, each independently keyed on $request->firm_id: (1) a wrap
+ * around the certificate()->exists() duplicate-generation guard, (2)
+ * the pre-existing wrap around the Document-branch hash lookup
+ * (unchanged), (3) the pre-existing wrap around the
+ * GeneratedDocument-branch hash lookup (unchanged), (4) a final wrap
+ * spanning everything from the events()->doesntExist() check through
+ * the trailing ->fresh() call (assembleSnapshot()'s two reads,
+ * SignatureCertificate::create(), the first eventLogger->log(), the
+ * pure assertTransitionAllowed(), $request->update(), the second
+ * eventLogger->log(), and $request->fresh()). Wraps (1) and (4) are
+ * new; (2) and (3) are the pre-existing Wave 6 fix, left untouched.
+ * DB::afterCommit() (webhook recording) already runs after the (now
+ * present) transaction commits and is unaffected by any of this.
  */
 class SignatureCertificateService
 {
@@ -53,7 +71,12 @@ class SignatureCertificateService
             );
         }
 
-        if ($request->certificate()->exists()) {
+        $certificateAlreadyExists = (new TenantContextService())->runWithFirmContext(
+            $request->firm_id,
+            fn () => $request->certificate()->exists(),
+        );
+
+        if ($certificateAlreadyExists) {
             throw new \RuntimeException('A certificate has already been generated for this request.');
         }
 
@@ -69,38 +92,42 @@ class SignatureCertificateService
             throw new \RuntimeException('Cannot generate a certificate: no document_hashes row exists for the source document.');
         }
 
-        if ($request->events()->doesntExist()) {
-            throw new \RuntimeException('Cannot generate a certificate: no signature_events trail exists for this request.');
-        }
+        $certificate = null;
 
-        $snapshot = $this->assembleSnapshot($request, $hash);
+        $completedRequest = (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $hash, &$certificate) {
+            if ($request->events()->doesntExist()) {
+                throw new \RuntimeException('Cannot generate a certificate: no signature_events trail exists for this request.');
+            }
 
-        $certificate = SignatureCertificate::create([
-            'firm_id' => $request->firm_id,
-            'signature_request_id' => $request->id,
-            'status' => \App\Enums\SignatureCertificateStatus::Generated,
-            'certificate_data_json' => $this->snapshotToArray($snapshot),
-            'document_hash_id' => $hash->id,
-            'generated_at' => now(),
-        ]);
+            $snapshot = $this->assembleSnapshot($request, $hash);
 
-        $this->eventLogger->log(
-            request: $request,
-            eventType: SignatureEventType::CertificateGenerated,
-            actorType: SignatureEventActorType::System,
-            documentHash: $hash,
-        );
+            $certificate = SignatureCertificate::create([
+                'firm_id' => $request->firm_id,
+                'signature_request_id' => $request->id,
+                'status' => \App\Enums\SignatureCertificateStatus::Generated,
+                'certificate_data_json' => $this->snapshotToArray($snapshot),
+                'document_hash_id' => $hash->id,
+                'generated_at' => now(),
+            ]);
 
-        $this->transitions->assertTransitionAllowed($request->status->value, SignatureRequestStatus::Completed->value);
-        $request->update(['status' => SignatureRequestStatus::Completed, 'completed_at' => now()]);
+            $this->eventLogger->log(
+                request: $request,
+                eventType: SignatureEventType::CertificateGenerated,
+                actorType: SignatureEventActorType::System,
+                documentHash: $hash,
+            );
 
-        $this->eventLogger->log(
-            request: $request,
-            eventType: SignatureEventType::RequestCompleted,
-            actorType: SignatureEventActorType::System,
-        );
+            $this->transitions->assertTransitionAllowed($request->status->value, SignatureRequestStatus::Completed->value);
+            $request->update(['status' => SignatureRequestStatus::Completed, 'completed_at' => now()]);
 
-        $completedRequest = $request->fresh();
+            $this->eventLogger->log(
+                request: $request,
+                eventType: SignatureEventType::RequestCompleted,
+                actorType: SignatureEventActorType::System,
+            );
+
+            return $request->fresh();
+        });
 
         DB::afterCommit(function () use ($completedRequest) {
             try {

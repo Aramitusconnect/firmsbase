@@ -64,6 +64,23 @@ class SignatureAndPdfTenantIsolationTest extends TestCase
         $this->policy->assertSignatureCertificateBelongsToFirm($certificate, $firmB);
     }
 
+    /**
+     * Narrowly updated for Section 39A-7 Wave 7: signature_requests now
+     * has permanent FORCE ROW LEVEL SECURITY. The previous version of
+     * this test called ONLY (new TenantContextResolver())->activateForFirm($firmA)
+     * — PHP-memory context only, never the PostgreSQL session's
+     * app.current_firm_id. Under FORCE RLS, the context-hold create()
+     * override SignatureRequestFactory gained in this same batch leaves
+     * the DATABASE session pointed at whichever firm was created LAST
+     * (firm B here) — NOT firm A — so a bare SignatureRequest::query()->count()
+     * would combine PHP-memory scoping (firm A, via BelongsToTenant) with
+     * a DB-session RLS filter still set to firm B, yielding 0 rows
+     * instead of 1 (reproduced empirically before this fix). Using
+     * runWithFirmContext() instead establishes BOTH layers of context
+     * together for firm A, matching the identical fix already applied to
+     * FormAndDocumentTenantIsolationTest's own model-query-narrowing
+     * tests in Section 39A-6 Wave 6.
+     */
     public function test_signature_request_query_is_narrowed_to_the_active_tenant(): void
     {
         $firmA = Firm::factory()->create();
@@ -71,11 +88,9 @@ class SignatureAndPdfTenantIsolationTest extends TestCase
         SignatureRequest::factory()->create(['firm_id' => $firmA->id]);
         SignatureRequest::factory()->create(['firm_id' => $firmB->id]);
 
-        (new TenantContextResolver())->activateForFirm($firmA);
+        $count = $this->runWithFirmContext($firmA, fn () => SignatureRequest::query()->count());
 
-        $this->assertSame(1, SignatureRequest::query()->count());
-
-        TenantContextResolver::clear();
+        $this->assertSame(1, $count);
     }
 
     protected function tearDown(): void

@@ -250,7 +250,17 @@ class RlsEnforcementFirewallTest extends TestCase
                 && $path !== 'database/migrations/2026_08_27_950025_prepare_row_level_security_and_force_rls_on_email_accounts_table.php'
                 && $path !== 'database/migrations/2026_08_27_950026_prepare_row_level_security_and_force_rls_on_email_messages_table.php'
                 && $path !== 'database/migrations/2026_08_27_950027_prepare_row_level_security_and_force_rls_on_email_attachments_table.php'
-                && $path !== 'database/migrations/2026_08_27_950028_prepare_row_level_security_and_force_rls_on_email_sync_events_table.php',
+                && $path !== 'database/migrations/2026_08_27_950028_prepare_row_level_security_and_force_rls_on_email_sync_events_table.php'
+                // Section 39A-7 Wave 7 (the seventh coordinated
+                // multi-table wave of this arc, e-signature domain)
+                // legitimately added four combined prepare-and-force
+                // migrations together: signature_requests,
+                // signature_request_recipients, signature_events, and
+                // signature_certificates.
+                && $path !== 'database/migrations/2026_08_27_950035_prepare_row_level_security_and_force_rls_on_signature_requests_table.php'
+                && $path !== 'database/migrations/2026_08_27_950036_prepare_row_level_security_and_force_rls_on_signature_request_recipients_table.php'
+                && $path !== 'database/migrations/2026_08_27_950037_prepare_row_level_security_and_force_rls_on_signature_events_table.php'
+                && $path !== 'database/migrations/2026_08_27_950038_prepare_row_level_security_and_force_rls_on_signature_certificates_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A must add no migrations in this pass, but found: '.implode(', ', $changed));

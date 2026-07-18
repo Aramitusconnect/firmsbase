@@ -138,4 +138,83 @@ class SignatureCertificateServiceTest extends TestCase
             'event_type' => SignatureEventType::CertificateGenerated->value,
         ]);
     }
+
+    /**
+     * Section 39A-7 Wave 7 residual-concern proof (flagged by this
+     * wave's own Phase 6 diff review): generate()'s
+     * $request->events()->doesntExist() precondition check is a REAL DB
+     * read. Before this wave's fix, calling generate() with no ambient
+     * tenant context active anywhere would let that read run with no
+     * app.current_firm_id session setting set, causing it to silently
+     * (and incorrectly) evaluate "true" — RLS fails closed to 0 visible
+     * rows — throwing the MISLEADING "no signature_events trail exists"
+     * error even though an event genuinely exists.
+     * SignatureCertificateService::generate() closes this by wrapping
+     * that read (and everything through the trailing ->fresh()) in its
+     * own runWithFirmContext($request->firm_id, ...) call (see that
+     * class's own docblock). This test proves the fix actually works:
+     * it explicitly clears BOTH the PHP-memory and PostgreSQL tenant
+     * context immediately before calling generate(), then asserts
+     * generate() still succeeds.
+     */
+    public function test_generate_correctly_detects_an_existing_events_trail_even_with_no_ambient_tenant_context(): void
+    {
+        $firm = Firm::factory()->create();
+        $document = Document::factory()->create(['firm_id' => $firm->id]);
+        $request = SignatureRequest::factory()->status(SignatureRequestStatus::Signed)->create(['firm_id' => $firm->id, 'document_id' => $document->id]);
+        SignatureRequestRecipient::factory()->forRequest($request)->status(SignatureRequestStatus::Signed)->create();
+        DocumentHash::factory()->forDocument($document)->create();
+        SignatureEvent::factory()->forRequest($request)->create();
+
+        (new \App\Services\TenantContextService())->clearDatabaseTenantContext();
+        \App\Services\TenantContextResolver::clear();
+        $this->assertNoDatabaseTenantContext();
+
+        $this->service->generate($request);
+
+        $certificate = $this->runWithFirmContext(
+            $firm,
+            fn () => SignatureCertificate::query()->where('signature_request_id', $request->id)->first(),
+        );
+
+        $this->assertNotNull(
+            $certificate,
+            'generate() must succeed under zero ambient context — its own internal wrap establishes context for the events()->doesntExist() read before checking it, so a genuinely-existing events trail must not be misreported as missing.'
+        );
+    }
+
+    /**
+     * Section 39A-7 Wave 7 residual-concern proof: generate()'s OTHER
+     * flagged silent-failure risk — the $request->certificate()->exists()
+     * duplicate-generation guard (line 56, structurally BEFORE the two
+     * pre-existing DocumentHashService wraps) is also a real DB read.
+     * Under FORCE RLS with no context, it would silently evaluate
+     * "false" regardless of whether a certificate genuinely already
+     * exists, letting a duplicate-generation attempt fall through to
+     * SignatureCertificate::create() and surface a raw DB
+     * unique-constraint violation instead of the clean, intended
+     * RuntimeException. This test forces exactly that scenario (a
+     * certificate already exists for a $request object whose in-memory
+     * status still reads 'signed', mirroring a caller retrying after a
+     * partial failure or a race) with zero ambient tenant context
+     * active, and asserts the clean RuntimeException is thrown — not a
+     * QueryException, and not a silently-created second certificate.
+     */
+    public function test_generate_correctly_detects_an_existing_certificate_even_with_no_ambient_tenant_context(): void
+    {
+        $firm = Firm::factory()->create();
+        $document = Document::factory()->create(['firm_id' => $firm->id]);
+        $request = SignatureRequest::factory()->status(SignatureRequestStatus::Signed)->create(['firm_id' => $firm->id, 'document_id' => $document->id]);
+        $hash = DocumentHash::factory()->forDocument($document)->create();
+        SignatureCertificate::factory()->forRequest($request, $hash)->create();
+
+        (new \App\Services\TenantContextService())->clearDatabaseTenantContext();
+        \App\Services\TenantContextResolver::clear();
+        $this->assertNoDatabaseTenantContext();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('A certificate has already been generated for this request.');
+
+        $this->service->generate($request);
+    }
 }

@@ -110,4 +110,122 @@ class SignatureRequestWorkflowServiceTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $this->service->void($request, $paralegal, 'Not permitted.');
     }
+
+    /**
+     * Section 39A-7 Wave 7 residual-concern proof (flagged by this
+     * wave's own Phase 6 diff review): send()'s
+     * $request->recipients()->doesntExist() precondition check is a
+     * REAL DB read. Before this wave's fix, calling send() with no
+     * ambient tenant context active anywhere would let that read run
+     * with no app.current_firm_id session setting set, causing it to
+     * silently (and incorrectly) evaluate "true" — RLS fails closed to
+     * 0 visible rows — throwing the MISLEADING "Cannot send: this
+     * request has no recipients" business-logic error even though a
+     * recipient genuinely exists. SignatureRequestWorkflowService::send()
+     * closes this by wrapping that specific read in its own
+     * runWithFirmContext($request->firm_id, ...) call (see that class's
+     * own docblock). This test proves the fix actually works: it
+     * explicitly clears BOTH the PHP-memory and PostgreSQL tenant
+     * context immediately before calling send(), then asserts send()
+     * still succeeds — i.e. the caller does not need its own ambient
+     * wrap around the call site for this precondition read to see the
+     * true state of the data.
+     */
+    public function test_send_correctly_detects_existing_recipients_even_with_no_ambient_tenant_context(): void
+    {
+        $firm = Firm::factory()->create();
+        $actor = FirmUser::factory()->role(FirmUserRole::Attorney)->create(['firm_id' => $firm->id]);
+        $document = Document::factory()->create(['firm_id' => $firm->id]);
+        $request = $this->service->create($firm, 'Engagement Letter', $actor, $document);
+        \App\Models\SignatureRequestRecipient::factory()->forRequest($request)->create();
+        $this->service->attorneyReview($request, $actor, 'Suitable for e-signature under UETA.');
+
+        $request = $this->runWithFirmContext($firm, fn () => $request->fresh());
+
+        (new \App\Services\TenantContextService())->clearDatabaseTenantContext();
+        \App\Services\TenantContextResolver::clear();
+        $this->assertNoDatabaseTenantContext();
+
+        $sent = $this->service->send($request, $actor);
+
+        $this->assertSame(
+            SignatureRequestStatus::Sent,
+            $sent->status,
+            'send() must correctly detect the genuinely-existing recipient even though the test established zero ambient context before calling it — proving the internal wrap, not a misleading "no recipients" error.'
+        );
+    }
+
+    /**
+     * Section 39A-7 Wave 7 residual-concern proof: empirically confirms
+     * send()'s per-recipient loop is NOT wrapped in one shared,
+     * all-or-nothing transaction — this wave's design (§4.1) explicitly
+     * chose independent per-statement wraps specifically so FORCE RLS
+     * activation would not silently introduce a NEW atomicity guarantee
+     * this class has never claimed. A temporary, test-only Eloquent
+     * `updating` listener (removed in the `finally` block below; safe
+     * because SignatureRequestRecipient itself registers no booted()
+     * event listeners of its own — confirmed by direct inspection of
+     * app/Models/SignatureRequestRecipient.php) forces a synchronous
+     * exception on the 2nd of 3 recipients' update() calls, simulating
+     * a mid-loop failure. Today's failure semantics must match: the 1st
+     * recipient's update already committed, the 2nd/3rd remain
+     * untouched, and the request's own status update (a separate,
+     * earlier wrap, before the loop even starts) remains committed —
+     * exactly the same partial-application behavior this method already
+     * had before FORCE RLS activation (it was never wrapped in a shared
+     * DB::transaction() across the whole loop, before or after this
+     * wave).
+     */
+    public function test_send_recipient_loop_is_not_atomic_matching_documented_pre_rls_behavior(): void
+    {
+        $firm = Firm::factory()->create();
+        $actor = FirmUser::factory()->role(FirmUserRole::Attorney)->create(['firm_id' => $firm->id]);
+        $document = Document::factory()->create(['firm_id' => $firm->id]);
+        $request = $this->service->create($firm, 'Engagement Letter', $actor, $document);
+        \App\Models\SignatureRequestRecipient::factory()->count(3)->forRequest($request)->create();
+        $this->service->attorneyReview($request, $actor, 'Suitable for e-signature under UETA.');
+
+        $request = $this->runWithFirmContext($firm, fn () => $request->fresh());
+
+        $callCount = 0;
+        \App\Models\SignatureRequestRecipient::updating(function () use (&$callCount) {
+            $callCount++;
+
+            if ($callCount === 2) {
+                throw new \RuntimeException('simulated failure on the 2nd recipient update');
+            }
+        });
+
+        try {
+            try {
+                $this->service->send($request, $actor);
+                $this->fail('Expected the simulated exception to propagate out of send().');
+            } catch (\RuntimeException $e) {
+                $this->assertSame('simulated failure on the 2nd recipient update', $e->getMessage());
+            }
+        } finally {
+            \App\Models\SignatureRequestRecipient::flushEventListeners();
+        }
+
+        $sentRecipientCount = $this->runWithFirmContext(
+            $firm,
+            fn () => \App\Models\SignatureRequestRecipient::where('signature_request_id', $request->id)
+                ->where('status', SignatureRequestStatus::Sent->value)
+                ->count(),
+        );
+
+        $this->assertSame(
+            1,
+            $sentRecipientCount,
+            'Exactly one recipient update must have committed before the simulated failure on the 2nd update — proving the loop is NOT wrapped in one shared, all-or-nothing transaction.'
+        );
+
+        $requestStatus = $this->runWithFirmContext($firm, fn () => \App\Models\SignatureRequest::find($request->id)->status);
+
+        $this->assertSame(
+            SignatureRequestStatus::Sent,
+            $requestStatus,
+            "The request's own status update (a separate, earlier wrap) must remain committed even though the later per-recipient loop failed partway through — the same non-atomic behavior this method had before FORCE RLS activation."
+        );
+    }
 }

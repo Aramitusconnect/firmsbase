@@ -27,6 +27,27 @@ use App\Models\SignatureRequest;
  * review of whether a specific document can be signed electronically":
  * a human attorney/firm-owner sign-off is REQUIRED before a request can
  * ever be sent, not a computed/AI-derived flag.
+ *
+ * Section 39A-7 Wave 7: signature_requests/signature_request_recipients/
+ * signature_events/signature_certificates are now FORCE RLS protected.
+ * create() and attorneyReview() each wrap their fixed, small statement
+ * set (the row write, the paired eventLogger->log() call, and the
+ * method's own trailing ->fresh()) in ONE shared runWithFirmContext()
+ * unit, mirroring EmailMessageLinkingService::link()'s "one wrap for a
+ * fixed-N-statement unit" precedent. send()/void() are the
+ * variable-length-loop case: each gets independent, per-statement
+ * wraps (mirroring EmailSyncService::captureMessage()'s per-attachment
+ * loop precedent) rather than one shared outer wrap, because a single
+ * shared wrap would silently introduce a NEW atomicity guarantee this
+ * class has never claimed — it would roll back prior recipients'
+ * updates on a later failure, a behavior change this RLS-activation
+ * pass must not introduce. Each per-recipient update() inside the
+ * loops is keyed on $recipient->firm_id (the row actually being
+ * mutated), not $request->firm_id, for the same deterministic-choice
+ * reasoning SignatureRecipientWorkflowService's own wraps use. Pure,
+ * in-memory checks (canManageRequests(), canReviewAsAttorney(),
+ * canVoid(), isAttorneyReviewed(), assertTransitionAllowed()) stay
+ * OUTSIDE every wrap.
  */
 class SignatureRequestWorkflowService
 {
@@ -55,29 +76,31 @@ class SignatureRequestWorkflowService
             throw new \RuntimeException('Exactly one of $document or $generatedDocument must be provided.');
         }
 
-        $request = SignatureRequest::create([
-            'firm_id' => $firm->id,
-            'matter_id' => $matter?->id,
-            'client_id' => $client?->id,
-            'source_document_type' => $document !== null
-                ? SignatureSourceDocumentType::Document
-                : SignatureSourceDocumentType::GeneratedDocument,
-            'document_id' => $document?->id,
-            'generated_document_id' => $generatedDocument?->id,
-            'status' => SignatureRequestStatus::Draft,
-            'title' => $title,
-            'requested_by_firm_user_id' => $requestedBy->id,
-            'expires_at' => $expiresAt,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($firm->id, function () use ($firm, $title, $requestedBy, $document, $generatedDocument, $matter, $client, $expiresAt) {
+            $request = SignatureRequest::create([
+                'firm_id' => $firm->id,
+                'matter_id' => $matter?->id,
+                'client_id' => $client?->id,
+                'source_document_type' => $document !== null
+                    ? SignatureSourceDocumentType::Document
+                    : SignatureSourceDocumentType::GeneratedDocument,
+                'document_id' => $document?->id,
+                'generated_document_id' => $generatedDocument?->id,
+                'status' => SignatureRequestStatus::Draft,
+                'title' => $title,
+                'requested_by_firm_user_id' => $requestedBy->id,
+                'expires_at' => $expiresAt,
+            ]);
 
-        $this->eventLogger->log(
-            request: $request,
-            eventType: SignatureEventType::RequestCreated,
-            actorType: SignatureEventActorType::FirmUser,
-            actorFirmUser: $requestedBy,
-        );
+            $this->eventLogger->log(
+                request: $request,
+                eventType: SignatureEventType::RequestCreated,
+                actorType: SignatureEventActorType::FirmUser,
+                actorFirmUser: $requestedBy,
+            );
 
-        return $request->fresh();
+            return $request->fresh();
+        });
     }
 
     /**
@@ -90,20 +113,22 @@ class SignatureRequestWorkflowService
             throw new \RuntimeException('Only a FirmOwner or Attorney may perform the attorney-review sign-off.');
         }
 
-        $request->update([
-            'attorney_reviewed_at' => now(),
-            'attorney_reviewed_by_firm_user_id' => $reviewer->id,
-            'attorney_review_notes' => $notes,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $reviewer, $notes) {
+            $request->update([
+                'attorney_reviewed_at' => now(),
+                'attorney_reviewed_by_firm_user_id' => $reviewer->id,
+                'attorney_review_notes' => $notes,
+            ]);
 
-        $this->eventLogger->log(
-            request: $request,
-            eventType: SignatureEventType::RequestAttorneyReviewed,
-            actorType: SignatureEventActorType::FirmUser,
-            actorFirmUser: $reviewer,
-        );
+            $this->eventLogger->log(
+                request: $request,
+                eventType: SignatureEventType::RequestAttorneyReviewed,
+                actorType: SignatureEventActorType::FirmUser,
+                actorFirmUser: $reviewer,
+            );
 
-        return $request->fresh();
+            return $request->fresh();
+        });
     }
 
     public function send(SignatureRequest $request, FirmUser $actor): SignatureRequest
@@ -119,26 +144,42 @@ class SignatureRequestWorkflowService
             );
         }
 
-        if ($request->recipients()->doesntExist()) {
+        $hasNoRecipients = (new TenantContextService())->runWithFirmContext(
+            $request->firm_id,
+            fn () => $request->recipients()->doesntExist(),
+        );
+
+        if ($hasNoRecipients) {
             throw new \RuntimeException('Cannot send: this request has no recipients.');
         }
 
         $this->transitions->assertTransitionAllowed($request->status->value, SignatureRequestStatus::Sent->value);
 
-        $request->update(['status' => SignatureRequestStatus::Sent, 'sent_at' => now()]);
+        (new TenantContextService())->runWithFirmContext(
+            $request->firm_id,
+            fn () => $request->update(['status' => SignatureRequestStatus::Sent, 'sent_at' => now()]),
+        );
+
+        (new TenantContextService())->runWithFirmContext(
+            $request->firm_id,
+            fn () => $request->load('recipients'),
+        );
 
         foreach ($request->recipients as $recipient) {
-            $recipient->update(['status' => SignatureRequestStatus::Sent]);
+            (new TenantContextService())->runWithFirmContext(
+                $recipient->firm_id,
+                fn () => $recipient->update(['status' => SignatureRequestStatus::Sent]),
+            );
         }
 
-        $this->eventLogger->log(
+        (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $this->eventLogger->log(
             request: $request,
             eventType: SignatureEventType::RequestSent,
             actorType: SignatureEventActorType::FirmUser,
             actorFirmUser: $actor,
-        );
+        ));
 
-        return $request->fresh();
+        return (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->fresh());
     }
 
     /**
@@ -153,22 +194,33 @@ class SignatureRequestWorkflowService
 
         $this->transitions->assertTransitionAllowed($request->status->value, SignatureRequestStatus::Voided->value);
 
-        $request->update(['status' => SignatureRequestStatus::Voided, 'voided_at' => now()]);
+        (new TenantContextService())->runWithFirmContext(
+            $request->firm_id,
+            fn () => $request->update(['status' => SignatureRequestStatus::Voided, 'voided_at' => now()]),
+        );
+
+        (new TenantContextService())->runWithFirmContext(
+            $request->firm_id,
+            fn () => $request->load('recipients'),
+        );
 
         foreach ($request->recipients as $recipient) {
             if ($this->transitions->isTransitionAllowed($recipient->status->value, SignatureRequestStatus::Voided->value)) {
-                $recipient->update(['status' => SignatureRequestStatus::Voided, 'voided_at' => now()]);
+                (new TenantContextService())->runWithFirmContext(
+                    $recipient->firm_id,
+                    fn () => $recipient->update(['status' => SignatureRequestStatus::Voided, 'voided_at' => now()]),
+                );
             }
         }
 
-        $this->eventLogger->log(
+        (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $this->eventLogger->log(
             request: $request,
             eventType: SignatureEventType::RequestVoided,
             actorType: SignatureEventActorType::FirmUser,
             actorFirmUser: $actor,
             metadata: ['reason' => $reason],
-        );
+        ));
 
-        return $request->fresh();
+        return (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->fresh());
     }
 }
