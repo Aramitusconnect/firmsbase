@@ -601,6 +601,14 @@ class RlsForceRolloutFirewallTest extends TestCase
             // signature_request_recipients, signature_events,
             // signature_certificates) implemented as one combined unit.
             'signature_requests', 'signature_request_recipients', 'signature_events', 'signature_certificates',
+            // Narrowly updated AGAIN by Section 39A-8 Wave 8 — the
+            // eighth coordinated multi-table wave, covering the
+            // governance/support/platform domain (legal_holds,
+            // deletion_requests, key_destruction_requests,
+            // support_access_requests, support_access_sessions,
+            // deployment_health_checks) implemented as one combined unit.
+            'legal_holds', 'deletion_requests', 'key_destruction_requests',
+            'support_access_requests', 'support_access_sessions', 'deployment_health_checks',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
