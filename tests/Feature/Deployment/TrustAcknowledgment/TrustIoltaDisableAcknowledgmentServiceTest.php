@@ -30,7 +30,12 @@ class TrustIoltaDisableAcknowledgmentServiceTest extends TestCase
     public function test_posture_invalid_with_only_admin_approval(): void
     {
         $firm = $this->makeDeploymentFirm(DeploymentMode::Dedicated);
-        $config = DeploymentConfig::factory()->forFirm($firm)->create();
+
+        // deployment_configs now carries permanent FORCE ROW LEVEL
+        // SECURITY — the bare factory create() and the later fresh()
+        // reads have no ambient tenant context, so each is wrapped
+        // narrowly.
+        $config = $this->runWithFirmContext($firm, fn () => DeploymentConfig::factory()->forFirm($firm)->create());
         $admin1 = $this->makePlatformAdmin();
         $admin2 = $this->makePlatformAdmin();
 
@@ -38,17 +43,22 @@ class TrustIoltaDisableAcknowledgmentServiceTest extends TestCase
         $this->service->firstApprove($request, $admin1);
         $this->service->secondApprove($request, $admin2);
 
+        $freshConfig = $this->runWithFirmContext($firm, fn () => $config->fresh());
+
         $this->assertTrue($this->service->isAdminApproved($firm));
-        $this->assertFalse($config->fresh()->hasFirmAcknowledgedTrustIoltaDisabled());
-        $this->assertFalse($this->service->isPostureValid($firm, $config->fresh()));
+        $this->assertFalse($freshConfig->hasFirmAcknowledgedTrustIoltaDisabled());
+        $this->assertFalse($this->service->isPostureValid($firm, $freshConfig));
     }
 
     public function test_posture_invalid_with_only_firm_acknowledgment(): void
     {
         $firm = $this->makeDeploymentFirm(DeploymentMode::Dedicated);
-        $config = DeploymentConfig::factory()->forFirm($firm)->create();
+        $config = $this->runWithFirmContext($firm, fn () => DeploymentConfig::factory()->forFirm($firm)->create());
         $firmUser = FirmUser::factory()->create(['firm_id' => $firm->id]);
 
+        // recordFirmAcknowledgment() wraps its own write/read in the
+        // config's own firm_id context internally — no external wrap
+        // needed here.
         $acknowledged = $this->service->recordFirmAcknowledgment($config, $firmUser, 'We acknowledge operating-only posture.', 'v1');
 
         $this->assertTrue($acknowledged->hasFirmAcknowledgedTrustIoltaDisabled());
@@ -59,7 +69,7 @@ class TrustIoltaDisableAcknowledgmentServiceTest extends TestCase
     public function test_posture_valid_only_when_both_present(): void
     {
         $firm = $this->makeDeploymentFirm(DeploymentMode::Dedicated);
-        $config = DeploymentConfig::factory()->forFirm($firm)->create();
+        $config = $this->runWithFirmContext($firm, fn () => DeploymentConfig::factory()->forFirm($firm)->create());
         $firmUser = FirmUser::factory()->create(['firm_id' => $firm->id]);
         $admin1 = $this->makePlatformAdmin();
         $admin2 = $this->makePlatformAdmin();

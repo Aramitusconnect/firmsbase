@@ -31,9 +31,7 @@ use App\ValueObjects\HighRiskChangeDecision;
  */
 class TrustIoltaDisableAcknowledgmentService
 {
-    public function __construct(private readonly HighRiskPlatformChangePolicyService $highRiskPolicy)
-    {
-    }
+    public function __construct(private readonly HighRiskPlatformChangePolicyService $highRiskPolicy) {}
 
     public function requestApproval(Firm $firm, PlatformAdmin $requestedBy, string $reason): HighRiskChangeRequest
     {
@@ -74,6 +72,18 @@ class TrustIoltaDisableAcknowledgmentService
      * exist for this firm (created as part of the firm's dedicated/
      * private deployment setup) — this service is not the writer of
      * that row's other columns.
+     *
+     * The update is wrapped in the ROW's OWN firm_id context
+     * (deployment_configs now carries permanent FORCE ROW LEVEL
+     * SECURITY) — deliberately $config->firm_id, never the
+     * acknowledging FirmUser's firm id or any other derived value.
+     * $config->firm_id is this row's own owning column, so it is
+     * guaranteed to satisfy the row's RLS policy; deriving context
+     * from the acknowledging actor instead could silently mismatch
+     * (e.g. cross-firm data, a bug elsewhere) and Eloquent's update()
+     * does not throw on 0 affected rows — that mismatch would look
+     * like success while actually being a silent no-op rather than a
+     * clean, visible failure.
      */
     public function recordFirmAcknowledgment(
         DeploymentConfig $config,
@@ -81,14 +91,24 @@ class TrustIoltaDisableAcknowledgmentService
         string $acknowledgmentText,
         string $acknowledgmentVersion,
     ): DeploymentConfig {
-        $config->update([
-            'trust_iolta_disabled_acknowledged_at' => now(),
-            'trust_iolta_disabled_acknowledged_by' => $acknowledgedBy->user_id,
-            'trust_iolta_disabled_acknowledgment_text' => $acknowledgmentText,
-            'trust_iolta_disabled_acknowledgment_version' => $acknowledgmentVersion,
-        ]);
+        // fresh() is deliberately read INSIDE the same wrapped call as
+        // the update — reading it after the context is torn back down
+        // would itself fail closed under FORCE ROW LEVEL SECURITY (no
+        // context active), returning null and breaking this method's
+        // non-nullable return type.
+        return (new TenantContextService)->runWithFirmContext(
+            $config->firm_id,
+            function () use ($config, $acknowledgedBy, $acknowledgmentText, $acknowledgmentVersion) {
+                $config->update([
+                    'trust_iolta_disabled_acknowledged_at' => now(),
+                    'trust_iolta_disabled_acknowledged_by' => $acknowledgedBy->user_id,
+                    'trust_iolta_disabled_acknowledgment_text' => $acknowledgmentText,
+                    'trust_iolta_disabled_acknowledgment_version' => $acknowledgmentVersion,
+                ]);
 
-        return $config->fresh();
+                return $config->fresh();
+            },
+        );
     }
 
     /**
