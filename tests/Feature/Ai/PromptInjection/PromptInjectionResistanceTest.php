@@ -96,11 +96,16 @@ class PromptInjectionResistanceTest extends TestCase
 
         app(AiUsageRecorderService::class)->record($firm, $user, $request, $response);
 
-        $this->assertDatabaseHas('ai_tool_actions', [
-            'firm_id' => $firm->id,
-            'tool_name' => 'lookup_case_status',
-            'was_constrained' => false,
-        ]);
+        // ai_tool_actions is now FORCE RLS-enabled; assertDatabaseHas()
+        // issues a context-free raw query, which would otherwise see
+        // zero rows regardless of what record() actually wrote.
+        $this->runWithFirmContext($firm, function () use ($firm) {
+            $this->assertDatabaseHas('ai_tool_actions', [
+                'firm_id' => $firm->id,
+                'tool_name' => 'lookup_case_status',
+                'was_constrained' => false,
+            ]);
+        });
     }
 
     public function test_tool_action_is_blocked_when_the_request_did_not_allow_tool_actions(): void
@@ -130,10 +135,12 @@ class PromptInjectionResistanceTest extends TestCase
 
         app(AiUsageRecorderService::class)->record($firm, $user, $request, $response);
 
-        $this->assertDatabaseHas('ai_tool_actions', [
-            'firm_id' => $firm->id,
-            'tool_name' => 'some_tool',
-            'status' => \App\Enums\AiToolActionStatus::Blocked->value,
-        ]);
+        $this->runWithFirmContext($firm, function () use ($firm) {
+            $this->assertDatabaseHas('ai_tool_actions', [
+                'firm_id' => $firm->id,
+                'tool_name' => 'some_tool',
+                'status' => \App\Enums\AiToolActionStatus::Blocked->value,
+            ]);
+        });
     }
 }
