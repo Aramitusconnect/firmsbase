@@ -466,6 +466,21 @@ class DeploymentEnvironmentFirewallTest extends TestCase
             'tests/Feature/Deployment/Configs/DeploymentConfigTest.php',
             'tests/Feature/Deployment/Health/DeploymentHealthEnvelopeServiceTest.php',
             'tests/Feature/Security/RlsForceRollout/PrivateEnterpriseSettingsForceRlsActivationTest.php',
+            // Section 39A-5 Wave 1 follow-on (this batch, a later,
+            // distinct staged-FORCE-activation branch) legitimately
+            // added a firm_ai_provider_keys-only combined prepare+force
+            // RLS migration, wrapped AiProviderKeyService::generate()/
+            // rotate() each in their own runWithFirmContext() call (a
+            // protected Phase 16 file, but this is a real, narrow,
+            // in-scope wiring fix required by this checkpoint's own
+            // FORCE activation, not an unrelated rewrite), fixed
+            // FirmAiProviderKeyFactory::definition() to derive both
+            // firm_id and encryption_key_id from one shared Firm, and
+            // added this checkpoint's own activation-proof test file.
+            'database/migrations/2026_08_27_950015_prepare_row_level_security_and_force_rls_on_firm_ai_provider_keys_table.php',
+            'app/Services/AiProviderKeyService.php',
+            'database/factories/FirmAiProviderKeyFactory.php',
+            'tests/Feature/Security/RlsForceRollout/FirmAiProviderKeysForceRlsActivationTest.php',
         ];
 
         return array_values(array_filter(

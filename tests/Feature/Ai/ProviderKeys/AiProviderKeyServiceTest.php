@@ -105,6 +105,23 @@ class AiProviderKeyServiceTest extends TestCase
         $this->assertSame(1, \App\Models\FirmAiProviderKey::query()->where('firm_id', $firm->id)->where('provider', AiProvider::OpenAi->value)->where('status', AiProviderKeyStatus::Active->value)->count());
     }
 
+    /**
+     * firm_ai_provider_keys has FORCE ROW LEVEL SECURITY (see
+     * database/migrations/2026_08_27_950015_prepare_row_level_security_and_force_rls_on_firm_ai_provider_keys_table.php).
+     * makeAiEntitledFirm($firmB) leaves the PostgreSQL session context
+     * ambiently held at firmB (FirmSettingsFactory's pre-existing
+     * context-hold create() override never clears it) — a bare
+     * $keyA->fresh() read at that point would run under firmB's
+     * context, not firmA's, and RLS would correctly return no row for
+     * firmA's own key. The explicit runWithFirmContext($firmA, ...)
+     * wrap below makes the read genuinely belong to firmA's context
+     * instead of relying on incidental ambient state, so $keyA is
+     * actually re-read before being handed to rotate($firmB, ...) —
+     * the real guarantee under test (rotate() rejects a key that does
+     * not belong to the given firm) is otherwise unreachable, since a
+     * null $existing would fail with a TypeError before ever reaching
+     * that guard.
+     */
     public function test_cannot_rotate_a_key_belonging_to_another_firm(): void
     {
         $firmA = $this->makeAiEntitledFirm();
@@ -113,8 +130,9 @@ class AiProviderKeyServiceTest extends TestCase
         $service = app(AiProviderKeyService::class);
 
         $keyA = $service->generate($firmA, AiProvider::OpenAi, $user)['key'];
+        $keyA = $this->runWithFirmContext($firmA, fn () => $keyA->fresh());
 
         $this->expectException(\RuntimeException::class);
-        $service->rotate($firmB, $keyA->fresh(), $user);
+        $service->rotate($firmB, $keyA, $user);
     }
 }
