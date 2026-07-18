@@ -208,6 +208,24 @@ class RowLevelSecurityCoverageMappingService
         // 2026_08_27_950038_prepare_row_level_security_and_force_rls_on_signature_certificates_table.php.
         // All four moved here from MISSING_PREPARED_TABLES below.
         'signature_requests', 'signature_request_recipients', 'signature_events', 'signature_certificates',
+        // Section 39A-5 Wave 8 (governance/support/platform domain) —
+        // six tables implemented and committed as ONE combined unit
+        // (not six independent checkpoints), since Phase 1/2 read-only
+        // analysis confirmed legal_holds is a shared clearance-gate
+        // read dependency for both deletion_requests and
+        // key_destruction_requests, and support_access_requests/
+        // support_access_sessions share a direct parent-child writer
+        // relationship (closed with a real composite FK, not just
+        // documented):
+        // 2026_08_28_960001_prepare_row_level_security_and_force_rls_on_legal_holds_table.php,
+        // 2026_08_28_960002_prepare_row_level_security_and_force_rls_on_deletion_requests_table.php,
+        // 2026_08_28_960003_prepare_row_level_security_and_force_rls_on_key_destruction_requests_table.php,
+        // 2026_08_28_960004_prepare_row_level_security_and_force_rls_on_support_access_requests_table.php,
+        // 2026_08_28_960005_prepare_row_level_security_and_force_rls_on_support_access_sessions_table.php,
+        // 2026_08_28_960006_prepare_row_level_security_and_force_rls_on_deployment_health_checks_table.php.
+        // All six moved here from MISSING_PREPARED_TABLES below.
+        'legal_holds', 'deletion_requests', 'key_destruction_requests',
+        'support_access_requests', 'support_access_sessions', 'deployment_health_checks',
     ];
 
     /**
@@ -283,16 +301,23 @@ class RowLevelSecurityCoverageMappingService
      * e-signature domain, implemented as one combined unit rather than
      * four independent checkpoints.
      *
+     * Section 39A-5 Wave 8 removed legal_holds, deletion_requests,
+     * key_destruction_requests, support_access_requests,
+     * support_access_sessions, and deployment_health_checks from this
+     * array (moved to PREPARED_TABLES above) — the eighth coordinated
+     * multi-table wave, covering the governance/support/platform
+     * domain, implemented as one combined unit rather than six
+     * independent checkpoints.
+     *
      * @var array<int, string>
      */
     private const MISSING_PREPARED_TABLES = [
-        'deletion_requests', 'deployment_health_checks',
         'export_jobs',
         'fleet_migration_instance_status',
-        'implementation_projects', 'import_batches', 'key_destruction_requests',
-        'legal_holds', 'matter_trust_balances',
+        'implementation_projects', 'import_batches',
+        'matter_trust_balances',
         'migration_projects', 'offboarding_requests',
-        'support_access_requests', 'support_access_sessions', 'trust_accounts',
+        'trust_accounts',
         'trust_approval_events', 'trust_balances', 'trust_chargeback_events',
         'trust_ledger_entries', 'trust_ledgers', 'trust_reconciliations',
         'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries',

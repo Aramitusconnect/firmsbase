@@ -62,9 +62,11 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // here: all five of its tables (ai_usage_events, ai_tool_actions,
         // firm_ai_provider_keys, ai_approval_requests, ai_approval_events)
         // were moved into PREPARED_TABLES by Section 39A-5 Wave 3.
-        // Phase 17 governance.
-        $this->assertContains('legal_holds', $missing);
-        $this->assertContains('deletion_requests', $missing);
+        // Phase 17 governance no longer has a spot-check example here
+        // either: legal_holds and deletion_requests were moved into
+        // PREPARED_TABLES by Section 39A-5 Wave 8, along with
+        // key_destruction_requests, support_access_requests,
+        // support_access_sessions, and deployment_health_checks.
     }
 
     public function test_exempt_tables_includes_global_commercial_and_reference_tables(): void
@@ -148,8 +150,14 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // signature_events, and signature_certificates moved from
         // MISSING_PREPARED_TABLES into PREPARED_TABLES (82 -> 86,
         // 31 -> 27); tenantOwnedTables() remains unchanged (113).
-        $this->assertCount(86, $this->service->preparedTables());
-        $this->assertCount(27, $this->service->missingPreparedTables());
+        // Narrowly updated AGAIN by Section 39A-5 Wave 8 —
+        // legal_holds, deletion_requests, key_destruction_requests,
+        // support_access_requests, support_access_sessions, and
+        // deployment_health_checks moved from MISSING_PREPARED_TABLES
+        // into PREPARED_TABLES (86 -> 92, 27 -> 21); tenantOwnedTables()
+        // remains unchanged (113).
+        $this->assertCount(92, $this->service->preparedTables());
+        $this->assertCount(21, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
         $this->assertCount(24, $this->service->exemptTables());
@@ -197,13 +205,18 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // combined unit) — it was moved into PREPARED_TABLES (and given
         // a real RLS policy + FORCE activation) in that batch, so it is
         // no longer missing.
+        // support_access_requests and support_access_sessions removed
+        // from this list by Section 39A-5 Wave 8 (governance/support/
+        // platform domain, 6 tables implemented as one combined unit)
+        // — both moved into PREPARED_TABLES (and given a real RLS
+        // policy + FORCE activation) in that batch, so neither is any
+        // longer missing.
         foreach ([
             'trust_approval_events', 'webhook_deliveries',
             'webhook_delivery_attempts', 'webhook_secrets',
             'matter_trust_balances',
             'fleet_migration_instance_status',
             'implementation_projects',
-            'support_access_requests', 'support_access_sessions',
         ] as $table) {
             $this->assertContains($table, $missing, "{$table} must be tracked in MISSING_PREPARED_TABLES.");
         }
