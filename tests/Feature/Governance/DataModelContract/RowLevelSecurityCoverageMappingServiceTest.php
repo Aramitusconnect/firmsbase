@@ -192,9 +192,14 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // combined unit) — each was moved into PREPARED_TABLES (and
         // given a real RLS policy + FORCE activation) in that batch, so
         // none is any longer missing.
+        // signature_events removed from this list by Section 39A-5
+        // Wave 7 (e-signature domain, 4 tables implemented as one
+        // combined unit) — it was moved into PREPARED_TABLES (and given
+        // a real RLS policy + FORCE activation) in that batch, so it is
+        // no longer missing.
         foreach ([
             'trust_approval_events', 'webhook_deliveries',
-            'signature_events', 'webhook_delivery_attempts', 'webhook_secrets',
+            'webhook_delivery_attempts', 'webhook_secrets',
             'matter_trust_balances',
             'fleet_migration_instance_status',
             'implementation_projects',
