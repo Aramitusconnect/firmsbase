@@ -196,6 +196,18 @@ class RowLevelSecurityCoverageMappingService
         // All six moved here from MISSING_PREPARED_TABLES below.
         'generated_documents', 'form_drafts', 'generated_document_events',
         'form_review_events', 'document_hashes', 'pdf_view_events',
+        // Section 39A-5 Wave 7 (e-signature domain) — four tables
+        // implemented and committed as ONE combined unit (not four
+        // independent checkpoints), since Phase 1/2 read-only analysis
+        // confirmed they all originate from a single prior commit and
+        // SignatureCertificateService::generate() alone touches
+        // signature_events and signature_certificates in one call path:
+        // 2026_08_27_950035_prepare_row_level_security_and_force_rls_on_signature_requests_table.php,
+        // 2026_08_27_950036_prepare_row_level_security_and_force_rls_on_signature_request_recipients_table.php,
+        // 2026_08_27_950037_prepare_row_level_security_and_force_rls_on_signature_events_table.php,
+        // 2026_08_27_950038_prepare_row_level_security_and_force_rls_on_signature_certificates_table.php.
+        // All four moved here from MISSING_PREPARED_TABLES below.
+        'signature_requests', 'signature_request_recipients', 'signature_events', 'signature_certificates',
     ];
 
     /**
@@ -264,6 +276,13 @@ class RowLevelSecurityCoverageMappingService
      * documents/forms domain, implemented as one combined unit rather
      * than six independent checkpoints.
      *
+     * Section 39A-5 Wave 7 removed signature_requests,
+     * signature_request_recipients, signature_events, and
+     * signature_certificates from this array (moved to PREPARED_TABLES
+     * above) — the seventh coordinated multi-table wave, covering the
+     * e-signature domain, implemented as one combined unit rather than
+     * four independent checkpoints.
+     *
      * @var array<int, string>
      */
     private const MISSING_PREPARED_TABLES = [
@@ -273,8 +292,6 @@ class RowLevelSecurityCoverageMappingService
         'implementation_projects', 'import_batches', 'key_destruction_requests',
         'legal_holds', 'matter_trust_balances',
         'migration_projects', 'offboarding_requests',
-        'signature_certificates', 'signature_events',
-        'signature_request_recipients', 'signature_requests',
         'support_access_requests', 'support_access_sessions', 'trust_accounts',
         'trust_approval_events', 'trust_balances', 'trust_chargeback_events',
         'trust_ledger_entries', 'trust_ledgers', 'trust_reconciliations',

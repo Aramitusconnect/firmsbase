@@ -143,8 +143,13 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // ai_approval_requests, and ai_approval_events moved from
         // MISSING_PREPARED_TABLES into PREPARED_TABLES (60 -> 65,
         // 53 -> 48); tenantOwnedTables() remains unchanged (113).
-        $this->assertCount(82, $this->service->preparedTables());
-        $this->assertCount(31, $this->service->missingPreparedTables());
+        // Narrowly updated AGAIN by Section 39A-5 Wave 7 —
+        // signature_requests, signature_request_recipients,
+        // signature_events, and signature_certificates moved from
+        // MISSING_PREPARED_TABLES into PREPARED_TABLES (82 -> 86,
+        // 31 -> 27); tenantOwnedTables() remains unchanged (113).
+        $this->assertCount(86, $this->service->preparedTables());
+        $this->assertCount(27, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
         $this->assertCount(24, $this->service->exemptTables());
