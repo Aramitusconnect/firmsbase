@@ -47,9 +47,29 @@ class AiUsageRecorderService
         private readonly AiApprovalWorkflowService $approvalWorkflow,
         private readonly AiToolActionRecorderService $toolActionRecorder,
         private readonly UsageRollupService $usageRollupService,
-    ) {
-    }
+    ) {}
 
+    /**
+     * Section 39A-5 (Wave 1, firm_ai_settings checkpoint) — firm_ai_settings
+     * now has FORCE ROW LEVEL SECURITY active (see the
+     * 2026_08_27_950003_prepare_row_level_security_and_force_rls_on_firm_ai_settings_table.php
+     * migration), and this method is its only real reader
+     * (AiBudgetEnforcementService::checkFirmBudget() and
+     * computeCostCents() below, both firm_ai_settings readers via
+     * Firm::aiSettings()). record() is a single-firm operation from
+     * start to finish, so the ENTIRE method body is wrapped in ONE
+     * outer runWithFirmContext() call here rather than wrapping each
+     * sub-piece separately — per this project's established
+     * convention, a nested self-wrap of an inner call would clear an
+     * already-active outer caller's context prematurely when this
+     * method is invoked from within one.
+     *
+     * This single wrap is ALREADY comprehensive for the
+     * ai_usage_events/ai_approval_requests/ai_approval_events/
+     * ai_tool_actions writes performed inside this same method body —
+     * a later, separate wave activating FORCE ROW LEVEL SECURITY on
+     * those other tables must NOT re-wrap this method again.
+     */
     public function record(
         Firm $firm,
         User $user,
@@ -57,73 +77,75 @@ class AiUsageRecorderService
         AiProviderResponse $response,
         ?Matter $matter = null,
     ): AiUsageEvent {
-        $this->modeResolution->assertEnabled($firm);
-        $this->modeResolution->assertProviderAccess($firm, $request->provider);
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $user, $request, $response, $matter) {
+            $this->modeResolution->assertEnabled($firm);
+            $this->modeResolution->assertProviderAccess($firm, $request->provider);
 
-        [$periodStartsAt, $periodEndsAt] = $this->currentPeriod();
+            [$periodStartsAt, $periodEndsAt] = $this->currentPeriod();
 
-        $totalTokens = $response->tokensIn + $response->tokensOut;
-        $costCents = $this->computeCostCents($firm, $totalTokens);
+            $totalTokens = $response->tokensIn + $response->tokensOut;
+            $costCents = $this->computeCostCents($firm, $totalTokens);
 
-        $budgetResult = $this->budgetEnforcement->checkFirmBudget(
-            $firm,
-            $totalTokens,
-            $costCents,
-            $periodStartsAt,
-            $periodEndsAt,
-        );
-
-        if (! $budgetResult->allowed()) {
-            throw new \RuntimeException($budgetResult->reason ?? 'AI budget/token limit exceeded.');
-        }
-
-        $isHighRisk = $request->actionType->isHighRisk();
-
-        $usageEvent = DB::transaction(function () use ($firm, $user, $matter, $request, $response, $costCents, $isHighRisk) {
-            return AiUsageEvent::create([
-                'firm_id' => $firm->id,
-                'user_id' => $user->id,
-                'matter_id' => $matter?->id,
-                'ai_mode' => $this->modeResolution->resolve($firm),
-                'provider' => $request->provider,
-                'model' => $request->model,
-                'tokens_in' => $response->tokensIn,
-                'tokens_out' => $response->tokensOut,
-                'cost_cents' => $costCents,
-                'approval_required' => $isHighRisk,
-                'action_type' => $request->actionType,
-            ]);
-        });
-
-        if ($firm->billingAccount) {
-            $this->usageRollupService->recordUsage(
-                $firm->billingAccount,
+            $budgetResult = $this->budgetEnforcement->checkFirmBudget(
                 $firm,
-                UsageRollupMetric::AiTokens,
                 $totalTokens,
+                $costCents,
                 $periodStartsAt,
                 $periodEndsAt,
             );
-        }
 
-        if ($isHighRisk) {
-            $category = $request->actionType->toApprovalCategory();
+            if (! $budgetResult->allowed()) {
+                throw new \RuntimeException($budgetResult->reason ?? 'AI budget/token limit exceeded.');
+            }
 
-            if ($category !== null) {
-                $this->approvalWorkflow->submit(
+            $isHighRisk = $request->actionType->isHighRisk();
+
+            $usageEvent = DB::transaction(function () use ($firm, $user, $matter, $request, $response, $costCents, $isHighRisk) {
+                return AiUsageEvent::create([
+                    'firm_id' => $firm->id,
+                    'user_id' => $user->id,
+                    'matter_id' => $matter?->id,
+                    'ai_mode' => $this->modeResolution->resolve($firm),
+                    'provider' => $request->provider,
+                    'model' => $request->model,
+                    'tokens_in' => $response->tokensIn,
+                    'tokens_out' => $response->tokensOut,
+                    'cost_cents' => $costCents,
+                    'approval_required' => $isHighRisk,
+                    'action_type' => $request->actionType,
+                ]);
+            });
+
+            if ($firm->billingAccount) {
+                $this->usageRollupService->recordUsage(
+                    $firm->billingAccount,
                     $firm,
-                    $user,
-                    $usageEvent,
-                    $category,
-                    $response->outputText,
-                    $matter,
+                    UsageRollupMetric::AiTokens,
+                    $totalTokens,
+                    $periodStartsAt,
+                    $periodEndsAt,
                 );
             }
-        }
 
-        $this->toolActionRecorder->recordFromResponse($firm, $matter, $usageEvent, $request, $response);
+            if ($isHighRisk) {
+                $category = $request->actionType->toApprovalCategory();
 
-        return $usageEvent;
+                if ($category !== null) {
+                    $this->approvalWorkflow->submit(
+                        $firm,
+                        $user,
+                        $usageEvent,
+                        $category,
+                        $response->outputText,
+                        $matter,
+                    );
+                }
+            }
+
+            $this->toolActionRecorder->recordFromResponse($firm, $matter, $usageEvent, $request, $response);
+
+            return $usageEvent;
+        });
     }
 
     private function computeCostCents(Firm $firm, int $totalTokens): int

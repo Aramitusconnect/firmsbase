@@ -5,6 +5,8 @@ namespace Tests\Feature\Ai\Concerns;
 use App\Enums\AiMode;
 use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
+use App\Enums\PaymentMode;
+use App\Enums\TwoFactorMode;
 use App\Models\Firm;
 use App\Models\FirmSettings;
 use App\Models\FirmUser;
@@ -42,14 +44,21 @@ trait SetsUpAiEntitledFirm
         // app.current_firm_id session context before inserting), so
         // route creation through it instead.
         FirmSettings::factory()->forFirm($firm)->create([
-            'payment_mode' => \App\Enums\PaymentMode::OperatingPaymentsOnly,
+            'payment_mode' => PaymentMode::OperatingPaymentsOnly,
             'trust_iolta_protection' => true,
             'ai_mode' => $mode,
-            'client_2fa_mode' => \App\Enums\TwoFactorMode::Optional,
+            'client_2fa_mode' => TwoFactorMode::Optional,
             'default_language' => 'en',
         ]);
 
-        $firm->aiSettings()->create([
+        // firm_ai_settings has FORCE ROW LEVEL SECURITY (Section 39A-5,
+        // Wave 1 firm_ai_settings checkpoint) — a direct
+        // $firm->aiSettings()->create(...) relation call runs with no
+        // tenant context active and is rejected by the policy. Wrap
+        // the whole call in runWithFirmContext() rather than relying
+        // on any incidental leftover session context from the
+        // FirmSettings::factory() call above.
+        $this->runWithFirmContext($firm, fn () => $firm->aiSettings()->create([
             'allowed_providers_json' => ['openai'],
             'allowed_models_json' => ['fake-model-1'],
             'token_limit_per_period' => null,
@@ -59,7 +68,7 @@ trait SetsUpAiEntitledFirm
             'client_data_context_enabled' => false,
             'high_risk_requires_approval' => true,
             'full_content_logging_enabled' => false,
-        ]);
+        ]));
 
         return $firm->fresh(['firmSettings', 'aiSettings']);
     }

@@ -5,10 +5,14 @@ namespace Tests\Feature\Ai\Usage;
 use App\Enums\AiMode;
 use App\Enums\AiProvider;
 use App\Enums\AiUsageActionType;
+use App\Enums\EntitlementSource;
+use App\Enums\PaymentMode;
 use App\Enums\UsageRollupMetric;
 use App\Models\Firm;
 use App\Models\User;
 use App\Services\AiUsageRecorderService;
+use App\Services\EncryptionKeyService;
+use App\Services\EntitlementService;
 use App\Services\UsageRollupService;
 use App\ValueObjects\AiPromptRequest;
 use App\ValueObjects\AiProviderResponse;
@@ -41,7 +45,11 @@ class AiUsageRecorderServiceTest extends TestCase
     public function test_token_limit_is_enforced_at_firm_level(): void
     {
         $firm = $this->makeAiEntitledFirm();
-        $firm->aiSettings->update(['token_limit_per_period' => 10]);
+        // firm_ai_settings has FORCE ROW LEVEL SECURITY (Section
+        // 39A-5, Wave 1 firm_ai_settings checkpoint) — wrap the update
+        // in runWithFirmContext() rather than relying on any
+        // incidental leftover session context.
+        $this->runWithFirmContext($firm, fn () => $firm->aiSettings->update(['token_limit_per_period' => 10]));
         $user = User::factory()->create();
 
         $this->expectException(\RuntimeException::class);
@@ -58,7 +66,11 @@ class AiUsageRecorderServiceTest extends TestCase
     public function test_budget_limit_is_enforced_at_firm_level(): void
     {
         $firm = $this->makeAiEntitledFirm();
-        $firm->aiSettings->update(['budget_limit_cents_per_period' => 0]);
+        // firm_ai_settings has FORCE ROW LEVEL SECURITY (Section
+        // 39A-5, Wave 1 firm_ai_settings checkpoint) — wrap the update
+        // in runWithFirmContext() rather than relying on any
+        // incidental leftover session context.
+        $this->runWithFirmContext($firm, fn () => $firm->aiSettings->update(['budget_limit_cents_per_period' => 0]));
         $user = User::factory()->create();
 
         $this->expectException(\RuntimeException::class);
@@ -93,8 +105,8 @@ class AiUsageRecorderServiceTest extends TestCase
         $firm = Firm::factory()->withBillingAccount()->create();
         // Re-use the entitlement helper's setup manually since
         // makeAiEntitledFirm() creates its own firm.
-        app(\App\Services\EntitlementService::class)->setForSource($firm, 'ai', \App\Enums\EntitlementSource::AdminOverride, true);
-        app(\App\Services\EncryptionKeyService::class)->provision($firm);
+        app(EntitlementService::class)->setForSource($firm, 'ai', EntitlementSource::AdminOverride, true);
+        app(EncryptionKeyService::class)->provision($firm);
         // firm_settings has FORCE ROW LEVEL SECURITY (Section 39A-3L,
         // Checkpoint 18) — a direct relation create runs with no
         // tenant context active and is rejected by the policy. The
@@ -104,7 +116,7 @@ class AiUsageRecorderServiceTest extends TestCase
         // with no context (which would return null under FORCE RLS,
         // not an exception, and read as "AI mode is disabled").
         $this->runWithFirmContext($firm, function () use ($firm) {
-            $firm->firmSettings()->create(['payment_mode' => \App\Enums\PaymentMode::OperatingPaymentsOnly, 'ai_mode' => AiMode::PlatformManaged]);
+            $firm->firmSettings()->create(['payment_mode' => PaymentMode::OperatingPaymentsOnly, 'ai_mode' => AiMode::PlatformManaged]);
             $firm->aiSettings()->create(['usage_markup_basis_points' => 0]);
             $firm->refresh();
             $firm->load('firmSettings', 'aiSettings');
