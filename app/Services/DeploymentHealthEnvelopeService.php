@@ -29,17 +29,14 @@ class DeploymentHealthEnvelopeService
 
     public function buildEnvelope(Firm $firm, string $version, string $saasVersion, ?string $migrationStatus = null): DeploymentHealthEnvelope
     {
-        // private_enterprise_settings now carries permanent FORCE ROW
-        // LEVEL SECURITY, so this read is wrapped narrowly in the
-        // firm's own tenant context (whole-call wrap, not just the
-        // argument) rather than relying on any ambient context that
-        // may or may not already be active at this call site. Queried
-        // directly by firm_id instead of trusting the cached
+        // private_enterprise_settings carries permanent FORCE ROW LEVEL
+        // SECURITY, so this read is wrapped narrowly in the firm's own
+        // tenant context (whole-call wrap, not just the argument)
+        // rather than relying on any ambient context that may or may
+        // not already be active at this call site. Queried directly by
+        // firm_id instead of trusting the cached
         // $firm->privateEnterpriseSettings relation, to avoid a
-        // stale-cache hazard. The DeploymentHealthCheck::create() call
-        // below is intentionally left unwrapped — it writes to the
-        // separate, still-unprepared deployment_health_checks table
-        // and must stay decoupled from this table's context.
+        // stale-cache hazard.
         $telemetryProhibited = (new TenantContextService())->runWithFirmContext(
             $firm,
             fn () => (bool) (PrivateEnterpriseSettings::query()->where('firm_id', $firm->id)->first()?->telemetry_prohibited ?? false),
@@ -51,14 +48,20 @@ class DeploymentHealthEnvelopeService
 
         $heartbeatAt = now();
 
-        DeploymentHealthCheck::create([
+        // deployment_health_checks now carries permanent FORCE ROW
+        // LEVEL SECURITY too — a second, separate, sequential wrap
+        // (not nested inside the PrivateEnterpriseSettings wrap above,
+        // which has already closed by this point). Keyed on the same
+        // $firm param since both wrapped operations concern the same
+        // firm's data.
+        (new TenantContextService())->runWithFirmContext($firm, fn () => DeploymentHealthCheck::create([
             'firm_id' => $firm->id,
             'heartbeat_at' => $heartbeatAt,
             'version' => $version,
             'migration_status' => $migrationStatus,
             'status' => $status,
             'reported_via' => $reportMode,
-        ]);
+        ]));
 
         return new DeploymentHealthEnvelope(
             heartbeatAt: $heartbeatAt,
@@ -77,13 +80,16 @@ class DeploymentHealthEnvelopeService
      */
     public function reportOffline(Firm $firm, string $version, ?string $migrationStatus = null, HealthCheckStatus $status = HealthCheckStatus::Unknown): DeploymentHealthCheck
     {
-        return DeploymentHealthCheck::create([
+        // deployment_health_checks now carries permanent FORCE ROW
+        // LEVEL SECURITY — this method had no wrap of any kind before
+        // this batch.
+        return (new TenantContextService())->runWithFirmContext($firm, fn () => DeploymentHealthCheck::create([
             'firm_id' => $firm->id,
             'heartbeat_at' => now(),
             'version' => $version,
             'migration_status' => $migrationStatus,
             'status' => $status,
             'reported_via' => DeploymentHealthReportMode::OfflineReport,
-        ]);
+        ]));
     }
 }

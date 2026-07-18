@@ -45,8 +45,8 @@ class DeletionGovernanceService
             return new DeletionClearanceResult(true, false, false, 'Retention policy has not cleared for this record.');
         }
 
-        $legalHoldCleared = ! $this->legalHoldService->hasActiveHold($firm, LegalHoldScope::Matter, $request->subject_id)
-            && ! $this->legalHoldService->hasActiveHold($firm, LegalHoldScope::Firm);
+        $legalHoldCleared = (new TenantContextService())->runWithFirmContext($firm, fn () => ! $this->legalHoldService->hasActiveHold($firm, LegalHoldScope::Matter, $request->subject_id)
+            && ! $this->legalHoldService->hasActiveHold($firm, LegalHoldScope::Firm));
 
         if (! $legalHoldCleared) {
             return new DeletionClearanceResult(true, true, false, 'An active legal hold blocks this deletion.');
@@ -66,14 +66,16 @@ class DeletionGovernanceService
                 default => DeletionRequestStatus::LegalHoldBlocked,
             };
 
-            $request->update(['status' => $status]);
+            (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => $status]));
 
             throw new \RuntimeException($clearance->reason ?? 'Deletion request is not yet clear for approval.');
         }
 
-        $request->update(['status' => DeletionRequestStatus::PendingApproval]);
+        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request) {
+            $request->update(['status' => DeletionRequestStatus::PendingApproval]);
 
-        return $request->fresh();
+            return $request->fresh();
+        });
     }
 
     /**
@@ -87,8 +89,10 @@ class DeletionGovernanceService
             throw new \RuntimeException('Deletion request cannot be finalized without an Approved deletion_approvals row.');
         }
 
-        $request->update(['status' => DeletionRequestStatus::ReadyForExecution]);
+        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request) {
+            $request->update(['status' => DeletionRequestStatus::ReadyForExecution]);
 
-        return $request->fresh();
+            return $request->fresh();
+        });
     }
 }

@@ -50,8 +50,15 @@ class AccessReviewService
     {
         $subjects = match ($review->scope) {
             AccessReviewScope::PlatformAdmins => PlatformAdmin::query()->get(),
+            // support_access_requests has permanent FORCE ROW LEVEL SECURITY
+            // (this wave's own 2026_08_28_960004 migration) with a strict,
+            // non-nullable firm_id policy — there is no NULL-context bypass,
+            // so this list must be built by looping every firm and merging
+            // per-firm results in PHP (see supportAccessRequesterIdsAcrossAllFirms())
+            // rather than querying directly; do not "simplify" this back to
+            // an unwrapped cross-firm query, it will silently return nothing.
             AccessReviewScope::SupportAgents => PlatformAdmin::query()
-                ->whereIn('id', SupportAccessRequest::query()->whereNotNull('requested_by')->distinct()->pluck('requested_by'))
+                ->whereIn('id', $this->supportAccessRequesterIdsAcrossAllFirms())
                 ->get(),
             // firm_users has permanent FORCE ROW LEVEL SECURITY
             // (Section 39A-3B). $review->firm_id is nullable at the
@@ -87,6 +94,40 @@ class AccessReviewService
                 'decision' => AccessReviewItemDecision::Pending,
             ]);
         }
+    }
+
+    /**
+     * support_access_requests carries permanent FORCE ROW LEVEL SECURITY
+     * with a strict, non-nullable firm_id policy (no NULL-context bypass),
+     * and requested_by values legitimately span every firm a platform admin
+     * may have requested access to. The only correct way to read "distinct
+     * requested_by across every firm" is therefore to iterate every firm
+     * explicitly, wrapping each firm's read in its own runWithFirmContext(),
+     * and merge the per-firm results in PHP — mirroring the established
+     * HealthCheckService::runAllAndRecord() per-firm aggregation pattern for
+     * platform-wide reads over an RLS-forced table. runWithoutFirmContext()
+     * would NOT work here: it still yields zero rows against a strict
+     * non-null firm_id policy, it does not bypass RLS.
+     */
+    private function supportAccessRequesterIdsAcrossAllFirms(): array
+    {
+        $tenantContext = new TenantContextService();
+        $requesterIds = collect();
+
+        foreach (Firm::query()->get() as $firm) {
+            $requesterIds = $requesterIds->merge(
+                $tenantContext->runWithFirmContext(
+                    $firm,
+                    fn () => SupportAccessRequest::query()
+                        ->where('firm_id', $firm->id)
+                        ->whereNotNull('requested_by')
+                        ->distinct()
+                        ->pluck('requested_by'),
+                )
+            );
+        }
+
+        return $requesterIds->unique()->values()->all();
     }
 
     public function recordDecision(

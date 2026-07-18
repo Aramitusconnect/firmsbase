@@ -735,22 +735,34 @@ class TimelineEventsForceRlsActivationTest extends TestCase
         $approvalService = app(KeyDestructionApprovalService::class);
         $approval = $approvalService->requestApproval($request, $admin1, 'Two-person approval required.');
         $approvalService->firstApprove($approval, $admin1);
-        $approvalService->secondApprove($approval->fresh(), $admin2);
+        $approvalService->secondApprove($approval->fresh(), $request, $admin2);
 
-        $this->assertSame(KeyDestructionRequestStatus::Approved, $request->fresh()->status);
+        // key_destruction_requests now carries permanent FORCE ROW
+        // LEVEL SECURITY (this same batch's own Section 39A-8 Wave 8
+        // activation), so this bare fresh() reload (outside any
+        // context) must be explicitly wrapped, or it would incorrectly
+        // resolve to null.
+        $freshRequest = $this->runWithFirmContext($firm, fn () => $request->fresh());
+        $this->assertSame(KeyDestructionRequestStatus::Approved, $freshRequest->status);
 
-        $executed = app(KeyDestructionExecutionService::class)->execute($request->fresh());
+        // execute() re-reads the row itself via its own leading
+        // runWithFirmContext() wrap, so passing $freshRequest directly
+        // (rather than calling ->fresh() again here, outside context)
+        // is correct.
+        $executed = app(KeyDestructionExecutionService::class)->execute($freshRequest);
 
         $this->assertSame(KeyDestructionRequestStatus::Executed, $executed->status);
         $this->assertNotNull($executed->executed_at);
         $this->assertNoDatabaseTenantContext('KeyDestructionExecutionService::execute() must clear its own context wrap before returning.');
 
         // Both must exist TOGETHER — the status update on
-        // key_destruction_requests (not itself FORCE-protected) AND the
-        // timeline_events audit row (now FORCE-protected), proving
-        // neither succeeded while the other silently failed.
+        // key_destruction_requests (also now FORCE-protected by this
+        // same Section 39A-8 Wave 8 batch, so this raw query must be
+        // wrapped too) AND the timeline_events audit row (also
+        // FORCE-protected), proving neither succeeded while the other
+        // silently failed.
         $statusFromDatabase = KeyDestructionRequestStatus::from(
-            DB::table('key_destruction_requests')->where('id', $request->id)->value('status')
+            $this->runWithFirmContext($firm, fn () => DB::table('key_destruction_requests')->where('id', $request->id)->value('status'))
         );
         $this->assertSame(KeyDestructionRequestStatus::Executed, $statusFromDatabase, 'key_destruction_requests.status must genuinely be Executed in the database.');
 

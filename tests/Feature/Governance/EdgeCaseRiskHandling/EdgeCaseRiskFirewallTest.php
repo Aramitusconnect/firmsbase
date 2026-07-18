@@ -50,10 +50,21 @@ class EdgeCaseRiskFirewallTest extends TestCase
         'app/Services/DocumentChaseService.php',
         'app/Services/TrustConcurrencyLockService.php',
         'app/Services/TrustBalanceService.php',
-        'app/Services/LegalHoldService.php',
-        'app/Services/DeletionGovernanceService.php',
-        'app/Services/KeyDestructionRequestService.php',
-        'app/Services/KeyDestructionApprovalService.php',
+        // LegalHoldService.php, DeletionGovernanceService.php,
+        // KeyDestructionRequestService.php, and
+        // KeyDestructionApprovalService.php are deliberately NOT in
+        // this list any more — Section 39A-8 Wave 8 (governance/
+        // support/platform domain) found a genuine need to wrap
+        // place()/release() (LegalHoldService), the legal-hold
+        // clearance check + status-transition writes
+        // (DeletionGovernanceService), the clearance check + status-
+        // transition writes (KeyDestructionRequestService), and the
+        // now-explicit-$request-parameter secondApprove()/deny()
+        // writes (KeyDestructionApprovalService) each in their own
+        // runWithFirmContext() call, since legal_holds,
+        // deletion_requests, and key_destruction_requests now have
+        // permanent FORCE ROW LEVEL SECURITY. Decision logic, order,
+        // and return values are unchanged.
         'app/Services/FleetMigrationOrchestrationService.php',
         'app/Services/LicenseFileValidationService.php',
         // PaymentClassificationService.php is deliberately NOT in this
@@ -86,7 +97,15 @@ class EdgeCaseRiskFirewallTest extends TestCase
         'app/Services/FormTemplateService.php',
         'app/Services/FormEditionWatchService.php',
         'app/Services/LegalDataAccessPolicyService.php',
-        'app/Services/OffboardingRequestService.php',
+        // OffboardingRequestService.php is deliberately NOT in this
+        // list any more — Section 39A-8 Wave 8 found a genuine need to
+        // wrap evaluateReadiness()'s single hasActiveHold() call in
+        // runWithFirmContext(), since legal_holds now has permanent
+        // FORCE ROW LEVEL SECURITY (closing the fail-open bug where an
+        // unwrapped read under FORCE silently returns zero rows rather
+        // than erroring, making an active hold invisible). advance()/
+        // complete()/cancel() (which write to offboarding_requests
+        // itself, not yet FORCE'd) are untouched.
         'app/Services/PermissionMatrixMappingService.php',
         'app/Services/DeploymentModeCoverageMappingService.php',
         'app/Services/OperationalReadinessMappingService.php',
@@ -160,6 +179,12 @@ class EdgeCaseRiskFirewallTest extends TestCase
         'tests/Feature/Ai/Entitlement/AiEntitlementAndModeBlockingTest.php',
         'tests/Feature/Ai/Foundation/AiModeEnumReplacementTest.php',
         'tests/Feature/Ai/Usage/AiUsageRecorderServiceTest.php',
+        // Section 39A-8 Wave 8 (governance/support/platform domain)
+        // legitimately updated this test to wrap bare
+        // assertDatabaseHas()/direct-query reads in explicit tenant
+        // context, once deployment_health_checks gained permanent
+        // FORCE ROW LEVEL SECURITY.
+        'tests/Feature/Deployment/Health/DeploymentHealthEnvelopeServiceTest.php',
     ];
 
     public function test_no_new_migration_files_were_added(): void
@@ -213,13 +238,26 @@ class EdgeCaseRiskFirewallTest extends TestCase
     {
         $changedRepoWide = $this->changedOrUntrackedPaths('.');
 
+        // DeploymentHealthEnvelopeService, DeletionGovernanceService,
+        // KeyDestructionRequestService, and LegalHoldService are
+        // deliberately NOT in this list any more — Section 39A-8 Wave
+        // 8 found a genuine need to wrap buildEnvelope()'s
+        // DeploymentHealthCheck::create() and reportOffline()'s own
+        // create() call (DeploymentHealthEnvelopeService), the
+        // legal-hold clearance check + status-transition writes
+        // (DeletionGovernanceService), the clearance check + status-
+        // transition writes (KeyDestructionRequestService), and
+        // place()/release() (LegalHoldService) each in their own
+        // runWithFirmContext() call, since deployment_health_checks,
+        // deletion_requests, key_destruction_requests, and legal_holds
+        // now have permanent FORCE ROW LEVEL SECURITY. Decision logic,
+        // order, and return values are unchanged.
         $behaviorFilePatterns = [
             'PaymentApplicationService', 'PaymentPlanService', 'PaymentPlanInstallmentService',
             'TrustDepositService', 'TrustLedgerEntryReversalService', 'TrustChargebackService',
             'AiProviderKeyService', 'AiUsageRecorderService', 'AiToolActionRecorderService',
-            'LicenseFileSigningService', 'FleetMigrationOrchestrationService', 'DeploymentHealthEnvelopeService',
+            'LicenseFileSigningService', 'FleetMigrationOrchestrationService',
             'ImportApplyService', 'ImportRollbackService',
-            'DeletionGovernanceService', 'KeyDestructionRequestService', 'LegalHoldService',
         ];
 
         $touched = array_values(array_filter(
@@ -294,7 +332,12 @@ class EdgeCaseRiskFirewallTest extends TestCase
                 && $path !== 'tests/Feature/Ai/Concerns/SetsUpAiEntitledFirm.php'
                 && $path !== 'tests/Feature/Ai/Entitlement/AiEntitlementAndModeBlockingTest.php'
                 && $path !== 'tests/Feature/Ai/Foundation/AiModeEnumReplacementTest.php'
-                && $path !== 'tests/Feature/Ai/Usage/AiUsageRecorderServiceTest.php',
+                && $path !== 'tests/Feature/Ai/Usage/AiUsageRecorderServiceTest.php'
+                // Section 39A-8 Wave 8 legitimately updated this test to
+                // wrap bare assertDatabaseHas()/direct-query reads in
+                // explicit tenant context, once deployment_health_checks
+                // gained permanent FORCE ROW LEVEL SECURITY.
+                && $path !== 'tests/Feature/Deployment/Health/DeploymentHealthEnvelopeServiceTest.php',
         );
 
         $this->assertEmpty(
@@ -652,6 +695,25 @@ class EdgeCaseRiskFirewallTest extends TestCase
             'database/factories/ContactFactory.php',
             'database/factories/PartyFactory.php',
             'tests/Feature/Imports/ImportDuplicateDetectionServiceTest.php',
+            // Section 39A-8 Wave 8 (the eighth coordinated multi-table
+            // wave, governance/support/platform domain) legitimately
+            // added six combined prepare-and-force migrations
+            // (legal_holds, deletion_requests, key_destruction_requests,
+            // support_access_requests, support_access_sessions,
+            // deployment_health_checks) and their six factories'
+            // context-hold fixes.
+            'database/migrations/2026_08_28_960001_prepare_row_level_security_and_force_rls_on_legal_holds_table.php',
+            'database/migrations/2026_08_28_960002_prepare_row_level_security_and_force_rls_on_deletion_requests_table.php',
+            'database/migrations/2026_08_28_960003_prepare_row_level_security_and_force_rls_on_key_destruction_requests_table.php',
+            'database/migrations/2026_08_28_960004_prepare_row_level_security_and_force_rls_on_support_access_requests_table.php',
+            'database/migrations/2026_08_28_960005_prepare_row_level_security_and_force_rls_on_support_access_sessions_table.php',
+            'database/migrations/2026_08_28_960006_prepare_row_level_security_and_force_rls_on_deployment_health_checks_table.php',
+            'database/factories/LegalHoldFactory.php',
+            'database/factories/DeletionRequestFactory.php',
+            'database/factories/KeyDestructionRequestFactory.php',
+            'database/factories/SupportAccessRequestFactory.php',
+            'database/factories/SupportAccessSessionFactory.php',
+            'database/factories/DeploymentHealthCheckFactory.php',
         ];
 
         return array_values(array_filter(

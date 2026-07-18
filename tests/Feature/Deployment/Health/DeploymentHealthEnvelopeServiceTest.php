@@ -25,7 +25,12 @@ class DeploymentHealthEnvelopeServiceTest extends TestCase
         $this->assertSame('2026.7.0', $envelope->version);
         $this->assertSame('completed', $envelope->migrationStatus);
         $this->assertSame(HealthCheckStatus::Healthy, $envelope->status);
-        $this->assertDatabaseHas('deployment_health_checks', ['firm_id' => $firm->id, 'version' => '2026.7.0']);
+
+        // deployment_health_checks now carries permanent FORCE ROW
+        // LEVEL SECURITY, so this bare assertDatabaseHas() (outside any
+        // context) must be explicitly wrapped, or it would incorrectly
+        // see zero rows rather than the row it means to confirm exists.
+        $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('deployment_health_checks', ['firm_id' => $firm->id, 'version' => '2026.7.0']));
     }
 
     public function test_envelope_carries_no_pii_or_firm_identifying_content_beyond_the_id(): void
@@ -34,7 +39,13 @@ class DeploymentHealthEnvelopeServiceTest extends TestCase
 
         app(DeploymentHealthEnvelopeService::class)->buildEnvelope($firm, '2026.7.0', '2026.7.0');
 
-        $row = \App\Models\DeploymentHealthCheck::query()->where('firm_id', $firm->id)->firstOrFail();
+        // deployment_health_checks now carries permanent FORCE ROW
+        // LEVEL SECURITY, so this bare read (outside any context) must
+        // be explicitly wrapped, or it would incorrectly find no row.
+        $row = $this->runWithFirmContext(
+            $firm,
+            fn () => \App\Models\DeploymentHealthCheck::query()->where('firm_id', $firm->id)->firstOrFail(),
+        );
 
         $this->assertStringNotContainsString($firm->name, (string) $row->detail);
     }
@@ -52,7 +63,12 @@ class DeploymentHealthEnvelopeServiceTest extends TestCase
         $envelope = app(DeploymentHealthEnvelopeService::class)->buildEnvelope($firm->fresh(), '2026.7.0', '2026.7.0');
 
         $this->assertSame(DeploymentHealthReportMode::OfflineReport, $envelope->reportedVia);
-        $this->assertDatabaseHas('deployment_health_checks', ['firm_id' => $firm->id, 'reported_via' => DeploymentHealthReportMode::OfflineReport->value]);
+
+        // deployment_health_checks now carries permanent FORCE ROW
+        // LEVEL SECURITY, so this bare assertDatabaseHas() (outside any
+        // context) must be explicitly wrapped, or it would incorrectly
+        // see zero rows rather than the row it means to confirm exists.
+        $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('deployment_health_checks', ['firm_id' => $firm->id, 'reported_via' => DeploymentHealthReportMode::OfflineReport->value]));
     }
 
     public function test_reported_via_defaults_to_live_when_telemetry_is_not_prohibited(): void

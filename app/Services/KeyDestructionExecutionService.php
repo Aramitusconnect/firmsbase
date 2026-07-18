@@ -23,7 +23,15 @@ class KeyDestructionExecutionService
 
     public function execute(KeyDestructionRequest $request): KeyDestructionRequest
     {
-        $fresh = $request->fresh();
+        // New, leading, standalone wrap — key_destruction_requests is
+        // now FORCE RLS (this batch); $request->fresh() re-reads the
+        // row from the database and must run under its own firm's
+        // context. Sequential with, not nested inside, the existing
+        // Wave-7-fixed tail wrap below (keyed on $fresh->firm): this
+        // wrap's own finally-block closes before that one opens, so
+        // neither one's context leaks into or is clobbered by the
+        // other.
+        $fresh = (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->fresh());
 
         if ($fresh->status !== KeyDestructionRequestStatus::Approved) {
             throw new \RuntimeException('Key destruction can only execute for an Approved request.');

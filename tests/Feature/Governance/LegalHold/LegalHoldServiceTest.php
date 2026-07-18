@@ -28,8 +28,19 @@ class LegalHoldServiceTest extends TestCase
 
         $this->service->place($firm, LegalHoldScope::Firm, 'Pending litigation.', $admin);
 
-        $this->assertTrue($this->service->hasActiveHold($firm, LegalHoldScope::Firm));
-        $this->assertTrue($this->service->hasActiveHold($firm, LegalHoldScope::Matter, 12345));
+        // legal_holds carries permanent FORCE ROW LEVEL SECURITY.
+        // LegalHoldService::checkHold()/hasActiveHold() deliberately
+        // carry no wrap of their own (a shared helper invoked by
+        // several other services, each of which wraps its own call) —
+        // a direct test call like this one must establish its own
+        // tenant context explicitly, exactly like every real caller
+        // (DeletionGovernanceService::checkClearance(),
+        // KeyDestructionRequestService::checkClearance(),
+        // OffboardingRequestService::evaluateReadiness()) now does.
+        $this->runWithFirmContext($firm, function () use ($firm) {
+            $this->assertTrue($this->service->hasActiveHold($firm, LegalHoldScope::Firm));
+            $this->assertTrue($this->service->hasActiveHold($firm, LegalHoldScope::Matter, 12345));
+        });
     }
 
     public function test_no_hold_means_not_blocked(): void
@@ -45,11 +56,15 @@ class LegalHoldServiceTest extends TestCase
         $admin = $this->makePlatformAdmin();
 
         $hold = $this->service->place($firm, LegalHoldScope::Firm, 'Pending litigation.', $admin);
-        $this->assertTrue($this->service->hasActiveHold($firm, LegalHoldScope::Firm));
+        // See test_firm_level_active_hold_blocks_the_whole_firm()'s own
+        // comment: checkHold()/hasActiveHold() carry no wrap of their
+        // own under legal_holds' permanent FORCE ROW LEVEL SECURITY, so
+        // a direct test call must establish its own tenant context.
+        $this->runWithFirmContext($firm, fn () => $this->assertTrue($this->service->hasActiveHold($firm, LegalHoldScope::Firm)));
 
         $this->service->release($hold, $admin, 'Litigation concluded.');
 
-        $this->assertFalse($this->service->hasActiveHold($firm, LegalHoldScope::Firm));
+        $this->runWithFirmContext($firm, fn () => $this->assertFalse($this->service->hasActiveHold($firm, LegalHoldScope::Firm)));
     }
 
     public function test_matter_scoped_hold_only_blocks_that_matter(): void
@@ -73,7 +88,12 @@ class LegalHoldServiceTest extends TestCase
 
         $this->service->place($firmA, LegalHoldScope::Firm, 'Firm A hold.', $admin);
 
-        $this->assertTrue($this->service->hasActiveHold($firmA, LegalHoldScope::Firm));
-        $this->assertFalse($this->service->hasActiveHold($firmB, LegalHoldScope::Firm));
+        // See test_firm_level_active_hold_blocks_the_whole_firm()'s own
+        // comment: checkHold()/hasActiveHold() carry no wrap of their
+        // own under legal_holds' permanent FORCE ROW LEVEL SECURITY, so
+        // each direct test call must establish its own tenant context,
+        // keyed on the firm actually being checked.
+        $this->runWithFirmContext($firmA, fn () => $this->assertTrue($this->service->hasActiveHold($firmA, LegalHoldScope::Firm)));
+        $this->runWithFirmContext($firmB, fn () => $this->assertFalse($this->service->hasActiveHold($firmB, LegalHoldScope::Firm)));
     }
 }

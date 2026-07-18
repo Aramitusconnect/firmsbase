@@ -1,0 +1,518 @@
+<?php
+
+namespace Tests\Feature\Security\RlsForceRollout;
+
+use App\Enums\SupportAccessSessionStatus;
+use App\Models\Firm;
+use App\Models\PlatformAdmin;
+use App\Models\SupportAccessRequest;
+use App\Models\SupportAccessSession;
+use App\Services\RowLevelSecurityCoverageMappingService;
+use App\Services\TenantContextService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Tests\TestCase;
+
+/**
+ * SupportAccessSessionsForceRlsActivationTest — proves the FORCE ROW
+ * LEVEL SECURITY activation for support_access_sessions (database/
+ * migrations/2026_08_28_960005_prepare_row_level_security_and_force_rls_on_support_access_sessions_table.php)
+ * is permanently active and behaves correctly.
+ *
+ * Fifth of the six-table, one-batch Section 39A-8 Wave 8 activation —
+ * see LegalHoldsForceRlsActivationTest's own docblock for the full
+ * combined-batch rationale and table order. Lands strictly after
+ * support_access_requests, since the composite foreign key this
+ * migration adds requires that table's own UNIQUE(firm_id, id)
+ * constraint to already exist.
+ *
+ * The composite FK — (firm_id, support_access_request_id) REFERENCES
+ * support_access_requests(firm_id, id) — is the best candidate in this
+ * wave for closing a cross-firm-mismatch gap at the DATABASE layer
+ * rather than merely documenting it, unlike every other table in this
+ * batch (legal_holds/deletion_requests/key_destruction_requests each
+ * only document their own single-hop-FK gap as accepted). This file's
+ * own dedicated section below proves that guarantee empirically, via a
+ * raw insert bypassing the service layer entirely.
+ */
+class SupportAccessSessionsForceRlsActivationTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private const MIGRATION_PATH = 'database/migrations/2026_08_28_960005_prepare_row_level_security_and_force_rls_on_support_access_sessions_table.php';
+
+    // ---------------------------------------------------------------
+    // FORCE state / policy proofs
+    // ---------------------------------------------------------------
+
+    public function test_all_previously_forced_tables_remain_force_row_level_security_enabled(): void
+    {
+        $coverage = new RowLevelSecurityCoverageMappingService;
+
+        foreach ($coverage->forcedTables() as $table) {
+            $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);
+
+            $this->assertNotNull($row, "Table {$table} not found in pg_class.");
+            $this->assertTrue((bool) $row->relforcerowsecurity, "{$table} must remain FORCE ROW LEVEL SECURITY enabled after this checkpoint.");
+        }
+    }
+
+    public function test_support_access_sessions_is_discovered_by_the_forced_tables_registry(): void
+    {
+        $coverage = new RowLevelSecurityCoverageMappingService;
+
+        $this->assertContains('support_access_sessions', $coverage->forcedTables());
+    }
+
+    public function test_support_access_sessions_has_row_level_security_enabled(): void
+    {
+        $row = DB::selectOne("select relrowsecurity from pg_class where relname = 'support_access_sessions'");
+
+        $this->assertNotNull($row);
+        $this->assertTrue((bool) $row->relrowsecurity);
+    }
+
+    public function test_support_access_sessions_has_permanent_force_row_level_security_enabled(): void
+    {
+        $row = DB::selectOne("select relforcerowsecurity from pg_class where relname = 'support_access_sessions'");
+
+        $this->assertNotNull($row);
+        $this->assertTrue(
+            (bool) $row->relforcerowsecurity,
+            'support_access_sessions must have permanent FORCE ROW LEVEL SECURITY active — this is not a transient, per-test setting.'
+        );
+    }
+
+    public function test_the_policy_has_both_an_explicit_using_and_with_check_clause(): void
+    {
+        $row = DB::selectOne(
+            "select pg_get_expr(polqual, polrelid) as using_expr, pg_get_expr(polwithcheck, polrelid) as with_check_expr
+             from pg_policy where polrelid = 'support_access_sessions'::regclass and polname = 'support_access_sessions_tenant_isolation'"
+        );
+
+        $this->assertNotNull($row, 'The support_access_sessions_tenant_isolation policy must exist.');
+
+        $expected = "(firm_id = (NULLIF(current_setting('app.current_firm_id'::text, true), ''::text))::bigint)";
+
+        $this->assertSame($expected, $row->using_expr, 'USING clause must match the reviewed predicate exactly — not a FOR INSERT-only clause.');
+        $this->assertSame($expected, $row->with_check_expr, 'WITH CHECK clause must be explicit and identical to USING, not inherited implicitly.');
+    }
+
+    // ---------------------------------------------------------------
+    // Missing-context fail-closed proofs
+    // ---------------------------------------------------------------
+
+    public function test_missing_tenant_context_cannot_read_support_access_sessions(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->createSessionForFirm($firm);
+
+        (new TenantContextService)->clearDatabaseTenantContext();
+
+        $this->assertSame(0, SupportAccessSession::query()->count());
+    }
+
+    public function test_missing_tenant_context_cannot_insert_support_access_sessions(): void
+    {
+        $firm = Firm::factory()->create();
+        $request = $this->runWithFirmContext($firm, fn () => SupportAccessRequest::factory()->create(['firm_id' => $firm->id]));
+        $admin = PlatformAdmin::factory()->create();
+
+        (new TenantContextService)->clearDatabaseTenantContext();
+
+        $this->expectExceptionMessageMatches('/row-level security policy/');
+
+        DB::table('support_access_sessions')->insert($this->rowAttributes($firm, $request, $admin));
+    }
+
+    /**
+     * SupportAccessSessionFactory DID gain a context-hold create()
+     * override in this batch, AND its definition() itself was fixed to
+     * derive firm_id from one authoritative parent
+     * SupportAccessRequest — its bare default-creation path is already
+     * tenant-consistent, so a bare SupportAccessSession::factory()->create()
+     * must now SUCCEED even with no ambient context.
+     */
+    public function test_bare_factory_create_without_context_now_succeeds_via_the_context_hold_override(): void
+    {
+        (new TenantContextService)->clearDatabaseTenantContext();
+
+        $session = SupportAccessSession::factory()->create();
+
+        $this->assertNotNull($session->id);
+        $this->assertNotNull($session->firm_id);
+
+        $persisted = $this->runWithFirmContext(
+            $session->firm_id,
+            fn () => SupportAccessSession::query()->with('supportAccessRequest')->find($session->id),
+        );
+
+        $this->assertNotNull($persisted, 'A bare factory-created row must be visible under its own firm\'s context.');
+        $this->assertSame(
+            $session->firm_id,
+            $persisted->supportAccessRequest->firm_id,
+            'Bare factory default must not produce a cross-firm support_access_request_id mismatch — definition() derives firm_id from the SAME request it points at.'
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Same-firm access / cross-firm isolation proofs
+    // ---------------------------------------------------------------
+
+    public function test_firm_a_context_can_read_its_own_support_access_session(): void
+    {
+        $firmA = Firm::factory()->create();
+        $sessionA = $this->createSessionForFirm($firmA);
+
+        $visibleIds = $this->runWithFirmContext(
+            $firmA,
+            fn () => SupportAccessSession::query()->pluck('id')->all(),
+        );
+
+        $this->assertSame([$sessionA->id], $visibleIds);
+    }
+
+    public function test_firm_a_context_cannot_read_firm_b_support_access_session(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $this->createSessionForFirm($firmA);
+        $sessionB = $this->createSessionForFirm($firmB);
+
+        $visibleIds = $this->runWithFirmContext(
+            $firmA,
+            fn () => SupportAccessSession::query()->pluck('id')->all(),
+        );
+
+        $this->assertNotContains($sessionB->id, $visibleIds);
+    }
+
+    public function test_firm_a_context_can_insert_a_valid_support_access_session(): void
+    {
+        $firmA = Firm::factory()->create();
+        $request = $this->runWithFirmContext($firmA, fn () => SupportAccessRequest::factory()->create(['firm_id' => $firmA->id]));
+        $admin = PlatformAdmin::factory()->create();
+
+        $insertedId = $this->runWithFirmContext(
+            $firmA,
+            fn () => DB::table('support_access_sessions')->insertGetId($this->rowAttributes($firmA, $request, $admin)),
+        );
+
+        $this->assertIsInt($insertedId);
+    }
+
+    public function test_firm_a_cannot_update_firm_b_support_access_session(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $sessionB = $this->createSessionForFirm($firmB);
+
+        $affected = $this->runWithFirmContext($firmA, function () use ($sessionB) {
+            return DB::table('support_access_sessions')->where('id', $sessionB->id)->update(['status' => SupportAccessSessionStatus::Revoked->value]);
+        });
+
+        $this->assertSame(0, $affected, 'No rows should be visible/updatable — Firm A must not be able to update Firm B\'s support_access_sessions row.');
+
+        $reReadAsFirmB = $this->runWithFirmContext(
+            $firmB,
+            fn () => SupportAccessSession::query()->find($sessionB->id),
+        );
+
+        $this->assertNotNull($reReadAsFirmB);
+        $this->assertSame(SupportAccessSessionStatus::Active, $reReadAsFirmB->status);
+    }
+
+    public function test_firm_a_cannot_delete_firm_b_support_access_session(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $sessionB = $this->createSessionForFirm($firmB);
+
+        $this->runWithFirmContext($firmA, function () use ($sessionB) {
+            DB::table('support_access_sessions')->where('id', $sessionB->id)->delete();
+        });
+
+        $reReadAsFirmB = $this->runWithFirmContext(
+            $firmB,
+            fn () => SupportAccessSession::query()->find($sessionB->id),
+        );
+
+        $this->assertNotNull($reReadAsFirmB, 'Firm A context must not be able to delete Firm B support_access_sessions.');
+    }
+
+    public function test_firm_a_cannot_insert_a_support_access_session_claiming_firm_b_ownership(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $requestB = $this->runWithFirmContext($firmB, fn () => SupportAccessRequest::factory()->create(['firm_id' => $firmB->id]));
+        $admin = PlatformAdmin::factory()->create();
+
+        $this->expectExceptionMessageMatches('/row-level security policy/');
+
+        $this->runWithFirmContext($firmA, function () use ($firmB, $requestB, $admin) {
+            DB::table('support_access_sessions')->insert($this->rowAttributes($firmB, $requestB, $admin));
+        });
+    }
+
+    public function test_ownership_cannot_be_reassigned_across_firms(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $sessionA = $this->createSessionForFirm($firmA);
+
+        $this->expectExceptionMessageMatches('/row-level security policy/');
+
+        $this->runWithFirmContext($firmA, function () use ($sessionA, $firmB) {
+            DB::table('support_access_sessions')->where('id', $sessionA->id)->update(['firm_id' => $firmB->id]);
+        });
+    }
+
+    // ---------------------------------------------------------------
+    // Required proof item #4 (Wave 8 governance-domain empirical
+    // verification): the composite FK on support_access_sessions
+    // genuinely works at the DATABASE layer, not just an application-
+    // layer check — proven via a raw insert bypassing the service
+    // layer entirely (DB::table()->insert(), never
+    // SupportAccessSessionService::start()).
+    // ---------------------------------------------------------------
+
+    public function test_composite_foreign_key_rejects_a_raw_insert_whose_firm_id_disagrees_with_its_parent_requests_actual_firm(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        // The parent request genuinely belongs to firm A.
+        $requestA = $this->runWithFirmContext($firmA, fn () => SupportAccessRequest::factory()->create(['firm_id' => $firmA->id]));
+        $admin = PlatformAdmin::factory()->create();
+
+        $this->expectException(\Illuminate\Database\QueryException::class);
+        $this->expectExceptionMessageMatches('/support_access_sessions_firm_id_request_id_foreign/');
+
+        // Raw insert, service layer bypassed entirely: firm_id claims
+        // firm B while support_access_request_id points at firm A's own
+        // request — the exact cross-firm mismatch the composite FK
+        // exists to reject at the database layer.
+        $this->runWithFirmContext($firmB, function () use ($firmB, $requestA, $admin) {
+            $attributes = $this->rowAttributes($firmB, $requestA, $admin);
+
+            DB::table('support_access_sessions')->insert($attributes);
+        });
+    }
+
+    /**
+     * Positive control for the composite FK: a raw insert with
+     * genuinely matching firm_id/support_access_request_id succeeds —
+     * proving the constraint targets only the mismatch, not every raw
+     * insert generically.
+     */
+    public function test_composite_foreign_key_allows_a_raw_insert_whose_firm_id_genuinely_matches_its_parent_request(): void
+    {
+        $firm = Firm::factory()->create();
+        $request = $this->runWithFirmContext($firm, fn () => SupportAccessRequest::factory()->create(['firm_id' => $firm->id]));
+        $admin = PlatformAdmin::factory()->create();
+
+        $insertedId = $this->runWithFirmContext($firm, function () use ($firm, $request, $admin) {
+            return DB::table('support_access_sessions')->insertGetId($this->rowAttributes($firm, $request, $admin));
+        });
+
+        $this->assertIsInt($insertedId, 'A raw insert whose firm_id genuinely matches its parent request\'s own firm_id must succeed — the composite FK targets only genuine mismatches.');
+    }
+
+    // ---------------------------------------------------------------
+    // Context lifecycle proofs
+    // ---------------------------------------------------------------
+
+    public function test_tenant_context_clears_after_success(): void
+    {
+        $firm = Firm::factory()->create();
+
+        $this->createSessionForFirm($firm);
+
+        $this->assertNoDatabaseTenantContext();
+    }
+
+    public function test_tenant_context_clears_after_exception(): void
+    {
+        $firm = Firm::factory()->create();
+
+        try {
+            $this->runWithFirmContext($firm, function () {
+                throw new \RuntimeException('simulated failure inside firm context');
+            });
+        } catch (\RuntimeException $e) {
+            // expected
+        }
+
+        $this->assertNoDatabaseTenantContext();
+    }
+
+    // ---------------------------------------------------------------
+    // Migration down()/up() restoration proofs
+    // ---------------------------------------------------------------
+
+    public function test_migration_down_fully_restores_the_pre_checkpoint_state(): void
+    {
+        $migration = require base_path(self::MIGRATION_PATH);
+
+        $migration->down();
+
+        try {
+            $row = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'support_access_sessions'");
+            $this->assertFalse((bool) $row->relrowsecurity, 'Rollback must fully disable RLS, not merely clear FORCE.');
+            $this->assertFalse((bool) $row->relforcerowsecurity, 'Rollback must clear FORCE.');
+
+            $policy = DB::selectOne(
+                "select 1 from pg_policy where polrelid = 'support_access_sessions'::regclass and polname = 'support_access_sessions_tenant_isolation'"
+            );
+            $this->assertNull($policy, 'Rollback must drop the policy this checkpoint created.');
+
+            $fk = DB::selectOne(
+                "select 1 from pg_constraint where conname = 'support_access_sessions_firm_id_request_id_foreign' and conrelid = 'support_access_sessions'::regclass"
+            );
+            $this->assertNull($fk, 'Rollback must drop the composite foreign key this checkpoint added.');
+        } finally {
+            $migration->up();
+        }
+
+        $rowAfterUp = DB::selectOne("select relforcerowsecurity from pg_class where relname = 'support_access_sessions'");
+        $this->assertTrue((bool) $rowAfterUp->relforcerowsecurity, 'up() must be restored in the finally block.');
+
+        $fkAfterUp = DB::selectOne(
+            "select 1 from pg_constraint where conname = 'support_access_sessions_firm_id_request_id_foreign' and conrelid = 'support_access_sessions'::regclass"
+        );
+        $this->assertNotNull($fkAfterUp, 'up() must recreate the composite foreign key too.');
+    }
+
+    public function test_migration_round_trip_affects_only_support_access_sessions(): void
+    {
+        $coverage = new RowLevelSecurityCoverageMappingService;
+        $otherTables = array_slice($coverage->preparedTables(), 0, 5);
+        $otherTables[] = 'support_access_requests';
+        $otherTables[] = 'deployment_health_checks';
+
+        $before = [];
+        foreach ($otherTables as $table) {
+            $before[$table] = DB::selectOne('select relrowsecurity, relforcerowsecurity from pg_class where relname = ?', [$table]);
+        }
+
+        $migration = require base_path(self::MIGRATION_PATH);
+        $migration->down();
+        $migration->up();
+
+        foreach ($otherTables as $table) {
+            $after = DB::selectOne('select relrowsecurity, relforcerowsecurity from pg_class where relname = ?', [$table]);
+
+            $this->assertSame(
+                (bool) $before[$table]->relrowsecurity,
+                (bool) $after->relrowsecurity,
+                "{$table}'s relrowsecurity must be unaffected by the support_access_sessions migration round trip."
+            );
+            $this->assertSame(
+                (bool) $before[$table]->relforcerowsecurity,
+                (bool) $after->relforcerowsecurity,
+                "{$table}'s relforcerowsecurity must be unaffected by the support_access_sessions migration round trip."
+            );
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Scope proofs
+    // ---------------------------------------------------------------
+
+    public function test_uncovered_tenant_tables_were_not_modified(): void
+    {
+        $coverage = new RowLevelSecurityCoverageMappingService;
+        $thisBatch = ['legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks'];
+
+        foreach ($coverage->missingPreparedTables() as $table) {
+            if (in_array($table, $thisBatch, true)) {
+                continue;
+            }
+
+            $row = DB::selectOne('select relrowsecurity from pg_class where relname = ?', [$table]);
+
+            if ($row === null) {
+                continue;
+            }
+
+            $this->assertFalse(
+                (bool) $row->relrowsecurity,
+                "{$table} was reported as missing RLS preparation, but RLS is now enabled — this checkpoint must not add policies for any other uncovered table."
+            );
+        }
+    }
+
+    public function test_compliance_gap_registry_service_was_not_modified(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('app/Services/ComplianceGapRegistryService.php');
+
+        $this->assertEmpty($changed, 'ComplianceGapRegistryService.php must remain untouched by this checkpoint.');
+    }
+
+    public function test_row_level_security_coverage_mapping_service_was_not_modified(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('app/Services/RowLevelSecurityCoverageMappingService.php');
+
+        $this->assertEmpty(
+            $changed,
+            'RowLevelSecurityCoverageMappingService.php must remain untouched by this individual checkpoint — the wave-integration update lands separately once this batch has landed.'
+        );
+    }
+
+    public function test_no_ui_routes_controllers_or_deployment_features_were_added(): void
+    {
+        foreach (['routes', 'app/Http/Controllers', 'app/Filament', 'resources/views', 'app/Livewire'] as $relativeDir) {
+            $changed = $this->changedOrUntrackedPaths($relativeDir);
+
+            $this->assertEmpty($changed, "This checkpoint must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
+        }
+
+        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
+        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
+    }
+
+    private function createSessionForFirm(Firm $firm): SupportAccessSession
+    {
+        return $this->runWithFirmContext($firm, function () use ($firm) {
+            $request = SupportAccessRequest::factory()->create(['firm_id' => $firm->id]);
+
+            return SupportAccessSession::factory()->create([
+                'firm_id' => $firm->id,
+                'support_access_request_id' => $request->id,
+            ]);
+        });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function rowAttributes(Firm $firm, SupportAccessRequest $request, PlatformAdmin $admin): array
+    {
+        return [
+            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'support_access_request_id' => $request->id,
+            'firm_id' => $firm->id,
+            'platform_admin_id' => $admin->id,
+            'status' => SupportAccessSessionStatus::Active->value,
+            'started_at' => now(),
+            'expires_at' => now()->addHour(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function changedOrUntrackedPaths(string $scope): array
+    {
+        $changed = trim((string) shell_exec(
+            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
+        ));
+
+        if ($changed === '') {
+            return [];
+        }
+
+        return preg_split('/\R/', $changed) ?: [];
+    }
+}

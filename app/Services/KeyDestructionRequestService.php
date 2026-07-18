@@ -36,7 +36,7 @@ class KeyDestructionRequestService
         ?OffboardingRequest $offboardingRequest = null,
         ?TenantEncryptionKey $tenantEncryptionKey = null,
     ): KeyDestructionRequest {
-        return KeyDestructionRequest::create([
+        return (new TenantContextService())->runWithFirmContext($firm, fn () => KeyDestructionRequest::create([
             'firm_id' => $firm->id,
             'offboarding_request_id' => $offboardingRequest?->id,
             'tenant_encryption_key_id' => $tenantEncryptionKey?->id,
@@ -44,7 +44,7 @@ class KeyDestructionRequestService
             'reason' => $reason,
             'requested_by_platform_admin_id' => $requestedBy->id,
             'requested_at' => now(),
-        ]);
+        ]));
     }
 
     public function checkClearance(KeyDestructionRequest $request): KeyDestructionClearanceResult
@@ -69,7 +69,7 @@ class KeyDestructionRequestService
             return new KeyDestructionClearanceResult(true, false, false, 'Retention policy has not cleared for this firm.');
         }
 
-        $legalHoldCleared = ! $this->legalHoldService->hasActiveHold($firm, LegalHoldScope::Firm);
+        $legalHoldCleared = (new TenantContextService())->runWithFirmContext($firm, fn () => ! $this->legalHoldService->hasActiveHold($firm, LegalHoldScope::Firm));
 
         if (! $legalHoldCleared) {
             return new KeyDestructionClearanceResult(true, true, false, 'An active legal hold blocks key destruction.');
@@ -89,24 +89,28 @@ class KeyDestructionRequestService
                 default => KeyDestructionRequestStatus::LegalHoldBlocked,
             };
 
-            $request->update(['status' => $status]);
+            (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => $status]));
 
             throw new \RuntimeException($clearance->reason ?? 'Key destruction request is not yet clear for approval.');
         }
 
-        $request->update(['status' => KeyDestructionRequestStatus::PendingApproval]);
+        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request) {
+            $request->update(['status' => KeyDestructionRequestStatus::PendingApproval]);
 
-        return $request->fresh();
+            return $request->fresh();
+        });
     }
 
     public function cancel(KeyDestructionRequest $request, string $reason): KeyDestructionRequest
     {
-        $request->update([
-            'status' => KeyDestructionRequestStatus::Cancelled,
-            'cancelled_at' => now(),
-            'cancelled_reason' => $reason,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $reason) {
+            $request->update([
+                'status' => KeyDestructionRequestStatus::Cancelled,
+                'cancelled_at' => now(),
+                'cancelled_reason' => $reason,
+            ]);
 
-        return $request->fresh();
+            return $request->fresh();
+        });
     }
 }

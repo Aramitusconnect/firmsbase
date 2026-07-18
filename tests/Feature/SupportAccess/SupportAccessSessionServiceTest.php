@@ -44,7 +44,19 @@ class SupportAccessSessionServiceTest extends TestCase
     public function test_expired_sessions_do_not_authorize_access(): void
     {
         $firm = Firm::factory()->create();
-        $session = \App\Models\SupportAccessSession::factory()->expired()->create(['firm_id' => $firm->id]);
+        // support_access_sessions now carries a real composite foreign
+        // key, (firm_id, support_access_request_id) REFERENCES
+        // support_access_requests(firm_id, id) — overriding only
+        // firm_id here (as this test previously did) while leaving the
+        // factory's own independently-generated parent
+        // support_access_request tied to a DIFFERENT firm now correctly
+        // fails at the database layer. An explicit, matching parent
+        // request for THIS firm must be created first.
+        $request = \App\Models\SupportAccessRequest::factory()->forFirm($firm)->create();
+        $session = \App\Models\SupportAccessSession::factory()->expired()->create([
+            'firm_id' => $firm->id,
+            'support_access_request_id' => $request->id,
+        ]);
 
         $this->assertFalse($this->sessionService->isValid($session));
     }

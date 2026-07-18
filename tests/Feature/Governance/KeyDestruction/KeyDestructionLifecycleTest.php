@@ -117,8 +117,16 @@ class KeyDestructionLifecycleTest extends TestCase
         $approvalService = app(KeyDestructionApprovalService::class);
         $approval = $approvalService->requestApproval($request, $admin1, 'Two-person approval required.');
 
+        // key_destruction_requests now carries permanent FORCE ROW
+        // LEVEL SECURITY. execute() itself already re-reads the row
+        // via its own leading runWithFirmContext($request->firm_id, ...)
+        // wrap (a defense-in-depth guard against a stale in-memory
+        // status), so passing the original, still-in-scope $request
+        // object directly — rather than calling ->fresh() here in the
+        // test, outside any context, which would incorrectly resolve
+        // to null under FORCE — is both correct and simpler.
         $this->expectException(\RuntimeException::class);
-        app(KeyDestructionExecutionService::class)->execute($request->fresh());
+        app(KeyDestructionExecutionService::class)->execute($request);
     }
 
     public function test_full_lifecycle_executes_and_marks_key_destroyed_and_renders_sample_unreadable(): void
@@ -143,12 +151,22 @@ class KeyDestructionLifecycleTest extends TestCase
         $approvalService = app(KeyDestructionApprovalService::class);
         $approval = $approvalService->requestApproval($request, $admin1, 'Two-person approval required.');
         $approvalService->firstApprove($approval, $admin1);
-        $approvalService->secondApprove($approval->fresh(), $admin2);
+        $approvalService->secondApprove($approval->fresh(), $request, $admin2);
 
-        $this->assertTrue($approvalService->isApproved($request->fresh()));
-        $this->assertSame(KeyDestructionRequestStatus::Approved, $request->fresh()->status);
+        // key_destruction_requests now carries permanent FORCE ROW
+        // LEVEL SECURITY, so this bare fresh() reload (outside any
+        // context) must be explicitly wrapped, or it would incorrectly
+        // resolve to null — this genuinely re-verifies the status
+        // secondApprove() persisted, not just the stale in-memory copy.
+        $freshRequest = $this->runWithFirmContext($firm, fn () => $request->fresh());
+        $this->assertTrue($approvalService->isApproved($freshRequest));
+        $this->assertSame(KeyDestructionRequestStatus::Approved, $freshRequest->status);
 
-        $executed = app(KeyDestructionExecutionService::class)->execute($request->fresh());
+        // execute() re-reads the row itself via its own leading
+        // runWithFirmContext() wrap, so passing $freshRequest directly
+        // (rather than calling ->fresh() again here, outside context)
+        // is correct.
+        $executed = app(KeyDestructionExecutionService::class)->execute($freshRequest);
 
         $this->assertSame(KeyDestructionRequestStatus::Executed, $executed->status);
         $this->assertNotNull($executed->executed_at);
@@ -189,9 +207,16 @@ class KeyDestructionLifecycleTest extends TestCase
         $approvalService = app(KeyDestructionApprovalService::class);
         $approval = $approvalService->requestApproval($request, $admin1, 'Approval.');
         $approvalService->firstApprove($approval, $admin1);
-        $approvalService->secondApprove($approval->fresh(), $admin2);
+        $approvalService->secondApprove($approval->fresh(), $request, $admin2);
 
-        app(KeyDestructionExecutionService::class)->execute($request->fresh());
+        // execute() re-reads the row itself via its own leading
+        // runWithFirmContext($request->firm_id, ...) wrap, so passing
+        // the original, still-in-scope $request directly (rather than
+        // calling ->fresh() here, outside any context, which would
+        // incorrectly resolve to null under key_destruction_requests'
+        // permanent FORCE ROW LEVEL SECURITY) is both correct and
+        // simpler.
+        app(KeyDestructionExecutionService::class)->execute($request);
 
         // Section 39A-3L, Checkpoint 16: tenant_encryption_keys is now
         // FORCE RLS. Both bare reads below (outside any context) must
@@ -239,9 +264,75 @@ class KeyDestructionLifecycleTest extends TestCase
         $approvalService = app(KeyDestructionApprovalService::class);
         $approval = $approvalService->requestApproval($request, $admin1, 'Approval.');
         $approvalService->firstApprove($approval, $admin1);
-        $approved = $approvalService->secondApprove($approval->fresh(), $admin2);
+        $approved = $approvalService->secondApprove($approval->fresh(), $request, $admin2);
 
         $this->expectException(\LogicException::class);
         $approved->update(['denial_reason' => 'attempted tamper']);
+    }
+
+    /**
+     * Required proof item #2 (Wave 8 governance-domain empirical
+     * verification): key_destruction_approvals carries no firm_id
+     * column of its own, so secondApprove()/deny() now accept the
+     * parent KeyDestructionRequest as an explicit parameter rather than
+     * a lazy relation load — proving the mismatch guard genuinely
+     * throws when a caller passes a $request that does not actually
+     * belong to the given $approval.
+     */
+    public function test_second_approve_rejects_a_mismatched_key_destruction_request(): void
+    {
+        $firm = $this->makeGovernanceFirm();
+        $otherFirm = $this->makeGovernanceFirm();
+        $admin1 = $this->makePlatformAdmin();
+        $admin2 = $this->makePlatformAdmin();
+        $this->seedPermissiveTrustAndFirmPolicies();
+        $firm->forceFill(['created_at' => now()->subYears(10)])->save();
+
+        $offboardingRequest = app(OffboardingRequestService::class)->request($firm, $admin1, 'Offboarding.');
+        $export = app(OffboardingExportService::class)->generate($offboardingRequest, requestedByPlatformAdmin: $admin1);
+        app(OffboardingExportService::class)->verify($export, $admin1);
+
+        $request = app(KeyDestructionRequestService::class)->request($firm, $admin1, 'Destroy key.', $offboardingRequest);
+        app(KeyDestructionRequestService::class)->submitForApproval($request);
+
+        $approvalService = app(KeyDestructionApprovalService::class);
+        $approval = $approvalService->requestApproval($request, $admin1, 'Two-person approval required.');
+        $approvalService->firstApprove($approval, $admin1);
+
+        // A genuinely unrelated request for a DIFFERENT firm — not the
+        // one this $approval actually belongs to.
+        $unrelatedRequest = app(KeyDestructionRequestService::class)->request($otherFirm, $admin1, 'Unrelated request.');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $approvalService->secondApprove($approval->fresh(), $unrelatedRequest, $admin2);
+    }
+
+    /**
+     * Same mismatch-guard proof as above, but for deny().
+     */
+    public function test_deny_rejects_a_mismatched_key_destruction_request(): void
+    {
+        $firm = $this->makeGovernanceFirm();
+        $otherFirm = $this->makeGovernanceFirm();
+        $admin1 = $this->makePlatformAdmin();
+        $denier = $this->makePlatformAdmin();
+        $this->seedPermissiveTrustAndFirmPolicies();
+        $firm->forceFill(['created_at' => now()->subYears(10)])->save();
+
+        $offboardingRequest = app(OffboardingRequestService::class)->request($firm, $admin1, 'Offboarding.');
+        $export = app(OffboardingExportService::class)->generate($offboardingRequest, requestedByPlatformAdmin: $admin1);
+        app(OffboardingExportService::class)->verify($export, $admin1);
+
+        $request = app(KeyDestructionRequestService::class)->request($firm, $admin1, 'Destroy key.', $offboardingRequest);
+        app(KeyDestructionRequestService::class)->submitForApproval($request);
+
+        $approvalService = app(KeyDestructionApprovalService::class);
+        $approval = $approvalService->requestApproval($request, $admin1, 'Two-person approval required.');
+        $approvalService->firstApprove($approval, $admin1);
+
+        $unrelatedRequest = app(KeyDestructionRequestService::class)->request($otherFirm, $admin1, 'Unrelated request.');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $approvalService->deny($approval->fresh(), $unrelatedRequest, $denier, 'Denied for testing.');
     }
 }

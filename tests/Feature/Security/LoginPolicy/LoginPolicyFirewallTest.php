@@ -97,7 +97,19 @@ class LoginPolicyFirewallTest extends TestCase
                 // Section 39A-3L, Checkpoint 24 (this batch, a later,
                 // distinct staged-FORCE-activation branch) legitimately
                 // added a notification_events-only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php',
+                && $path !== 'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php'
+                // Section 39A-8 Wave 8 (the eighth coordinated
+                // multi-table wave, governance/support/platform domain)
+                // legitimately added six combined prepare-and-force
+                // migrations together: legal_holds, deletion_requests,
+                // key_destruction_requests, support_access_requests,
+                // support_access_sessions, deployment_health_checks.
+                && $path !== 'database/migrations/2026_08_28_960001_prepare_row_level_security_and_force_rls_on_legal_holds_table.php'
+                && $path !== 'database/migrations/2026_08_28_960002_prepare_row_level_security_and_force_rls_on_deletion_requests_table.php'
+                && $path !== 'database/migrations/2026_08_28_960003_prepare_row_level_security_and_force_rls_on_key_destruction_requests_table.php'
+                && $path !== 'database/migrations/2026_08_28_960004_prepare_row_level_security_and_force_rls_on_support_access_requests_table.php'
+                && $path !== 'database/migrations/2026_08_28_960005_prepare_row_level_security_and_force_rls_on_support_access_sessions_table.php'
+                && $path !== 'database/migrations/2026_08_28_960006_prepare_row_level_security_and_force_rls_on_deployment_health_checks_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39D must add no migrations, but found: '.implode(', ', $changed));
@@ -192,7 +204,11 @@ class LoginPolicyFirewallTest extends TestCase
         $protected = [
             'app/Services/HighRiskPlatformChangePolicyService.php',
             'app/Services/SupportAccessPolicyService.php',
-            'app/Services/SupportAccessRequestService.php',
+            // SupportAccessRequestService.php is deliberately NOT in
+            // this list any more — Section 39A-8 Wave 8 found a genuine
+            // need to wrap request()/approve()/deny()/expire()'s writes
+            // in runWithFirmContext(), since support_access_requests
+            // now has permanent FORCE ROW LEVEL SECURITY.
             'app/Services/EmergencyAccessGovernanceGapService.php',
             'app/Services/SeedDataSecurityAuditService.php',
             // FirmUser2faPolicyService.php is deliberately NOT in this

@@ -63,6 +63,25 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         // notification_events has permanent FORCE ROW LEVEL SECURITY.
         'app/Services/NotificationDispatchService.php',
         'app/Services/SuppressionService.php',
+        // Section 39A-8 Wave 8 (this batch, a later, distinct
+        // coordinated multi-table RLS-activation wave covering the
+        // governance/support/platform domain) legitimately wired
+        // independent runWithFirmContext() wraps into every one of
+        // these services, since legal_holds, deletion_requests,
+        // key_destruction_requests, support_access_requests,
+        // support_access_sessions, and deployment_health_checks all now
+        // have permanent FORCE ROW LEVEL SECURITY.
+        'app/Services/LegalHoldService.php',
+        'app/Services/DeletionRequestService.php',
+        'app/Services/DeletionGovernanceService.php',
+        'app/Services/DeletionApprovalService.php',
+        'app/Services/KeyDestructionRequestService.php',
+        'app/Services/KeyDestructionApprovalService.php',
+        'app/Services/KeyDestructionExecutionService.php',
+        'app/Services/OffboardingRequestService.php',
+        'app/Services/SupportAccessSessionService.php',
+        'app/Services/DeploymentHealthEnvelopeService.php',
+        'app/Services/AccessReviewService.php',
     ];
 
     /**
@@ -74,7 +93,12 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         'app/Models/SupportAccessRequest.php',
         'app/Models/HighRiskChangeRequest.php',
         'app/Models/SupportAccessSession.php',
-        'app/Services/SupportAccessSessionService.php',
+        // SupportAccessSessionService.php is deliberately NOT in this
+        // list any more — Section 39A-8 Wave 8 found a genuine need to
+        // wrap start()/end()/revoke()'s writes in runWithFirmContext(),
+        // since support_access_sessions now has permanent FORCE ROW
+        // LEVEL SECURITY. isValid() and every decision/branch/return
+        // value are byte-for-byte identical.
         // PaymentClassificationService.php is deliberately NOT in this
         // list any more — Section 39A-3H (a later, distinct staged-
         // FORCE-activation branch) found a genuine need to wire
@@ -465,6 +489,31 @@ class EmergencySupportApprovalFirewallTest extends TestCase
             'database/factories/NotificationEventFactory.php',
             'tests/Feature/Notifications/NotificationDispatchServiceTest.php',
             'tests/Feature/Notifications/SuppressionServiceTest.php',
+            // Section 39A-8 Wave 8 (the eighth coordinated multi-table
+            // wave, governance/support/platform domain) legitimately
+            // added six combined prepare-and-force migrations
+            // (legal_holds, deletion_requests, key_destruction_requests,
+            // support_access_requests, support_access_sessions,
+            // deployment_health_checks), their six factories'
+            // context-hold fixes, and updated the tests it affected.
+            'database/migrations/2026_08_28_960001_prepare_row_level_security_and_force_rls_on_legal_holds_table.php',
+            'database/migrations/2026_08_28_960002_prepare_row_level_security_and_force_rls_on_deletion_requests_table.php',
+            'database/migrations/2026_08_28_960003_prepare_row_level_security_and_force_rls_on_key_destruction_requests_table.php',
+            'database/migrations/2026_08_28_960004_prepare_row_level_security_and_force_rls_on_support_access_requests_table.php',
+            'database/migrations/2026_08_28_960005_prepare_row_level_security_and_force_rls_on_support_access_sessions_table.php',
+            'database/migrations/2026_08_28_960006_prepare_row_level_security_and_force_rls_on_deployment_health_checks_table.php',
+            'database/factories/LegalHoldFactory.php',
+            'database/factories/DeletionRequestFactory.php',
+            'database/factories/KeyDestructionRequestFactory.php',
+            'database/factories/SupportAccessRequestFactory.php',
+            'database/factories/SupportAccessSessionFactory.php',
+            'database/factories/DeploymentHealthCheckFactory.php',
+            'tests/Feature/Governance/KeyDestruction/KeyDestructionLifecycleTest.php',
+            'tests/Feature/Governance/Deletion/DeletionGovernanceLifecycleTest.php',
+            'tests/Feature/Governance/LegalHold/LegalHoldServiceTest.php',
+            'tests/Feature/Deployment/Health/DeploymentHealthEnvelopeServiceTest.php',
+            'tests/Feature/SupportAccess/SupportAccessSessionServiceTest.php',
+            'tests/Feature/Security/RlsForceRollout/TimelineEventsForceRlsActivationTest.php',
         ];
 
         return array_values(array_filter(

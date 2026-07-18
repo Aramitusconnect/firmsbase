@@ -104,7 +104,15 @@ class EmergencySupportHighRiskApprovalTest extends TestCase
 
         $this->assertTrue($this->requestService->isEmergencyHighRiskApproved($request));
 
-        $finalDecision = $this->policyService->canStartSession($request->fresh());
+        // support_access_requests now carries permanent FORCE ROW LEVEL
+        // SECURITY, so a bare ->fresh() here (outside any context)
+        // would incorrectly resolve to null. canStartSession() never
+        // itself re-queries support_access_requests — it only reads
+        // the in-memory $request's own attributes and queries
+        // high_risk_change_requests (unaffected by this table's RLS) —
+        // so passing the original, still-in-scope $request directly is
+        // both correct and simpler.
+        $finalDecision = $this->policyService->canStartSession($request);
         $this->assertTrue($finalDecision->allowed, 'Emergency access should be usable once high-risk approval is Approved.');
     }
 

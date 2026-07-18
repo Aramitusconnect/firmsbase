@@ -29,7 +29,7 @@ class LegalHoldService
         ?Matter $matter = null,
         ?Document $document = null,
     ): LegalHold {
-        return LegalHold::create([
+        return (new TenantContextService())->runWithFirmContext($firm, fn () => LegalHold::create([
             'firm_id' => $firm->id,
             'scope_type' => $scope,
             'client_id' => $client?->id,
@@ -40,20 +40,22 @@ class LegalHoldService
             'placed_by_type' => $placedBy::class,
             'placed_by_id' => $placedBy->id,
             'placed_at' => now(),
-        ]);
+        ]));
     }
 
     public function release(LegalHold $hold, object $releasedBy, string $reason): LegalHold
     {
-        $hold->update([
-            'status' => LegalHoldStatus::Released,
-            'released_by_type' => $releasedBy::class,
-            'released_by_id' => $releasedBy->id,
-            'released_at' => now(),
-            'release_reason' => $reason,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($hold->firm_id, function () use ($hold, $releasedBy, $reason) {
+            $hold->update([
+                'status' => LegalHoldStatus::Released,
+                'released_by_type' => $releasedBy::class,
+                'released_by_id' => $releasedBy->id,
+                'released_at' => now(),
+                'release_reason' => $reason,
+            ]);
 
-        return $hold->fresh();
+            return $hold->fresh();
+        });
     }
 
     /**

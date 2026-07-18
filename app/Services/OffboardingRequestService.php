@@ -56,7 +56,7 @@ class OffboardingRequestService
             ->isRetentionCleared($policy, $firm->created_at ?? now())
             ->cleared;
 
-        $legalHoldCleared = ! $this->legalHoldService->hasActiveHold($firm, LegalHoldScope::Firm);
+        $legalHoldCleared = (new TenantContextService())->runWithFirmContext($firm, fn () => ! $this->legalHoldService->hasActiveHold($firm, LegalHoldScope::Firm));
 
         return new OffboardingReadinessResult($exportCompleted, $retentionCleared, $legalHoldCleared);
     }

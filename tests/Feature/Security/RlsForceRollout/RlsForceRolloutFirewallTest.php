@@ -650,8 +650,19 @@ class RlsForceRolloutFirewallTest extends TestCase
             'signature_events', 'signature_certificates',
         ];
 
+        // Section 39A-8 Wave 8's own six tables — identical exemption
+        // shape as Wave 6/Wave 7 immediately above: genuinely still
+        // listed in MISSING_PREPARED_TABLES (coordinator's registry
+        // update is a later, separate wave-integration commit) but DO
+        // now legitimately have real RLS enabled via this wave's own
+        // combined prepare-and-force migrations.
+        $wave8ExemptTables = [
+            'legal_holds', 'deletion_requests', 'key_destruction_requests',
+            'support_access_requests', 'support_access_sessions', 'deployment_health_checks',
+        ];
+
         foreach ($coverage->missingPreparedTables() as $table) {
-            if (in_array($table, $wave6ExemptTables, true) || in_array($table, $wave7ExemptTables, true)) {
+            if (in_array($table, $wave6ExemptTables, true) || in_array($table, $wave7ExemptTables, true) || in_array($table, $wave8ExemptTables, true)) {
                 continue;
             }
 
@@ -1122,6 +1133,21 @@ class RlsForceRolloutFirewallTest extends TestCase
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950036_prepare_row_level_security_and_force_rls_on_signature_request_recipients_table.php'));
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950037_prepare_row_level_security_and_force_rls_on_signature_events_table.php'));
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950038_prepare_row_level_security_and_force_rls_on_signature_certificates_table.php'));
+    }
+
+    public function test_the_wave_8_force_rls_migration_files_exist(): void
+    {
+        // Section 39A-8 Wave 8 — the eighth coordinated multi-table
+        // wave (governance/support/platform domain), six combined
+        // prepare+force migrations implemented and committed as one
+        // unit, to be landed together via a later wave-integration
+        // commit.
+        $this->assertFileExists(base_path('database/migrations/2026_08_28_960001_prepare_row_level_security_and_force_rls_on_legal_holds_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_28_960002_prepare_row_level_security_and_force_rls_on_deletion_requests_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_28_960003_prepare_row_level_security_and_force_rls_on_key_destruction_requests_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_28_960004_prepare_row_level_security_and_force_rls_on_support_access_requests_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_28_960005_prepare_row_level_security_and_force_rls_on_support_access_sessions_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_28_960006_prepare_row_level_security_and_force_rls_on_deployment_health_checks_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

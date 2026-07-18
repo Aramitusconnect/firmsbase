@@ -115,7 +115,7 @@ class DeletionGovernanceLifecycleTest extends TestCase
         $approvalService = app(DeletionApprovalService::class);
         $approval = $approvalService->requestApproval($request->fresh(), $admin1, 'Governed hard delete.');
         $approvalService->firstApprove($approval, $admin1);
-        $approvalService->secondApprove($approval->fresh(), $admin2);
+        $approvalService->secondApprove($approval->fresh(), $request, $admin2);
 
         $finalRequest = $request->fresh();
         $this->assertSame(DeletionRequestStatus::ReadyForExecution, $finalRequest->status);
@@ -154,5 +154,57 @@ class DeletionGovernanceLifecycleTest extends TestCase
 
         $this->expectException(\LogicException::class);
         $request->delete();
+    }
+
+    /**
+     * Required proof item #2 (Wave 8 governance-domain empirical
+     * verification): deletion_approvals carries no firm_id column of
+     * its own, so secondApprove()/deny() now accept the parent
+     * DeletionRequest as an explicit parameter rather than a lazy
+     * relation load — proving the mismatch guard genuinely throws when
+     * a caller passes a $request that does not actually belong to the
+     * given $approval.
+     */
+    public function test_second_approve_rejects_a_mismatched_deletion_request(): void
+    {
+        $firm = $this->makeGovernanceFirm();
+        $admin1 = $this->makePlatformAdmin();
+        $admin2 = $this->makePlatformAdmin();
+        $matter = Matter::factory()->create(['firm_id' => $firm->id]);
+        $otherMatter = Matter::factory()->create(['firm_id' => $firm->id]);
+
+        $request = app(DeletionRequestService::class)->request($firm, Matter::class, $matter->id, 'Reason.', $admin1);
+        $approvalService = app(DeletionApprovalService::class);
+        $approval = $approvalService->requestApproval($request, $admin1, 'Governed hard delete.');
+        $approvalService->firstApprove($approval, $admin1);
+
+        // A genuinely unrelated deletion request — not the one this
+        // $approval actually belongs to.
+        $unrelatedRequest = app(DeletionRequestService::class)->request($firm, Matter::class, $otherMatter->id, 'Unrelated request.', $admin1);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $approvalService->secondApprove($approval->fresh(), $unrelatedRequest, $admin2);
+    }
+
+    /**
+     * Same mismatch-guard proof as above, but for deny().
+     */
+    public function test_deny_rejects_a_mismatched_deletion_request(): void
+    {
+        $firm = $this->makeGovernanceFirm();
+        $admin1 = $this->makePlatformAdmin();
+        $denier = $this->makePlatformAdmin();
+        $matter = Matter::factory()->create(['firm_id' => $firm->id]);
+        $otherMatter = Matter::factory()->create(['firm_id' => $firm->id]);
+
+        $request = app(DeletionRequestService::class)->request($firm, Matter::class, $matter->id, 'Reason.', $admin1);
+        $approvalService = app(DeletionApprovalService::class);
+        $approval = $approvalService->requestApproval($request, $admin1, 'Governed hard delete.');
+        $approvalService->firstApprove($approval, $admin1);
+
+        $unrelatedRequest = app(DeletionRequestService::class)->request($firm, Matter::class, $otherMatter->id, 'Unrelated request.', $admin1);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $approvalService->deny($approval->fresh(), $unrelatedRequest, $denier, 'Denied for testing.');
     }
 }

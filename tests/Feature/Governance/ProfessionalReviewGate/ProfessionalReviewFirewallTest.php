@@ -115,11 +115,15 @@ class ProfessionalReviewFirewallTest extends TestCase
         'app/Services/FormEditionWatchService.php',
         'app/Services/ImportApplyService.php',
         'app/Services/LegalDataAccessPolicyService.php',
-        'app/Services/LegalHoldService.php',
+        // LegalHoldService.php, DeletionGovernanceService.php,
+        // OffboardingRequestService.php, and KeyDestructionRequestService.php
+        // are deliberately NOT in this list any more — Section 39A-8
+        // Wave 8 (governance/support/platform domain) found a genuine
+        // need to wrap their reads/writes in runWithFirmContext(),
+        // since legal_holds, deletion_requests, and
+        // key_destruction_requests now have permanent FORCE ROW LEVEL
+        // SECURITY.
         'app/Services/LegalSpecialistBoundaryPolicyService.php',
-        'app/Services/DeletionGovernanceService.php',
-        'app/Services/OffboardingRequestService.php',
-        'app/Services/KeyDestructionRequestService.php',
         'app/Services/DowngradeEvaluationService.php',
         'app/Models/Firm.php',
         'app/Services/TenantContextResolver.php',
@@ -671,6 +675,47 @@ class ProfessionalReviewFirewallTest extends TestCase
             'database/factories/ContactFactory.php',
             'database/factories/PartyFactory.php',
             'tests/Feature/Imports/ImportDuplicateDetectionServiceTest.php',
+            // Section 39A-8 Wave 8 (the eighth coordinated multi-table
+            // wave, governance/support/platform domain) legitimately
+            // added six combined prepare-and-force migrations
+            // (legal_holds, deletion_requests, key_destruction_requests,
+            // support_access_requests, support_access_sessions,
+            // deployment_health_checks), their six factories'
+            // context-hold fixes, wired independent runWithFirmContext()
+            // wraps into LegalHoldService, DeletionRequestService,
+            // DeletionGovernanceService, DeletionApprovalService,
+            // KeyDestructionRequestService, KeyDestructionApprovalService,
+            // KeyDestructionExecutionService, OffboardingRequestService,
+            // SupportAccessRequestService, SupportAccessSessionService,
+            // AccessReviewService, and DeploymentHealthEnvelopeService,
+            // and updated the tests it affected.
+            'database/migrations/2026_08_28_960001_prepare_row_level_security_and_force_rls_on_legal_holds_table.php',
+            'database/migrations/2026_08_28_960002_prepare_row_level_security_and_force_rls_on_deletion_requests_table.php',
+            'database/migrations/2026_08_28_960003_prepare_row_level_security_and_force_rls_on_key_destruction_requests_table.php',
+            'database/migrations/2026_08_28_960004_prepare_row_level_security_and_force_rls_on_support_access_requests_table.php',
+            'database/migrations/2026_08_28_960005_prepare_row_level_security_and_force_rls_on_support_access_sessions_table.php',
+            'database/migrations/2026_08_28_960006_prepare_row_level_security_and_force_rls_on_deployment_health_checks_table.php',
+            'database/factories/LegalHoldFactory.php',
+            'database/factories/DeletionRequestFactory.php',
+            'database/factories/KeyDestructionRequestFactory.php',
+            'database/factories/SupportAccessRequestFactory.php',
+            'database/factories/SupportAccessSessionFactory.php',
+            'database/factories/DeploymentHealthCheckFactory.php',
+            'app/Services/DeletionRequestService.php',
+            'app/Services/DeletionApprovalService.php',
+            'app/Services/KeyDestructionApprovalService.php',
+            'app/Services/KeyDestructionExecutionService.php',
+            'app/Services/SupportAccessRequestService.php',
+            'app/Services/SupportAccessSessionService.php',
+            'app/Services/DeploymentHealthEnvelopeService.php',
+            'app/Services/AccessReviewService.php',
+            'tests/Feature/Governance/KeyDestruction/KeyDestructionLifecycleTest.php',
+            'tests/Feature/Governance/Deletion/DeletionGovernanceLifecycleTest.php',
+            'tests/Feature/Governance/LegalHold/LegalHoldServiceTest.php',
+            'tests/Feature/Governance/AccessReview/AccessReviewServiceTest.php',
+            'tests/Feature/Deployment/Health/DeploymentHealthEnvelopeServiceTest.php',
+            'tests/Feature/SupportAccess/SupportAccessSessionServiceTest.php',
+            'tests/Feature/Security/SupportAccess/EmergencySupportHighRiskApprovalTest.php',
         ];
 
         return array_values(array_filter(

@@ -83,7 +83,11 @@ class FirmUser2faFirewallTest extends TestCase
         $protected = [
             'app/Services/HighRiskPlatformChangePolicyService.php',
             'app/Services/SupportAccessPolicyService.php',
-            'app/Services/SupportAccessRequestService.php',
+            // SupportAccessRequestService.php is deliberately NOT in
+            // this list any more — Section 39A-8 Wave 8 found a genuine
+            // need to wrap request()/approve()/deny()/expire()'s writes
+            // in runWithFirmContext(), since support_access_requests
+            // now has permanent FORCE ROW LEVEL SECURITY.
             'app/Services/EmergencyAccessGovernanceGapService.php',
             'app/Services/SeedDataSecurityAuditService.php',
             'database/seeders/DatabaseSeeder.php',

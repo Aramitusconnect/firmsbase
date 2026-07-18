@@ -39,7 +39,7 @@ class DeletionApprovalService
             'status' => HighRiskChangeRequestStatus::Pending,
         ]);
 
-        $request->update(['status' => \App\Enums\DeletionRequestStatus::PendingApproval]);
+        (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => \App\Enums\DeletionRequestStatus::PendingApproval]));
 
         return $approval;
     }
@@ -57,8 +57,26 @@ class DeletionApprovalService
         return $approval->fresh();
     }
 
-    public function secondApprove(DeletionApproval $approval, PlatformAdmin $approver): DeletionApproval
+    /**
+     * $request is accepted explicitly rather than lazy-loaded off
+     * $approval->deletionRequest — deletion_approvals carries no
+     * firm_id column of its own, so once deletion_requests is FORCE
+     * RLS (this batch), that lazy load would silently return null
+     * under no ambient context (not an error), and null->update(...)
+     * would throw a fatal Error on every successful second-approval.
+     * Every existing caller already has the parent request in scope at
+     * the call site. The mismatch check below guards against a caller
+     * pairing the wrong request with the wrong approval — the
+     * application-layer analogue of a composite-FK check, since
+     * deletion_approvals has no firm_id to key a DB-level constraint
+     * on.
+     */
+    public function secondApprove(DeletionApproval $approval, DeletionRequest $request, PlatformAdmin $approver): DeletionApproval
     {
+        if ($request->id !== $approval->deletion_request_id) {
+            throw new \InvalidArgumentException('The given DeletionRequest does not match this DeletionApproval.');
+        }
+
         $decision = $this->highRiskPolicy->secondApprove($approval->highRiskChangeRequest, $approver);
 
         $approval->update([
@@ -68,14 +86,23 @@ class DeletionApprovalService
         ]);
 
         if ($decision->status === HighRiskChangeRequestStatus::Approved) {
-            $approval->deletionRequest->update(['status' => DeletionRequestStatus::ReadyForExecution]);
+            (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => DeletionRequestStatus::ReadyForExecution]));
         }
 
         return $approval->fresh();
     }
 
-    public function deny(DeletionApproval $approval, PlatformAdmin $denier, string $reason): DeletionApproval
+    /**
+     * See secondApprove()'s docblock for why $request is now an
+     * explicit parameter instead of a lazy $approval->deletionRequest
+     * load, and why the mismatch check exists.
+     */
+    public function deny(DeletionApproval $approval, DeletionRequest $request, PlatformAdmin $denier, string $reason): DeletionApproval
     {
+        if ($request->id !== $approval->deletion_request_id) {
+            throw new \InvalidArgumentException('The given DeletionRequest does not match this DeletionApproval.');
+        }
+
         $decision = $this->highRiskPolicy->deny($approval->highRiskChangeRequest, $denier, $reason);
 
         $approval->update([
@@ -85,7 +112,7 @@ class DeletionApprovalService
             'denial_reason' => $reason,
         ]);
 
-        $approval->deletionRequest->update(['status' => DeletionRequestStatus::Denied]);
+        (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => DeletionRequestStatus::Denied]));
 
         return $approval->fresh();
     }

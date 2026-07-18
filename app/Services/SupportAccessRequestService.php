@@ -63,7 +63,7 @@ class SupportAccessRequestService
             throw new \InvalidArgumentException('Emergency support access requires an emergency_justification in addition to reason.');
         }
 
-        $request = SupportAccessRequest::create([
+        $request = (new TenantContextService())->runWithFirmContext($firm, fn () => SupportAccessRequest::create([
             'firm_id' => $firm->id,
             'requested_by' => $requestedBy->id,
             'access_type' => $accessType,
@@ -71,7 +71,7 @@ class SupportAccessRequestService
             'status' => SupportAccessRequestStatus::Requested,
             'requested_duration_minutes' => $requestedDurationMinutes,
             'emergency_justification' => $emergencyJustification,
-        ]);
+        ]));
 
         if ($accessType === SupportAccessType::Emergency) {
             $this->highRiskPolicy->request(
@@ -103,30 +103,36 @@ class SupportAccessRequestService
 
     public function approve(SupportAccessRequest $request, FirmUser $approver): SupportAccessRequest
     {
-        $request->update([
-            'status' => SupportAccessRequestStatus::Approved,
-            'approved_by' => $approver->id,
-            'approved_at' => now(),
-        ]);
+        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $approver) {
+            $request->update([
+                'status' => SupportAccessRequestStatus::Approved,
+                'approved_by' => $approver->id,
+                'approved_at' => now(),
+            ]);
 
-        return $request->fresh();
+            return $request->fresh();
+        });
     }
 
     public function deny(SupportAccessRequest $request, FirmUser $denier): SupportAccessRequest
     {
-        $request->update([
-            'status' => SupportAccessRequestStatus::Denied,
-            'denied_by' => $denier->id,
-            'denied_at' => now(),
-        ]);
+        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $denier) {
+            $request->update([
+                'status' => SupportAccessRequestStatus::Denied,
+                'denied_by' => $denier->id,
+                'denied_at' => now(),
+            ]);
 
-        return $request->fresh();
+            return $request->fresh();
+        });
     }
 
     public function expire(SupportAccessRequest $request): SupportAccessRequest
     {
-        $request->update(['status' => SupportAccessRequestStatus::Expired]);
+        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request) {
+            $request->update(['status' => SupportAccessRequestStatus::Expired]);
 
-        return $request->fresh();
+            return $request->fresh();
+        });
     }
 }

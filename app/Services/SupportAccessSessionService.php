@@ -23,36 +23,40 @@ class SupportAccessSessionService
     {
         $expiresAt = now()->addMinutes($request->requested_duration_minutes);
 
-        return SupportAccessSession::create([
+        return (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => SupportAccessSession::create([
             'support_access_request_id' => $request->id,
             'firm_id' => $request->firm_id,
             'platform_admin_id' => $request->requested_by,
             'status' => SupportAccessSessionStatus::Active,
             'started_at' => now(),
             'expires_at' => $expiresAt,
-        ]);
+        ]));
     }
 
     public function end(SupportAccessSession $session): SupportAccessSession
     {
-        $session->update([
-            'status' => SupportAccessSessionStatus::Expired,
-            'ended_at' => now(),
-        ]);
+        return (new TenantContextService())->runWithFirmContext($session->firm_id, function () use ($session) {
+            $session->update([
+                'status' => SupportAccessSessionStatus::Expired,
+                'ended_at' => now(),
+            ]);
 
-        return $session->fresh();
+            return $session->fresh();
+        });
     }
 
     public function revoke(SupportAccessSession $session, \App\Models\PlatformAdmin $revokedBy): SupportAccessSession
     {
-        $session->update([
-            'status' => SupportAccessSessionStatus::Revoked,
-            'revoked_by' => $revokedBy->id,
-            'revoked_at' => now(),
-            'ended_at' => now(),
-        ]);
+        return (new TenantContextService())->runWithFirmContext($session->firm_id, function () use ($session, $revokedBy) {
+            $session->update([
+                'status' => SupportAccessSessionStatus::Revoked,
+                'revoked_by' => $revokedBy->id,
+                'revoked_at' => now(),
+                'ended_at' => now(),
+            ]);
 
-        return $session->fresh();
+            return $session->fresh();
+        });
     }
 
     public function isValid(SupportAccessSession $session): bool
