@@ -45,9 +45,75 @@ class MatterExpenseServiceTest extends TestCase
 
         $link = $this->service->link($firm, $matter, $expense);
 
-        $this->assertDatabaseHas('matter_expenses', [
-            'id' => $link->id, 'matter_id' => $matter->id, 'expense_id' => $expense->id, 'firm_id' => $firm->id,
-        ]);
+        // matter_expenses now has permanent FORCE ROW LEVEL SECURITY (see
+        // database/migrations/2026_08_27_950012_prepare_row_level_
+        // security_and_force_rls_on_matter_expenses_table.php).
+        // assertDatabaseHas() queries with no tenant context of its own,
+        // so it would (correctly) see zero rows against this now-forced
+        // table — the re-read below is an explicit, context-wrapped read
+        // instead, matching this project's established convention (see
+        // e.g. FirmActivationEventsForceRlsActivationTest).
+        $reRead = $this->runWithFirmContext(
+            $firm,
+            fn () => \App\Models\MatterExpense::withoutGlobalScopes()->find($link->id),
+        );
+
+        $this->assertNotNull($reRead, 'link() must genuinely persist a matter_expenses row, readable under its own firm context.');
+        $this->assertSame($matter->id, $reRead->matter_id);
+        $this->assertSame($expense->id, $reRead->expense_id);
+        $this->assertSame($firm->id, $reRead->firm_id);
+    }
+
+    /**
+     * CRITICAL REGRESSION TEST (security review finding): wrapping the
+     * duplicate-guard read (`$expense->matterExpense()->exists()`) and
+     * the create() write together in one outer runWithFirmContext() call
+     * must NOT silently defeat the pre-existing "already linked" guard.
+     * Calling link() twice for the same expense must still throw.
+     */
+    public function test_linking_the_same_expense_twice_still_throws_the_duplicate_guard(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->enableExpenses($firm);
+        $matterOne = Matter::factory()->forFirm($firm)->create();
+        $matterTwo = Matter::factory()->forFirm($firm)->create();
+        $expense = Expense::factory()->forFirm($firm)->create();
+
+        $this->service->link($firm, $matterOne, $expense);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('This expense is already linked to a matter.');
+
+        $this->service->link($firm, $matterTwo, $expense);
+    }
+
+    /** Tenant context must clear after both the success and exception paths through link(). */
+    public function test_tenant_context_clears_after_link_success_and_after_duplicate_guard_exception(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->enableExpenses($firm);
+        $matter = Matter::factory()->forFirm($firm)->create();
+        $expense = Expense::factory()->forFirm($firm)->create();
+
+        // MatterFactory/ExpenseFactory deliberately leave the PostgreSQL
+        // session's database-only tenant context set to the fixture firm
+        // afterward (their own established convention). Clear it
+        // explicitly so the assertions below prove link() itself leaves
+        // no context behind, rather than merely restoring that
+        // pre-existing fixture leftover.
+        (new \App\Services\TenantContextService())->clearDatabaseTenantContext();
+
+        $this->service->link($firm, $matter, $expense);
+        $this->assertNoDatabaseTenantContext('link() must clear its own internal context wrap after a successful link.');
+
+        try {
+            $this->service->link($firm, $matter, $expense);
+            $this->fail('Expected the duplicate-guard RuntimeException to be thrown.');
+        } catch (\RuntimeException $e) {
+            // expected
+        }
+
+        $this->assertNoDatabaseTenantContext('link() must clear its own internal context wrap even when the duplicate guard throws.');
     }
 
     /** Required: cross-firm invoice/expense/matter combinations are blocked. */
@@ -80,7 +146,17 @@ class MatterExpenseServiceTest extends TestCase
         // snapshot on the already-created link must NOT change.
         $expense->update(['reimbursable' => false]);
 
-        $this->assertTrue($link->fresh()->reimbursable_snapshot);
+        // matter_expenses now has permanent FORCE ROW LEVEL SECURITY —
+        // ->fresh() re-queries with no tenant context of its own (link()
+        // already cleared its internal wrap), so re-read explicitly
+        // under the owning firm's context instead.
+        $reRead = $this->runWithFirmContext(
+            $firm,
+            fn () => \App\Models\MatterExpense::withoutGlobalScopes()->find($link->id),
+        );
+
+        $this->assertNotNull($reRead);
+        $this->assertTrue($reRead->reimbursable_snapshot);
     }
 
     public function test_linking_blocked_when_module_disabled(): void
