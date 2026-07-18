@@ -509,7 +509,7 @@ class AiApprovalRequestsForceRlsActivationTest extends TestCase
 
         $sampledPrepared = array_slice($coverage->preparedTables(), 0, 5);
         $otherTables = array_merge($sampledPrepared, [
-            'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', // paired sibling, own independent migration, must remain untouched
+            'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', // paired sibling, own independent migration, must remain untouched
             'tenant_encryption_keys', // already FORCE-active, must remain untouched
             'ai_usage_events', // still unprepared (MISSING_PREPARED_TABLES), must remain untouched
             'matters', // already FORCE-active, must remain untouched

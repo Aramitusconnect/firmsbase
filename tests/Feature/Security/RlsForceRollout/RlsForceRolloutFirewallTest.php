@@ -570,6 +570,7 @@ class RlsForceRolloutFirewallTest extends TestCase
             // seventy-two to seventy-six — same additive-only pattern,
             // no existing assertion removed or weakened.
             'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events',
+            'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

@@ -178,6 +178,24 @@ class RowLevelSecurityCoverageMappingService
         // 2026_08_27_950028_prepare_row_level_security_and_force_rls_on_email_sync_events_table.php.
         // All four moved here from MISSING_PREPARED_TABLES below.
         'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events',
+        // Section 39A-5 Wave 6 (documents/forms domain) — six tables
+        // implemented and committed as ONE combined unit (not six
+        // independent checkpoints), since Phase 1/2 read-only analysis
+        // confirmed two tightly-coupled review-workflow pairs
+        // (form_drafts+form_review_events via FormReviewService;
+        // generated_documents+generated_document_events via
+        // DocumentReviewService) plus two looser singletons
+        // (document_hashes, pdf_view_events) with cross-domain read
+        // dependencies on generated_documents:
+        // 2026_08_27_950029_prepare_row_level_security_and_force_rls_on_generated_documents_table.php,
+        // 2026_08_27_950030_prepare_row_level_security_and_force_rls_on_form_drafts_table.php,
+        // 2026_08_27_950031_prepare_row_level_security_and_force_rls_on_generated_document_events_table.php,
+        // 2026_08_27_950032_prepare_row_level_security_and_force_rls_on_form_review_events_table.php,
+        // 2026_08_27_950033_prepare_row_level_security_and_force_rls_on_document_hashes_table.php,
+        // 2026_08_27_950034_prepare_row_level_security_and_force_rls_on_pdf_view_events_table.php.
+        // All six moved here from MISSING_PREPARED_TABLES below.
+        'generated_documents', 'form_drafts', 'generated_document_events',
+        'form_review_events', 'document_hashes', 'pdf_view_events',
     ];
 
     /**
@@ -239,17 +257,22 @@ class RowLevelSecurityCoverageMappingService
      * wave, covering the email domain, implemented as one combined unit
      * rather than four independent checkpoints.
      *
+     * Section 39A-5 Wave 6 removed generated_documents, form_drafts,
+     * generated_document_events, form_review_events, document_hashes,
+     * and pdf_view_events from this array (moved to PREPARED_TABLES
+     * above) — the sixth coordinated multi-table wave, covering the
+     * documents/forms domain, implemented as one combined unit rather
+     * than six independent checkpoints.
+     *
      * @var array<int, string>
      */
     private const MISSING_PREPARED_TABLES = [
         'deletion_requests', 'deployment_health_checks',
-        'document_hashes',
         'export_jobs',
-        'fleet_migration_instance_status', 'form_drafts',
-        'form_review_events', 'generated_document_events', 'generated_documents',
+        'fleet_migration_instance_status',
         'implementation_projects', 'import_batches', 'key_destruction_requests',
         'legal_holds', 'matter_trust_balances',
-        'migration_projects', 'offboarding_requests', 'pdf_view_events',
+        'migration_projects', 'offboarding_requests',
         'signature_certificates', 'signature_events',
         'signature_request_recipients', 'signature_requests',
         'support_access_requests', 'support_access_sessions', 'trust_accounts',

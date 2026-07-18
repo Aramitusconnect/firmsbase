@@ -81,7 +81,7 @@ class PrivateEnterpriseSettingsForceRlsActivationTest extends TestCase
         // ai_approval_events), bringing it to sixty-five. This test now
         // runs against the fully-integrated state.
         $preparedTables = $coverage->preparedTables();
-        $this->assertCount(76, $preparedTables, 'Section 39A-5 Wave 2, Wave 3, Wave 4, and Wave 5 integration must have moved private_enterprise_settings and every sibling table from all four waves into PREPARED_TABLES.');
+        $this->assertCount(82, $preparedTables, 'Section 39A-5 Wave 2, Wave 3, Wave 4, Wave 5, and Wave 6 integration must have moved private_enterprise_settings and every sibling table from all five waves into PREPARED_TABLES.');
 
         foreach ($preparedTables as $table) {
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);
@@ -109,7 +109,7 @@ class PrivateEnterpriseSettingsForceRlsActivationTest extends TestCase
         // siblings from that wave — plus five more from Wave 3:
         // ai_usage_events, ai_tool_actions, firm_ai_provider_keys,
         // ai_approval_requests, ai_approval_events).
-        $this->assertCount(76, $forced, 'Exactly 76 tables must have a FORCE-activation migration after Section 39A-5 Wave 5 — no more, no less.');
+        $this->assertCount(82, $forced, 'Exactly 82 tables must have a FORCE-activation migration after Section 39A-5 Wave 6 — no more, no less.');
 
         foreach ($forced as $table) {
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);

@@ -143,8 +143,8 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // ai_approval_requests, and ai_approval_events moved from
         // MISSING_PREPARED_TABLES into PREPARED_TABLES (60 -> 65,
         // 53 -> 48); tenantOwnedTables() remains unchanged (113).
-        $this->assertCount(76, $this->service->preparedTables());
-        $this->assertCount(37, $this->service->missingPreparedTables());
+        $this->assertCount(82, $this->service->preparedTables());
+        $this->assertCount(31, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
         $this->assertCount(24, $this->service->exemptTables());
@@ -181,13 +181,19 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // unit) — it was moved into PREPARED_TABLES (and given a real
         // RLS policy + FORCE activation) in that batch, so it is no
         // longer missing.
+        // document_hashes, form_review_events, generated_document_events,
+        // and pdf_view_events removed from this list by Section 39A-5
+        // Wave 6 (documents/forms domain, 6 tables implemented as one
+        // combined unit) — each was moved into PREPARED_TABLES (and
+        // given a real RLS policy + FORCE activation) in that batch, so
+        // none is any longer missing.
         foreach ([
-            'trust_approval_events', 'document_hashes', 'webhook_deliveries',
+            'trust_approval_events', 'webhook_deliveries',
             'signature_events', 'webhook_delivery_attempts', 'webhook_secrets',
             'matter_trust_balances',
-            'fleet_migration_instance_status', 'form_review_events',
-            'generated_document_events', 'implementation_projects',
-            'pdf_view_events', 'support_access_requests', 'support_access_sessions',
+            'fleet_migration_instance_status',
+            'implementation_projects',
+            'support_access_requests', 'support_access_sessions',
         ] as $table) {
             $this->assertContains($table, $missing, "{$table} must be tracked in MISSING_PREPARED_TABLES.");
         }
