@@ -199,6 +199,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
         // additive only, no existing assertion removed or weakened.
         $expectedForced = [
             'ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings',
+            'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links',
             'customer_success_health_scores',
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
@@ -281,6 +282,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
         // additive only, no existing assertion removed or weakened.
         $forced = [
             'ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings',
+            'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links',
             'customer_success_health_scores',
             'clients', 'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',

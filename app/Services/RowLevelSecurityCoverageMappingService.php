@@ -129,6 +129,14 @@ class RowLevelSecurityCoverageMappingService
         // 2026_08_27_950003_prepare_row_level_security_and_force_rls_on_firm_ai_settings_table.php.
         // All three moved here from MISSING_PREPARED_TABLES below.
         'ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings',
+        // Section 39A-5 Wave 2 — same combined prepare+force shape,
+        // four independent tables activated together:
+        // 2026_08_27_950004_prepare_row_level_security_and_force_rls_on_email_message_links_table.php,
+        // 2026_08_27_950005_prepare_row_level_security_and_force_rls_on_email_visibility_rules_table.php,
+        // 2026_08_27_950011_prepare_row_level_security_and_force_rls_on_private_enterprise_settings_table.php,
+        // 2026_08_27_950012_prepare_row_level_security_and_force_rls_on_matter_expenses_table.php.
+        // All four moved here from MISSING_PREPARED_TABLES below.
+        'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links',
     ];
 
     /**
@@ -165,6 +173,11 @@ class RowLevelSecurityCoverageMappingService
      * wave of the 39A-5 uncovered-table rollout, chosen for minimal,
      * mutually-independent blast radius.
      *
+     * Section 39A-5 Wave 2 removed email_visibility_rules,
+     * private_enterprise_settings, matter_expenses, and
+     * email_message_links from this array (moved to PREPARED_TABLES
+     * above) — the second coordinated multi-table wave.
+     *
      * @var array<int, string>
      */
     private const MISSING_PREPARED_TABLES = [
@@ -173,15 +186,15 @@ class RowLevelSecurityCoverageMappingService
         'ai_usage_events', 'chart_of_accounts',
         'deletion_requests', 'deployment_health_checks',
         'document_hashes', 'email_accounts', 'email_attachments',
-        'email_message_links', 'email_messages', 'email_sync_events',
-        'email_visibility_rules', 'expense_approvals', 'expense_categories',
+        'email_messages', 'email_sync_events',
+        'expense_approvals', 'expense_categories',
         'expense_receipts', 'expenses', 'export_jobs', 'firm_ai_provider_keys',
         'fleet_migration_instance_status', 'form_drafts',
         'form_review_events', 'generated_document_events', 'generated_documents',
         'implementation_projects', 'import_batches', 'key_destruction_requests',
-        'legal_holds', 'matter_expenses', 'matter_trust_balances',
+        'legal_holds', 'matter_trust_balances',
         'migration_projects', 'offboarding_requests', 'pdf_view_events',
-        'private_enterprise_settings', 'signature_certificates', 'signature_events',
+        'signature_certificates', 'signature_events',
         'signature_request_recipients', 'signature_requests',
         'support_access_requests', 'support_access_sessions', 'trust_accounts',
         'trust_approval_events', 'trust_balances', 'trust_chargeback_events',

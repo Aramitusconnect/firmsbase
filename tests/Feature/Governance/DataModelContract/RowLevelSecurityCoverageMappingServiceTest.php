@@ -132,8 +132,13 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // firm_ai_settings moved from MISSING_PREPARED_TABLES into
         // PREPARED_TABLES (53 -> 56, 60 -> 57); tenantOwnedTables()
         // remains unchanged (113).
-        $this->assertCount(56, $this->service->preparedTables());
-        $this->assertCount(57, $this->service->missingPreparedTables());
+        // Narrowly updated AGAIN by Section 39A-5 Wave 2 —
+        // email_visibility_rules, private_enterprise_settings,
+        // matter_expenses, and email_message_links moved from
+        // MISSING_PREPARED_TABLES into PREPARED_TABLES (56 -> 60,
+        // 57 -> 53); tenantOwnedTables() remains unchanged (113).
+        $this->assertCount(60, $this->service->preparedTables());
+        $this->assertCount(53, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
         $this->assertCount(24, $this->service->exemptTables());
@@ -156,13 +161,17 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Section 39A-5, Checkpoint 1 — it was moved into
         // PREPARED_TABLES (and given a real RLS policy + FORCE
         // activation) in the same batch, so it is no longer missing.
+        // matter_expenses removed from this list by Section 39A-5
+        // Wave 2 — it was moved into PREPARED_TABLES (and given a real
+        // RLS policy + FORCE activation) in the same batch, so it is
+        // no longer missing.
         foreach ([
             'trust_approval_events', 'document_hashes', 'webhook_deliveries',
             'signature_events', 'webhook_delivery_attempts', 'webhook_secrets',
             'matter_trust_balances', 'accounting_export_lines',
             'email_sync_events',
             'fleet_migration_instance_status', 'form_review_events',
-            'generated_document_events', 'implementation_projects', 'matter_expenses',
+            'generated_document_events', 'implementation_projects',
             'pdf_view_events', 'support_access_requests', 'support_access_sessions',
         ] as $table) {
             $this->assertContains($table, $missing, "{$table} must be tracked in MISSING_PREPARED_TABLES.");

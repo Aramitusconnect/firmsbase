@@ -70,8 +70,15 @@ class PrivateEnterpriseSettingsForceRlsActivationTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService;
 
+        // Wave-integration note: this table's own checkpoint commit did
+        // not move private_enterprise_settings into PREPARED_TABLES —
+        // the subsequent Section 39A-5 Wave 2 integration commit did,
+        // together with its three sibling tables (email_visibility_rules,
+        // matter_expenses, email_message_links), bringing the count from
+        // fifty-six to sixty. This test now runs against the integrated
+        // state.
         $preparedTables = $coverage->preparedTables();
-        $this->assertCount(56, $preparedTables, 'This checkpoint must not move private_enterprise_settings into PREPARED_TABLES itself — that happens in the shared wave-integration commit.');
+        $this->assertCount(60, $preparedTables, 'Section 39A-5 Wave 2 integration must have moved private_enterprise_settings and its three sibling tables into PREPARED_TABLES together.');
 
         foreach ($preparedTables as $table) {
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);
@@ -94,7 +101,10 @@ class PrivateEnterpriseSettingsForceRlsActivationTest extends TestCase
         $forced = $coverage->forcedTables();
 
         $this->assertContains('private_enterprise_settings', $forced);
-        $this->assertCount(57, $forced, 'Exactly 57 tables must have a FORCE-activation migration after this checkpoint — no more, no less.');
+        // Sixty after Section 39A-5 Wave 2 integration (fifty-six prior
+        // plus this table's three siblings from the same wave:
+        // email_visibility_rules, matter_expenses, email_message_links).
+        $this->assertCount(60, $forced, 'Exactly 60 tables must have a FORCE-activation migration after Section 39A-5 Wave 2 — no more, no less.');
 
         foreach ($forced as $table) {
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);

@@ -493,6 +493,15 @@ class RlsForceRolloutFirewallTest extends TestCase
             // same additive-only pattern, no existing assertion
             // removed or weakened.
             'ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings',
+            // Narrowly updated AGAIN by Section 39A-5 Wave 2 — the
+            // second coordinated multi-table wave of this arc, covering
+            // email_visibility_rules, private_enterprise_settings,
+            // matter_expenses, and email_message_links together (each
+            // with its own combined prepare+force migration) — extends
+            // the "exactly these tables are forced" list from
+            // fifty-six to sixty — same additive-only pattern, no
+            // existing assertion removed or weakened.
+            'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -908,6 +917,17 @@ class RlsForceRolloutFirewallTest extends TestCase
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950001_prepare_row_level_security_and_force_rls_on_ai_retrieval_indexes_table.php'));
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950002_prepare_row_level_security_and_force_rls_on_deployment_configs_table.php'));
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950003_prepare_row_level_security_and_force_rls_on_firm_ai_settings_table.php'));
+    }
+
+    public function test_the_wave_2_force_rls_migration_files_exist(): void
+    {
+        // Section 39A-5 Wave 2 — the second coordinated multi-table
+        // wave, four independent combined prepare+force migrations
+        // landed together via a wave-integration commit.
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950004_prepare_row_level_security_and_force_rls_on_email_message_links_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950005_prepare_row_level_security_and_force_rls_on_email_visibility_rules_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950011_prepare_row_level_security_and_force_rls_on_private_enterprise_settings_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950012_prepare_row_level_security_and_force_rls_on_matter_expenses_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void
