@@ -60,7 +60,8 @@ class AuditPreservationPolicyServiceTest extends TestCase
 
     public function test_existing_ai_usage_event_append_only_protection_still_throws(): void
     {
-        $event = AiUsageEvent::factory()->create();
+        $firm = \App\Models\Firm::factory()->create();
+        $event = $this->runWithFirmContext($firm, fn () => AiUsageEvent::factory()->forFirm($firm)->create());
 
         $this->expectException(\LogicException::class);
         $event->delete();
