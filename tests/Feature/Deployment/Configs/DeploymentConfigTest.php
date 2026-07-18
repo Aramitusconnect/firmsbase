@@ -46,27 +46,39 @@ class DeploymentConfigTest extends TestCase
     {
         $firm = $this->makeDeploymentFirm(DeploymentMode::PrivateEnterprise);
 
-        $settings = PrivateEnterpriseSettings::factory()->forFirm($firm)->create([
-            'requires_custom_domain' => true,
-            'requires_isolated_database' => true,
-            'requires_isolated_storage' => true,
-        ]);
+        // private_enterprise_settings now carries permanent FORCE ROW
+        // LEVEL SECURITY, so the bare create() (and the subsequent
+        // ->fresh() reads) have no ambient tenant context and are
+        // wrapped narrowly, same established precedent as
+        // DeploymentConfigTest's own deployment_configs wrap above.
+        $settings = $this->runWithFirmContext(
+            $firm,
+            fn () => PrivateEnterpriseSettings::factory()->forFirm($firm)->create([
+                'requires_custom_domain' => true,
+                'requires_isolated_database' => true,
+                'requires_isolated_storage' => true,
+            ]),
+        );
 
-        $this->assertTrue($settings->fresh()->requires_custom_domain);
-        $this->assertTrue($settings->fresh()->requires_isolated_database);
-        $this->assertTrue($settings->fresh()->requires_isolated_storage);
+        $this->runWithFirmContext($firm, function () use ($settings) {
+            $this->assertTrue($settings->fresh()->requires_custom_domain);
+            $this->assertTrue($settings->fresh()->requires_isolated_database);
+            $this->assertTrue($settings->fresh()->requires_isolated_storage);
+        });
     }
 
     public function test_private_enterprise_settings_default_every_requirement_to_false(): void
     {
         $firm = $this->makeDeploymentFirm(DeploymentMode::PrivateEnterprise);
 
-        $settings = PrivateEnterpriseSettings::factory()->forFirm($firm)->create();
+        $settings = $this->runWithFirmContext($firm, fn () => PrivateEnterpriseSettings::factory()->forFirm($firm)->create());
 
-        $this->assertFalse($settings->fresh()->requires_custom_domain);
-        $this->assertFalse($settings->fresh()->requires_isolated_database);
-        $this->assertFalse($settings->fresh()->requires_isolated_storage);
-        $this->assertFalse($settings->fresh()->telemetry_prohibited);
+        $this->runWithFirmContext($firm, function () use ($settings) {
+            $this->assertFalse($settings->fresh()->requires_custom_domain);
+            $this->assertFalse($settings->fresh()->requires_isolated_database);
+            $this->assertFalse($settings->fresh()->requires_isolated_storage);
+            $this->assertFalse($settings->fresh()->telemetry_prohibited);
+        });
     }
 
     public function test_deployment_config_isolated_database_and_storage_are_declarations_only(): void

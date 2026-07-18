@@ -42,7 +42,12 @@ class DeploymentHealthEnvelopeServiceTest extends TestCase
     public function test_telemetry_prohibited_forces_offline_report_mode(): void
     {
         $firm = $this->makeDeploymentFirm(DeploymentMode::PrivateEnterprise);
-        PrivateEnterpriseSettings::factory()->forFirm($firm)->telemetryProhibited()->create();
+
+        // private_enterprise_settings now carries permanent FORCE ROW
+        // LEVEL SECURITY, so the bare create() has no ambient tenant
+        // context and is wrapped narrowly, same established precedent
+        // as DeploymentConfigTest's own deployment_configs wrap.
+        $this->runWithFirmContext($firm, fn () => PrivateEnterpriseSettings::factory()->forFirm($firm)->telemetryProhibited()->create());
 
         $envelope = app(DeploymentHealthEnvelopeService::class)->buildEnvelope($firm->fresh(), '2026.7.0', '2026.7.0');
 

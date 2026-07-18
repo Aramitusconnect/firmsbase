@@ -6,6 +6,8 @@ use App\Enums\DeploymentHealthReportMode;
 use App\Enums\HealthCheckStatus;
 use App\Models\DeploymentHealthCheck;
 use App\Models\Firm;
+use App\Models\PrivateEnterpriseSettings;
+use App\Services\TenantContextService;
 use App\ValueObjects\DeploymentHealthEnvelope;
 
 /**
@@ -27,7 +29,21 @@ class DeploymentHealthEnvelopeService
 
     public function buildEnvelope(Firm $firm, string $version, string $saasVersion, ?string $migrationStatus = null): DeploymentHealthEnvelope
     {
-        $telemetryProhibited = (bool) ($firm->privateEnterpriseSettings?->telemetry_prohibited ?? false);
+        // private_enterprise_settings now carries permanent FORCE ROW
+        // LEVEL SECURITY, so this read is wrapped narrowly in the
+        // firm's own tenant context (whole-call wrap, not just the
+        // argument) rather than relying on any ambient context that
+        // may or may not already be active at this call site. Queried
+        // directly by firm_id instead of trusting the cached
+        // $firm->privateEnterpriseSettings relation, to avoid a
+        // stale-cache hazard. The DeploymentHealthCheck::create() call
+        // below is intentionally left unwrapped — it writes to the
+        // separate, still-unprepared deployment_health_checks table
+        // and must stay decoupled from this table's context.
+        $telemetryProhibited = (new TenantContextService())->runWithFirmContext(
+            $firm,
+            fn () => (bool) (PrivateEnterpriseSettings::query()->where('firm_id', $firm->id)->first()?->telemetry_prohibited ?? false),
+        );
         $reportMode = $telemetryProhibited ? DeploymentHealthReportMode::OfflineReport : DeploymentHealthReportMode::Live;
 
         $skew = $this->versionSkewPolicy->check($version, $saasVersion);

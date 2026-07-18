@@ -448,6 +448,24 @@ class DeploymentEnvironmentFirewallTest extends TestCase
             'app/Services/SuppressionService.php',
             'tests/Feature/Notifications/NotificationDispatchServiceTest.php',
             'tests/Feature/Notifications/SuppressionServiceTest.php',
+            // Section 39A-5 Wave 1 follow-on (this batch, a later,
+            // distinct staged-FORCE-activation branch) legitimately
+            // added a private_enterprise_settings-only combined
+            // prepare+force RLS migration, wrapped
+            // DeploymentHealthEnvelopeService::buildEnvelope()'s
+            // telemetry_prohibited read in its own runWithFirmContext()
+            // call (a protected Phase 16 file, but this is a real,
+            // narrow, in-scope wiring fix required by this checkpoint's
+            // own FORCE activation, not an unrelated rewrite), wrapped
+            // two pre-existing bare PrivateEnterpriseSettings::factory()
+            // create() call sites in DeploymentConfigTest.php and one in
+            // DeploymentHealthEnvelopeServiceTest.php, and added this
+            // checkpoint's own activation-proof test file.
+            'database/migrations/2026_08_27_950011_prepare_row_level_security_and_force_rls_on_private_enterprise_settings_table.php',
+            'app/Services/DeploymentHealthEnvelopeService.php',
+            'tests/Feature/Deployment/Configs/DeploymentConfigTest.php',
+            'tests/Feature/Deployment/Health/DeploymentHealthEnvelopeServiceTest.php',
+            'tests/Feature/Security/RlsForceRollout/PrivateEnterpriseSettingsForceRlsActivationTest.php',
         ];
 
         return array_values(array_filter(
