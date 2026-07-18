@@ -161,6 +161,10 @@ class RlsContextRolloutFirewallTest extends TestCase
             // Narrowly updated AGAIN by Section 39A-5 Wave 7 (e-signature
             // domain, 4 tables implemented as one combined unit) —
             'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests',
+            // Narrowly updated AGAIN by Section 39A-5 Wave 8 (governance/
+            // support/platform domain, 6 tables implemented as one combined
+            // unit) —
+            'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks',
         ];
 
         // security_events is the final checkpoint in this arc: every
