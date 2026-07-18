@@ -3,9 +3,11 @@
 namespace Tests\Feature\Ai\Retrieval;
 
 use App\Enums\AiRetrievalIndexStatus;
+use App\Models\AiRetrievalIndex;
 use App\Models\Matter;
 use App\Models\MatterAssignment;
 use App\Services\AiRetrievalIsolationService;
+use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\Ai\Concerns\SetsUpAiEntitledFirm;
 use Tests\TestCase;
@@ -21,6 +23,16 @@ class AiRetrievalIsolationServiceTest extends TestCase
 {
     use RefreshDatabase, SetsUpAiEntitledFirm;
 
+    /**
+     * Section 39A-5 (Wave 1): ai_retrieval_indexes now has FORCE ROW
+     * LEVEL SECURITY active, and provisionFor() wraps its own write in
+     * runWithFirmContext() (restored to "no context" once the call
+     * returns). assertDatabaseCount()'s raw, unscoped query is
+     * therefore itself subject to the RLS policy and would see zero
+     * rows once no context is active — so visibility is verified per
+     * firm, under that firm's own context, instead of with a single
+     * ambient-context table-wide count.
+     */
     public function test_each_firm_gets_a_unique_dedicated_namespace(): void
     {
         $firmA = $this->makeAiEntitledFirm();
@@ -32,7 +44,15 @@ class AiRetrievalIsolationServiceTest extends TestCase
 
         $this->assertNotSame($indexA->namespace_identifier, $indexB->namespace_identifier);
         $this->assertSame(AiRetrievalIndexStatus::Provisioned, $indexA->status);
-        $this->assertDatabaseCount('ai_retrieval_indexes', 2);
+
+        $this->assertSame(1, $this->runWithFirmContext(
+            $firmA,
+            fn () => AiRetrievalIndex::withoutGlobalScopes()->where('firm_id', $firmA->id)->count(),
+        ));
+        $this->assertSame(1, $this->runWithFirmContext(
+            $firmB,
+            fn () => AiRetrievalIndex::withoutGlobalScopes()->where('firm_id', $firmB->id)->count(),
+        ));
     }
 
     public function test_provisioning_is_idempotent_per_firm(): void
@@ -44,7 +64,10 @@ class AiRetrievalIsolationServiceTest extends TestCase
         $second = $service->provisionFor($firm);
 
         $this->assertSame($first->id, $second->id);
-        $this->assertDatabaseCount('ai_retrieval_indexes', 1);
+        $this->assertSame(1, $this->runWithFirmContext(
+            $firm,
+            fn () => AiRetrievalIndex::withoutGlobalScopes()->where('firm_id', $firm->id)->count(),
+        ));
     }
 
     public function test_retrieval_context_blocks_cross_firm_matter_data(): void
@@ -98,5 +121,66 @@ class AiRetrievalIsolationServiceTest extends TestCase
         $this->expectExceptionMessage('every matter');
 
         app(AiRetrievalIsolationService::class)->buildContext($firm, $paralegalFirmUser->user, [$matterA, $matterB]);
+    }
+
+    /**
+     * Section 39A-5 (Wave 1): buildContext() now wraps its own body in
+     * runWithFirmContext(), and internally calls TWO further sources of
+     * nested runWithFirmContext() calls of its own — provisionFor()'s
+     * own wrap, and (once per requested matter, via
+     * MatterAccessPolicyService::canAccessAllMatters()) canAccessMatter()'s
+     * own wrap. With 2+ requested matters this exercises the deepest
+     * nesting this call graph produces: outer (buildContext) ->
+     * provisionFor -> [restore] -> canAccessMatter(matterA) ->
+     * [restore] -> canAccessMatter(matterB) -> [restore] -> [outer
+     * restore]. TenantContextService::runWithFirmContext() is
+     * documented-safe for this because each call restores whatever
+     * context was active immediately before it, rather than
+     * unconditionally clearing — proved here by asserting no tenant
+     * context remains active once buildContext() returns, even though
+     * this whole test itself runs inside RefreshDatabase's own
+     * transaction with no ambient firm context of its own.
+     */
+    public function test_build_context_with_multiple_matters_restores_context_correctly_through_nested_wraps(): void
+    {
+        $firm = $this->makeAiEntitledFirm();
+        $attorneyFirmUser = $this->makeAttorney($firm);
+        $matterA = Matter::factory()->forFirm($firm)->create();
+        $matterB = Matter::factory()->forFirm($firm)->create();
+
+        // makeAiEntitledFirm()/makeAttorney()/MatterFactory each
+        // deliberately leave the PostgreSQL session's database-only
+        // tenant context set to the fixture firm afterward (their own
+        // established convention). Clear it explicitly so the
+        // "no leftover context" assertion below proves buildContext()
+        // itself leaves no context behind, rather than merely restoring
+        // that pre-existing fixture leftover.
+        (new TenantContextService)->clearDatabaseTenantContext();
+
+        $context = app(AiRetrievalIsolationService::class)->buildContext(
+            $firm,
+            $attorneyFirmUser->user,
+            [$matterA, $matterB],
+        );
+
+        $this->assertTrue($context->permitsMatter($matterA->id));
+        $this->assertTrue($context->permitsMatter($matterB->id));
+        $this->assertSame($firm->id, $context->firmId);
+
+        // No leftover context after the whole nested call graph unwinds.
+        $this->assertNoDatabaseTenantContext();
+
+        // And the provisioned index row is still correctly readable
+        // under its own firm's context afterward — proving the nested
+        // wraps did not corrupt or leak into some other firm's context
+        // along the way.
+        $index = $this->runWithFirmContext(
+            $firm,
+            fn () => AiRetrievalIndex::withoutGlobalScopes()->where('firm_id', $firm->id)->first(),
+        );
+
+        $this->assertNotNull($index);
+        $this->assertSame($context->namespaceIdentifier, $index->namespace_identifier);
+        $this->assertNoDatabaseTenantContext();
     }
 }
