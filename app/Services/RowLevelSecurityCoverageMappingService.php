@@ -150,6 +150,22 @@ class RowLevelSecurityCoverageMappingService
         // 2026_08_27_950017_prepare_row_level_security_and_force_rls_on_ai_approval_events_table.php.
         // All five moved here from MISSING_PREPARED_TABLES below.
         'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events',
+        // Section 39A-5 Wave 4 (accounting/expense domain) — seven
+        // tables implemented and committed as ONE combined unit (not
+        // seven independent checkpoints), since Phase 1/2 read-only
+        // analysis confirmed they share a single writer group with no
+        // safe split point (AccountingExportLineBuilderService::
+        // buildForBatch() alone touches 3 of the 7 in one call path):
+        // 2026_08_27_950018_prepare_row_level_security_and_force_rls_on_chart_of_accounts_table.php,
+        // 2026_08_27_950019_prepare_row_level_security_and_force_rls_on_expense_categories_table.php,
+        // 2026_08_27_950020_prepare_row_level_security_and_force_rls_on_expenses_table.php,
+        // 2026_08_27_950021_prepare_row_level_security_and_force_rls_on_expense_receipts_table.php,
+        // 2026_08_27_950022_prepare_row_level_security_and_force_rls_on_expense_approvals_table.php,
+        // 2026_08_27_950023_prepare_row_level_security_and_force_rls_on_accounting_export_batches_table.php,
+        // 2026_08_27_950024_prepare_row_level_security_and_force_rls_on_accounting_export_lines_table.php.
+        // All seven moved here from MISSING_PREPARED_TABLES below.
+        'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts',
+        'expense_approvals', 'accounting_export_batches', 'accounting_export_lines',
     ];
 
     /**
@@ -197,16 +213,21 @@ class RowLevelSecurityCoverageMappingService
      * above) — the third coordinated multi-table wave, covering the
      * AI governance domain.
      *
+     * Section 39A-5 Wave 4 removed chart_of_accounts, expense_categories,
+     * expenses, expense_receipts, expense_approvals,
+     * accounting_export_batches, and accounting_export_lines from this
+     * array (moved to PREPARED_TABLES above) — the fourth coordinated
+     * multi-table wave, covering the accounting/expense domain,
+     * implemented as one combined unit rather than seven independent
+     * checkpoints.
+     *
      * @var array<int, string>
      */
     private const MISSING_PREPARED_TABLES = [
-        'accounting_export_batches', 'accounting_export_lines',
-        'chart_of_accounts',
         'deletion_requests', 'deployment_health_checks',
         'document_hashes', 'email_accounts', 'email_attachments',
         'email_messages', 'email_sync_events',
-        'expense_approvals', 'expense_categories',
-        'expense_receipts', 'expenses', 'export_jobs',
+        'export_jobs',
         'fleet_migration_instance_status', 'form_drafts',
         'form_review_events', 'generated_document_events', 'generated_documents',
         'implementation_projects', 'import_batches', 'key_destruction_requests',

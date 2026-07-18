@@ -503,6 +503,17 @@ class RlsForceRolloutFirewallTest extends TestCase
             // existing assertion removed or weakened.
             'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links',
             'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events',
+            // Narrowly updated AGAIN by Section 39A-5 Wave 4 — the
+            // fourth coordinated multi-table wave, covering the
+            // accounting/expense domain (chart_of_accounts,
+            // expense_categories, expenses, expense_receipts,
+            // expense_approvals, accounting_export_batches,
+            // accounting_export_lines) implemented as one combined unit
+            // — extends the "exactly these tables are forced" list from
+            // sixty-five to seventy-two — same additive-only pattern, no
+            // existing assertion removed or weakened.
+            'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts',
+            'expense_approvals', 'accounting_export_batches', 'accounting_export_lines',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -941,6 +952,21 @@ class RlsForceRolloutFirewallTest extends TestCase
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950015_prepare_row_level_security_and_force_rls_on_firm_ai_provider_keys_table.php'));
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950016_prepare_row_level_security_and_force_rls_on_ai_approval_requests_table.php'));
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950017_prepare_row_level_security_and_force_rls_on_ai_approval_events_table.php'));
+    }
+
+    public function test_the_wave_4_force_rls_migration_files_exist(): void
+    {
+        // Section 39A-5 Wave 4 — the fourth coordinated multi-table
+        // wave (accounting/expense domain), seven combined prepare+force
+        // migrations implemented and committed as one unit, then landed
+        // together via a wave-integration commit.
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950018_prepare_row_level_security_and_force_rls_on_chart_of_accounts_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950019_prepare_row_level_security_and_force_rls_on_expense_categories_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950020_prepare_row_level_security_and_force_rls_on_expenses_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950021_prepare_row_level_security_and_force_rls_on_expense_receipts_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950022_prepare_row_level_security_and_force_rls_on_expense_approvals_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950023_prepare_row_level_security_and_force_rls_on_accounting_export_batches_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950024_prepare_row_level_security_and_force_rls_on_accounting_export_lines_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void
