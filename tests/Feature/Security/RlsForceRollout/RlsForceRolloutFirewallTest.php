@@ -300,6 +300,27 @@ use Tests\TestCase;
  * batch, since no prior preparation migration existed for it; see this
  * batch's own CustomerSuccessHealthScoresForceRlsActivationTest for
  * the full proof.
+ *
+ * Narrowly updated AGAIN by Section 39A-5 Wave 5 (independent Phase 7
+ * test authoring for this batch, run before its own wave-integration
+ * commit) to add this batch's own four migration-existence checks
+ * (test_the_wave_5_force_rls_migration_files_exist), covering
+ * email_accounts, email_messages, email_attachments, and
+ * email_sync_events — same additive-only pattern every prior wave used
+ * here. Deliberately does NOT touch
+ * test_only_clients_and_firm_users_have_permanent_force_row_level_security_among_prepared_tables()'s
+ * own $expectedForced list or
+ * test_no_new_rls_policy_was_added_for_any_still_uncovered_tenant_table():
+ * both read RowLevelSecurityCoverageMappingService's PREPARED_TABLES/
+ * MISSING_PREPARED_TABLES arrays, which this batch's own checkpoint
+ * deliberately does NOT modify (see EmailAccountsForceRlsActivationTest's
+ * own docblock) — the coordinator updates that shared registry once, in
+ * a later, separate wave-integration commit, exactly like every prior
+ * wave. Until that lands, this batch's four tables are genuinely still
+ * listed in MISSING_PREPARED_TABLES while already having real RLS
+ * enabled — an expected, temporary, structural artifact of this
+ * specific test-authoring phase, not a defect this file's own
+ * assertions should be narrowed to hide.
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -967,6 +988,18 @@ class RlsForceRolloutFirewallTest extends TestCase
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950022_prepare_row_level_security_and_force_rls_on_expense_approvals_table.php'));
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950023_prepare_row_level_security_and_force_rls_on_accounting_export_batches_table.php'));
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950024_prepare_row_level_security_and_force_rls_on_accounting_export_lines_table.php'));
+    }
+
+    public function test_the_wave_5_force_rls_migration_files_exist(): void
+    {
+        // Section 39A-5 Wave 5 — the fifth coordinated multi-table wave
+        // (email domain), four combined prepare+force migrations
+        // implemented and committed as one unit, to be landed together
+        // via a later wave-integration commit.
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950025_prepare_row_level_security_and_force_rls_on_email_accounts_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950026_prepare_row_level_security_and_force_rls_on_email_messages_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950027_prepare_row_level_security_and_force_rls_on_email_attachments_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950028_prepare_row_level_security_and_force_rls_on_email_sync_events_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

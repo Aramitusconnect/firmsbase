@@ -24,6 +24,20 @@ use App\Models\EmailOAuthToken;
  * TenantEncryptionKey (via EmailBodyEncryptionService), rather than
  * persisting a plaintext token column (which does not exist on this
  * table at all).
+ *
+ * Tenant-context wiring (email_sync_events FORCE ROW LEVEL SECURITY
+ * activation, Section 39A-5 Wave 5): email_oauth_tokens itself has no
+ * firm_id column and is not in scope. store() never calls
+ * auditService->record(), so it needs no wrap. rotate()/revoke() both
+ * begin with `$account = $token->emailAccount;` — a lazy load of
+ * email_accounts, itself now FORCE'd — which is a caller-responsibility
+ * bootstrap dependency (mirroring the already-landed
+ * email_visibility_rules migration's own documented convention): the
+ * caller must already have tenant context active before calling
+ * rotate()/revoke(), not this service. Once $account is resolved, each
+ * method adds its own defensive, independent wrap around just the
+ * auditService->record(...) call, keyed on the now-resolved
+ * $account->firm_id.
  */
 class EmailOAuthTokenService
 {
@@ -59,12 +73,12 @@ class EmailOAuthTokenService
 
         $newToken = $this->store($account, $token->token_type, $newRawToken, $expiresAt);
 
-        $this->auditService->record(
+        (new TenantContextService())->runWithFirmContext($account->firm_id, fn () => $this->auditService->record(
             $account->firm,
             $account,
             EmailSyncEventType::TokenRotated,
             EmailSyncOutcome::Success,
-        );
+        ));
 
         return $newToken;
     }
@@ -75,12 +89,12 @@ class EmailOAuthTokenService
 
         $token->update(['status' => EmailOAuthTokenStatus::Revoked]);
 
-        $this->auditService->record(
+        (new TenantContextService())->runWithFirmContext($account->firm_id, fn () => $this->auditService->record(
             $account->firm,
             $account,
             EmailSyncEventType::TokenRevoked,
             EmailSyncOutcome::Success,
-        );
+        ));
 
         return $token->fresh();
     }

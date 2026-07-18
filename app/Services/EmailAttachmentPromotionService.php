@@ -39,6 +39,33 @@ use Illuminate\Support\Facades\DB;
  * DB::afterCommit() runs the closure immediately (no active
  * transaction to defer past), same documented behavior relied on in
  * DocumentSecurityService::upload().
+ *
+ * Tenant-context wiring (email_attachments/email_messages/
+ * email_sync_events FORCE ROW LEVEL SECURITY activation, Section
+ * 39A-5 Wave 5): every write (and the one lazy-load read of
+ * $attachment->emailMessage) gets its own independent, sibling-
+ * sequential runWithFirmContext() wrap — never a wrap spanning more
+ * than one statement, and never two wraps nested inside each other.
+ * This removes the nesting hazard categorically (no outer wrap exists
+ * for any inner wrap to nest inside) and avoids introducing a new
+ * atomicity guarantee this method never had. Every wrap that mutates
+ * the attachment's OWN row is keyed on $attachment->firm_id (its own
+ * already-loaded column, which is what RLS on email_attachments
+ * actually checks).
+ *
+ * REQUIRED, security-relevant correction — do NOT simplify: the
+ * promoted Document's firm_id, its wrap key, and the subsequent
+ * cross-firm guard are derived via the two-hop
+ * $message->emailAccount->firm_id path (see the class docblock above,
+ * lines 28-32) — NEVER via $attachment->firm_id, even though every
+ * other statement in this method uses $attachment->firm_id as its own
+ * wrap key. $attachment->firm_id and $message->emailAccount->firm_id
+ * are only empirically equal under today's disciplined writers — no
+ * composite FK/CHECK/trigger guarantees it at the database layer (see
+ * this batch's migrations' own documented deferred gap #1) — so
+ * substituting the shortcut here would silently trade away the one
+ * defense that stops a malformed/malicious provider fixture from
+ * producing a cross-firm Document.
  */
 class EmailAttachmentPromotionService
 {
@@ -50,7 +77,9 @@ class EmailAttachmentPromotionService
 
     public function scanAndPromote(EmailAttachment $attachment): EmailAttachmentPromotionResult
     {
-        $message = $attachment->emailMessage;
+        $service = new TenantContextService();
+
+        $message = $service->runWithFirmContext($attachment->firm_id, fn () => $attachment->emailMessage);
 
         if ($message->storage_mode !== EmailStorageMode::EncryptedBodyAndAttachments) {
             return $this->block(
@@ -61,7 +90,7 @@ class EmailAttachmentPromotionService
 
         $scanStatus = $this->safetyService->assertSafeAndScan($attachment);
 
-        $attachment->update(['scan_status' => $scanStatus]);
+        $service->runWithFirmContext($attachment->firm_id, fn () => $attachment->update(['scan_status' => $scanStatus]));
 
         if ($scanStatus !== DocumentScanStatus::Clean) {
             $mappedStatus = match ($scanStatus) {
@@ -70,15 +99,19 @@ class EmailAttachmentPromotionService
                 default => EmailAttachmentPromotionStatus::Blocked,
             };
 
-            $attachment->update(['promotion_status' => $mappedStatus]);
+            $service->runWithFirmContext($attachment->firm_id, fn () => $attachment->update(['promotion_status' => $mappedStatus]));
 
             return $this->block($attachment, "attachment did not pass a clean virus scan (status={$scanStatus->value})", false);
         }
 
-        // firm_id is derived exclusively from the message's own account — never from provider data.
-        $firmId = $message->emailAccount->firm_id;
+        // firm_id for the promoted Document is derived via the ORIGINAL, approved
+        // two-hop account-chain path (message->emailAccount->firm_id), NOT
+        // $attachment->firm_id — preserving the documented anti-cross-firm-leak
+        // invariant exactly as it exists today (this class's own docblock,
+        // lines 28-32).
+        $firmId = $service->runWithFirmContext($message->firm_id, fn () => $message->emailAccount->firm_id);
 
-        $document = (new TenantContextService())->runWithFirmContext($firmId, fn () => Document::create([
+        $document = $service->runWithFirmContext($firmId, fn () => Document::create([
             'firm_id' => $firmId,
             'matter_id' => null,
             'client_id' => null,
@@ -97,11 +130,11 @@ class EmailAttachmentPromotionService
             throw new \RuntimeException('Promoted document must not cross firms.');
         }
 
-        $attachment->update([
+        $service->runWithFirmContext($attachment->firm_id, fn () => $attachment->update([
             'document_id' => $document->id,
             'promotion_status' => EmailAttachmentPromotionStatus::Promoted,
             'scan_status' => DocumentScanStatus::Clean,
-        ]);
+        ]));
 
         $this->auditPromoted($attachment);
 
@@ -118,13 +151,15 @@ class EmailAttachmentPromotionService
 
     private function block(EmailAttachment $attachment, string $reason, bool $writeStatus = true): EmailAttachmentPromotionResult
     {
+        $service = new TenantContextService();
+
         if ($writeStatus) {
-            $attachment->update([
+            $service->runWithFirmContext($attachment->firm_id, fn () => $attachment->update([
                 'promotion_status' => EmailAttachmentPromotionStatus::Blocked,
                 'blocked_reason' => $reason,
-            ]);
+            ]));
         } else {
-            $attachment->update(['blocked_reason' => $reason]);
+            $service->runWithFirmContext($attachment->firm_id, fn () => $attachment->update(['blocked_reason' => $reason]));
         }
 
         $this->auditBlocked($attachment, $reason);
@@ -134,23 +169,23 @@ class EmailAttachmentPromotionService
 
     private function auditPromoted(EmailAttachment $attachment): void
     {
-        $this->auditService->record(
+        (new TenantContextService())->runWithFirmContext($attachment->firm_id, fn () => $this->auditService->record(
             $attachment->firm,
             $attachment->emailMessage->emailAccount,
             EmailSyncEventType::AttachmentPromoted,
             EmailSyncOutcome::Success,
             detail: "email_attachment_id={$attachment->id} document_id={$attachment->document_id}",
-        );
+        ));
     }
 
     private function auditBlocked(EmailAttachment $attachment, string $reason): void
     {
-        $this->auditService->record(
+        (new TenantContextService())->runWithFirmContext($attachment->firm_id, fn () => $this->auditService->record(
             $attachment->firm,
             $attachment->emailMessage->emailAccount,
             EmailSyncEventType::AttachmentBlocked,
             EmailSyncOutcome::Blocked,
             detail: "email_attachment_id={$attachment->id}: {$reason}",
-        );
+        ));
     }
 }

@@ -41,6 +41,27 @@ use App\ValueObjects\EmailSyncRunResult;
  *     invoked (by EmailAttachmentSafetyService, called separately —
  *     see EmailAttachmentPromotionService) and eligible for Document
  *     promotion.
+ *
+ * Tenant-context wiring (email_messages/email_attachments/
+ * email_sync_events FORCE ROW LEVEL SECURITY activation, Section
+ * 39A-5 Wave 5): $this->accessPolicy->canUseEmail() stays outside any
+ * wrap — it self-wraps its own EntitlementService::isEnabled() call,
+ * and nesting an outer wrap around it would reproduce the decoy-wrap
+ * bug (an inner wrap's finally clearing the outer caller's context
+ * prematurely). Every other DB read/write in sync()/captureMessage()
+ * gets its OWN independent runWithFirmContext() call, keyed on
+ * $firm->id throughout — deliberately NOT one wrap spanning
+ * captureMessage()'s whole body or sync()'s whole loop. captureMessage()
+ * is a variable-length unit (one message create + 0..N attachment
+ * creates, with the per-message audit event actually written by the
+ * CALLER's loop, not inside captureMessage() itself) with no explicit
+ * transaction today; bundling it into one wrap (which always opens its
+ * own DB::transaction()) would silently change today's partial-
+ * failure/partial-persistence behavior with no product-owner sign-off.
+ * Sequential, never-nested, independent wraps close every hard-fail
+ * write path and both silent-empty-result read paths
+ * (auditService->latestCursorFor()) in this call chain without
+ * introducing any new atomicity guarantee.
  */
 class EmailSyncService
 {
@@ -57,30 +78,33 @@ class EmailSyncService
         $firm = $account->firm;
 
         if (! $this->accessPolicy->canUseEmail($firm->id)) {
-            $this->auditService->record(
+            (new TenantContextService())->runWithFirmContext($firm->id, fn () => $this->auditService->record(
                 $firm,
                 $account,
                 EmailSyncEventType::SyncRun,
                 EmailSyncOutcome::Blocked,
                 detail: 'firm is not entitled to the email module',
-            );
+            ));
 
             return new EmailSyncRunResult($account->id, EmailSyncOutcome::Blocked, 0);
         }
 
         if ($account->storage_mode === EmailStorageMode::Disabled) {
-            $this->auditService->record(
+            (new TenantContextService())->runWithFirmContext($firm->id, fn () => $this->auditService->record(
                 $firm,
                 $account,
                 EmailSyncEventType::SyncRun,
                 EmailSyncOutcome::Blocked,
                 detail: 'storage_mode is disabled; sync/capture is blocked entirely (approved correction)',
-            );
+            ));
 
             return new EmailSyncRunResult($account->id, EmailSyncOutcome::Blocked, 0);
         }
 
-        $sinceCursor = $this->auditService->latestCursorFor($account);
+        $sinceCursor = (new TenantContextService())->runWithFirmContext(
+            $firm->id,
+            fn () => $this->auditService->latestCursorFor($account),
+        );
 
         $fetch = $this->providerClient->fetchNewMessages($account, $sinceCursor);
         $fixtureMessages = $fetch['messages'] ?? [];
@@ -97,27 +121,30 @@ class EmailSyncService
                 $anyEncryptionFailed = true;
             }
 
-            $this->auditService->record(
+            (new TenantContextService())->runWithFirmContext($firm->id, fn () => $this->auditService->record(
                 $firm,
                 $account,
                 EmailSyncEventType::MessageCaptured,
                 EmailSyncOutcome::Success,
                 detail: "captured provider_message_id={$fixture['provider_message_id']}",
-            );
+            ));
         }
 
-        $account->update(['last_synced_at' => now()]);
+        (new TenantContextService())->runWithFirmContext(
+            $firm->id,
+            fn () => $account->update(['last_synced_at' => now()]),
+        );
 
         $outcome = $anyEncryptionFailed ? EmailSyncOutcome::PartialFailure : EmailSyncOutcome::Success;
 
-        $this->auditService->record(
+        (new TenantContextService())->runWithFirmContext($firm->id, fn () => $this->auditService->record(
             $firm,
             $account,
             EmailSyncEventType::SyncRun,
             $outcome,
             resultingCursor: $resultingCursor,
             detail: "captured {$captured} message(s)",
-        );
+        ));
 
         return new EmailSyncRunResult($account->id, $outcome, $captured, $resultingCursor);
     }
@@ -143,36 +170,42 @@ class EmailSyncService
 
         $attachments = $fixture['attachments'] ?? [];
 
-        $message = EmailMessage::create([
-            'firm_id' => $firm->id,
-            'email_account_id' => $account->id,
-            'provider_thread_id' => $fixture['provider_thread_id'],
-            'provider_message_id' => $fixture['provider_message_id'],
-            'direction' => $fixture['direction'],
-            'from_address' => $fixture['from_address'],
-            'to_addresses' => $fixture['to_addresses'] ?? [],
-            'subject' => $fixture['subject'] ?? null,
-            'sent_at' => $fixture['sent_at'] ?? null,
-            'received_at' => $fixture['received_at'] ?? null,
-            'storage_mode' => $storageMode,
-            'body_status' => $bodyStatus,
-            'encrypted_body_ciphertext' => $ciphertext,
-            'encryption_key_id' => $encryptionKeyId,
-            'has_attachments' => count($attachments) > 0,
-        ]);
+        $message = (new TenantContextService())->runWithFirmContext(
+            $firm->id,
+            fn () => EmailMessage::create([
+                'firm_id' => $firm->id,
+                'email_account_id' => $account->id,
+                'provider_thread_id' => $fixture['provider_thread_id'],
+                'provider_message_id' => $fixture['provider_message_id'],
+                'direction' => $fixture['direction'],
+                'from_address' => $fixture['from_address'],
+                'to_addresses' => $fixture['to_addresses'] ?? [],
+                'subject' => $fixture['subject'] ?? null,
+                'sent_at' => $fixture['sent_at'] ?? null,
+                'received_at' => $fixture['received_at'] ?? null,
+                'storage_mode' => $storageMode,
+                'body_status' => $bodyStatus,
+                'encrypted_body_ciphertext' => $ciphertext,
+                'encryption_key_id' => $encryptionKeyId,
+                'has_attachments' => count($attachments) > 0,
+            ]),
+        );
 
         foreach ($attachments as $attachmentFixture) {
-            EmailAttachment::create([
-                'firm_id' => $firm->id,
-                'email_message_id' => $message->id,
-                'original_filename' => $attachmentFixture['original_filename'],
-                'mime_type' => $attachmentFixture['mime_type'],
-                'size_bytes' => $attachmentFixture['size_bytes'],
-                'provider_attachment_id' => $attachmentFixture['provider_attachment_id'],
-                'scan_status' => 'pending',
-                'simulated_storage_path' => "email-attachments/{$firm->uuid}/{$account->uuid}/{$attachmentFixture['provider_attachment_id']}",
-                'promotion_status' => 'pending',
-            ]);
+            (new TenantContextService())->runWithFirmContext(
+                $firm->id,
+                fn () => EmailAttachment::create([
+                    'firm_id' => $firm->id,
+                    'email_message_id' => $message->id,
+                    'original_filename' => $attachmentFixture['original_filename'],
+                    'mime_type' => $attachmentFixture['mime_type'],
+                    'size_bytes' => $attachmentFixture['size_bytes'],
+                    'provider_attachment_id' => $attachmentFixture['provider_attachment_id'],
+                    'scan_status' => 'pending',
+                    'simulated_storage_path' => "email-attachments/{$firm->uuid}/{$account->uuid}/{$attachmentFixture['provider_attachment_id']}",
+                    'promotion_status' => 'pending',
+                ]),
+            );
         }
 
         return $message;

@@ -14,6 +14,15 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * BelongsToTenant (Phase 8 ImportAuditEvent precedent — audit tables
  * are queried explicitly by services, not globally scoped). No uuid.
  * created_at only, no updated_at.
+ *
+ * Append-only (required companion fix landing alongside this table's
+ * FORCE ROW LEVEL SECURITY activation — see database/migrations/
+ * 2026_08_27_950028_prepare_row_level_security_and_force_rls_on_email_sync_events_table.php):
+ * booted() throws on any update/delete of an existing row, mirroring
+ * AiApprovalEvent's exact immutability pattern. RLS's WITH CHECK
+ * clause governs INSERT-time firm ownership only and is NOT the
+ * append-only mechanism — that guarantee comes exclusively from this
+ * guard. The only writer is EmailSyncAuditService::record().
  */
 class EmailSyncEvent extends Model
 {
@@ -38,6 +47,17 @@ class EmailSyncEvent extends Model
             'outcome' => EmailSyncOutcome::class,
             'created_at' => 'datetime',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::updating(function () {
+            throw new \LogicException('email_sync_events is append-only and cannot be updated.');
+        });
+
+        static::deleting(function () {
+            throw new \LogicException('email_sync_events is append-only and cannot be deleted.');
+        });
     }
 
     public function firm(): BelongsTo

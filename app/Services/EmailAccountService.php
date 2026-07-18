@@ -19,6 +19,22 @@ use App\Models\FirmUser;
  * I/O. Mailbox connection is firm-user-only (approved decision):
  * connected_by_firm_user_id is the only actor column; there is no
  * platform-admin path anywhere in this service.
+ *
+ * Tenant-context wiring (email_accounts/email_sync_events FORCE ROW
+ * LEVEL SECURITY activation, Section 39A-5 Wave 5): every
+ * accessPolicy->canManageMailbox()/actor-firm-match check below is a
+ * pure in-memory check and stays OUTSIDE any wrap, unchanged.
+ * connect()'s row create and its immediately-following audit-event
+ * write share ONE outer runWithFirmContext() call, keyed on $firm->id
+ * — the exact "one row create + one audit create, one wrap" shape
+ * EmailMessageLinkingService::link() already established.
+ * disconnect()/revoke() similarly share one wrap (update + fresh() +
+ * the audit call, which reads $account->firm from inside that same
+ * wrap), keyed on $account->firm_id. markError()/updateStorageMode()
+ * have no audit call, so each gets its own wrap around just its
+ * update()+fresh() pair. None of these wraps ever nests inside
+ * another — each method call site wraps its own whole body, per
+ * runWithFirmContext()'s own nesting-safety convention.
  */
 class EmailAccountService
 {
@@ -43,24 +59,26 @@ class EmailAccountService
             throw new \RuntimeException('Actor does not belong to the connecting firm.');
         }
 
-        $account = EmailAccount::create([
-            'firm_id' => $firm->id,
-            'provider' => $provider,
-            'mailbox_address' => $mailboxAddress,
-            'connection_status' => EmailAccountConnectionStatus::Connected,
-            'storage_mode' => $storageMode,
-            'connected_by_firm_user_id' => $actor->id,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($firm->id, function () use ($firm, $provider, $mailboxAddress, $storageMode, $actor) {
+            $account = EmailAccount::create([
+                'firm_id' => $firm->id,
+                'provider' => $provider,
+                'mailbox_address' => $mailboxAddress,
+                'connection_status' => EmailAccountConnectionStatus::Connected,
+                'storage_mode' => $storageMode,
+                'connected_by_firm_user_id' => $actor->id,
+            ]);
 
-        $this->auditService->record(
-            $firm,
-            $account,
-            EmailSyncEventType::AccountConnected,
-            EmailSyncOutcome::Success,
-            detail: "mailbox {$mailboxAddress} connected via {$provider->value} (foundation-only, no real OAuth handshake)",
-        );
+            $this->auditService->record(
+                $firm,
+                $account,
+                EmailSyncEventType::AccountConnected,
+                EmailSyncOutcome::Success,
+                detail: "mailbox {$mailboxAddress} connected via {$provider->value} (foundation-only, no real OAuth handshake)",
+            );
 
-        return $account;
+            return $account;
+        });
     }
 
     public function disconnect(EmailAccount $account, FirmUser $actor): EmailAccount
@@ -69,16 +87,18 @@ class EmailAccountService
             throw new \RuntimeException('Actor role is not permitted to disconnect a firm mailbox.');
         }
 
-        $account->update(['connection_status' => EmailAccountConnectionStatus::Disconnected]);
+        return (new TenantContextService())->runWithFirmContext($account->firm_id, function () use ($account) {
+            $account->update(['connection_status' => EmailAccountConnectionStatus::Disconnected]);
 
-        $this->auditService->record(
-            $account->firm,
-            $account,
-            EmailSyncEventType::AccountDisconnected,
-            EmailSyncOutcome::Success,
-        );
+            $this->auditService->record(
+                $account->firm,
+                $account,
+                EmailSyncEventType::AccountDisconnected,
+                EmailSyncOutcome::Success,
+            );
 
-        return $account->fresh();
+            return $account->fresh();
+        });
     }
 
     public function revoke(EmailAccount $account, FirmUser $actor, string $reason): EmailAccount
@@ -87,30 +107,34 @@ class EmailAccountService
             throw new \RuntimeException('Actor role is not permitted to revoke a firm mailbox.');
         }
 
-        $account->update([
-            'connection_status' => EmailAccountConnectionStatus::Revoked,
-            'error_reason' => $reason,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($account->firm_id, function () use ($account, $reason) {
+            $account->update([
+                'connection_status' => EmailAccountConnectionStatus::Revoked,
+                'error_reason' => $reason,
+            ]);
 
-        $this->auditService->record(
-            $account->firm,
-            $account,
-            EmailSyncEventType::AccountDisconnected,
-            EmailSyncOutcome::Success,
-            detail: "revoked: {$reason}",
-        );
+            $this->auditService->record(
+                $account->firm,
+                $account,
+                EmailSyncEventType::AccountDisconnected,
+                EmailSyncOutcome::Success,
+                detail: "revoked: {$reason}",
+            );
 
-        return $account->fresh();
+            return $account->fresh();
+        });
     }
 
     public function markError(EmailAccount $account, string $reason): EmailAccount
     {
-        $account->update([
-            'connection_status' => EmailAccountConnectionStatus::Error,
-            'error_reason' => $reason,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($account->firm_id, function () use ($account, $reason) {
+            $account->update([
+                'connection_status' => EmailAccountConnectionStatus::Error,
+                'error_reason' => $reason,
+            ]);
 
-        return $account->fresh();
+            return $account->fresh();
+        });
     }
 
     public function updateStorageMode(EmailAccount $account, FirmUser $actor, EmailStorageMode $storageMode): EmailAccount
@@ -119,8 +143,10 @@ class EmailAccountService
             throw new \RuntimeException('Actor role is not permitted to change mailbox storage mode.');
         }
 
-        $account->update(['storage_mode' => $storageMode]);
+        return (new TenantContextService())->runWithFirmContext($account->firm_id, function () use ($account, $storageMode) {
+            $account->update(['storage_mode' => $storageMode]);
 
-        return $account->fresh();
+            return $account->fresh();
+        });
     }
 }
