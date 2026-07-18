@@ -321,6 +321,33 @@ use Tests\TestCase;
  * enabled — an expected, temporary, structural artifact of this
  * specific test-authoring phase, not a defect this file's own
  * assertions should be narrowed to hide.
+ *
+ * Narrowly updated AGAIN by Section 39A-6 Wave 6 (independent Phase 7
+ * test authoring for this batch, run before its own wave-integration
+ * commit) to add this batch's own migration-existence check
+ * (test_the_wave_6_force_rls_migration_files_exist), covering
+ * generated_documents, form_drafts, generated_document_events,
+ * form_review_events, document_hashes, and pdf_view_events — same
+ * additive-only pattern every prior wave used here. UNLIKE the
+ * email-domain wave (Section 39A-5 Wave 5), this wave's six tables genuinely
+ * ARE still listed in RowLevelSecurityCoverageMappingService's own
+ * MISSING_PREPARED_TABLES array (confirmed by direct inspection — each
+ * of this wave's own migrations both PREPARES (ENABLE ROW LEVEL
+ * SECURITY + CREATE POLICY) and FORCES its table in one migration,
+ * exactly like the customer_success_health_scores precedent, rather
+ * than merely flipping FORCE on for an already-prepared table like the
+ * email domain's four tables did). This means
+ * test_no_new_rls_policy_was_added_for_any_still_uncovered_tenant_table()
+ * below would otherwise report a false positive for these six genuinely
+ * newly-RLS'd tables — narrowly updated to exempt exactly this batch's
+ * six tables, with an explanatory comment at the exemption site, rather
+ * than weakening the check for any other still-genuinely-uncovered
+ * table. The coordinator's later, separate wave-integration commit is
+ * still what actually moves these six tables out of
+ * MISSING_PREPARED_TABLES and into PREPARED_TABLES — this narrow
+ * per-batch exemption is temporary scaffolding for this test-authoring
+ * phase only, exactly like the customer_success_health_scores precedent
+ * needed before its own registry update eventually landed.
  */
 class RlsForceRolloutFirewallTest extends TestCase
 {
@@ -566,7 +593,26 @@ class RlsForceRolloutFirewallTest extends TestCase
     {
         $coverage = new RowLevelSecurityCoverageMappingService();
 
+        // Section 39A-6 Wave 6's own six tables genuinely ARE still
+        // listed in MISSING_PREPARED_TABLES (the coordinator's registry
+        // update is a later, separate wave-integration commit — see
+        // this file's own class docblock) but DO now legitimately have
+        // real RLS enabled via this wave's own combined
+        // prepare-and-force migrations (the same shape
+        // customer_success_health_scores used). Exempting exactly these
+        // six, by name, is not a general weakening of this check — every
+        // OTHER still-genuinely-uncovered tenant table must still report
+        // relrowsecurity = false below.
+        $wave6ExemptTables = [
+            'generated_documents', 'form_drafts', 'generated_document_events',
+            'form_review_events', 'document_hashes', 'pdf_view_events',
+        ];
+
         foreach ($coverage->missingPreparedTables() as $table) {
+            if (in_array($table, $wave6ExemptTables, true)) {
+                continue;
+            }
+
             $row = DB::selectOne('select relrowsecurity from pg_class where relname = ?', [$table]);
 
             if ($row === null) {
@@ -1008,6 +1054,20 @@ class RlsForceRolloutFirewallTest extends TestCase
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950026_prepare_row_level_security_and_force_rls_on_email_messages_table.php'));
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950027_prepare_row_level_security_and_force_rls_on_email_attachments_table.php'));
         $this->assertFileExists(base_path('database/migrations/2026_08_27_950028_prepare_row_level_security_and_force_rls_on_email_sync_events_table.php'));
+    }
+
+    public function test_the_wave_6_force_rls_migration_files_exist(): void
+    {
+        // Section 39A-6 Wave 6 — the sixth coordinated multi-table wave
+        // (documents/forms domain), six combined prepare+force
+        // migrations implemented and committed as one unit, to be landed
+        // together via a later wave-integration commit.
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950029_prepare_row_level_security_and_force_rls_on_generated_documents_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950030_prepare_row_level_security_and_force_rls_on_form_drafts_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950031_prepare_row_level_security_and_force_rls_on_generated_document_events_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950032_prepare_row_level_security_and_force_rls_on_form_review_events_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950033_prepare_row_level_security_and_force_rls_on_document_hashes_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_27_950034_prepare_row_level_security_and_force_rls_on_pdf_view_events_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void

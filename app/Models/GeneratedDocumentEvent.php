@@ -9,6 +9,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * GeneratedDocumentEvent — pure audit row, mirrors FormReviewEvent.
+ * Append-only (Section 39A-6 Wave 6 companion fix, required not
+ * optional — mirrors AiApprovalEvent's/EmailSyncEvent's exact
+ * booted() guard, since this table has neither BelongsToTenant nor a
+ * pre-existing append-only guard of its own): no updated_at, and the
+ * model's booted() hook throws on any update/delete of an existing
+ * row. The only writer is DocumentReviewService::recordEvent().
  */
 class GeneratedDocumentEvent extends Model
 {
@@ -31,6 +37,17 @@ class GeneratedDocumentEvent extends Model
             'event_type' => GeneratedDocumentEventType::class,
             'created_at' => 'datetime',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::updating(function () {
+            throw new \LogicException('generated_document_events is append-only and cannot be updated.');
+        });
+
+        static::deleting(function () {
+            throw new \LogicException('generated_document_events is append-only and cannot be deleted.');
+        });
     }
 
     public function firm(): BelongsTo

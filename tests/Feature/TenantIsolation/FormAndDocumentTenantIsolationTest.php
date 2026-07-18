@@ -59,6 +59,21 @@ class FormAndDocumentTenantIsolationTest extends TestCase
         $this->policy->assertGeneratedDocumentBelongsToFirm($document, $firmB);
     }
 
+    /**
+     * Narrowly updated for Section 39A-6 Wave 6: form_drafts now has
+     * permanent FORCE ROW LEVEL SECURITY. The previous version of this
+     * test called ONLY (new TenantContextResolver())->activateForFirm($firmA)
+     * — PHP-memory context only, never the PostgreSQL session's
+     * app.current_firm_id. Under FORCE RLS, the context-hold create()
+     * override each of these factories gained in this same batch leaves
+     * the DATABASE session pointed at whichever firm was created LAST
+     * (firm B here) — NOT firm A — so a bare FormDraft::query()->count()
+     * would combine PHP-memory scoping (firm A, via BelongsToTenant) with
+     * a DB-session RLS filter still set to firm B, yielding 0 rows
+     * instead of 1. Using runWithFirmContext() instead establishes BOTH
+     * layers of context together for firm A, matching every other
+     * FORCE-RLS-era test in this codebase.
+     */
     public function test_form_draft_model_query_is_narrowed_to_the_active_tenant(): void
     {
         $firmA = Firm::factory()->create();
@@ -66,13 +81,18 @@ class FormAndDocumentTenantIsolationTest extends TestCase
         FormDraft::factory()->create(['firm_id' => $firmA->id]);
         FormDraft::factory()->create(['firm_id' => $firmB->id]);
 
-        (new TenantContextResolver())->activateForFirm($firmA);
+        $count = $this->runWithFirmContext($firmA, fn () => FormDraft::query()->count());
 
-        $this->assertSame(1, FormDraft::query()->count());
-
-        TenantContextResolver::clear();
+        $this->assertSame(1, $count);
     }
 
+    /**
+     * Narrowly updated for Section 39A-6 Wave 6: generated_documents now
+     * has permanent FORCE ROW LEVEL SECURITY — see this file's own
+     * test_form_draft_model_query_is_narrowed_to_the_active_tenant()
+     * docblock immediately above for the full diagnosis; identical fix
+     * applied here.
+     */
     public function test_generated_document_query_is_narrowed_to_the_active_tenant(): void
     {
         $firmA = Firm::factory()->create();
@@ -80,11 +100,9 @@ class FormAndDocumentTenantIsolationTest extends TestCase
         GeneratedDocument::factory()->forFirm($firmA)->create();
         GeneratedDocument::factory()->forFirm($firmB)->create();
 
-        (new TenantContextResolver())->activateForFirm($firmA);
+        $count = $this->runWithFirmContext($firmA, fn () => GeneratedDocument::query()->count());
 
-        $this->assertSame(1, GeneratedDocument::query()->count());
-
-        TenantContextResolver::clear();
+        $this->assertSame(1, $count);
     }
 
     protected function tearDown(): void

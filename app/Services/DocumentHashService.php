@@ -21,6 +21,13 @@ use App\ValueObjects\DocumentHashRecordResult;
  * eventual real storage layer) supplies. What IS real here: the
  * immutability guarantee, the algorithm typing, and the association to
  * the correct source document.
+ *
+ * Section 39A-6 Wave 6: document_hashes is now FORCE RLS protected.
+ * recordForDocument()/recordForGeneratedDocument() each wrap only
+ * their own DocumentHash::create() call independently, keyed on the
+ * relevant parent's own firm_id — no paired write, no loop, mirroring
+ * PdfViewEventService's "independent, non-nested wraps per call"
+ * pattern.
  */
 class DocumentHashService
 {
@@ -30,7 +37,7 @@ class DocumentHashService
         ?FirmUser $recordedBy = null,
         HashAlgorithm $algorithm = HashAlgorithm::Sha256,
     ): DocumentHashRecordResult {
-        $hash = DocumentHash::create([
+        $hash = (new TenantContextService())->runWithFirmContext($document->firm_id, fn () => DocumentHash::create([
             'firm_id' => $document->firm_id,
             'source_document_type' => SignatureSourceDocumentType::Document,
             'document_id' => $document->id,
@@ -38,7 +45,7 @@ class DocumentHashService
             'hash_value' => $hashValue,
             'recorded_by_firm_user_id' => $recordedBy?->id,
             'recorded_at' => now(),
-        ]);
+        ]));
 
         return new DocumentHashRecordResult($hash->id, $algorithm, $hashValue, $hash->recorded_at);
     }
@@ -49,7 +56,7 @@ class DocumentHashService
         ?FirmUser $recordedBy = null,
         HashAlgorithm $algorithm = HashAlgorithm::Sha256,
     ): DocumentHashRecordResult {
-        $hash = DocumentHash::create([
+        $hash = (new TenantContextService())->runWithFirmContext($generatedDocument->firm_id, fn () => DocumentHash::create([
             'firm_id' => $generatedDocument->firm_id,
             'source_document_type' => SignatureSourceDocumentType::GeneratedDocument,
             'generated_document_id' => $generatedDocument->id,
@@ -57,7 +64,7 @@ class DocumentHashService
             'hash_value' => $hashValue,
             'recorded_by_firm_user_id' => $recordedBy?->id,
             'recorded_at' => now(),
-        ]);
+        ]));
 
         return new DocumentHashRecordResult($hash->id, $algorithm, $hashValue, $hash->recorded_at);
     }

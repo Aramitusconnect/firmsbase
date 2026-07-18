@@ -10,6 +10,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * FormReviewEvent — pure audit row. Has firm_id for direct queries but
  * does NOT use BelongsToTenant (Phase 8/9 audit-row precedent).
+ * Append-only (Section 39A-6 Wave 6 companion fix, required not
+ * optional — mirrors AiApprovalEvent's/EmailSyncEvent's exact
+ * booted() guard, since this table has neither BelongsToTenant nor a
+ * pre-existing append-only guard of its own): no updated_at, and the
+ * model's booted() hook throws on any update/delete of an existing
+ * row. The only writer is FormReviewService::recordEvent().
  */
 class FormReviewEvent extends Model
 {
@@ -32,6 +38,17 @@ class FormReviewEvent extends Model
             'event_type' => FormReviewEventType::class,
             'created_at' => 'datetime',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::updating(function () {
+            throw new \LogicException('form_review_events is append-only and cannot be updated.');
+        });
+
+        static::deleting(function () {
+            throw new \LogicException('form_review_events is append-only and cannot be deleted.');
+        });
     }
 
     public function firm(): BelongsTo

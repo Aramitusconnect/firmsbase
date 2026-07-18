@@ -23,6 +23,16 @@ use App\ValueObjects\PdfAccessDecision;
  * the request first, and the caller must separately call
  * recordDownloadDecision() with the PdfAccessDecision returned by
  * PdfDownloadPolicyService.
+ *
+ * Section 39A-6 Wave 6: pdf_view_events is now FORCE RLS protected. The
+ * shared private write() (the sole PdfViewEvent::create() call site for
+ * recordOpened()/recordDownloadRequested()/recordDownloadDecision()) and
+ * recordAnnotation()'s own separate PdfViewEvent::create() call each wrap
+ * only their own single insert, keyed on $firm->id — independent,
+ * non-nested wraps, no paired write. PdfAnnotationService::annotate()'s
+ * entitlement check (SignatureAndPdfAccessPolicyService::annotationsEnabledForFirm(),
+ * which self-wraps via EntitlementService::isEnabled() internally) lives
+ * entirely outside this class and is never wrapped here.
  */
 class PdfViewEventService
 {
@@ -108,7 +118,7 @@ class PdfViewEventService
         string $ipAddress,
         string $userAgent,
     ): PdfViewEvent {
-        return PdfViewEvent::create([
+        return (new TenantContextService())->runWithFirmContext($firm->id, fn () => PdfViewEvent::create([
             'firm_id' => $firm->id,
             'viewer_type' => $viewerType,
             'viewer_firm_user_id' => $viewerFirmUser?->id,
@@ -123,7 +133,7 @@ class PdfViewEventService
             'ip_address' => $ipAddress,
             'user_agent' => $userAgent,
             'occurred_at' => now(),
-        ]);
+        ]));
     }
 
     private function write(
@@ -138,7 +148,7 @@ class PdfViewEventService
         string $ipAddress,
         string $userAgent,
     ): PdfViewEvent {
-        return PdfViewEvent::create([
+        return (new TenantContextService())->runWithFirmContext($firm->id, fn () => PdfViewEvent::create([
             'firm_id' => $firm->id,
             'viewer_type' => $viewerType,
             'viewer_firm_user_id' => $viewerFirmUser?->id,
@@ -150,6 +160,6 @@ class PdfViewEventService
             'ip_address' => $ipAddress,
             'user_agent' => $userAgent,
             'occurred_at' => now(),
-        ]);
+        ]));
     }
 }

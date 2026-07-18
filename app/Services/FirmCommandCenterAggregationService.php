@@ -44,6 +44,12 @@ use Carbon\CarbonInterface;
  * (each of which already wraps its own read independently — these are
  * sequential, independent context activations via named constructor
  * arguments, never nested).
+ *
+ * Section 39A-6 Wave 6 — form_drafts is now FORCE-RLS protected.
+ * formsReadyForReviewCount previously read FormDraft with NO
+ * runWithFirmContext() wrap at all — the one confirmed live bug found
+ * in this domain's inventory pass. Now wrapped identically to every
+ * other metric in this method.
  */
 class FirmCommandCenterAggregationService
 {
@@ -106,10 +112,10 @@ class FirmCommandCenterAggregationService
                 ->where('firm_id', $firm->id)
                 ->where('status', TaskStatus::Blocked)
                 ->count()),
-            formsReadyForReviewCount: FormDraft::query()
+            formsReadyForReviewCount: (new TenantContextService())->runWithFirmContext($firm, fn () => FormDraft::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', FormDraftStatus::ReadyForReview)
-                ->count(),
+                ->count()),
             documentChaseEscalationsCount: (new TenantContextService())->runWithFirmContext($firm, fn () => DocumentChaseEvent::query()
                 ->where('firm_id', $firm->id)
                 ->where('event_type', 'escalated')

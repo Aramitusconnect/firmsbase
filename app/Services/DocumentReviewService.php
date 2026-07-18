@@ -21,6 +21,21 @@ use App\Models\GeneratedDocumentEvent;
  * or archived, but cannot become Approved until the template version
  * is ReviewedApproved. On success, used_sample_content is refreshed
  * to false.
+ *
+ * Section 39A-6 Wave 6: generated_documents/generated_document_events
+ * are now FORCE RLS protected. Every transition method (including
+ * markNeedsData()) wraps its own parent-row update() + paired
+ * recordEvent() call + trailing ->fresh() as ONE shared
+ * runWithFirmContext() unit — the same shape as FormReviewService.
+ * Unlike FormReviewService::approve(), NO method in this class
+ * registers a DB::afterCommit() callback, so 7 of these 8 methods get
+ * the full "wrap the write portion of the method" shape with no
+ * carve-out. Pure in-memory checks (assertTransitionAllowed(),
+ * canApprove()) and the lazy documentTemplateVersion relation read
+ * stay OUTSIDE the wrap. resubmitAfterRevision() is the one exception,
+ * mirroring FormReviewService's own carve-out: it does NOT wrap its
+ * call into moveToReadyForReview() (which already self-wraps) — it
+ * wraps only its own recordEvent() call, separately and non-nested.
  */
 class DocumentReviewService
 {
@@ -33,29 +48,36 @@ class DocumentReviewService
     public function markNeedsData(GeneratedDocument $document): GeneratedDocument
     {
         $this->transitions->assertTransitionAllowed($document->status->value, GeneratedDocumentStatus::NeedsData->value);
-        $document->update(['status' => GeneratedDocumentStatus::NeedsData]);
 
-        return $document->fresh();
+        return (new TenantContextService())->runWithFirmContext($document->firm_id, function () use ($document) {
+            $document->update(['status' => GeneratedDocumentStatus::NeedsData]);
+
+            return $document->fresh();
+        });
     }
 
     public function moveToReadyForReview(GeneratedDocument $document): GeneratedDocument
     {
         $this->transitions->assertTransitionAllowed($document->status->value, GeneratedDocumentStatus::ReadyForReview->value);
-        $document->update(['status' => GeneratedDocumentStatus::ReadyForReview]);
 
-        $this->recordEvent($document, GeneratedDocumentEventType::MarkedReadyForReview, $document->generatedByFirmUser);
+        return (new TenantContextService())->runWithFirmContext($document->firm_id, function () use ($document) {
+            $document->update(['status' => GeneratedDocumentStatus::ReadyForReview]);
+            $this->recordEvent($document, GeneratedDocumentEventType::MarkedReadyForReview, $document->generatedByFirmUser);
 
-        return $document->fresh();
+            return $document->fresh();
+        });
     }
 
     public function submitForAttorneyReview(GeneratedDocument $document, FirmUser $actor): GeneratedDocument
     {
         $this->transitions->assertTransitionAllowed($document->status->value, GeneratedDocumentStatus::AttorneyReview->value);
-        $document->update(['status' => GeneratedDocumentStatus::AttorneyReview]);
 
-        $this->recordEvent($document, GeneratedDocumentEventType::SubmittedForAttorneyReview, $actor);
+        return (new TenantContextService())->runWithFirmContext($document->firm_id, function () use ($document, $actor) {
+            $document->update(['status' => GeneratedDocumentStatus::AttorneyReview]);
+            $this->recordEvent($document, GeneratedDocumentEventType::SubmittedForAttorneyReview, $actor);
 
-        return $document->fresh();
+            return $document->fresh();
+        });
     }
 
     /**
@@ -72,7 +94,9 @@ class DocumentReviewService
         $currentContentStatus = $document->documentTemplateVersion->content_status;
 
         if ($currentContentStatus === DocumentTemplateContentStatus::SampleOnly) {
-            $document->update(['used_sample_content' => true]);
+            (new TenantContextService())->runWithFirmContext($document->firm_id, function () use ($document) {
+                $document->update(['used_sample_content' => true]);
+            });
 
             throw new \RuntimeException(
                 'Cannot approve: the document_template_version used to generate this document is still SampleOnly. '.
@@ -80,17 +104,19 @@ class DocumentReviewService
             );
         }
 
-        $document->update([
-            'status' => GeneratedDocumentStatus::Approved,
-            'used_sample_content' => false,
-            'reviewed_by_firm_user_id' => $actor->id,
-            'reviewed_at' => now(),
-            'approved_at' => now(),
-        ]);
+        return (new TenantContextService())->runWithFirmContext($document->firm_id, function () use ($document, $actor) {
+            $document->update([
+                'status' => GeneratedDocumentStatus::Approved,
+                'used_sample_content' => false,
+                'reviewed_by_firm_user_id' => $actor->id,
+                'reviewed_at' => now(),
+                'approved_at' => now(),
+            ]);
 
-        $this->recordEvent($document, GeneratedDocumentEventType::Approved, $actor);
+            $this->recordEvent($document, GeneratedDocumentEventType::Approved, $actor);
 
-        return $document->fresh();
+            return $document->fresh();
+        });
     }
 
     public function reject(GeneratedDocument $document, FirmUser $actor, string $reason): GeneratedDocument
@@ -100,28 +126,42 @@ class DocumentReviewService
         }
 
         $this->transitions->assertTransitionAllowed($document->status->value, GeneratedDocumentStatus::Rejected->value);
-        $document->update(['status' => GeneratedDocumentStatus::Rejected, 'reviewed_by_firm_user_id' => $actor->id, 'reviewed_at' => now()]);
 
-        $this->recordEvent($document, GeneratedDocumentEventType::Rejected, $actor, $reason);
+        return (new TenantContextService())->runWithFirmContext($document->firm_id, function () use ($document, $actor, $reason) {
+            $document->update(['status' => GeneratedDocumentStatus::Rejected, 'reviewed_by_firm_user_id' => $actor->id, 'reviewed_at' => now()]);
+            $this->recordEvent($document, GeneratedDocumentEventType::Rejected, $actor, $reason);
 
-        return $document->fresh();
+            return $document->fresh();
+        });
     }
 
     public function requestRevision(GeneratedDocument $document, FirmUser $actor, string $notes): GeneratedDocument
     {
         $this->transitions->assertTransitionAllowed($document->status->value, GeneratedDocumentStatus::Revised->value);
-        $document->update(['status' => GeneratedDocumentStatus::Revised]);
 
-        $this->recordEvent($document, GeneratedDocumentEventType::RequestedRevision, $actor, $notes);
+        return (new TenantContextService())->runWithFirmContext($document->firm_id, function () use ($document, $actor, $notes) {
+            $document->update(['status' => GeneratedDocumentStatus::Revised]);
+            $this->recordEvent($document, GeneratedDocumentEventType::RequestedRevision, $actor, $notes);
 
-        return $document->fresh();
+            return $document->fresh();
+        });
     }
 
     public function resubmitAfterRevision(GeneratedDocument $document, FirmUser $actor): GeneratedDocument
     {
+        // moveToReadyForReview() already wraps its own write in
+        // runWithFirmContext(). Calling it from inside a SECOND, outer
+        // wrap here would nest the wraps for no benefit and risk the
+        // same class of premature-commit/rollback interaction FormReviewService
+        // has to guard against on its own needs_data throw path — so this
+        // call is deliberately left UNWRAPPED at this call site, and only
+        // the event this method itself records gets its own, separate,
+        // non-nested wrap.
         $result = $this->moveToReadyForReview($document);
 
-        $this->recordEvent($result, GeneratedDocumentEventType::ResubmittedAfterRevision, $actor);
+        (new TenantContextService())->runWithFirmContext($document->firm_id, function () use ($result, $actor) {
+            $this->recordEvent($result, GeneratedDocumentEventType::ResubmittedAfterRevision, $actor);
+        });
 
         return $result;
     }
@@ -129,11 +169,13 @@ class DocumentReviewService
     public function archive(GeneratedDocument $document, FirmUser $actor): GeneratedDocument
     {
         $this->transitions->assertTransitionAllowed($document->status->value, GeneratedDocumentStatus::Archived->value);
-        $document->update(['status' => GeneratedDocumentStatus::Archived]);
 
-        $this->recordEvent($document, GeneratedDocumentEventType::Archived, $actor);
+        return (new TenantContextService())->runWithFirmContext($document->firm_id, function () use ($document, $actor) {
+            $document->update(['status' => GeneratedDocumentStatus::Archived]);
+            $this->recordEvent($document, GeneratedDocumentEventType::Archived, $actor);
 
-        return $document->fresh();
+            return $document->fresh();
+        });
     }
 
     private function recordEvent(GeneratedDocument $document, GeneratedDocumentEventType $type, FirmUser $actor, ?string $notes = null): void

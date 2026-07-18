@@ -22,6 +22,11 @@ use App\ValueObjects\DocumentGenerationResult;
  * used_sample_content is set here from the template version's CURRENT
  * content_status at generation time; DocumentReviewService::approve()
  * re-checks it live rather than trusting this snapshot.
+ *
+ * Section 39A-6 Wave 6: generated_documents is now FORCE RLS
+ * protected. Only the GeneratedDocument::create() call below is
+ * wrapped in runWithFirmContext($firmId, ...) — this is a
+ * single-table write with no paired table write in the same call.
  */
 class DocumentGenerationService
 {
@@ -53,7 +58,7 @@ class DocumentGenerationService
             (string) \Illuminate\Support\Str::uuid()
         );
 
-        $document = GeneratedDocument::create([
+        $document = (new TenantContextService())->runWithFirmContext($firmId, fn () => GeneratedDocument::create([
             'firm_id' => $firmId,
             'matter_id' => $matter?->id,
             'client_id' => $client?->id,
@@ -62,7 +67,7 @@ class DocumentGenerationService
             'simulated_storage_path' => $simulatedStoragePath,
             'used_sample_content' => $usedSampleContent,
             'generated_by_firm_user_id' => $actor->id,
-        ]);
+        ]));
 
         return new DocumentGenerationResult(
             generatedDocumentId: $document->id,

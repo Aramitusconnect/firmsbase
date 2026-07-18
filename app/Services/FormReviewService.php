@@ -38,6 +38,30 @@ use Illuminate\Support\Facades\DB;
  * happen before this line is ever reached. Not wrapped in an explicit
  * DB::transaction(); DB::afterCommit() runs the closure immediately
  * since there is no active transaction to defer past.
+ *
+ * Section 39A-6 Wave 6: form_drafts/form_review_events are now FORCE
+ * RLS protected. Every transition method wraps its own parent-row
+ * update() + paired recordEvent() call + trailing ->fresh() as ONE
+ * shared runWithFirmContext() unit (mirroring
+ * EmailMessageLinkingService::link()'s "one wrap for a fixed
+ * 2-statement unit" shape — these methods always write exactly one
+ * parent row plus one paired audit event, never a variable-length
+ * loop). Pure in-memory checks (assertTransitionAllowed(), canApprove(),
+ * checklistService->isComplete()) stay OUTSIDE the wrap. approve() is
+ * the one exception: its wrap ends immediately after $draft->fresh()
+ * inside the closure — the DB::afterCommit() registration and final
+ * return stay textually outside/after the wrap, because wrapping them
+ * too would defer the webhook-recording callback to fire synchronously
+ * inside runWithFirmContext()'s own DB::transaction() commit, i.e.
+ * before this call's own finally block restores prior context (a
+ * genuine DB-session/PHP-memory layer mismatch once webhook tables are
+ * themselves ever FORCE RLS'd in a future wave). resubmitAfterRevision()
+ * is a second exception: it does NOT wrap its call into
+ * moveToReadyForReview() (which already self-wraps), since nesting would
+ * risk that method's needs_data throw-after-commit path being rolled
+ * back by an outer wrap's transaction boundary once the exception
+ * propagates — it wraps only its own recordEvent() call, separately and
+ * non-nested.
  */
 class FormReviewService
 {
@@ -55,7 +79,10 @@ class FormReviewService
 
         if (! $missingResult->isComplete()) {
             $this->transitions->assertTransitionAllowed($draft->status->value, 'needs_data');
-            $draft->update(['status' => FormDraftStatus::NeedsData]);
+
+            (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft) {
+                $draft->update(['status' => FormDraftStatus::NeedsData]);
+            });
 
             throw new \RuntimeException(
                 'Cannot move to ready_for_review: required data is still missing for field(s): '.implode(', ', $missingResult->missingFieldCodes)
@@ -63,21 +90,25 @@ class FormReviewService
         }
 
         $this->transitions->assertTransitionAllowed($draft->status->value, FormDraftStatus::ReadyForReview->value);
-        $draft->update(['status' => FormDraftStatus::ReadyForReview]);
 
-        $this->recordEvent($draft, FormReviewEventType::MarkedReadyForReview, $draft->generatedByFirmUser);
+        return (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft) {
+            $draft->update(['status' => FormDraftStatus::ReadyForReview]);
+            $this->recordEvent($draft, FormReviewEventType::MarkedReadyForReview, $draft->generatedByFirmUser);
 
-        return $draft->fresh();
+            return $draft->fresh();
+        });
     }
 
     public function submitForAttorneyReview(FormDraft $draft, FirmUser $actor): FormDraft
     {
         $this->transitions->assertTransitionAllowed($draft->status->value, FormDraftStatus::AttorneyReview->value);
-        $draft->update(['status' => FormDraftStatus::AttorneyReview]);
 
-        $this->recordEvent($draft, FormReviewEventType::SubmittedForAttorneyReview, $actor);
+        return (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft, $actor) {
+            $draft->update(['status' => FormDraftStatus::AttorneyReview]);
+            $this->recordEvent($draft, FormReviewEventType::SubmittedForAttorneyReview, $actor);
 
-        return $draft->fresh();
+            return $draft->fresh();
+        });
     }
 
     /**
@@ -102,7 +133,9 @@ class FormReviewService
             ->contains(fn ($value) => $value->formMappingRule?->content_status === FormMappingContentStatus::SampleOnly);
 
         if ($usedSampleMapping) {
-            $draft->update(['used_sample_mapping' => true]);
+            (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft) {
+                $draft->update(['used_sample_mapping' => true]);
+            });
 
             throw new \RuntimeException(
                 'Cannot approve: this draft used at least one mapping rule that is still SampleOnly. '.
@@ -110,17 +143,19 @@ class FormReviewService
             );
         }
 
-        $draft->update([
-            'status' => FormDraftStatus::Approved,
-            'used_sample_mapping' => false,
-            'reviewed_by_firm_user_id' => $actor->id,
-            'reviewed_at' => now(),
-            'approved_at' => now(),
-        ]);
+        $draft = (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft, $actor) {
+            $draft->update([
+                'status' => FormDraftStatus::Approved,
+                'used_sample_mapping' => false,
+                'reviewed_by_firm_user_id' => $actor->id,
+                'reviewed_at' => now(),
+                'approved_at' => now(),
+            ]);
 
-        $this->recordEvent($draft, FormReviewEventType::Approved, $actor);
+            $this->recordEvent($draft, FormReviewEventType::Approved, $actor);
 
-        $draft = $draft->fresh();
+            return $draft->fresh();
+        });
 
         DB::afterCommit(function () use ($draft) {
             try {
@@ -140,28 +175,46 @@ class FormReviewService
         }
 
         $this->transitions->assertTransitionAllowed($draft->status->value, FormDraftStatus::Rejected->value);
-        $draft->update(['status' => FormDraftStatus::Rejected, 'reviewed_by_firm_user_id' => $actor->id, 'reviewed_at' => now()]);
 
-        $this->recordEvent($draft, FormReviewEventType::Rejected, $actor, $reason);
+        return (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft, $actor, $reason) {
+            $draft->update(['status' => FormDraftStatus::Rejected, 'reviewed_by_firm_user_id' => $actor->id, 'reviewed_at' => now()]);
+            $this->recordEvent($draft, FormReviewEventType::Rejected, $actor, $reason);
 
-        return $draft->fresh();
+            return $draft->fresh();
+        });
     }
 
     public function requestRevision(FormDraft $draft, FirmUser $actor, string $notes): FormDraft
     {
         $this->transitions->assertTransitionAllowed($draft->status->value, FormDraftStatus::Revised->value);
-        $draft->update(['status' => FormDraftStatus::Revised]);
 
-        $this->recordEvent($draft, FormReviewEventType::RequestedRevision, $actor, $notes);
+        return (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft, $actor, $notes) {
+            $draft->update(['status' => FormDraftStatus::Revised]);
+            $this->recordEvent($draft, FormReviewEventType::RequestedRevision, $actor, $notes);
 
-        return $draft->fresh();
+            return $draft->fresh();
+        });
     }
 
     public function resubmitAfterRevision(FormDraft $draft, FirmUser $actor): FormDraft
     {
+        // moveToReadyForReview() already wraps its own write(s) in
+        // runWithFirmContext() — including a throw-after-commit path on
+        // the needs_data branch, where the update must survive even
+        // though the method then throws. Calling it from inside a
+        // SECOND, outer wrap here would nest the transactions: the
+        // needs_data update would commit only to an inner savepoint,
+        // then get rolled back when the propagating exception reaches
+        // the outer wrap's own DB::transaction() boundary. So this call
+        // is deliberately left UNWRAPPED at this call site — it runs at
+        // the top level exactly as if called directly — and only the
+        // event this method itself records gets its own, separate,
+        // non-nested wrap.
         $result = $this->moveToReadyForReview($draft);
 
-        $this->recordEvent($result, FormReviewEventType::ResubmittedAfterRevision, $actor);
+        (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($result, $actor) {
+            $this->recordEvent($result, FormReviewEventType::ResubmittedAfterRevision, $actor);
+        });
 
         return $result;
     }
@@ -169,11 +222,13 @@ class FormReviewService
     public function archive(FormDraft $draft, FirmUser $actor): FormDraft
     {
         $this->transitions->assertTransitionAllowed($draft->status->value, FormDraftStatus::Archived->value);
-        $draft->update(['status' => FormDraftStatus::Archived]);
 
-        $this->recordEvent($draft, FormReviewEventType::Archived, $actor);
+        return (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft, $actor) {
+            $draft->update(['status' => FormDraftStatus::Archived]);
+            $this->recordEvent($draft, FormReviewEventType::Archived, $actor);
 
-        return $draft->fresh();
+            return $draft->fresh();
+        });
     }
 
     private function recordEvent(FormDraft $draft, FormReviewEventType $type, FirmUser $actor, ?string $notes = null): void
