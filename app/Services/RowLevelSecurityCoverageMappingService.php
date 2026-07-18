@@ -166,6 +166,18 @@ class RowLevelSecurityCoverageMappingService
         // All seven moved here from MISSING_PREPARED_TABLES below.
         'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts',
         'expense_approvals', 'accounting_export_batches', 'accounting_export_lines',
+        // Section 39A-5 Wave 5 (email domain) — four tables implemented
+        // and committed as ONE combined unit (not four independent
+        // checkpoints), since Phase 1/2 read-only analysis confirmed
+        // they share a single writer group with no safe split point
+        // (EmailSyncService::sync()/captureMessage() alone touches 3-4
+        // of the 4 in one un-transacted call path):
+        // 2026_08_27_950025_prepare_row_level_security_and_force_rls_on_email_accounts_table.php,
+        // 2026_08_27_950026_prepare_row_level_security_and_force_rls_on_email_messages_table.php,
+        // 2026_08_27_950027_prepare_row_level_security_and_force_rls_on_email_attachments_table.php,
+        // 2026_08_27_950028_prepare_row_level_security_and_force_rls_on_email_sync_events_table.php.
+        // All four moved here from MISSING_PREPARED_TABLES below.
+        'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events',
     ];
 
     /**
@@ -221,12 +233,17 @@ class RowLevelSecurityCoverageMappingService
      * implemented as one combined unit rather than seven independent
      * checkpoints.
      *
+     * Section 39A-5 Wave 5 removed email_accounts, email_messages,
+     * email_attachments, and email_sync_events from this array (moved
+     * to PREPARED_TABLES above) — the fifth coordinated multi-table
+     * wave, covering the email domain, implemented as one combined unit
+     * rather than four independent checkpoints.
+     *
      * @var array<int, string>
      */
     private const MISSING_PREPARED_TABLES = [
         'deletion_requests', 'deployment_health_checks',
-        'document_hashes', 'email_accounts', 'email_attachments',
-        'email_messages', 'email_sync_events',
+        'document_hashes',
         'export_jobs',
         'fleet_migration_instance_status', 'form_drafts',
         'form_review_events', 'generated_document_events', 'generated_documents',

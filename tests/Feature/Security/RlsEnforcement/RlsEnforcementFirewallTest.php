@@ -236,7 +236,11 @@ class RlsEnforcementFirewallTest extends TestCase
                 && $path !== 'database/migrations/2026_08_27_950021_prepare_row_level_security_and_force_rls_on_expense_receipts_table.php'
                 && $path !== 'database/migrations/2026_08_27_950022_prepare_row_level_security_and_force_rls_on_expense_approvals_table.php'
                 && $path !== 'database/migrations/2026_08_27_950023_prepare_row_level_security_and_force_rls_on_accounting_export_batches_table.php'
-                && $path !== 'database/migrations/2026_08_27_950024_prepare_row_level_security_and_force_rls_on_accounting_export_lines_table.php',
+                && $path !== 'database/migrations/2026_08_27_950024_prepare_row_level_security_and_force_rls_on_accounting_export_lines_table.php'
+                && $path !== 'database/migrations/2026_08_27_950025_prepare_row_level_security_and_force_rls_on_email_accounts_table.php'
+                && $path !== 'database/migrations/2026_08_27_950026_prepare_row_level_security_and_force_rls_on_email_messages_table.php'
+                && $path !== 'database/migrations/2026_08_27_950027_prepare_row_level_security_and_force_rls_on_email_attachments_table.php'
+                && $path !== 'database/migrations/2026_08_27_950028_prepare_row_level_security_and_force_rls_on_email_sync_events_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A must add no migrations in this pass, but found: '.implode(', ', $changed));

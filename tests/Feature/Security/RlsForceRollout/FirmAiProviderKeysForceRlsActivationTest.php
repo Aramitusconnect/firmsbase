@@ -142,7 +142,7 @@ class FirmAiProviderKeysForceRlsActivationTest extends TestCase
         $forced = $coverage->forcedTables();
 
         $this->assertContains('firm_ai_provider_keys', $forced, 'firm_ai_provider_keys must be discoverable as FORCE-active by forcedTables().');
-        $this->assertCount(72, $forced, 'Exactly 72 tables must have a FORCE-activation migration after Section 39A-5 Wave 4 — no more, no less.');
+        $this->assertCount(76, $forced, 'Exactly 76 tables must have a FORCE-activation migration after Section 39A-5 Wave 5 — no more, no less.');
     }
 
     public function test_the_policy_has_both_an_explicit_using_and_with_check_clause(): void

@@ -61,6 +61,7 @@ class RlsForceActivationFirewallTest extends TestCase
             'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events',
             'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts',
             'expense_approvals', 'accounting_export_batches', 'accounting_export_lines',
+            'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events',
             'firm_users', 'documents', 'deadlines', 'tasks', 'matters', 'invoices', 'payments', 'conflict_check_runs',
             'lead_sources', 'consultation_outcomes', 'firm_leads', 'consultations',
             'firm_practice_areas', 'document_chase_rules', 'employee_rates', 'calendar_events', 'client_communication_preferences',

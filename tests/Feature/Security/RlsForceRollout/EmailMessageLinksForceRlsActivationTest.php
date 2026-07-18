@@ -77,12 +77,21 @@ class EmailMessageLinksForceRlsActivationTest extends TestCase
 
     public function test_email_messages_remains_unprepared(): void
     {
+        // Narrowly updated by Section 39A-5 Wave 5 (email domain, 4
+        // tables implemented as one combined unit): email_messages
+        // itself is now FORCE RLS'd too, as part of that later,
+        // independent wave — this checkpoint's own original scope
+        // (activating only email_message_links, whose own direct
+        // firm_id column made that independently safe regardless of
+        // whether email_messages was ever activated) is unaffected by
+        // that later addition. See EmailMessagesForceRlsActivationTest
+        // for the full proof of that later activation.
         $row = DB::selectOne("select relrowsecurity from pg_class where relname = 'email_messages'");
 
         $this->assertNotNull($row);
-        $this->assertFalse(
+        $this->assertTrue(
             (bool) $row->relrowsecurity,
-            'email_messages (the parent table) must remain unprepared — this checkpoint only activates email_message_links, its own direct firm_id column making that independently safe.'
+            'email_messages is now RLS-enabled as of Section 39A-5 Wave 5 — this no longer needs to remain unprepared for this checkpoint\'s own original scope to have been safe.'
         );
     }
 

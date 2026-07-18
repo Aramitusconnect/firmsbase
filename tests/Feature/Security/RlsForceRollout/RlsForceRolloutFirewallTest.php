@@ -535,6 +535,14 @@ class RlsForceRolloutFirewallTest extends TestCase
             // existing assertion removed or weakened.
             'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts',
             'expense_approvals', 'accounting_export_batches', 'accounting_export_lines',
+            // Narrowly updated AGAIN by Section 39A-5 Wave 5 — the
+            // fifth coordinated multi-table wave, covering the email
+            // domain (email_accounts, email_messages, email_attachments,
+            // email_sync_events) implemented as one combined unit —
+            // extends the "exactly these tables are forced" list from
+            // seventy-two to seventy-six — same additive-only pattern,
+            // no existing assertion removed or weakened.
+            'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
