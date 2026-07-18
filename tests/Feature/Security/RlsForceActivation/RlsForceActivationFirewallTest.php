@@ -156,6 +156,9 @@ class RlsForceActivationFirewallTest extends TestCase
             // activation batch in this arc, covering security_events) —
             // this test's own scope (39A-3A) only asserts clients here.
             'security_events',
+            // Narrowly updated AGAIN by Section 39A-5 Wave 7 (e-signature
+            // domain, 4 tables implemented as one combined unit) —
+            'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

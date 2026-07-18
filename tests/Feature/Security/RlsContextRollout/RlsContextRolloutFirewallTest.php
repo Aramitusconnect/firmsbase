@@ -158,6 +158,9 @@ class RlsContextRolloutFirewallTest extends TestCase
             // activation batch in this arc, covering security_events).
             // This test's own scope (39A-2) never touched FORCE state.
             'security_events',
+            // Narrowly updated AGAIN by Section 39A-5 Wave 7 (e-signature
+            // domain, 4 tables implemented as one combined unit) —
+            'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests',
         ];
 
         // security_events is the final checkpoint in this arc: every
