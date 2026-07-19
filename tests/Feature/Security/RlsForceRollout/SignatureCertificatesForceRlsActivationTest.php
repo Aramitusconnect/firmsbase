@@ -76,10 +76,11 @@ class SignatureCertificatesForceRlsActivationTest extends TestCase
         $coverage = new RowLevelSecurityCoverageMappingService;
 
         // Narrowly updated AGAIN by Section 39A-5 Wave 8 (governance/support/platform domain, 6 tables) — additive only, no existing assertion removed or weakened.
+        // Narrowly updated AGAIN by Section 39A-5 Wave 9 (migration/export domain, 6 tables) — additive only, no existing assertion removed or weakened.
         $this->assertCount(
-            92,
+            98,
             $coverage->forcedTables(),
-            'Exactly 92 tables must have FORCE ROW LEVEL SECURITY active once this final checkpoint of the Wave 7 batch lands — no more, no fewer.'
+            'Exactly 98 tables must have FORCE ROW LEVEL SECURITY active once this final checkpoint of the Wave 7 batch lands — no more, no fewer.'
         );
     }
 

@@ -165,6 +165,9 @@ class RlsContextRolloutFirewallTest extends TestCase
             // support/platform domain, 6 tables implemented as one combined
             // unit) —
             'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks',
+            // Narrowly updated AGAIN by Section 39A-5 Wave 9 (migration/
+            // export domain, 6 tables implemented as one combined unit) —
+            'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests',
         ];
 
         // security_events is the final checkpoint in this arc: every
