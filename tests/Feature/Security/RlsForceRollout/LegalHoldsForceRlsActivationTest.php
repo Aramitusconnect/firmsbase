@@ -483,13 +483,21 @@ class LegalHoldsForceRlsActivationTest extends TestCase
         // Place a REAL, active firm-scope legal hold.
         app(LegalHoldService::class)->place($firm, LegalHoldScope::Firm, 'Litigation in progress.', $admin);
 
-        $readiness = app(OffboardingRequestService::class)->evaluateReadiness($offboardingRequest->fresh());
+        // offboarding_requests is now FORCE RLS'd (Wave 9): request()'s own
+        // wrap has already exited by this point and restored context to
+        // none, so a bare ->fresh() call here would return null. Wrap it
+        // explicitly, keyed on the firm this request belongs to.
+        $readiness = app(OffboardingRequestService::class)->evaluateReadiness(
+            (new TenantContextService())->runWithFirmContext($firm, fn () => $offboardingRequest->fresh())
+        );
 
         $this->assertTrue($readiness->exportCompleted);
         $this->assertTrue($readiness->retentionCleared);
         $this->assertFalse($readiness->legalHoldCleared, 'OffboardingRequestService::evaluateReadiness() must correctly detect the active legal hold — silently reporting it cleared here is exactly the fail-open bug this batch closes.');
 
-        $advanced = app(OffboardingRequestService::class)->advance($offboardingRequest->fresh());
+        $advanced = app(OffboardingRequestService::class)->advance(
+            (new TenantContextService())->runWithFirmContext($firm, fn () => $offboardingRequest->fresh())
+        );
         $this->assertSame(OffboardingRequestStatus::LegalHoldBlocked, $advanced->status, 'advance() must transition to LegalHoldBlocked, proving the hold was genuinely detected end-to-end.');
     }
 
@@ -531,7 +539,12 @@ class LegalHoldsForceRlsActivationTest extends TestCase
         $keyDestructionClearance = app(KeyDestructionRequestService::class)->checkClearance($keyDestructionRequest);
         $this->assertTrue($keyDestructionClearance->isClear());
 
-        $readiness = app(OffboardingRequestService::class)->evaluateReadiness($offboardingRequest->fresh());
+        // Same FORCE-RLS-driven fix as above: bare ->fresh() with no
+        // ambient context active would return null once offboarding_requests
+        // is FORCE'd, so wrap it explicitly keyed on $firm.
+        $readiness = app(OffboardingRequestService::class)->evaluateReadiness(
+            (new TenantContextService())->runWithFirmContext($firm, fn () => $offboardingRequest->fresh())
+        );
         $this->assertTrue($readiness->legalHoldCleared);
     }
 

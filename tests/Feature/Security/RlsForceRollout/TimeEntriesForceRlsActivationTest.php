@@ -654,13 +654,20 @@ class TimeEntriesForceRlsActivationTest extends TestCase
         $applyService = new ImportApplyService($documentSafetyService, $auditService);
 
         $batch = $batchService->create($firm, ImportEntityType::TimeEntry, ImportSourceType::CsvUpload);
-        $batchService->stageRows($batch, [[
+        // import_batches gained permanent FORCE ROW LEVEL SECURITY in a
+        // later, separate wave (Section 39A-9 Wave 9); stageRows()'s own
+        // wrap already restores database session context to "none" by
+        // the time it returns, so a bare $batch->fresh() call afterward
+        // would return null. Chain stageRows()'s own already-fresh
+        // return value and confirmBatch()'s own return value instead of
+        // an unwrapped re-fetch.
+        $batch = $batchService->stageRows($batch, [[
             'user_id' => $user->id,
             'seconds' => 5400,
             'worked_on' => now()->toDateString(),
         ]]);
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
-        $applyService->confirmBatch($batch->fresh());
+        $confirmed = $applyService->confirmBatch($batch);
 
         // No ambient context established before apply() — the whole
         // point is proving ImportApplyService's own internal wrap (the
@@ -669,7 +676,7 @@ class TimeEntriesForceRlsActivationTest extends TestCase
         (new TenantContextService())->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
-        $applied = $applyService->apply($batch->fresh());
+        $applied = $applyService->apply($confirmed);
 
         $this->assertSame(ImportBatchStatus::Applied, $applied->status);
 

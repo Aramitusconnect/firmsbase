@@ -1,0 +1,502 @@
+<?php
+
+namespace Tests\Feature\Security\RlsForceRollout;
+
+use App\Enums\ImplementationProjectStatus;
+use App\Models\Firm;
+use App\Models\ImplementationProject;
+use App\Models\PlatformAdmin;
+use App\Services\ImplementationProjectService;
+use App\Services\ImplementationTaskService;
+use App\Services\RowLevelSecurityCoverageMappingService;
+use App\Services\TenantContextService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Tests\TestCase;
+
+/**
+ * ImplementationProjectsForceRlsActivationTest — proves the FORCE ROW
+ * LEVEL SECURITY activation for implementation_projects (database/
+ * migrations/2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php)
+ * is permanently active and behaves correctly.
+ *
+ * Fourth of the six-table, one-batch Section 39A-9 Wave 9 activation —
+ * see ExportJobsForceRlsActivationTest's own docblock for the full
+ * combined-batch rationale and table order. ImplementationProject does
+ * NOT use BelongsToTenant despite its non-null firm_id (an informational
+ * inconsistency only, no action required) — RLS still enforces firm_id
+ * isolation at the database layer regardless of Eloquent trait usage.
+ *
+ * The single most important proof group in this file is the
+ * ImplementationTaskService::complete()/skip()/block() signature-change
+ * regression: these methods now take the already-known
+ * ImplementationProject as an explicit second parameter instead of
+ * relying on a lazy $task->implementationProject relation load (which
+ * would silently fail-closed under FORCE with no in-memory value to key
+ * a wrap on before it resolves).
+ */
+class ImplementationProjectsForceRlsActivationTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private const MIGRATION_PATH = 'database/migrations/2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php';
+
+    // ---------------------------------------------------------------
+    // FORCE state / policy proofs
+    // ---------------------------------------------------------------
+
+    public function test_all_previously_forced_tables_remain_force_row_level_security_enabled(): void
+    {
+        $coverage = new RowLevelSecurityCoverageMappingService;
+
+        foreach ($coverage->forcedTables() as $table) {
+            $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);
+
+            $this->assertNotNull($row, "Table {$table} not found in pg_class.");
+            $this->assertTrue((bool) $row->relforcerowsecurity, "{$table} must remain FORCE ROW LEVEL SECURITY enabled after this checkpoint.");
+        }
+    }
+
+    public function test_implementation_projects_is_discovered_by_the_forced_tables_registry(): void
+    {
+        $coverage = new RowLevelSecurityCoverageMappingService;
+
+        $this->assertContains('implementation_projects', $coverage->forcedTables());
+    }
+
+    public function test_implementation_projects_has_row_level_security_enabled(): void
+    {
+        $row = DB::selectOne("select relrowsecurity from pg_class where relname = 'implementation_projects'");
+
+        $this->assertNotNull($row);
+        $this->assertTrue((bool) $row->relrowsecurity);
+    }
+
+    public function test_implementation_projects_has_permanent_force_row_level_security_enabled(): void
+    {
+        $row = DB::selectOne("select relforcerowsecurity from pg_class where relname = 'implementation_projects'");
+
+        $this->assertNotNull($row);
+        $this->assertTrue((bool) $row->relforcerowsecurity, 'implementation_projects must have permanent FORCE ROW LEVEL SECURITY active — this is not a transient, per-test setting.');
+    }
+
+    public function test_the_policy_has_both_an_explicit_using_and_with_check_clause(): void
+    {
+        $row = DB::selectOne(
+            "select pg_get_expr(polqual, polrelid) as using_expr, pg_get_expr(polwithcheck, polrelid) as with_check_expr
+             from pg_policy where polrelid = 'implementation_projects'::regclass and polname = 'implementation_projects_tenant_isolation'"
+        );
+
+        $this->assertNotNull($row, 'The implementation_projects_tenant_isolation policy must exist.');
+
+        $expected = "(firm_id = (NULLIF(current_setting('app.current_firm_id'::text, true), ''::text))::bigint)";
+
+        $this->assertSame($expected, $row->using_expr, 'USING clause must match the reviewed predicate exactly.');
+        $this->assertSame($expected, $row->with_check_expr, 'WITH CHECK clause must be explicit and identical to USING, not inherited implicitly.');
+    }
+
+    // ---------------------------------------------------------------
+    // Missing-context fail-closed proofs
+    // ---------------------------------------------------------------
+
+    public function test_missing_tenant_context_cannot_read_implementation_projects(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->createProjectForFirm($firm);
+
+        (new TenantContextService)->clearDatabaseTenantContext();
+
+        $this->assertSame(0, ImplementationProject::query()->count());
+    }
+
+    public function test_missing_tenant_context_cannot_insert_implementation_projects(): void
+    {
+        $firm = Firm::factory()->create();
+
+        (new TenantContextService)->clearDatabaseTenantContext();
+
+        $this->expectExceptionMessageMatches('/row-level security policy/');
+
+        DB::table('implementation_projects')->insert($this->rowAttributes($firm));
+    }
+
+    /**
+     * ImplementationProjectFactory DID gain a context-hold create()
+     * override in this batch — its bare default-creation path is
+     * already tenant-consistent, so a bare
+     * ImplementationProject::factory()->create() must now SUCCEED even
+     * with no ambient context.
+     */
+    public function test_bare_factory_create_without_context_now_succeeds_via_the_context_hold_override(): void
+    {
+        (new TenantContextService)->clearDatabaseTenantContext();
+
+        $project = ImplementationProject::factory()->create();
+
+        $this->assertNotNull($project->id);
+        $this->assertNotNull($project->firm_id);
+
+        $persisted = $this->runWithFirmContext(
+            $project->firm_id,
+            fn () => ImplementationProject::query()->find($project->id),
+        );
+
+        $this->assertNotNull($persisted, 'A bare factory-created row must be visible under its own firm\'s context.');
+        $this->assertSame($project->firm_id, $persisted->firm_id);
+    }
+
+    // ---------------------------------------------------------------
+    // Same-firm access / cross-firm isolation proofs
+    // ---------------------------------------------------------------
+
+    public function test_firm_a_context_can_read_its_own_implementation_project(): void
+    {
+        $firmA = Firm::factory()->create();
+        $projectA = $this->createProjectForFirm($firmA);
+
+        $visibleIds = $this->runWithFirmContext(
+            $firmA,
+            fn () => ImplementationProject::query()->pluck('id')->all(),
+        );
+
+        $this->assertSame([$projectA->id], $visibleIds);
+    }
+
+    public function test_firm_a_context_cannot_read_firm_b_implementation_project(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $this->createProjectForFirm($firmA);
+        $projectB = $this->createProjectForFirm($firmB);
+
+        $visibleIds = $this->runWithFirmContext(
+            $firmA,
+            fn () => ImplementationProject::query()->pluck('id')->all(),
+        );
+
+        $this->assertNotContains($projectB->id, $visibleIds);
+    }
+
+    public function test_firm_a_context_can_insert_a_valid_implementation_project(): void
+    {
+        $firmA = Firm::factory()->create();
+
+        $insertedId = $this->runWithFirmContext(
+            $firmA,
+            fn () => DB::table('implementation_projects')->insertGetId($this->rowAttributes($firmA)),
+        );
+
+        $this->assertIsInt($insertedId);
+    }
+
+    public function test_firm_a_cannot_update_firm_b_implementation_project(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $projectB = $this->createProjectForFirm($firmB);
+
+        $affected = $this->runWithFirmContext($firmA, function () use ($projectB) {
+            return DB::table('implementation_projects')->where('id', $projectB->id)->update(['status' => ImplementationProjectStatus::Blocked->value]);
+        });
+
+        $this->assertSame(0, $affected, 'No rows should be visible/updatable — Firm A must not be able to update Firm B\'s implementation_projects row.');
+
+        $reReadAsFirmB = $this->runWithFirmContext(
+            $firmB,
+            fn () => ImplementationProject::query()->find($projectB->id),
+        );
+
+        $this->assertNotNull($reReadAsFirmB);
+        $this->assertSame(ImplementationProjectStatus::NotStarted, $reReadAsFirmB->status);
+    }
+
+    public function test_firm_a_cannot_delete_firm_b_implementation_project(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $projectB = $this->createProjectForFirm($firmB);
+
+        $this->runWithFirmContext($firmA, function () use ($projectB) {
+            DB::table('implementation_projects')->where('id', $projectB->id)->delete();
+        });
+
+        $reReadAsFirmB = $this->runWithFirmContext(
+            $firmB,
+            fn () => ImplementationProject::query()->find($projectB->id),
+        );
+
+        $this->assertNotNull($reReadAsFirmB, 'Firm A context must not be able to delete Firm B implementation_projects.');
+    }
+
+    public function test_firm_a_cannot_insert_an_implementation_project_claiming_firm_b_ownership(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+
+        $this->expectExceptionMessageMatches('/row-level security policy/');
+
+        $this->runWithFirmContext($firmA, function () use ($firmB) {
+            DB::table('implementation_projects')->insert($this->rowAttributes($firmB));
+        });
+    }
+
+    public function test_ownership_cannot_be_reassigned_across_firms(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $projectA = $this->createProjectForFirm($firmA);
+
+        $this->expectExceptionMessageMatches('/row-level security policy/');
+
+        $this->runWithFirmContext($firmA, function () use ($projectA, $firmB) {
+            DB::table('implementation_projects')->where('id', $projectA->id)->update(['firm_id' => $firmB->id]);
+        });
+    }
+
+    // ---------------------------------------------------------------
+    // ImplementationTaskService::complete()/skip()/block() signature
+    // regression proofs — the single most important proof group here.
+    // ---------------------------------------------------------------
+
+    public function test_completing_a_task_correctly_updates_the_project_with_the_new_explicit_project_parameter(): void
+    {
+        $firm = Firm::factory()->create();
+        $project = app(ImplementationProjectService::class)->createForFirm($firm);
+        $admin = PlatformAdmin::factory()->create();
+
+        (new TenantContextService)->clearDatabaseTenantContext();
+
+        $task = app(ImplementationTaskService::class)->complete($project->tasks->first(), $project, $admin);
+
+        $this->assertNotNull($task->completed_at);
+        $this->assertSame(
+            ImplementationProjectStatus::InProgress,
+            $this->runWithFirmContext($firm, fn () => $project->fresh()->status),
+        );
+        $this->assertNoDatabaseTenantContext();
+    }
+
+    public function test_skipping_a_task_correctly_updates_the_project_with_the_new_explicit_project_parameter(): void
+    {
+        $firm = Firm::factory()->create();
+        $project = app(ImplementationProjectService::class)->createForFirm($firm);
+
+        (new TenantContextService)->clearDatabaseTenantContext();
+
+        app(ImplementationTaskService::class)->skip($project->tasks->first(), $project);
+
+        $this->assertSame(
+            ImplementationProjectStatus::InProgress,
+            $this->runWithFirmContext($firm, fn () => $project->fresh()->status),
+        );
+        $this->assertNoDatabaseTenantContext();
+    }
+
+    public function test_blocking_a_task_correctly_updates_the_project_with_the_new_explicit_project_parameter(): void
+    {
+        $firm = Firm::factory()->create();
+        $project = app(ImplementationProjectService::class)->createForFirm($firm);
+
+        (new TenantContextService)->clearDatabaseTenantContext();
+
+        app(ImplementationTaskService::class)->block($project->tasks->first(), $project);
+
+        $this->assertSame(
+            ImplementationProjectStatus::Blocked,
+            $this->runWithFirmContext($firm, fn () => $project->fresh()->status),
+        );
+        $this->assertNoDatabaseTenantContext();
+    }
+
+    public function test_completing_a_task_for_the_wrong_project_does_not_leak_a_cross_firm_write(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $projectA = app(ImplementationProjectService::class)->createForFirm($firmA);
+        $projectB = app(ImplementationProjectService::class)->createForFirm($firmB);
+        $admin = PlatformAdmin::factory()->create();
+
+        // Passing firm B's task alongside firm A's project: the task's
+        // own update() has no firm_id (implementation_tasks is not
+        // itself RLS-scoped), so this write always succeeds regardless
+        // — but updateProjectProgress() is keyed on the EXPLICIT
+        // $project parameter's own firm_id, so it must only ever affect
+        // the project actually passed in, never any other firm's
+        // project.
+        app(ImplementationTaskService::class)->complete($projectB->tasks->first(), $projectA, $admin);
+
+        $reReadProjectB = $this->runWithFirmContext($firmB, fn () => $projectB->fresh());
+        $this->assertSame(ImplementationProjectStatus::NotStarted, $reReadProjectB->status, 'Project B must not have been touched by a call keyed on project A.');
+    }
+
+    // ---------------------------------------------------------------
+    // Context lifecycle proofs
+    // ---------------------------------------------------------------
+
+    public function test_tenant_context_clears_after_success(): void
+    {
+        $firm = Firm::factory()->create();
+
+        $this->createProjectForFirm($firm);
+
+        $this->assertNoDatabaseTenantContext();
+    }
+
+    public function test_tenant_context_clears_after_exception(): void
+    {
+        $firm = Firm::factory()->create();
+
+        try {
+            $this->runWithFirmContext($firm, function () {
+                throw new \RuntimeException('simulated failure inside firm context');
+            });
+        } catch (\RuntimeException $e) {
+            // expected
+        }
+
+        $this->assertNoDatabaseTenantContext();
+    }
+
+    // ---------------------------------------------------------------
+    // Migration down()/up() restoration proofs
+    // ---------------------------------------------------------------
+
+    public function test_migration_down_fully_restores_the_pre_checkpoint_state(): void
+    {
+        $migration = require base_path(self::MIGRATION_PATH);
+
+        $migration->down();
+
+        try {
+            $row = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'implementation_projects'");
+            $this->assertFalse((bool) $row->relrowsecurity, 'Rollback must fully disable RLS, not merely clear FORCE.');
+            $this->assertFalse((bool) $row->relforcerowsecurity, 'Rollback must clear FORCE.');
+
+            $policy = DB::selectOne(
+                "select 1 from pg_policy where polrelid = 'implementation_projects'::regclass and polname = 'implementation_projects_tenant_isolation'"
+            );
+            $this->assertNull($policy, 'Rollback must drop the policy this checkpoint created.');
+        } finally {
+            $migration->up();
+        }
+
+        $rowAfterUp = DB::selectOne("select relforcerowsecurity from pg_class where relname = 'implementation_projects'");
+        $this->assertTrue((bool) $rowAfterUp->relforcerowsecurity, 'up() must be restored in the finally block.');
+    }
+
+    public function test_migration_round_trip_affects_only_implementation_projects(): void
+    {
+        $coverage = new RowLevelSecurityCoverageMappingService;
+        $otherTables = array_slice($coverage->preparedTables(), 0, 5);
+
+        $before = [];
+        foreach ($otherTables as $table) {
+            $before[$table] = DB::selectOne('select relrowsecurity, relforcerowsecurity from pg_class where relname = ?', [$table]);
+        }
+
+        $migration = require base_path(self::MIGRATION_PATH);
+        $migration->down();
+        $migration->up();
+
+        foreach ($otherTables as $table) {
+            $after = DB::selectOne('select relrowsecurity, relforcerowsecurity from pg_class where relname = ?', [$table]);
+            $this->assertEquals($before[$table], $after, "{$table}'s RLS state must be unaffected by implementation_projects' own migration round trip.");
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Scope proofs
+    // ---------------------------------------------------------------
+
+    public function test_uncovered_tenant_tables_were_not_modified(): void
+    {
+        $coverage = new RowLevelSecurityCoverageMappingService;
+        $thisBatch = [
+            'export_jobs', 'migration_projects', 'import_batches',
+            'implementation_projects', 'fleet_migration_instance_status',
+            'offboarding_requests',
+        ];
+
+        foreach ($coverage->missingPreparedTables() as $table) {
+            if (in_array($table, $thisBatch, true)) {
+                continue;
+            }
+
+            $row = DB::selectOne('select relrowsecurity from pg_class where relname = ?', [$table]);
+
+            if ($row === null) {
+                continue;
+            }
+
+            $this->assertFalse(
+                (bool) $row->relrowsecurity,
+                "{$table} was reported as missing RLS preparation, but RLS is now enabled — this checkpoint must not add policies for any other uncovered table."
+            );
+        }
+    }
+
+    public function test_compliance_gap_registry_service_was_not_modified(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('app/Services/ComplianceGapRegistryService.php');
+
+        $this->assertEmpty($changed, 'ComplianceGapRegistryService.php must remain untouched by this checkpoint.');
+    }
+
+    public function test_row_level_security_coverage_mapping_service_was_not_modified(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('app/Services/RowLevelSecurityCoverageMappingService.php');
+
+        $this->assertEmpty(
+            $changed,
+            'RowLevelSecurityCoverageMappingService.php must remain untouched by this individual checkpoint — the wave-integration update lands separately once this batch has landed.'
+        );
+    }
+
+    public function test_no_ui_routes_controllers_or_deployment_features_were_added(): void
+    {
+        foreach (['routes', 'app/Http/Controllers', 'app/Filament', 'resources/views', 'app/Livewire'] as $relativeDir) {
+            $changed = $this->changedOrUntrackedPaths($relativeDir);
+
+            $this->assertEmpty($changed, "This checkpoint must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
+        }
+
+        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
+        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
+    }
+
+    private function createProjectForFirm(Firm $firm): ImplementationProject
+    {
+        return $this->runWithFirmContext($firm, fn () => ImplementationProject::factory()->create(['firm_id' => $firm->id]));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function rowAttributes(Firm $firm): array
+    {
+        return [
+            'uuid' => (string) Str::uuid(),
+            'firm_id' => $firm->id,
+            'status' => ImplementationProjectStatus::NotStarted->value,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function changedOrUntrackedPaths(string $scope): array
+    {
+        $changed = trim((string) shell_exec(
+            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
+        ));
+
+        if ($changed === '') {
+            return [];
+        }
+
+        return preg_split('/\R/', $changed) ?: [];
+    }
+}

@@ -65,7 +65,12 @@ class EdgeCaseRiskFirewallTest extends TestCase
         // deletion_requests, and key_destruction_requests now have
         // permanent FORCE ROW LEVEL SECURITY. Decision logic, order,
         // and return values are unchanged.
-        'app/Services/FleetMigrationOrchestrationService.php',
+        // FleetMigrationOrchestrationService.php is deliberately NOT in
+        // this list any more — Section 39A-9 Wave 9 (migration/export
+        // domain) found a genuine need to wrap its migration-instance
+        // status transitions in runWithFirmContext(), since
+        // fleet_migration_instance_status now has permanent FORCE ROW
+        // LEVEL SECURITY.
         'app/Services/LicenseFileValidationService.php',
         // PaymentClassificationService.php is deliberately NOT in this
         // list any more — Section 39A-3H (a later, distinct staged-
@@ -81,8 +86,12 @@ class EdgeCaseRiskFirewallTest extends TestCase
         'app/Services/AiModeResolutionService.php',
         'app/Services/PromptInjectionResistanceService.php',
         'app/Services/ImportApplyService.php',
-        'app/Services/ImportPreviewService.php',
-        'app/Services/ImportBatchService.php',
+        // ImportPreviewService.php and ImportBatchService.php are
+        // deliberately NOT in this list any more — Section 39A-9 Wave 9
+        // (migration/export domain) found a genuine need to wrap their
+        // create()/status-transition writes in runWithFirmContext(),
+        // since import_batches now has permanent FORCE ROW LEVEL
+        // SECURITY.
         'app/Services/ImportRollbackService.php',
         // TemplatePackInstallationService.php is deliberately NOT in
         // this list any more — Section 39A-3L, Checkpoint 6, Table
@@ -252,11 +261,17 @@ class EdgeCaseRiskFirewallTest extends TestCase
         // deletion_requests, key_destruction_requests, and legal_holds
         // now have permanent FORCE ROW LEVEL SECURITY. Decision logic,
         // order, and return values are unchanged.
+        // FleetMigrationOrchestrationService is deliberately NOT in this
+        // list any more — Section 39A-9 Wave 9 (migration/export domain)
+        // found a genuine need to wrap its migration-instance status
+        // transitions in runWithFirmContext(), since
+        // fleet_migration_instance_status now has permanent FORCE ROW
+        // LEVEL SECURITY.
         $behaviorFilePatterns = [
             'PaymentApplicationService', 'PaymentPlanService', 'PaymentPlanInstallmentService',
             'TrustDepositService', 'TrustLedgerEntryReversalService', 'TrustChargebackService',
             'AiProviderKeyService', 'AiUsageRecorderService', 'AiToolActionRecorderService',
-            'LicenseFileSigningService', 'FleetMigrationOrchestrationService',
+            'LicenseFileSigningService',
             'ImportApplyService', 'ImportRollbackService',
         ];
 
@@ -337,7 +352,18 @@ class EdgeCaseRiskFirewallTest extends TestCase
                 // wrap bare assertDatabaseHas()/direct-query reads in
                 // explicit tenant context, once deployment_health_checks
                 // gained permanent FORCE ROW LEVEL SECURITY.
-                && $path !== 'tests/Feature/Deployment/Health/DeploymentHealthEnvelopeServiceTest.php',
+                && $path !== 'tests/Feature/Deployment/Health/DeploymentHealthEnvelopeServiceTest.php'
+                // Section 39A-9 Wave 9 (migration/export domain)
+                // legitimately updated these existing functional test
+                // files outside the governance-mapping tree once their
+                // underlying tables gained permanent FORCE ROW LEVEL
+                // SECURITY.
+                && $path !== 'tests/Feature/Deployment/Fleet/FleetMigrationOrchestrationServiceTest.php'
+                && $path !== 'tests/Feature/Implementation/ImplementationTaskServiceTest.php'
+                && $path !== 'tests/Feature/Imports/ImportBatchServiceTest.php'
+                && $path !== 'tests/Feature/Imports/ImportPreviewServiceTest.php'
+                && $path !== 'tests/Feature/TenantIsolation/ImportExportTenantIsolationTest.php'
+                && $path !== 'tests/Feature/Webhooks/Wiring/InvoiceCreatedWiringTest.php',
         );
 
         $this->assertEmpty(
@@ -714,6 +740,35 @@ class EdgeCaseRiskFirewallTest extends TestCase
             'database/factories/SupportAccessRequestFactory.php',
             'database/factories/SupportAccessSessionFactory.php',
             'database/factories/DeploymentHealthCheckFactory.php',
+            // Section 39A-9 Wave 9 (migration/export domain) legitimately
+            // added six combined prepare-and-force migrations (export_jobs,
+            // migration_projects, import_batches, implementation_projects,
+            // fleet_migration_instance_status, offboarding_requests), their
+            // six factories' context-hold fixes, wired independent
+            // runWithFirmContext() wraps into ExportJobService,
+            // FleetMigrationOrchestrationService, ImplementationProjectService,
+            // ImplementationTaskService, ImportApplyService, ImportBatchService,
+            // ImportPreviewService, ImportRollbackService,
+            // ImportRowValidationService, MigrationProjectService, and
+            // OffboardingRequestService, and updated the tests it affected.
+            'database/migrations/2026_08_29_970001_prepare_row_level_security_and_force_rls_on_export_jobs_table.php',
+            'database/migrations/2026_08_29_970002_prepare_row_level_security_and_force_rls_on_migration_projects_table.php',
+            'database/migrations/2026_08_29_970003_prepare_row_level_security_and_force_rls_on_import_batches_table.php',
+            'database/migrations/2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php',
+            'database/migrations/2026_08_29_970005_prepare_row_level_security_and_force_rls_on_fleet_migration_instance_status_table.php',
+            'database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php',
+            'database/factories/ExportJobFactory.php',
+            'database/factories/FleetMigrationInstanceStatusFactory.php',
+            'database/factories/ImplementationProjectFactory.php',
+            'database/factories/ImportBatchFactory.php',
+            'database/factories/MigrationProjectFactory.php',
+            'database/factories/OffboardingRequestFactory.php',
+            'tests/Feature/Deployment/Fleet/FleetMigrationOrchestrationServiceTest.php',
+            'tests/Feature/Implementation/ImplementationTaskServiceTest.php',
+            'tests/Feature/Imports/ImportBatchServiceTest.php',
+            'tests/Feature/Imports/ImportPreviewServiceTest.php',
+            'tests/Feature/TenantIsolation/ImportExportTenantIsolationTest.php',
+            'tests/Feature/Webhooks/Wiring/InvoiceCreatedWiringTest.php',
         ];
 
         return array_values(array_filter(

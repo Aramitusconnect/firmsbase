@@ -18,6 +18,11 @@ use App\Models\PlatformAdmin;
  * stageRows()) import_rows' initial staged state. Staging rows never
  * creates a production record for any entity — it only writes
  * import_rows with raw_data exactly as given (project rule 2/3).
+ *
+ * import_batches carries FORCE ROW LEVEL SECURITY (see
+ * database/migrations/2026_08_29_970003_prepare_row_level_security_and_force_rls_on_import_batches_table.php),
+ * so every write here runs under a runWithFirmContext() wrap, keyed on
+ * the firm already known at each call site.
  */
 class ImportBatchService
 {
@@ -34,7 +39,7 @@ class ImportBatchService
         ?FirmUser $createdByFirmUser = null,
         ?PlatformAdmin $createdByPlatformAdmin = null,
     ): ImportBatch {
-        $batch = ImportBatch::create([
+        $batch = (new TenantContextService())->runWithFirmContext($firm, fn () => ImportBatch::create([
             'firm_id' => $firm->id,
             'entity_type' => $entityType,
             'source_type' => $sourceType,
@@ -42,7 +47,7 @@ class ImportBatchService
             'status' => ImportBatchStatus::Draft,
             'created_by_firm_user_id' => $createdByFirmUser?->id,
             'created_by_platform_admin_id' => $createdByPlatformAdmin?->id,
-        ]);
+        ]));
 
         $this->auditService->record($batch, ImportAuditEventType::BatchCreated);
 
@@ -62,17 +67,21 @@ class ImportBatchService
             ]);
         }
 
-        $batch->update(['status' => ImportBatchStatus::Staged, 'staged_at' => now()]);
+        return (new TenantContextService())->runWithFirmContext($batch->firm_id, function () use ($batch) {
+            $batch->update(['status' => ImportBatchStatus::Staged, 'staged_at' => now()]);
 
-        return $batch->fresh();
+            return $batch->fresh();
+        });
     }
 
     public function cancel(ImportBatch $batch): ImportBatch
     {
-        $batch->update(['status' => ImportBatchStatus::Cancelled, 'cancelled_at' => now()]);
+        return (new TenantContextService())->runWithFirmContext($batch->firm_id, function () use ($batch) {
+            $batch->update(['status' => ImportBatchStatus::Cancelled, 'cancelled_at' => now()]);
 
-        $this->auditService->record($batch, \App\Enums\ImportAuditEventType::BatchCancelled);
+            $this->auditService->record($batch, \App\Enums\ImportAuditEventType::BatchCancelled);
 
-        return $batch->fresh();
+            return $batch->fresh();
+        });
     }
 }

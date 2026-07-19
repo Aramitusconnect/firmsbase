@@ -26,6 +26,9 @@ use App\Services\ImportAuditService;
 use App\Services\ImportBatchService;
 use App\Services\ImportDocumentSafetyService;
 use App\Services\ImportDuplicateDetectionService;
+use App\Services\ImportMappingService;
+use App\Services\ImportPreviewService;
+use App\Services\ImportRowValidationService;
 use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use App\Services\TimelineEventRecorder;
@@ -109,6 +112,17 @@ class PartiesForceRlsActivationTest extends TestCase
     private function importDuplicateDetectionService(): ImportDuplicateDetectionService
     {
         return new ImportDuplicateDetectionService(new ImportAuditService());
+    }
+
+    private function importPreviewService(): ImportPreviewService
+    {
+        $auditService = new ImportAuditService();
+
+        return new ImportPreviewService(
+            new ImportRowValidationService(new ImportMappingService($auditService), $auditService),
+            $this->importDuplicateDetectionService(),
+            $auditService,
+        );
     }
 
     // ---------------------------------------------------------------
@@ -619,17 +633,23 @@ class PartiesForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $batch = $this->importBatchService()->create($firm, ImportEntityType::Party, ImportSourceType::CsvUpload);
-        $this->importBatchService()->stageRows($batch, [['name' => 'Checkpoint 26 Imported Party', 'email' => 'imported.party.checkpoint26@example.test']]);
+        // import_batches gained permanent FORCE ROW LEVEL SECURITY in a
+        // later, separate wave (Section 39A-9 Wave 9); each writer
+        // service's own wrap already restores database session context
+        // to "none" once it returns, so a bare $batch->fresh() call
+        // afterward would return null. Chain each service's own
+        // already-fresh return value instead of an unwrapped re-fetch.
+        $batch = $this->importBatchService()->stageRows($batch, [['name' => 'Checkpoint 26 Imported Party', 'email' => 'imported.party.checkpoint26@example.test']]);
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
 
         $applyService = $this->importApplyService();
-        $applyService->confirmBatch($batch->fresh());
+        $confirmed = $applyService->confirmBatch($batch);
 
         (new TenantContextService())->clearDatabaseTenantContext();
         (new TenantContextService())->clearFirmContext();
         $this->assertNoDatabaseTenantContext();
 
-        $applied = $applyService->apply($batch->fresh());
+        $applied = $applyService->apply($confirmed);
 
         $this->assertNoDatabaseTenantContext('apply() must clear its own internal context wrap before returning.');
         $this->assertSame(ImportBatchStatus::Applied, $applied->status);
@@ -650,28 +670,59 @@ class PartiesForceRlsActivationTest extends TestCase
 
     /**
      * ImportDuplicateDetectionService::detectParty() — wrapped in
-     * runWithFirmContext($firmId, ...) by Phase B5. Proves it correctly
-     * reads a real, already-persisted party row and reports a genuine
-     * duplicate match, with no ambient context established by the
-     * caller beforehand.
+     * runWithFirmContext($firmId, ...) by Phase B5. import_batches now
+     * carries FORCE ROW LEVEL SECURITY (see database/migrations/
+     * 2026_08_29_970003_prepare_row_level_security_and_force_rls_on_import_batches_table.php),
+     * and detect()'s own $row->importBatch lazy load is NOT wrapped by
+     * detect() itself — only its per-entity-type helper methods
+     * (detectParty() etc.) wrap themselves. detect() therefore no
+     * longer works standalone with truly zero ambient context: its real,
+     * only production call path is ImportPreviewService::preview(),
+     * whose entire body is now wrapped in one runWithFirmContext($batch->
+     * firm_id, ...) call (ImportPreviewService.php's own docblock). This
+     * test proves detect() correctly reads a real, already-persisted
+     * party row and reports a genuine duplicate match when exercised
+     * through that real call path, with no ambient context established
+     * by preview()'s OWN caller beforehand — the guarantee that
+     * actually holds in production, replacing the old (and no longer
+     * true, now that import_batches is FORCE-RLS'd) claim that detect()
+     * works with literally zero context of any kind.
      */
-    public function test_import_duplicate_detection_service_detect_party_genuinely_reads_with_no_ambient_context_established_beforehand(): void
+    public function test_import_duplicate_detection_service_detect_party_genuinely_reads_when_called_via_preview_with_no_ambient_context_established_by_the_caller(): void
     {
         $firm = Firm::factory()->create();
         $existing = Party::factory()->create(['firm_id' => $firm->id, 'name' => 'Checkpoint 26 Dup Party', 'email' => 'dup-party-checkpoint26@example.test']);
         $batch = ImportBatch::factory()->forFirm($firm)->entityType(ImportEntityType::Party)->create();
+        // import_mappings is not RLS-protected (InheritedTenant via
+        // import_batch_id, no firm_id of its own) — safe to seed with no
+        // ambient context, and required here so validateBatch() (called
+        // internally by preview()) preserves 'name'/'email' into
+        // mapped_data instead of dropping them (applyMappingsToRawData()
+        // only copies fields with a saved mapping).
+        (new ImportMappingService(new ImportAuditService()))->saveMappings($batch, [
+            ['source_field' => 'name', 'target_field' => 'name', 'is_required' => false],
+            ['source_field' => 'email', 'target_field' => 'email', 'is_required' => false],
+        ]);
         $row = $batch->rows()->create(['row_number' => 1, 'raw_data' => ['name' => 'Checkpoint 26 Dup Party', 'email' => 'dup-party-checkpoint26@example.test'], 'status' => 'validated']);
 
         (new TenantContextService())->clearDatabaseTenantContext();
         (new TenantContextService())->clearFirmContext();
         $this->assertNoDatabaseTenantContext();
 
-        $result = $this->importDuplicateDetectionService()->detect($row);
+        // $batch is passed as the already-hydrated, in-memory object
+        // returned by create() above — not re-fetched via ->fresh() —
+        // exactly matching preview()'s own documented contract that
+        // $batch->firm_id is already an in-memory attribute requiring no
+        // extra query before its internal wrap begins.
+        $preview = $this->importPreviewService()->preview($batch);
 
-        $this->assertNoDatabaseTenantContext('detect() must clear its own internal context wrap before returning.');
-        $this->assertTrue($result->isDuplicate);
-        $this->assertSame($existing->id, $result->matchedId);
-        $this->assertSame(Party::class, $result->matchedType);
+        $this->assertNoDatabaseTenantContext('preview() must clear its own internal context wrap before returning.');
+        $this->assertSame(1, $preview->duplicateRows);
+
+        $duplicateRow = $this->runWithFirmContext($firm, fn () => $row->fresh());
+        $this->assertTrue($duplicateRow->is_duplicate);
+        $this->assertSame($existing->id, $duplicateRow->duplicate_of_id);
+        $this->assertSame(Party::class, $duplicateRow->duplicate_of_type);
     }
 
     // ---------------------------------------------------------------

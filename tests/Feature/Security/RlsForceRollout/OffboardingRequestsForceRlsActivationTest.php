@@ -1,0 +1,474 @@
+<?php
+
+namespace Tests\Feature\Security\RlsForceRollout;
+
+use App\Enums\OffboardingRequestStatus;
+use App\Models\Firm;
+use App\Models\OffboardingRequest;
+use App\Models\PlatformAdmin;
+use App\Services\OffboardingRequestService;
+use App\Services\RowLevelSecurityCoverageMappingService;
+use App\Services\TenantContextService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Tests\TestCase;
+
+/**
+ * OffboardingRequestsForceRlsActivationTest — proves the FORCE ROW
+ * LEVEL SECURITY activation for offboarding_requests (database/
+ * migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php)
+ * is permanently active and behaves correctly.
+ *
+ * Sixth and last of the six-table, one-batch Section 39A-9 Wave 9
+ * activation — see ExportJobsForceRlsActivationTest's own docblock for
+ * the full combined-batch rationale and table order.
+ *
+ * advance()'s new whole-body wrap intentionally NESTS around
+ * evaluateReadiness()'s existing inner wrap (added in Wave 8 to fix the
+ * legal_holds fail-open bug, at the same firm) — the nesting proof
+ * below confirms this is structurally safe, not merely asserted.
+ */
+class OffboardingRequestsForceRlsActivationTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private const MIGRATION_PATH = 'database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php';
+
+    // ---------------------------------------------------------------
+    // FORCE state / policy proofs
+    // ---------------------------------------------------------------
+
+    public function test_all_previously_forced_tables_remain_force_row_level_security_enabled(): void
+    {
+        $coverage = new RowLevelSecurityCoverageMappingService;
+
+        foreach ($coverage->forcedTables() as $table) {
+            $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);
+
+            $this->assertNotNull($row, "Table {$table} not found in pg_class.");
+            $this->assertTrue((bool) $row->relforcerowsecurity, "{$table} must remain FORCE ROW LEVEL SECURITY enabled after this checkpoint.");
+        }
+    }
+
+    public function test_offboarding_requests_is_discovered_by_the_forced_tables_registry(): void
+    {
+        $coverage = new RowLevelSecurityCoverageMappingService;
+
+        $this->assertContains('offboarding_requests', $coverage->forcedTables());
+    }
+
+    public function test_offboarding_requests_has_row_level_security_enabled(): void
+    {
+        $row = DB::selectOne("select relrowsecurity from pg_class where relname = 'offboarding_requests'");
+
+        $this->assertNotNull($row);
+        $this->assertTrue((bool) $row->relrowsecurity);
+    }
+
+    public function test_offboarding_requests_has_permanent_force_row_level_security_enabled(): void
+    {
+        $row = DB::selectOne("select relforcerowsecurity from pg_class where relname = 'offboarding_requests'");
+
+        $this->assertNotNull($row);
+        $this->assertTrue((bool) $row->relforcerowsecurity, 'offboarding_requests must have permanent FORCE ROW LEVEL SECURITY active — this is not a transient, per-test setting.');
+    }
+
+    public function test_the_policy_has_both_an_explicit_using_and_with_check_clause(): void
+    {
+        $row = DB::selectOne(
+            "select pg_get_expr(polqual, polrelid) as using_expr, pg_get_expr(polwithcheck, polrelid) as with_check_expr
+             from pg_policy where polrelid = 'offboarding_requests'::regclass and polname = 'offboarding_requests_tenant_isolation'"
+        );
+
+        $this->assertNotNull($row, 'The offboarding_requests_tenant_isolation policy must exist.');
+
+        $expected = "(firm_id = (NULLIF(current_setting('app.current_firm_id'::text, true), ''::text))::bigint)";
+
+        $this->assertSame($expected, $row->using_expr, 'USING clause must match the reviewed predicate exactly.');
+        $this->assertSame($expected, $row->with_check_expr, 'WITH CHECK clause must be explicit and identical to USING, not inherited implicitly.');
+    }
+
+    // ---------------------------------------------------------------
+    // Missing-context fail-closed proofs
+    // ---------------------------------------------------------------
+
+    public function test_missing_tenant_context_cannot_read_offboarding_requests(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->createRequestForFirm($firm);
+
+        (new TenantContextService)->clearDatabaseTenantContext();
+
+        $this->assertSame(0, OffboardingRequest::query()->count());
+    }
+
+    public function test_missing_tenant_context_cannot_insert_offboarding_requests(): void
+    {
+        $firm = Firm::factory()->create();
+        $admin = PlatformAdmin::factory()->create();
+
+        (new TenantContextService)->clearDatabaseTenantContext();
+
+        $this->expectExceptionMessageMatches('/row-level security policy/');
+
+        DB::table('offboarding_requests')->insert($this->rowAttributes($firm, $admin));
+    }
+
+    /**
+     * OffboardingRequestFactory DID gain a context-hold create()
+     * override in this batch — its bare default-creation path is
+     * already tenant-consistent, so a bare
+     * OffboardingRequest::factory()->create() must now SUCCEED even
+     * with no ambient context.
+     */
+    public function test_bare_factory_create_without_context_now_succeeds_via_the_context_hold_override(): void
+    {
+        (new TenantContextService)->clearDatabaseTenantContext();
+
+        $request = OffboardingRequest::factory()->create();
+
+        $this->assertNotNull($request->id);
+        $this->assertNotNull($request->firm_id);
+
+        $persisted = $this->runWithFirmContext(
+            $request->firm_id,
+            fn () => OffboardingRequest::query()->find($request->id),
+        );
+
+        $this->assertNotNull($persisted, 'A bare factory-created row must be visible under its own firm\'s context.');
+        $this->assertSame($request->firm_id, $persisted->firm_id);
+    }
+
+    // ---------------------------------------------------------------
+    // Same-firm access / cross-firm isolation proofs
+    // ---------------------------------------------------------------
+
+    public function test_firm_a_context_can_read_its_own_offboarding_request(): void
+    {
+        $firmA = Firm::factory()->create();
+        $requestA = $this->createRequestForFirm($firmA);
+
+        $visibleIds = $this->runWithFirmContext(
+            $firmA,
+            fn () => OffboardingRequest::query()->pluck('id')->all(),
+        );
+
+        $this->assertSame([$requestA->id], $visibleIds);
+    }
+
+    public function test_firm_a_context_cannot_read_firm_b_offboarding_request(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $this->createRequestForFirm($firmA);
+        $requestB = $this->createRequestForFirm($firmB);
+
+        $visibleIds = $this->runWithFirmContext(
+            $firmA,
+            fn () => OffboardingRequest::query()->pluck('id')->all(),
+        );
+
+        $this->assertNotContains($requestB->id, $visibleIds);
+    }
+
+    public function test_firm_a_context_can_insert_a_valid_offboarding_request(): void
+    {
+        $firmA = Firm::factory()->create();
+        $admin = PlatformAdmin::factory()->create();
+
+        $insertedId = $this->runWithFirmContext(
+            $firmA,
+            fn () => DB::table('offboarding_requests')->insertGetId($this->rowAttributes($firmA, $admin)),
+        );
+
+        $this->assertIsInt($insertedId);
+    }
+
+    public function test_firm_a_cannot_update_firm_b_offboarding_request(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $requestB = $this->createRequestForFirm($firmB);
+
+        $affected = $this->runWithFirmContext($firmA, function () use ($requestB) {
+            return DB::table('offboarding_requests')->where('id', $requestB->id)->update(['status' => OffboardingRequestStatus::Cancelled->value]);
+        });
+
+        $this->assertSame(0, $affected, 'No rows should be visible/updatable — Firm A must not be able to update Firm B\'s offboarding_requests row.');
+
+        $reReadAsFirmB = $this->runWithFirmContext(
+            $firmB,
+            fn () => OffboardingRequest::query()->find($requestB->id),
+        );
+
+        $this->assertNotNull($reReadAsFirmB);
+        $this->assertSame(OffboardingRequestStatus::Requested, $reReadAsFirmB->status);
+    }
+
+    public function test_firm_a_cannot_delete_firm_b_offboarding_request(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $requestB = $this->createRequestForFirm($firmB);
+
+        $this->runWithFirmContext($firmA, function () use ($requestB) {
+            DB::table('offboarding_requests')->where('id', $requestB->id)->delete();
+        });
+
+        $reReadAsFirmB = $this->runWithFirmContext(
+            $firmB,
+            fn () => OffboardingRequest::query()->find($requestB->id),
+        );
+
+        $this->assertNotNull($reReadAsFirmB, 'Firm A context must not be able to delete Firm B offboarding_requests.');
+    }
+
+    public function test_firm_a_cannot_insert_an_offboarding_request_claiming_firm_b_ownership(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $admin = PlatformAdmin::factory()->create();
+
+        $this->expectExceptionMessageMatches('/row-level security policy/');
+
+        $this->runWithFirmContext($firmA, function () use ($firmB, $admin) {
+            DB::table('offboarding_requests')->insert($this->rowAttributes($firmB, $admin));
+        });
+    }
+
+    public function test_ownership_cannot_be_reassigned_across_firms(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $requestA = $this->createRequestForFirm($firmA);
+
+        $this->expectExceptionMessageMatches('/row-level security policy/');
+
+        $this->runWithFirmContext($firmA, function () use ($requestA, $firmB) {
+            DB::table('offboarding_requests')->where('id', $requestA->id)->update(['firm_id' => $firmB->id]);
+        });
+    }
+
+    // ---------------------------------------------------------------
+    // OffboardingRequestService::advance() nested-wrap proof — advance()'s
+    // NEW whole-body wrap intentionally nests around
+    // evaluateReadiness()'s EXISTING inner wrap (same firm), added in
+    // Wave 8. Confirm this genuinely works end to end with no ambient
+    // caller context, not merely that both wraps exist syntactically.
+    // ---------------------------------------------------------------
+
+    public function test_advance_correctly_nests_around_evaluate_readiness_inner_wrap_with_no_ambient_context(): void
+    {
+        $firm = Firm::factory()->create();
+        $admin = PlatformAdmin::factory()->create();
+
+        $request = app(OffboardingRequestService::class)->request($firm, $admin, 'Offboarding.');
+
+        (new TenantContextService)->clearDatabaseTenantContext();
+
+        // $request is already the fully-hydrated, in-memory return value
+        // of request() (an Eloquent create() result) — no re-fetch is
+        // needed, and a bare ->fresh() here with no ambient context
+        // active would return null (the same bug this batch's own fix
+        // to LegalHoldsForceRlsActivationTest closed).
+        $advanced = app(OffboardingRequestService::class)->advance($request);
+
+        // With no export/retention/legal-hold clearance work performed,
+        // the request must correctly land in ExportPending — proving the
+        // nested wrap correctly read/wrote all the way through.
+        $this->assertSame(OffboardingRequestStatus::ExportPending, $advanced->status);
+        $this->assertNoDatabaseTenantContext();
+    }
+
+    public function test_complete_and_cancel_succeed_with_no_ambient_context(): void
+    {
+        $firm = Firm::factory()->create();
+        $admin = PlatformAdmin::factory()->create();
+        $request = app(OffboardingRequestService::class)->request($firm, $admin, 'Offboarding.');
+
+        (new TenantContextService)->clearDatabaseTenantContext();
+        $completed = app(OffboardingRequestService::class)->complete($request);
+        $this->assertSame(OffboardingRequestStatus::Completed, $completed->status);
+        $this->assertNoDatabaseTenantContext();
+
+        $request2 = app(OffboardingRequestService::class)->request($firm, $admin, 'Offboarding again.');
+        (new TenantContextService)->clearDatabaseTenantContext();
+        $cancelled = app(OffboardingRequestService::class)->cancel($request2, 'Changed mind.');
+        $this->assertSame(OffboardingRequestStatus::Cancelled, $cancelled->status);
+        $this->assertNoDatabaseTenantContext();
+    }
+
+    // ---------------------------------------------------------------
+    // Context lifecycle proofs
+    // ---------------------------------------------------------------
+
+    public function test_tenant_context_clears_after_success(): void
+    {
+        $firm = Firm::factory()->create();
+
+        $this->createRequestForFirm($firm);
+
+        $this->assertNoDatabaseTenantContext();
+    }
+
+    public function test_tenant_context_clears_after_exception(): void
+    {
+        $firm = Firm::factory()->create();
+
+        try {
+            $this->runWithFirmContext($firm, function () {
+                throw new \RuntimeException('simulated failure inside firm context');
+            });
+        } catch (\RuntimeException $e) {
+            // expected
+        }
+
+        $this->assertNoDatabaseTenantContext();
+    }
+
+    // ---------------------------------------------------------------
+    // Migration down()/up() restoration proofs
+    // ---------------------------------------------------------------
+
+    public function test_migration_down_fully_restores_the_pre_checkpoint_state(): void
+    {
+        $migration = require base_path(self::MIGRATION_PATH);
+
+        $migration->down();
+
+        try {
+            $row = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'offboarding_requests'");
+            $this->assertFalse((bool) $row->relrowsecurity, 'Rollback must fully disable RLS, not merely clear FORCE.');
+            $this->assertFalse((bool) $row->relforcerowsecurity, 'Rollback must clear FORCE.');
+
+            $policy = DB::selectOne(
+                "select 1 from pg_policy where polrelid = 'offboarding_requests'::regclass and polname = 'offboarding_requests_tenant_isolation'"
+            );
+            $this->assertNull($policy, 'Rollback must drop the policy this checkpoint created.');
+        } finally {
+            $migration->up();
+        }
+
+        $rowAfterUp = DB::selectOne("select relforcerowsecurity from pg_class where relname = 'offboarding_requests'");
+        $this->assertTrue((bool) $rowAfterUp->relforcerowsecurity, 'up() must be restored in the finally block.');
+    }
+
+    public function test_migration_round_trip_affects_only_offboarding_requests(): void
+    {
+        $coverage = new RowLevelSecurityCoverageMappingService;
+        $otherTables = array_slice($coverage->preparedTables(), 0, 5);
+
+        $before = [];
+        foreach ($otherTables as $table) {
+            $before[$table] = DB::selectOne('select relrowsecurity, relforcerowsecurity from pg_class where relname = ?', [$table]);
+        }
+
+        $migration = require base_path(self::MIGRATION_PATH);
+        $migration->down();
+        $migration->up();
+
+        foreach ($otherTables as $table) {
+            $after = DB::selectOne('select relrowsecurity, relforcerowsecurity from pg_class where relname = ?', [$table]);
+            $this->assertEquals($before[$table], $after, "{$table}'s RLS state must be unaffected by offboarding_requests' own migration round trip.");
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Scope proofs
+    // ---------------------------------------------------------------
+
+    public function test_uncovered_tenant_tables_were_not_modified(): void
+    {
+        $coverage = new RowLevelSecurityCoverageMappingService;
+        $thisBatch = [
+            'export_jobs', 'migration_projects', 'import_batches',
+            'implementation_projects', 'fleet_migration_instance_status',
+            'offboarding_requests',
+        ];
+
+        foreach ($coverage->missingPreparedTables() as $table) {
+            if (in_array($table, $thisBatch, true)) {
+                continue;
+            }
+
+            $row = DB::selectOne('select relrowsecurity from pg_class where relname = ?', [$table]);
+
+            if ($row === null) {
+                continue;
+            }
+
+            $this->assertFalse(
+                (bool) $row->relrowsecurity,
+                "{$table} was reported as missing RLS preparation, but RLS is now enabled — this checkpoint must not add policies for any other uncovered table."
+            );
+        }
+    }
+
+    public function test_compliance_gap_registry_service_was_not_modified(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('app/Services/ComplianceGapRegistryService.php');
+
+        $this->assertEmpty($changed, 'ComplianceGapRegistryService.php must remain untouched by this checkpoint.');
+    }
+
+    public function test_row_level_security_coverage_mapping_service_was_not_modified(): void
+    {
+        $changed = $this->changedOrUntrackedPaths('app/Services/RowLevelSecurityCoverageMappingService.php');
+
+        $this->assertEmpty(
+            $changed,
+            'RowLevelSecurityCoverageMappingService.php must remain untouched by this individual checkpoint — the wave-integration update lands separately once this batch has landed.'
+        );
+    }
+
+    public function test_no_ui_routes_controllers_or_deployment_features_were_added(): void
+    {
+        foreach (['routes', 'app/Http/Controllers', 'app/Filament', 'resources/views', 'app/Livewire'] as $relativeDir) {
+            $changed = $this->changedOrUntrackedPaths($relativeDir);
+
+            $this->assertEmpty($changed, "This checkpoint must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
+        }
+
+        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
+        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
+    }
+
+    private function createRequestForFirm(Firm $firm): OffboardingRequest
+    {
+        return $this->runWithFirmContext($firm, fn () => OffboardingRequest::factory()->create(['firm_id' => $firm->id]));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function rowAttributes(Firm $firm, PlatformAdmin $admin): array
+    {
+        return [
+            'uuid' => (string) Str::uuid(),
+            'firm_id' => $firm->id,
+            'status' => OffboardingRequestStatus::Requested->value,
+            'reason' => 'Firm has cancelled and requested full offboarding.',
+            'requested_by_platform_admin_id' => $admin->id,
+            'requested_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function changedOrUntrackedPaths(string $scope): array
+    {
+        $changed = trim((string) shell_exec(
+            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
+        ));
+
+        if ($changed === '') {
+            return [];
+        }
+
+        return preg_split('/\R/', $changed) ?: [];
+    }
+}

@@ -417,6 +417,16 @@ class DataModelContractFirewallTest extends TestCase
             'app/Services/SuppressionService.php',
             'tests/Feature/Notifications/NotificationDispatchServiceTest.php',
             'tests/Feature/Notifications/SuppressionServiceTest.php',
+            // Section 39A-9 Wave 9 (migration/export domain) legitimately
+            // added six combined prepare-and-force migrations (export_jobs,
+            // migration_projects, import_batches, implementation_projects,
+            // fleet_migration_instance_status, offboarding_requests).
+            'database/migrations/2026_08_29_970001_prepare_row_level_security_and_force_rls_on_export_jobs_table.php',
+            'database/migrations/2026_08_29_970002_prepare_row_level_security_and_force_rls_on_migration_projects_table.php',
+            'database/migrations/2026_08_29_970003_prepare_row_level_security_and_force_rls_on_import_batches_table.php',
+            'database/migrations/2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php',
+            'database/migrations/2026_08_29_970005_prepare_row_level_security_and_force_rls_on_fleet_migration_instance_status_table.php',
+            'database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php',
         ];
 
         return array_values(array_filter(

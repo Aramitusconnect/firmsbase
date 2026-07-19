@@ -101,7 +101,12 @@ class WorkflowStateMachineFirewallTest extends TestCase
         'app/Services/TrustAccessPolicyService.php',
         'app/Services/TrustConcurrencyLockService.php',
         'app/Services/TrustBalanceService.php',
-        'app/Services/FleetMigrationOrchestrationService.php',
+        // FleetMigrationOrchestrationService.php is deliberately NOT in
+        // this list any more — Section 39A-9 Wave 9 (migration/export
+        // domain) found a genuine need to wrap its migration-instance
+        // status transitions in runWithFirmContext(), since
+        // fleet_migration_instance_status now has permanent FORCE ROW
+        // LEVEL SECURITY.
         // PaymentClassificationService.php is deliberately NOT in this
         // list any more — Section 39A-3H (a later, distinct staged-
         // FORCE-activation branch) found a genuine need to wire
@@ -245,20 +250,40 @@ class WorkflowStateMachineFirewallTest extends TestCase
     {
         $changedRepoWide = $this->changedOrUntrackedPaths('.');
 
+        // FleetMigrationOrchestrationService, ImportBatchService, and
+        // ImportPreviewService are deliberately NOT in this list any
+        // more — Section 39A-9 Wave 9 (migration/export domain) found a
+        // genuine need to wrap their migration-instance status
+        // transitions / batch create() and status-transition writes in
+        // runWithFirmContext(), since fleet_migration_instance_status
+        // and import_batches now have permanent FORCE ROW LEVEL
+        // SECURITY.
         $behaviorFilePatterns = [
             'PaymentApplicationService', 'PaymentPlanService', 'PaymentPlanInstallmentService',
             'TrustDepositService', 'TrustReconciliationService', 'TrustTransferRequestService', 'TrustRefundRequestService', 'TrustHighRiskAdjustmentService', 'TrustLedgerEntryReversalService', 'TrustChargebackService',
             'AiProviderKeyService', 'AiApprovalWorkflowService', 'AiModeResolutionService',
-            'DeploymentHealthEnvelopeService', 'FleetMigrationOrchestrationService', 'LicenseFileSigningService',
+            'DeploymentHealthEnvelopeService', 'LicenseFileSigningService',
             'InvoiceDraftingService', 'DocumentRequestService', 'TaskDependencyService', 'TaskService',
-            'LeadConversionService', 'MatterOpeningService', 'ImportApplyService', 'ImportPreviewService',
-            'ImportBatchService', 'ImportRollbackService', 'SignatureCertificateService',
+            'LeadConversionService', 'MatterOpeningService', 'ImportApplyService', 'ImportRollbackService',
+            'SignatureCertificateService',
             'SignatureRecipientWorkflowService', 'SignatureRequestWorkflowService', 'SignatureRequestAggregationService',
         ];
 
         $touched = array_values(array_filter(
             $changedRepoWide,
             function (string $path) use ($behaviorFilePatterns) {
+                // Section 39A-9 Wave 9 (migration/export domain)
+                // legitimately added/modified ImplementationTaskService.php
+                // and its test — its path happens to contain the
+                // "TaskService" substring this check scans for (a
+                // pre-existing pattern meant to catch TaskService.php),
+                // but no protected task-workflow behavior file was
+                // touched.
+                if ($path === 'app/Services/ImplementationTaskService.php'
+                    || $path === 'tests/Feature/Implementation/ImplementationTaskServiceTest.php') {
+                    return false;
+                }
+
                 foreach ($behaviorFilePatterns as $pattern) {
                     if (str_contains($path, $pattern)) {
                         return true;
@@ -319,7 +344,18 @@ class WorkflowStateMachineFirewallTest extends TestCase
                 && $path !== 'tests/Feature/Ai/Concerns/SetsUpAiEntitledFirm.php'
                 && $path !== 'tests/Feature/Ai/Entitlement/AiEntitlementAndModeBlockingTest.php'
                 && $path !== 'tests/Feature/Ai/Foundation/AiModeEnumReplacementTest.php'
-                && $path !== 'tests/Feature/Ai/Usage/AiUsageRecorderServiceTest.php',
+                && $path !== 'tests/Feature/Ai/Usage/AiUsageRecorderServiceTest.php'
+                // Section 39A-9 Wave 9 (migration/export domain)
+                // legitimately updated these existing functional test
+                // files outside the governance-mapping tree once their
+                // underlying tables gained permanent FORCE ROW LEVEL
+                // SECURITY.
+                && $path !== 'tests/Feature/Deployment/Fleet/FleetMigrationOrchestrationServiceTest.php'
+                && $path !== 'tests/Feature/Implementation/ImplementationTaskServiceTest.php'
+                && $path !== 'tests/Feature/Imports/ImportBatchServiceTest.php'
+                && $path !== 'tests/Feature/Imports/ImportPreviewServiceTest.php'
+                && $path !== 'tests/Feature/TenantIsolation/ImportExportTenantIsolationTest.php'
+                && $path !== 'tests/Feature/Webhooks/Wiring/InvoiceCreatedWiringTest.php',
         );
 
         $this->assertEmpty(
@@ -684,6 +720,35 @@ class WorkflowStateMachineFirewallTest extends TestCase
             'database/factories/ContactFactory.php',
             'database/factories/PartyFactory.php',
             'tests/Feature/Imports/ImportDuplicateDetectionServiceTest.php',
+            // Section 39A-9 Wave 9 (migration/export domain) legitimately
+            // added six combined prepare-and-force migrations (export_jobs,
+            // migration_projects, import_batches, implementation_projects,
+            // fleet_migration_instance_status, offboarding_requests), their
+            // six factories' context-hold fixes, wired independent
+            // runWithFirmContext() wraps into ExportJobService,
+            // FleetMigrationOrchestrationService, ImplementationProjectService,
+            // ImplementationTaskService, ImportApplyService, ImportBatchService,
+            // ImportPreviewService, ImportRollbackService,
+            // ImportRowValidationService, MigrationProjectService, and
+            // OffboardingRequestService, and updated the tests it affected.
+            'database/migrations/2026_08_29_970001_prepare_row_level_security_and_force_rls_on_export_jobs_table.php',
+            'database/migrations/2026_08_29_970002_prepare_row_level_security_and_force_rls_on_migration_projects_table.php',
+            'database/migrations/2026_08_29_970003_prepare_row_level_security_and_force_rls_on_import_batches_table.php',
+            'database/migrations/2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php',
+            'database/migrations/2026_08_29_970005_prepare_row_level_security_and_force_rls_on_fleet_migration_instance_status_table.php',
+            'database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php',
+            'database/factories/ExportJobFactory.php',
+            'database/factories/FleetMigrationInstanceStatusFactory.php',
+            'database/factories/ImplementationProjectFactory.php',
+            'database/factories/ImportBatchFactory.php',
+            'database/factories/MigrationProjectFactory.php',
+            'database/factories/OffboardingRequestFactory.php',
+            'tests/Feature/Deployment/Fleet/FleetMigrationOrchestrationServiceTest.php',
+            'tests/Feature/Implementation/ImplementationTaskServiceTest.php',
+            'tests/Feature/Imports/ImportBatchServiceTest.php',
+            'tests/Feature/Imports/ImportPreviewServiceTest.php',
+            'tests/Feature/TenantIsolation/ImportExportTenantIsolationTest.php',
+            'tests/Feature/Webhooks/Wiring/InvoiceCreatedWiringTest.php',
         ];
 
         return array_values(array_filter(

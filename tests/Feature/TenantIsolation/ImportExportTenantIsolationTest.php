@@ -11,6 +11,7 @@ use App\Services\TenantSafeImportExportPolicyService;
 use App\Exceptions\TenantIsolationException;
 use App\Models\ExportJob;
 use App\Services\TenantContextResolver;
+use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -38,9 +39,18 @@ class ImportExportTenantIsolationTest extends TestCase
         $batchService->create($firmA, ImportEntityType::Client, ImportSourceType::CsvUpload);
         $batchService->create($firmB, ImportEntityType::Client, ImportSourceType::CsvUpload);
 
-        (new TenantContextResolver())->activateForFirm($firmA);
-
-        $visibleBatches = \App\Models\ImportBatch::query()->get();
+        // import_batches now carries FORCE ROW LEVEL SECURITY (Wave 9). The
+        // service's own create() wrap already restored the database session
+        // context by the time it returns, so a bare PHP-memory-only
+        // activateForFirm() (as before) would leave the database session
+        // context unset and the read below would return zero rows
+        // (fail-closed), not the pre-FORCE 1 row. Establish BOTH layers of
+        // context (PHP-memory, for BelongsToTenant's global scope, and the
+        // database session setting, for RLS) via runWithFirmContext().
+        $visibleBatches = (new TenantContextService())->runWithFirmContext(
+            $firmA,
+            fn () => \App\Models\ImportBatch::query()->get()
+        );
 
         $this->assertCount(1, $visibleBatches);
         $this->assertSame($firmA->id, $visibleBatches->first()->firm_id);
@@ -53,9 +63,18 @@ class ImportExportTenantIsolationTest extends TestCase
         ExportJob::factory()->forFirm($firmA)->create();
         ExportJob::factory()->forFirm($firmB)->create();
 
-        (new TenantContextResolver())->activateForFirm($firmB);
-
-        $visibleJobs = ExportJob::query()->get();
+        // export_jobs now carries FORCE ROW LEVEL SECURITY (Wave 9). The
+        // last factory create() above leaves the database session context
+        // active for firmB (ExportJobFactory's context-hold override), but
+        // this test must not rely on that incidental leftover state — make
+        // the intent explicit with the same runWithFirmContext() wrap used
+        // above, establishing both the PHP-memory context (for
+        // BelongsToTenant's global scope) and the database session setting
+        // (for RLS) for firmB before reading.
+        $visibleJobs = (new TenantContextService())->runWithFirmContext(
+            $firmB,
+            fn () => ExportJob::query()->get()
+        );
 
         $this->assertCount(1, $visibleJobs);
         $this->assertSame($firmB->id, $visibleJobs->first()->firm_id);
@@ -91,8 +110,13 @@ class ImportExportTenantIsolationTest extends TestCase
         \App\Models\MigrationProject::factory()->forFirm($firmA)->create();
         \App\Models\MigrationProject::factory()->forFirm($firmB)->create();
 
-        (new TenantContextResolver())->activateForFirm($firmA);
+        // migration_projects now carries FORCE ROW LEVEL SECURITY (Wave 9);
+        // see the two tests above for the full rationale.
+        $visibleProjects = (new TenantContextService())->runWithFirmContext(
+            $firmA,
+            fn () => \App\Models\MigrationProject::query()->get()
+        );
 
-        $this->assertCount(1, \App\Models\MigrationProject::query()->get());
+        $this->assertCount(1, $visibleProjects);
     }
 }

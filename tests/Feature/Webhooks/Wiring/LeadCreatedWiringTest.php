@@ -57,8 +57,8 @@ class LeadCreatedWiringTest extends TestCase
         $batch = $this->batchService->create($firm, ImportEntityType::FirmLead, ImportSourceType::CsvUpload);
         $this->batchService->stageRows($batch, [$rowData]);
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
-        $this->service->confirmBatch($batch->fresh());
-        $this->service->apply($batch->fresh());
+        $confirmed = $this->service->confirmBatch($batch);
+        $this->service->apply($confirmed);
 
         return $firm;
     }

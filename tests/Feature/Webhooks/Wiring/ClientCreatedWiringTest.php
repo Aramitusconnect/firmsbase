@@ -96,8 +96,8 @@ class ClientCreatedWiringTest extends TestCase
         $batch = $batchService->create($firm, ImportEntityType::Client, ImportSourceType::CsvUpload);
         $batchService->stageRows($batch, [['display_name' => 'Imported Client']]);
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
-        $service->confirmBatch($batch->fresh());
-        $service->apply($batch->fresh());
+        $confirmed = $service->confirmBatch($batch);
+        $service->apply($confirmed);
 
         $this->assertDatabaseCount('webhook_events', 1);
         $this->assertDatabaseHas('webhook_events', ['event_type' => WebhookEventType::ClientCreated->value]);
@@ -114,8 +114,8 @@ class ClientCreatedWiringTest extends TestCase
         $batch = $batchService->create($firm, ImportEntityType::Client, ImportSourceType::CsvUpload);
         $batchService->stageRows($batch, [[]]); // no display_name -> throws inside the transaction
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
-        $service->confirmBatch($batch->fresh());
-        $service->apply($batch->fresh());
+        $confirmed = $service->confirmBatch($batch);
+        $service->apply($confirmed);
 
         $this->assertDatabaseCount('webhook_events', 0);
     }

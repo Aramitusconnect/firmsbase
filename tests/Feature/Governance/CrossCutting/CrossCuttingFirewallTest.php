@@ -203,7 +203,18 @@ class CrossCuttingFirewallTest extends TestCase
                 // Section 39A-3L, Checkpoint 24 (this batch, a later,
                 // distinct staged-FORCE-activation branch) legitimately
                 // added a notification_events-only FORCE RLS migration.
-                && $path !== 'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php',
+                && $path !== 'database/migrations/2026_08_25_930024_force_rls_on_notification_events_table.php'
+                // Section 39A-9 Wave 9 (migration/export domain)
+                // legitimately added six combined prepare-and-force
+                // migrations (export_jobs, migration_projects,
+                // import_batches, implementation_projects,
+                // fleet_migration_instance_status, offboarding_requests).
+                && $path !== 'database/migrations/2026_08_29_970001_prepare_row_level_security_and_force_rls_on_export_jobs_table.php'
+                && $path !== 'database/migrations/2026_08_29_970002_prepare_row_level_security_and_force_rls_on_migration_projects_table.php'
+                && $path !== 'database/migrations/2026_08_29_970003_prepare_row_level_security_and_force_rls_on_import_batches_table.php'
+                && $path !== 'database/migrations/2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php'
+                && $path !== 'database/migrations/2026_08_29_970005_prepare_row_level_security_and_force_rls_on_fleet_migration_instance_status_table.php'
+                && $path !== 'database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php',
         ));
     }
 

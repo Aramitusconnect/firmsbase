@@ -541,6 +541,50 @@ class SeedDataAuditFirewallTest extends TestCase
             'tests/Feature/Deployment/Health/DeploymentHealthEnvelopeServiceTest.php',
             'tests/Feature/SupportAccess/SupportAccessSessionServiceTest.php',
             'tests/Feature/Security/SupportAccess/EmergencySupportHighRiskApprovalTest.php',
+            // Section 39A-9 Wave 9 (the ninth coordinated multi-table
+            // wave, migration/export domain) legitimately added six
+            // combined prepare-and-force migrations (export_jobs,
+            // migration_projects, import_batches, implementation_projects,
+            // fleet_migration_instance_status, offboarding_requests),
+            // their six factories' context-hold fixes, a full per-firm-
+            // loop-and-merge rewrite of FleetMigrationOrchestrationService
+            // (fixing a genuine fail-open cross-firm authorization bug),
+            // a mandatory ImplementationTaskService signature change
+            // (complete()/skip()/block() now take an explicit
+            // ImplementationProject parameter), wired independent
+            // runWithFirmContext() wraps into ExportJobService,
+            // MigrationProjectService, ImportBatchService,
+            // ImportApplyService, ImportPreviewService,
+            // ImportRowValidationService, ImportRollbackService,
+            // ImplementationProjectService, and OffboardingRequestService,
+            // and updated the tests it affected.
+            'database/migrations/2026_08_29_970001_prepare_row_level_security_and_force_rls_on_export_jobs_table.php',
+            'database/migrations/2026_08_29_970002_prepare_row_level_security_and_force_rls_on_migration_projects_table.php',
+            'database/migrations/2026_08_29_970003_prepare_row_level_security_and_force_rls_on_import_batches_table.php',
+            'database/migrations/2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php',
+            'database/migrations/2026_08_29_970005_prepare_row_level_security_and_force_rls_on_fleet_migration_instance_status_table.php',
+            'database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php',
+            'database/factories/ExportJobFactory.php',
+            'database/factories/FleetMigrationInstanceStatusFactory.php',
+            'database/factories/ImplementationProjectFactory.php',
+            'database/factories/ImportBatchFactory.php',
+            'database/factories/MigrationProjectFactory.php',
+            'database/factories/OffboardingRequestFactory.php',
+            'app/Services/ExportJobService.php',
+            'app/Services/FleetMigrationOrchestrationService.php',
+            'app/Services/ImplementationProjectService.php',
+            'app/Services/ImplementationTaskService.php',
+            'app/Services/ImportBatchService.php',
+            'app/Services/ImportPreviewService.php',
+            'app/Services/ImportRowValidationService.php',
+            'app/Services/MigrationProjectService.php',
+            'tests/Feature/Deployment/Fleet/FleetMigrationOrchestrationServiceTest.php',
+            'tests/Feature/Implementation/ImplementationTaskServiceTest.php',
+            'tests/Feature/Imports/ImportBatchServiceTest.php',
+            'tests/Feature/Imports/ImportPreviewServiceTest.php',
+            'tests/Feature/Governance/Offboarding/OffboardingExportServiceTest.php',
+            'tests/Feature/TenantIsolation/ImportExportTenantIsolationTest.php',
+            'tests/Feature/Webhooks/Wiring/InvoiceCreatedWiringTest.php',
         ];
 
         $unexpected = array_values(array_filter(
@@ -964,6 +1008,50 @@ class SeedDataAuditFirewallTest extends TestCase
             'tests/Feature/Deployment/Health/DeploymentHealthEnvelopeServiceTest.php',
             'tests/Feature/SupportAccess/SupportAccessSessionServiceTest.php',
             'tests/Feature/Security/SupportAccess/EmergencySupportHighRiskApprovalTest.php',
+            // Section 39A-9 Wave 9 (the ninth coordinated multi-table
+            // wave, migration/export domain) legitimately added six
+            // combined prepare-and-force migrations (export_jobs,
+            // migration_projects, import_batches, implementation_projects,
+            // fleet_migration_instance_status, offboarding_requests),
+            // their six factories' context-hold fixes, a full per-firm-
+            // loop-and-merge rewrite of FleetMigrationOrchestrationService
+            // (fixing a genuine fail-open cross-firm authorization bug),
+            // a mandatory ImplementationTaskService signature change
+            // (complete()/skip()/block() now take an explicit
+            // ImplementationProject parameter), wired independent
+            // runWithFirmContext() wraps into ExportJobService,
+            // MigrationProjectService, ImportBatchService,
+            // ImportApplyService, ImportPreviewService,
+            // ImportRowValidationService, ImportRollbackService,
+            // ImplementationProjectService, and OffboardingRequestService,
+            // and updated the tests it affected.
+            'database/migrations/2026_08_29_970001_prepare_row_level_security_and_force_rls_on_export_jobs_table.php',
+            'database/migrations/2026_08_29_970002_prepare_row_level_security_and_force_rls_on_migration_projects_table.php',
+            'database/migrations/2026_08_29_970003_prepare_row_level_security_and_force_rls_on_import_batches_table.php',
+            'database/migrations/2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php',
+            'database/migrations/2026_08_29_970005_prepare_row_level_security_and_force_rls_on_fleet_migration_instance_status_table.php',
+            'database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php',
+            'database/factories/ExportJobFactory.php',
+            'database/factories/FleetMigrationInstanceStatusFactory.php',
+            'database/factories/ImplementationProjectFactory.php',
+            'database/factories/ImportBatchFactory.php',
+            'database/factories/MigrationProjectFactory.php',
+            'database/factories/OffboardingRequestFactory.php',
+            'app/Services/ExportJobService.php',
+            'app/Services/FleetMigrationOrchestrationService.php',
+            'app/Services/ImplementationProjectService.php',
+            'app/Services/ImplementationTaskService.php',
+            'app/Services/ImportBatchService.php',
+            'app/Services/ImportPreviewService.php',
+            'app/Services/ImportRowValidationService.php',
+            'app/Services/MigrationProjectService.php',
+            'tests/Feature/Deployment/Fleet/FleetMigrationOrchestrationServiceTest.php',
+            'tests/Feature/Implementation/ImplementationTaskServiceTest.php',
+            'tests/Feature/Imports/ImportBatchServiceTest.php',
+            'tests/Feature/Imports/ImportPreviewServiceTest.php',
+            'tests/Feature/Governance/Offboarding/OffboardingExportServiceTest.php',
+            'tests/Feature/TenantIsolation/ImportExportTenantIsolationTest.php',
+            'tests/Feature/Webhooks/Wiring/InvoiceCreatedWiringTest.php',
         ];
 
         return array_values(array_filter(

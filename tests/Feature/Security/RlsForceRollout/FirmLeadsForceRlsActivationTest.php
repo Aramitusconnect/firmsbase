@@ -678,10 +678,17 @@ class FirmLeadsForceRlsActivationTest extends TestCase
         $service = new ImportApplyService($documentSafetyService, $auditService);
 
         $batch = $batchService->create($firm, ImportEntityType::FirmLead, ImportSourceType::CsvUpload);
-        $batchService->stageRows($batch, [['name' => 'Imported Via Batch', 'email' => 'batch@example.test']]);
+        // import_batches gained permanent FORCE ROW LEVEL SECURITY in a
+        // later, separate wave (Section 39A-9 Wave 9); stageRows()'s own
+        // wrap already restores database session context to "none" by
+        // the time it returns, so a bare $batch->fresh() call afterward
+        // would return null. Chain stageRows()'s own already-fresh
+        // return value and each subsequent service call's own return
+        // value instead of an unwrapped re-fetch.
+        $batch = $batchService->stageRows($batch, [['name' => 'Imported Via Batch', 'email' => 'batch@example.test']]);
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
-        $service->confirmBatch($batch->fresh());
-        $service->apply($batch->fresh());
+        $confirmed = $service->confirmBatch($batch);
+        $service->apply($confirmed);
 
         $lead = $this->runWithFirmContext($firm, fn () => FirmLead::withoutGlobalScopes()->where('name', 'Imported Via Batch')->first());
 

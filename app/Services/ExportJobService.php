@@ -15,6 +15,12 @@ use App\ValueObjects\ExportGovernanceDecision;
  * created firm-scoped (project rule: "export jobs must be firm-scoped")
  * and is gated by ExportGovernancePolicyService BEFORE the job is
  * allowed to move past Requested.
+ *
+ * export_jobs carries FORCE ROW LEVEL SECURITY (see database/migrations/
+ * 2026_08_29_970001_prepare_row_level_security_and_force_rls_on_export_jobs_table.php),
+ * so every write here runs under a runWithFirmContext() wrap, keyed on
+ * the firm already known at each call site — never a nested self-wrap
+ * inside an already-active outer context.
  */
 class ExportJobService
 {
@@ -35,7 +41,7 @@ class ExportJobService
     ): ExportJob {
         $decision = $this->governancePolicyService->evaluate($firm, $hasActiveLegalHold, $retentionPeriodExpired, $firmIsOffboarding);
 
-        $job = ExportJob::create([
+        $job = (new TenantContextService())->runWithFirmContext($firm, fn () => ExportJob::create([
             'firm_id' => $firm->id,
             'export_type' => $exportType,
             'status' => $decision->allowed ? ExportJobStatus::Requested : ExportJobStatus::Blocked,
@@ -46,29 +52,35 @@ class ExportJobService
             'retention_checked' => true,
             'offboarding_checked' => true,
             'failed_reason' => $decision->allowed ? null : $decision->reason,
-        ]);
+        ]));
 
         return $job;
     }
 
     public function markInProgress(ExportJob $job): ExportJob
     {
-        $job->update(['status' => ExportJobStatus::InProgress, 'started_at' => now()]);
+        return (new TenantContextService())->runWithFirmContext($job->firm_id, function () use ($job) {
+            $job->update(['status' => ExportJobStatus::InProgress, 'started_at' => now()]);
 
-        return $job->fresh();
+            return $job->fresh();
+        });
     }
 
     public function markCompleted(ExportJob $job): ExportJob
     {
-        $job->update(['status' => ExportJobStatus::Completed, 'completed_at' => now()]);
+        return (new TenantContextService())->runWithFirmContext($job->firm_id, function () use ($job) {
+            $job->update(['status' => ExportJobStatus::Completed, 'completed_at' => now()]);
 
-        return $job->fresh();
+            return $job->fresh();
+        });
     }
 
     public function markFailed(ExportJob $job, string $reason): ExportJob
     {
-        $job->update(['status' => ExportJobStatus::Failed, 'failed_reason' => $reason]);
+        return (new TenantContextService())->runWithFirmContext($job->firm_id, function () use ($job, $reason) {
+            $job->update(['status' => ExportJobStatus::Failed, 'failed_reason' => $reason]);
 
-        return $job->fresh();
+            return $job->fresh();
+        });
     }
 }

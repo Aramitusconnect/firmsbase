@@ -38,31 +38,36 @@ class ImportRollbackServiceTest extends TestCase
 
     public function test_rollback_deletes_the_applied_production_record(): void
     {
+        // import_batches now carries FORCE ROW LEVEL SECURITY (Wave 9).
+        // Each writer service already restores database session context
+        // to "none" once its own wrap exits, so a bare $batch->fresh()
+        // call afterward would return null. Chain each service's own
+        // already-fresh return value instead of re-fetching unwrapped.
         $firm = Firm::factory()->create();
         $batch = $this->batchService->create($firm, ImportEntityType::Client, ImportSourceType::CsvUpload);
-        $this->batchService->stageRows($batch, [['display_name' => 'To Roll Back']]);
+        $batch = $this->batchService->stageRows($batch, [['display_name' => 'To Roll Back']]);
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
-        $this->applyService->confirmBatch($batch->fresh());
-        $this->applyService->apply($batch->fresh());
+        $confirmed = $this->applyService->confirmBatch($batch);
+        $applied = $this->applyService->apply($confirmed);
 
         $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('clients', ['firm_id' => $firm->id, 'display_name' => 'To Roll Back']));
 
-        $this->rollbackService->rollbackBatch($batch->fresh());
+        $rolledBack = $this->rollbackService->rollbackBatch($applied);
 
         $this->runWithFirmContext($firm, fn () => $this->assertDatabaseMissing('clients', ['firm_id' => $firm->id, 'display_name' => 'To Roll Back']));
-        $this->assertSame(ImportBatchStatus::RolledBack, $batch->fresh()->status);
+        $this->assertSame(ImportBatchStatus::RolledBack, $rolledBack->status);
     }
 
     public function test_rollback_marks_rollback_records_rolled_back(): void
     {
         $firm = Firm::factory()->create();
         $batch = $this->batchService->create($firm, ImportEntityType::Client, ImportSourceType::CsvUpload);
-        $this->batchService->stageRows($batch, [['display_name' => 'Client One']]);
+        $batch = $this->batchService->stageRows($batch, [['display_name' => 'Client One']]);
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
-        $this->applyService->confirmBatch($batch->fresh());
-        $this->applyService->apply($batch->fresh());
+        $confirmed = $this->applyService->confirmBatch($batch);
+        $applied = $this->applyService->apply($confirmed);
 
-        $this->rollbackService->rollbackBatch($batch->fresh());
+        $this->rollbackService->rollbackBatch($applied);
 
         $this->assertDatabaseHas('import_rollback_records', ['import_batch_id' => $batch->id, 'status' => RollbackRecordStatus::RolledBack->value]);
     }

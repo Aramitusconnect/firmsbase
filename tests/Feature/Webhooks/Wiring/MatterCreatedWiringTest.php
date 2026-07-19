@@ -58,8 +58,8 @@ class MatterCreatedWiringTest extends TestCase
             'matter_type_id' => $matterType->id,
         ]]);
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
-        $this->service->confirmBatch($batch->fresh());
-        $this->service->apply($batch->fresh());
+        $confirmed = $this->service->confirmBatch($batch);
+        $this->service->apply($confirmed);
 
         $this->assertDatabaseCount('webhook_events', 1);
         $this->assertDatabaseHas('webhook_events', ['event_type' => WebhookEventType::MatterCreated->value]);
@@ -75,8 +75,8 @@ class MatterCreatedWiringTest extends TestCase
         $batch = $this->batchService->create($firm, ImportEntityType::Matter, ImportSourceType::CsvUpload);
         $this->batchService->stageRows($batch, [[]]); // missing every required field -> throws
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
-        $this->service->confirmBatch($batch->fresh());
-        $this->service->apply($batch->fresh());
+        $confirmed = $this->service->confirmBatch($batch);
+        $this->service->apply($confirmed);
 
         $this->assertDatabaseCount('webhook_events', 0);
     }
@@ -99,8 +99,8 @@ class MatterCreatedWiringTest extends TestCase
             'matter_type_id' => $matterType->id,
         ]]);
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
-        $this->service->confirmBatch($batch->fresh());
-        $this->service->apply($batch->fresh());
+        $confirmed = $this->service->confirmBatch($batch);
+        $this->service->apply($confirmed);
 
         $this->assertDatabaseHas('matters', ['client_id' => $client->id]);
         $this->assertDatabaseHas('import_rows', ['status' => ImportRowStatus::Applied->value]);

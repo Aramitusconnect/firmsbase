@@ -5,6 +5,7 @@ namespace Tests\Feature\Governance\Offboarding;
 use App\Enums\OffboardingExportStatus;
 use App\Services\OffboardingExportService;
 use App\Services\OffboardingRequestService;
+use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\Governance\Concerns\SetsUpGovernanceFirm;
 use Tests\TestCase;
@@ -33,7 +34,13 @@ class OffboardingExportServiceTest extends TestCase
 
         $this->assertNotEmpty($export->package_manifest_json);
         $this->assertSame(OffboardingExportStatus::Generated, $export->status);
-        $this->assertDatabaseHas('export_jobs', ['id' => $export->export_job_id]);
+        // export_jobs now has permanent FORCE ROW LEVEL SECURITY
+        // (Section 39A-5 Wave 9) — a raw assertDatabaseHas() query runs
+        // with no ambient context, so it must be wrapped to see the row.
+        (new TenantContextService())->runWithFirmContext(
+            $firm,
+            fn () => $this->assertDatabaseHas('export_jobs', ['id' => $export->export_job_id]),
+        );
         // simulated_storage_path is metadata only — assert the linked
         // export_files convention is untouched (no real file write API
         // was called; ExportJobService/ExportFile own that guarantee).

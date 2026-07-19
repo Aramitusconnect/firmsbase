@@ -82,6 +82,24 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         'app/Services/SupportAccessSessionService.php',
         'app/Services/DeploymentHealthEnvelopeService.php',
         'app/Services/AccessReviewService.php',
+        // Section 39A-9 Wave 9 (this batch, a later, distinct
+        // coordinated multi-table RLS-activation wave covering the
+        // migration/export domain) legitimately wired independent
+        // runWithFirmContext() wraps into every one of these services,
+        // since export_jobs, migration_projects, import_batches,
+        // implementation_projects, fleet_migration_instance_status, and
+        // offboarding_requests all now have permanent FORCE ROW LEVEL
+        // SECURITY. (ImportApplyService.php, ImportRollbackService.php,
+        // and OffboardingRequestService.php were already allowed above
+        // from earlier waves and needed no new entry here.)
+        'app/Services/ExportJobService.php',
+        'app/Services/FleetMigrationOrchestrationService.php',
+        'app/Services/ImplementationProjectService.php',
+        'app/Services/ImplementationTaskService.php',
+        'app/Services/ImportBatchService.php',
+        'app/Services/ImportPreviewService.php',
+        'app/Services/ImportRowValidationService.php',
+        'app/Services/MigrationProjectService.php',
     ];
 
     /**
@@ -514,6 +532,25 @@ class EmergencySupportApprovalFirewallTest extends TestCase
             'tests/Feature/Deployment/Health/DeploymentHealthEnvelopeServiceTest.php',
             'tests/Feature/SupportAccess/SupportAccessSessionServiceTest.php',
             'tests/Feature/Security/RlsForceRollout/TimelineEventsForceRlsActivationTest.php',
+            // Section 39A-9 Wave 9 (migration/export domain) legitimately
+            // added six combined prepare-and-force migrations (export_jobs,
+            // migration_projects, import_batches, implementation_projects,
+            // fleet_migration_instance_status, offboarding_requests), their
+            // six factories' context-hold fixes, and updated the tests it
+            // affected. The wired service files themselves are allowed via
+            // ALLOWED_MODIFIED_FILES above.
+            'database/migrations/2026_08_29_970001_prepare_row_level_security_and_force_rls_on_export_jobs_table.php',
+            'database/migrations/2026_08_29_970002_prepare_row_level_security_and_force_rls_on_migration_projects_table.php',
+            'database/migrations/2026_08_29_970003_prepare_row_level_security_and_force_rls_on_import_batches_table.php',
+            'database/migrations/2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php',
+            'database/migrations/2026_08_29_970005_prepare_row_level_security_and_force_rls_on_fleet_migration_instance_status_table.php',
+            'database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php',
+            'database/factories/ExportJobFactory.php',
+            'database/factories/FleetMigrationInstanceStatusFactory.php',
+            'database/factories/ImplementationProjectFactory.php',
+            'database/factories/ImportBatchFactory.php',
+            'database/factories/MigrationProjectFactory.php',
+            'database/factories/OffboardingRequestFactory.php',
         ];
 
         return array_values(array_filter(

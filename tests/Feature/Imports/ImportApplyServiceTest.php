@@ -36,11 +36,16 @@ class ImportApplyServiceTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $batch = $this->batchService->create($firm, ImportEntityType::Client, ImportSourceType::CsvUpload);
-        $this->batchService->stageRows($batch, [['display_name' => 'Applied Client']]);
+        // import_batches now carries FORCE ROW LEVEL SECURITY (Wave 9).
+        // Each writer service already restores database session context
+        // to "none" once its own wrap exits, so a bare $batch->fresh()
+        // call afterward would return null. Chain each service's own
+        // already-fresh return value instead of re-fetching unwrapped.
+        $batch = $this->batchService->stageRows($batch, [['display_name' => 'Applied Client']]);
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
 
-        $this->service->confirmBatch($batch->fresh());
-        $applied = $this->service->apply($batch->fresh());
+        $confirmed = $this->service->confirmBatch($batch);
+        $applied = $this->service->apply($confirmed);
 
         $this->assertSame(ImportBatchStatus::Applied, $applied->status);
         $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('clients', ['firm_id' => $firm->id, 'display_name' => 'Applied Client']));
@@ -54,10 +59,13 @@ class ImportApplyServiceTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $batch = $this->batchService->create($firm, ImportEntityType::Client, ImportSourceType::CsvUpload);
-        $this->batchService->stageRows($batch, [['display_name' => 'Never Applied']]);
+        // Chain stageRows()'s own already-fresh return value rather than
+        // a bare, unwrapped $batch->fresh() re-fetch (see the comment on
+        // the first test in this file for the full FORCE RLS rationale).
+        $batch = $this->batchService->stageRows($batch, [['display_name' => 'Never Applied']]);
         // Deliberately left in Staged status — never validated/confirmed.
 
-        $this->service->apply($batch->fresh());
+        $this->service->apply($batch);
 
         $this->assertDatabaseCount('clients', 0);
     }
@@ -66,11 +74,11 @@ class ImportApplyServiceTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $batch = $this->batchService->create($firm, ImportEntityType::Client, ImportSourceType::CsvUpload);
-        $this->batchService->stageRows($batch, [['display_name' => 'Rollback Me']]);
+        $batch = $this->batchService->stageRows($batch, [['display_name' => 'Rollback Me']]);
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
-        $this->service->confirmBatch($batch->fresh());
+        $confirmed = $this->service->confirmBatch($batch);
 
-        $this->service->apply($batch->fresh());
+        $this->service->apply($confirmed);
 
         $this->assertDatabaseHas('import_rollback_records', ['import_batch_id' => $batch->id, 'status' => 'pending']);
     }
@@ -79,11 +87,11 @@ class ImportApplyServiceTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $batch = $this->batchService->create($firm, ImportEntityType::Client, ImportSourceType::CsvUpload);
-        $this->batchService->stageRows($batch, [[]]); // no display_name at all
+        $batch = $this->batchService->stageRows($batch, [[]]); // no display_name at all
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
-        $this->service->confirmBatch($batch->fresh());
+        $confirmed = $this->service->confirmBatch($batch);
 
-        $this->service->apply($batch->fresh());
+        $this->service->apply($confirmed);
 
         $row = $batch->rows()->first();
         $this->assertSame(ImportRowStatus::Failed, $row->status);
@@ -103,11 +111,11 @@ class ImportApplyServiceTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $batch = $this->batchService->create($firm, ImportEntityType::Contact, ImportSourceType::CsvUpload);
-        $this->batchService->stageRows($batch, [['name' => 'Applied Contact', 'email' => 'applied.contact@example.test']]);
+        $batch = $this->batchService->stageRows($batch, [['name' => 'Applied Contact', 'email' => 'applied.contact@example.test']]);
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
 
-        $this->service->confirmBatch($batch->fresh());
-        $applied = $this->service->apply($batch->fresh());
+        $confirmed = $this->service->confirmBatch($batch);
+        $applied = $this->service->apply($confirmed);
 
         $this->assertSame(ImportBatchStatus::Applied, $applied->status);
         $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('contacts', [
@@ -126,11 +134,11 @@ class ImportApplyServiceTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $batch = $this->batchService->create($firm, ImportEntityType::Party, ImportSourceType::CsvUpload);
-        $this->batchService->stageRows($batch, [['name' => 'Applied Party', 'entity_type' => 'individual']]);
+        $batch = $this->batchService->stageRows($batch, [['name' => 'Applied Party', 'entity_type' => 'individual']]);
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
 
-        $this->service->confirmBatch($batch->fresh());
-        $applied = $this->service->apply($batch->fresh());
+        $confirmed = $this->service->confirmBatch($batch);
+        $applied = $this->service->apply($confirmed);
 
         $this->assertSame(ImportBatchStatus::Applied, $applied->status);
         $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('parties', [
@@ -148,11 +156,11 @@ class ImportApplyServiceTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $batch = $this->batchService->create($firm, ImportEntityType::Template, ImportSourceType::CsvUpload);
-        $this->batchService->stageRows($batch, [['name' => 'Some template']]);
+        $batch = $this->batchService->stageRows($batch, [['name' => 'Some template']]);
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
-        $this->service->confirmBatch($batch->fresh());
+        $confirmed = $this->service->confirmBatch($batch);
 
-        $this->service->apply($batch->fresh());
+        $this->service->apply($confirmed);
 
         $row = $batch->rows()->first();
         $this->assertSame(ImportRowStatus::Skipped, $row->status);

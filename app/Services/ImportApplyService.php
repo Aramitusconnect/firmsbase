@@ -72,29 +72,34 @@ class ImportApplyService
 
     public function confirmBatch(ImportBatch $batch): ImportBatch
     {
-        $batch->rows()->where('status', ImportRowStatus::Validated->value)->update(['status' => ImportRowStatus::Confirmed->value]);
+        return (new TenantContextService())->runWithFirmContext($batch->firm_id, function () use ($batch) {
+            $batch->rows()->where('status', ImportRowStatus::Validated->value)->update(['status' => ImportRowStatus::Confirmed->value]);
 
-        $batch->update(['status' => ImportBatchStatus::Confirmed, 'confirmed_at' => now()]);
+            $batch->update(['status' => ImportBatchStatus::Confirmed, 'confirmed_at' => now()]);
 
-        $this->auditService->record($batch, ImportAuditEventType::BatchConfirmed);
+            $this->auditService->record($batch, ImportAuditEventType::BatchConfirmed);
 
-        return $batch->fresh();
+            return $batch->fresh();
+        });
     }
 
     public function apply(ImportBatch $batch): ImportBatch
     {
         $firm = $batch->firm;
-        $batch->update(['status' => ImportBatchStatus::Applying]);
 
-        foreach ($batch->rows()->where('status', ImportRowStatus::Confirmed->value)->get() as $row) {
-            $this->applyRow($firm, $batch, $row);
-        }
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $batch) {
+            $batch->update(['status' => ImportBatchStatus::Applying]);
 
-        $batch->update(['status' => ImportBatchStatus::Applied, 'applied_at' => now()]);
+            foreach ($batch->rows()->where('status', ImportRowStatus::Confirmed->value)->get() as $row) {
+                $this->applyRow($firm, $batch, $row);
+            }
 
-        $this->auditService->record($batch, ImportAuditEventType::ApplyCompleted);
+            $batch->update(['status' => ImportBatchStatus::Applied, 'applied_at' => now()]);
 
-        return $batch->fresh();
+            $this->auditService->record($batch, ImportAuditEventType::ApplyCompleted);
+
+            return $batch->fresh();
+        });
     }
 
     private function applyRow(Firm $firm, ImportBatch $batch, ImportRow $row): void

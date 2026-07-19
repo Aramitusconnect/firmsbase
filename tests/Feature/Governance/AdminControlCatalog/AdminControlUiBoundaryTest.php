@@ -310,7 +310,34 @@ class AdminControlUiBoundaryTest extends TestCase
                 // before this batch.
                 && $path !== 'database/factories/ContactFactory.php'
                 && $path !== 'database/factories/PartyFactory.php'
-                && $path !== 'tests/Feature/Imports/ImportDuplicateDetectionServiceTest.php',
+                && $path !== 'tests/Feature/Imports/ImportDuplicateDetectionServiceTest.php'
+                // Section 39A-9 Wave 9 (migration/export domain)
+                // legitimately added six combined prepare-and-force
+                // migrations (export_jobs, migration_projects,
+                // import_batches, implementation_projects,
+                // fleet_migration_instance_status, offboarding_requests),
+                // their six factories' context-hold fixes
+                // (app/Services/ is already excluded above, so only the
+                // migration/factory/affected tests need listing here),
+                // and updated the tests it affected.
+                && $path !== 'database/migrations/2026_08_29_970001_prepare_row_level_security_and_force_rls_on_export_jobs_table.php'
+                && $path !== 'database/migrations/2026_08_29_970002_prepare_row_level_security_and_force_rls_on_migration_projects_table.php'
+                && $path !== 'database/migrations/2026_08_29_970003_prepare_row_level_security_and_force_rls_on_import_batches_table.php'
+                && $path !== 'database/migrations/2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php'
+                && $path !== 'database/migrations/2026_08_29_970005_prepare_row_level_security_and_force_rls_on_fleet_migration_instance_status_table.php'
+                && $path !== 'database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php'
+                && $path !== 'database/factories/ExportJobFactory.php'
+                && $path !== 'database/factories/FleetMigrationInstanceStatusFactory.php'
+                && $path !== 'database/factories/ImplementationProjectFactory.php'
+                && $path !== 'database/factories/ImportBatchFactory.php'
+                && $path !== 'database/factories/MigrationProjectFactory.php'
+                && $path !== 'database/factories/OffboardingRequestFactory.php'
+                && $path !== 'tests/Feature/Deployment/Fleet/FleetMigrationOrchestrationServiceTest.php'
+                && $path !== 'tests/Feature/Implementation/ImplementationTaskServiceTest.php'
+                && $path !== 'tests/Feature/Imports/ImportBatchServiceTest.php'
+                && $path !== 'tests/Feature/Imports/ImportPreviewServiceTest.php'
+                && $path !== 'tests/Feature/TenantIsolation/ImportExportTenantIsolationTest.php'
+                && $path !== 'tests/Feature/Webhooks/Wiring/InvoiceCreatedWiringTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

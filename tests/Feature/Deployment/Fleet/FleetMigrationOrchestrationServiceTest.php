@@ -7,10 +7,22 @@ use App\Enums\FleetMigrationInstanceStatus as InstanceStatus;
 use App\Enums\FleetMigrationRunStatus;
 use App\Models\User;
 use App\Services\FleetMigrationOrchestrationService;
+use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\Deployment\Concerns\SetsUpDeploymentFirm;
 use Tests\TestCase;
 
+/**
+ * fleet_migration_instance_status now carries FORCE ROW LEVEL SECURITY
+ * (Wave 9, see database/migrations/2026_08_29_970005_prepare_row_level_
+ * security_and_force_rls_on_fleet_migration_instance_status_table.php).
+ * Every raw assertDatabaseHas()/assertDatabaseMissing() call against
+ * this table below is now wrapped in the relevant firm's own ambient
+ * context, since those helpers issue a plain DB query subject to the
+ * same policy as any other read — the orchestration service's own
+ * writer-side wraps (already exercised above each assertion) always
+ * restore context to "none" once they return.
+ */
 class FleetMigrationOrchestrationServiceTest extends TestCase
 {
     use RefreshDatabase, SetsUpDeploymentFirm;
@@ -32,9 +44,10 @@ class FleetMigrationOrchestrationServiceTest extends TestCase
 
         $run = $this->service->createRun('2026_08_01_000000_example', $initiator);
 
-        $this->assertDatabaseHas('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $dedicated->id, 'status' => InstanceStatus::Pending->value]);
-        $this->assertDatabaseHas('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $private->id, 'status' => InstanceStatus::Pending->value]);
-        $this->assertDatabaseMissing('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $saas->id]);
+        $tenantContext = new TenantContextService();
+        $tenantContext->runWithFirmContext($dedicated, fn () => $this->assertDatabaseHas('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $dedicated->id, 'status' => InstanceStatus::Pending->value]));
+        $tenantContext->runWithFirmContext($private, fn () => $this->assertDatabaseHas('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $private->id, 'status' => InstanceStatus::Pending->value]));
+        $tenantContext->runWithFirmContext($saas, fn () => $this->assertDatabaseMissing('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $saas->id]));
     }
 
     public function test_one_failure_halts_the_run_and_skips_remaining_pending_instances(): void
@@ -53,9 +66,10 @@ class FleetMigrationOrchestrationServiceTest extends TestCase
         $run = $run->fresh();
 
         $this->assertSame(FleetMigrationRunStatus::Halted, $run->status);
-        $this->assertDatabaseHas('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $firmA->id, 'status' => InstanceStatus::Applied->value]);
-        $this->assertDatabaseHas('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $firmB->id, 'status' => InstanceStatus::Failed->value]);
-        $this->assertDatabaseHas('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $firmC->id, 'status' => InstanceStatus::Skipped->value]);
+        $tenantContext = new TenantContextService();
+        $tenantContext->runWithFirmContext($firmA, fn () => $this->assertDatabaseHas('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $firmA->id, 'status' => InstanceStatus::Applied->value]));
+        $tenantContext->runWithFirmContext($firmB, fn () => $this->assertDatabaseHas('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $firmB->id, 'status' => InstanceStatus::Failed->value]));
+        $tenantContext->runWithFirmContext($firmC, fn () => $this->assertDatabaseHas('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $firmC->id, 'status' => InstanceStatus::Skipped->value]));
     }
 
     public function test_rollback_marks_already_applied_instances_rolled_back(): void
@@ -73,10 +87,11 @@ class FleetMigrationOrchestrationServiceTest extends TestCase
         $run = $this->service->rollback($run->fresh());
 
         $this->assertSame(FleetMigrationRunStatus::RolledBack, $run->status);
-        $this->assertDatabaseHas('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $firmA->id, 'status' => InstanceStatus::RolledBack->value]);
+        $tenantContext = new TenantContextService();
+        $tenantContext->runWithFirmContext($firmA, fn () => $this->assertDatabaseHas('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $firmA->id, 'status' => InstanceStatus::RolledBack->value]));
         // firmB was Failed, not Applied — rollback never touches a
         // Failed row.
-        $this->assertDatabaseHas('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $firmB->id, 'status' => InstanceStatus::Failed->value]);
+        $tenantContext->runWithFirmContext($firmB, fn () => $this->assertDatabaseHas('fleet_migration_instance_status', ['fleet_migration_run_id' => $run->id, 'firm_id' => $firmB->id, 'status' => InstanceStatus::Failed->value]));
     }
 
     public function test_a_fully_successful_run_can_complete(): void

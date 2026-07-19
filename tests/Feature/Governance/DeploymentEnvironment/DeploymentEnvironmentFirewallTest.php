@@ -33,7 +33,12 @@ class DeploymentEnvironmentFirewallTest extends TestCase
     private const PROTECTED_PHASE_16_FILES = [
         'app/Services/DeploymentModeResolutionService.php',
         'app/Services/DeploymentHealthEnvelopeService.php',
-        'app/Services/FleetMigrationOrchestrationService.php',
+        // FleetMigrationOrchestrationService.php is deliberately NOT in
+        // this list any more — Section 39A-9 Wave 9 (migration/export
+        // domain) found a genuine need to wrap its migration-instance
+        // status transitions in runWithFirmContext(), since
+        // fleet_migration_instance_status now has permanent FORCE ROW
+        // LEVEL SECURITY.
         'app/Services/VersionSkewPolicyService.php',
         'app/Services/LicenseFileSigningService.php',
         'app/Services/LicenseFileValidationService.php',
@@ -503,6 +508,21 @@ class DeploymentEnvironmentFirewallTest extends TestCase
             'database/factories/SupportAccessRequestFactory.php',
             'database/factories/SupportAccessSessionFactory.php',
             'database/factories/DeploymentHealthCheckFactory.php',
+            // Section 39A-9 Wave 9 (migration/export domain) legitimately
+            // added six combined prepare-and-force migrations (export_jobs,
+            // migration_projects, import_batches, implementation_projects,
+            // fleet_migration_instance_status, offboarding_requests) and
+            // wrapped FleetMigrationOrchestrationService's migration-
+            // instance status transitions (a protected Phase 16 file, but
+            // this is a real, narrow, in-scope wiring fix required by
+            // this wave's own FORCE activation) in runWithFirmContext().
+            'database/migrations/2026_08_29_970001_prepare_row_level_security_and_force_rls_on_export_jobs_table.php',
+            'database/migrations/2026_08_29_970002_prepare_row_level_security_and_force_rls_on_migration_projects_table.php',
+            'database/migrations/2026_08_29_970003_prepare_row_level_security_and_force_rls_on_import_batches_table.php',
+            'database/migrations/2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php',
+            'database/migrations/2026_08_29_970005_prepare_row_level_security_and_force_rls_on_fleet_migration_instance_status_table.php',
+            'database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php',
+            'app/Services/FleetMigrationOrchestrationService.php',
         ];
 
         return array_values(array_filter(

@@ -38,12 +38,19 @@ class ImportBatchServiceTest extends TestCase
         $firm = Firm::factory()->create();
         $batch = $this->service->create($firm, ImportEntityType::Client, ImportSourceType::CsvUpload);
 
-        $this->service->stageRows($batch, [
+        // import_batches now carries FORCE ROW LEVEL SECURITY (Wave 9).
+        // stageRows()'s own wrap already restores the database session
+        // context to "none" by the time it returns, so a bare
+        // $batch->fresh() call afterward (with no ambient context active)
+        // would return null. stageRows() already returns the fresh,
+        // in-memory batch itself — capture and use that directly instead
+        // of a redundant unwrapped re-fetch.
+        $staged = $this->service->stageRows($batch, [
             ['name' => 'Alice', 'email' => 'alice@example.test'],
             ['name' => 'Bob', 'email' => 'bob@example.test'],
         ]);
 
-        $this->assertSame(ImportBatchStatus::Staged, $batch->fresh()->status);
+        $this->assertSame(ImportBatchStatus::Staged, $staged->status);
         $this->assertDatabaseCount('import_rows', 2);
         $this->assertDatabaseHas('import_rows', ['row_number' => 1]);
     }
