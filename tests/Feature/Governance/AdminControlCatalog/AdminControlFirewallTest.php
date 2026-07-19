@@ -120,7 +120,19 @@ class AdminControlFirewallTest extends TestCase
         // (InvalidArgumentException) was added as the application-layer
         // analogue of a composite-FK check.
         'app/Services/PermissionMatrixMappingService.php',
-        'app/Services/DeploymentModeCoverageMappingService.php',
+        // DeploymentModeCoverageMappingService.php is deliberately
+        // NOT in this list any more — Section 39A-5 Wave 11 (the
+        // final wave of the 60-table RLS rollout) found a genuine
+        // need to correct this service's own governance notes text,
+        // which had gone self-contradictory once
+        // MISSING_PREPARED_TABLES became genuinely empty (the notes
+        // cited an uncovered-table count as the reason a control was
+        // not yet Implemented, but that count is now zero) — the
+        // PartiallyImplemented status itself was not changed, only
+        // the stated reasons, which now correctly cite the other
+        // still-genuinely-open items (cross-firm-pivot-mismatch
+        // remediation, firms root-table policy, support-access
+        // policy shape, offboarding_exports classification).
         'app/Services/OperationalReadinessMappingService.php',
         'app/Services/FirmCommandCenterAggregationService.php',
         'app/Services/TemplatePackCoverageMappingService.php',

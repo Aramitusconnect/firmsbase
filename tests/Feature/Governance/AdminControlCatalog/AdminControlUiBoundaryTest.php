@@ -45,6 +45,12 @@ class AdminControlUiBoundaryTest extends TestCase
             fn (string $path) => $path !== 'database/seeders/DatabaseSeeder.php'
                 && $path !== 'database/migrations/2026_07_29_900001_add_firm_user_2fa_mode_to_firm_settings_table.php'
                 && $path !== 'app/Models/FirmSettings.php'
+                // Section 39A-5 Wave 11 (the final wave of the 60-table
+                // RLS rollout) legitimately updated the shared gap
+                // registry doc once every table was moved into
+                // PREPARED_TABLES — a governance-doc update, not a
+                // catalog/UI change.
+                && $path !== 'docs/governance/rls-gap-registry.md'
                 && ! str_starts_with($path, 'app/Services/')
                 && ! str_starts_with($path, 'tests/Feature/Governance/')
                 && ! str_starts_with($path, 'tests/Feature/Security/')

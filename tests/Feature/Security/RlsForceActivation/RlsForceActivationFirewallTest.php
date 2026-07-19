@@ -170,6 +170,11 @@ class RlsForceActivationFirewallTest extends TestCase
             // accounting domain, 10 tables implemented as one combined
             // unit) —
             'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests',
+            // Narrowly updated AGAIN by Section 39A-5 Wave 11 (webhooks
+            // domain, the final wave of the 60-table rollout, 5 tables
+            // implemented as one combined unit) — this test's own scope
+            // (39A-3A) only asserts clients here.
+            'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

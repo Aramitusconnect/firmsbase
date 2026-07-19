@@ -45,14 +45,31 @@ class FinalExecutiveRecommendationFirewallTest extends TestCase
         'app/Services/AccessibilityCoverageMappingService.php',
         'app/Services/ClientPortalAccessibilityReadinessService.php',
         'app/Services/DataModelContractMappingService.php',
-        'app/Services/RowLevelSecurityCoverageMappingService.php',
+        // RowLevelSecurityCoverageMappingService.php is
+        // deliberately NOT in this list any more — Section 39A-5
+        // Wave 11 (the final wave of the 60-table RLS rollout)
+        // found a genuine need to update the shared RLS coverage
+        // registry once every table was moved into PREPARED_TABLES
+        // and MISSING_PREPARED_TABLES became genuinely empty.
         'app/Services/IdempotencyKeyCoverageMappingService.php',
         'app/Services/PermissionMatrixMappingService.php',
         'app/Services/LegalSpecialistConsistencyMappingService.php',
-        'app/Services/TestCoverageMappingService.php',
         'app/Services/ReleaseChecklistReadinessService.php',
         'app/Services/DefinitionOfDoneReadinessService.php',
-        'app/Services/DeploymentModeCoverageMappingService.php',
+        // TestCoverageMappingService.php and
+        // DeploymentModeCoverageMappingService.php are deliberately
+        // NOT in this list any more — Section 39A-5 Wave 11 (the
+        // final wave of the 60-table RLS rollout) found a genuine
+        // need to correct these two services' own governance notes
+        // text, which had gone self-contradictory once
+        // MISSING_PREPARED_TABLES became genuinely empty (the notes
+        // cited an uncovered-table count as the reason a control was
+        // not yet Implemented, but that count is now zero) — the
+        // PartiallyImplemented status itself was not changed, only
+        // the stated reasons, which now correctly cite the other
+        // still-genuinely-open items (cross-firm-pivot-mismatch
+        // remediation, firms root-table policy, support-access
+        // policy shape, offboarding_exports classification).
         'app/Services/OperationalReadinessMappingService.php',
         'app/Services/MobilePortalCoverageMappingService.php',
         'app/Services/FirmCommandCenterAggregationService.php',

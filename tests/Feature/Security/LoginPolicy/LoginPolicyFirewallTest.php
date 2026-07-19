@@ -232,7 +232,12 @@ class LoginPolicyFirewallTest extends TestCase
             // SECURITY in that checkpoint. Only the docblock changed —
             // no method logic in this file was touched.
             'database/seeders/DatabaseSeeder.php',
-            'app/Services/RowLevelSecurityCoverageMappingService.php',
+            // RowLevelSecurityCoverageMappingService.php is
+            // deliberately NOT in this list any more — Section 39A-5
+            // Wave 11 (the final wave of the 60-table RLS rollout)
+            // found a genuine need to update the shared RLS coverage
+            // registry once every table was moved into PREPARED_TABLES
+            // and MISSING_PREPARED_TABLES became genuinely empty.
             // PaymentClassificationService.php is deliberately NOT in
             // this list any more — Section 39A-3H (a later, distinct
             // staged-FORCE-activation branch) found a genuine need to

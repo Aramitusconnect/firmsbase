@@ -652,6 +652,18 @@ class RlsForceRolloutFirewallTest extends TestCase
             'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances',
             'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events',
             'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests',
+            // Narrowly updated AGAIN by Section 39A-5 Wave 11 — the
+            // eleventh and FINAL coordinated multi-table wave of this
+            // arc, covering the webhooks domain (webhook_deliveries,
+            // webhook_delivery_attempts, webhook_events,
+            // webhook_secrets, webhook_subscriptions) implemented as
+            // one combined unit — extends the "exactly these tables
+            // are forced" list from one hundred eight to one hundred
+            // thirteen — same additive-only pattern, no existing
+            // assertion removed or weakened. This closes the entire
+            // 60-table RLS backlog.
+            'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events',
+            'webhook_secrets', 'webhook_subscriptions',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

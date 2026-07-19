@@ -46,7 +46,12 @@ class SeedDataAuditFirewallTest extends TestCase
     private const PROTECTED_FILES = [
         'app/Services/ComplianceGapRegistryService.php',
         'app/ValueObjects/GapRegisterItem.php',
-        'app/Services/RowLevelSecurityCoverageMappingService.php',
+        // RowLevelSecurityCoverageMappingService.php is deliberately
+        // NOT in this list any more — Section 39A-5 Wave 11 (the final
+        // wave of the 60-table RLS rollout) found a genuine need to
+        // update the shared RLS coverage registry once every table was
+        // moved into PREPARED_TABLES and MISSING_PREPARED_TABLES
+        // became genuinely empty.
         'app/Services/SupportAccessPolicyService.php',
         // SupportAccessRequestService.php is deliberately NOT in this
         // list any more — Section 39A-8 Wave 8 found a genuine need to
@@ -161,6 +166,19 @@ class SeedDataAuditFirewallTest extends TestCase
             // fixed a stale git-diff assumption in Section 39B's own
             // firewall test.
             'tests/Feature/Security/FirmUser2fa/FirmUser2faFirewallTest.php',
+            // Section 39A-5 Wave 11 (the final wave of the 60-table RLS
+            // rollout) legitimately updated the shared RLS coverage
+            // mapping service and its own governance test once every
+            // table was moved into PREPARED_TABLES.
+            'app/Services/RowLevelSecurityCoverageMappingService.php',
+            'tests/Feature/Governance/DataModelContract/RowLevelSecurityCoverageMappingServiceTest.php',
+            // Same Wave 11 pass also corrected these two services' own
+            // governance notes text, which had gone self-contradictory
+            // once MISSING_PREPARED_TABLES became genuinely empty — the
+            // PartiallyImplemented status itself was not changed, only
+            // the stated reasons.
+            'app/Services/DeploymentModeCoverageMappingService.php',
+            'app/Services/TestCoverageMappingService.php',
         ];
 
         $allowedPrefixes = [

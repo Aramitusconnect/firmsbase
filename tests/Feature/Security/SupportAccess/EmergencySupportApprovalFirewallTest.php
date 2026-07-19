@@ -100,6 +100,17 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         'app/Services/ImportPreviewService.php',
         'app/Services/ImportRowValidationService.php',
         'app/Services/MigrationProjectService.php',
+        // Section 39A-5 Wave 11 (the final wave of the 60-table RLS
+        // rollout) legitimately updated the shared RLS coverage mapping
+        // service once every table was moved into PREPARED_TABLES.
+        'app/Services/RowLevelSecurityCoverageMappingService.php',
+        // Same Wave 11 pass also corrected these two services' own
+        // governance notes text, which had gone self-contradictory once
+        // MISSING_PREPARED_TABLES became genuinely empty — the
+        // PartiallyImplemented status itself was not changed, only the
+        // stated reasons.
+        'app/Services/DeploymentModeCoverageMappingService.php',
+        'app/Services/TestCoverageMappingService.php',
     ];
 
     /**
@@ -132,7 +143,12 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         // decision logic, order, and return values are byte-for-byte
         // identical.
         'app/Services/AiRetrievalIsolationService.php',
-        'app/Services/RowLevelSecurityCoverageMappingService.php',
+        // RowLevelSecurityCoverageMappingService.php is deliberately
+        // NOT in this list any more — Section 39A-5 Wave 11 (the final
+        // wave of the 60-table RLS rollout) found a genuine need to
+        // update the shared RLS coverage registry once every table was
+        // moved into PREPARED_TABLES and MISSING_PREPARED_TABLES
+        // became genuinely empty.
         'app/Services/ConsentService.php',
         'app/Services/ComplianceGapRegistryService.php',
     ];

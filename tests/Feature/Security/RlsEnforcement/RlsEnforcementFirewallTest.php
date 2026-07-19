@@ -305,7 +305,19 @@ class RlsEnforcementFirewallTest extends TestCase
                 && $path !== 'database/migrations/2026_08_30_980007_prepare_row_level_security_and_force_rls_on_trust_chargeback_events_table.php'
                 && $path !== 'database/migrations/2026_08_30_980008_prepare_row_level_security_and_force_rls_on_trust_reconciliations_table.php'
                 && $path !== 'database/migrations/2026_08_30_980009_prepare_row_level_security_and_force_rls_on_trust_refund_requests_table.php'
-                && $path !== 'database/migrations/2026_08_30_980010_prepare_row_level_security_and_force_rls_on_trust_transfer_requests_table.php',
+                && $path !== 'database/migrations/2026_08_30_980010_prepare_row_level_security_and_force_rls_on_trust_transfer_requests_table.php'
+                // Wave 11 (the eleventh and FINAL coordinated
+                // multi-table wave of this arc, webhooks domain)
+                // legitimately added five combined prepare-and-force
+                // migrations together: webhook_subscriptions,
+                // webhook_events, webhook_secrets, webhook_deliveries,
+                // and webhook_delivery_attempts. This is the last wave
+                // of the 60-table rollout.
+                && $path !== 'database/migrations/2026_08_31_990001_prepare_row_level_security_and_force_rls_on_webhook_subscriptions_table.php'
+                && $path !== 'database/migrations/2026_08_31_990002_prepare_row_level_security_and_force_rls_on_webhook_events_table.php'
+                && $path !== 'database/migrations/2026_08_31_990003_prepare_row_level_security_and_force_rls_on_webhook_secrets_table.php'
+                && $path !== 'database/migrations/2026_08_31_990004_prepare_row_level_security_and_force_rls_on_webhook_deliveries_table.php'
+                && $path !== 'database/migrations/2026_08_31_990005_prepare_row_level_security_and_force_rls_on_webhook_delivery_attempts_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A must add no migrations in this pass, but found: '.implode(', ', $changed));

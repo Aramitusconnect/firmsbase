@@ -272,6 +272,26 @@ class RowLevelSecurityCoverageMappingService
         'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances',
         'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events',
         'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests',
+        // Section 39A-5 Wave 11 — the eleventh and FINAL coordinated
+        // multi-table wave of the 60-table rollout, covering the
+        // webhooks domain. Fixed a decoy wrap in
+        // WebhookEventRecorderService::record() (only the payload
+        // builder was tenant-scoped; the actual event/subscription
+        // read/delivery-fan-out writes were not) and a completely
+        // unwrapped WebhookDispatchJob::handle() (fixed by passing firm
+        // identity explicitly via a new constructor argument, after an
+        // initial proposed fix deriving it from a pre-context read of
+        // the RLS-gated table itself was caught and rejected in
+        // independent security review as circular):
+        // 2026_08_31_990001_prepare_row_level_security_and_force_rls_on_webhook_subscriptions_table.php,
+        // 2026_08_31_990002_prepare_row_level_security_and_force_rls_on_webhook_events_table.php,
+        // 2026_08_31_990003_prepare_row_level_security_and_force_rls_on_webhook_secrets_table.php,
+        // 2026_08_31_990004_prepare_row_level_security_and_force_rls_on_webhook_deliveries_table.php,
+        // 2026_08_31_990005_prepare_row_level_security_and_force_rls_on_webhook_delivery_attempts_table.php.
+        // All five moved here from MISSING_PREPARED_TABLES below, which
+        // is now EMPTY — this closes the 60-table rollout in full.
+        'webhook_subscriptions', 'webhook_events', 'webhook_secrets',
+        'webhook_deliveries', 'webhook_delivery_attempts',
     ];
 
     /**
@@ -373,12 +393,22 @@ class RowLevelSecurityCoverageMappingService
      * group in this rollout, implemented as one combined unit rather
      * than ten independent checkpoints.
      *
+     * Section 39A-5 Wave 11 removed webhook_subscriptions,
+     * webhook_events, webhook_secrets, webhook_deliveries, and
+     * webhook_delivery_attempts from this array (moved to
+     * PREPARED_TABLES above) — the eleventh and FINAL coordinated
+     * multi-table wave of the entire 60-table rollout. This array is
+     * now EMPTY: every tenant-owned table identified at the start of
+     * this rollout now has real RLS preparation and FORCE activation.
+     * A future genuinely-new tenant-owned table (e.g. from an
+     * as-yet-unbuilt feature) would still need to be added here first,
+     * per this class's own docblock — an empty array today does not
+     * mean this array can never be used again, only that the known
+     * backlog as of this rollout is fully closed.
+     *
      * @var array<int, string>
      */
     private const MISSING_PREPARED_TABLES = [
-        'webhook_deliveries',
-        'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets',
-        'webhook_subscriptions',
     ];
 
     /**

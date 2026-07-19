@@ -172,6 +172,10 @@ class RlsContextRolloutFirewallTest extends TestCase
             // accounting domain, 10 tables implemented as one combined
             // unit) —
             'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests',
+            // Narrowly updated AGAIN by Section 39A-5 Wave 11 (webhooks
+            // domain, the final wave of the 60-table rollout, 5 tables
+            // implemented as one combined unit) —
+            'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions',
         ];
 
         // security_events is the final checkpoint in this arc: every
@@ -537,7 +541,12 @@ class RlsContextRolloutFirewallTest extends TestCase
             // canAttemptFirmLogin()'s FirmUser read with explicit
             // tenant context, since firm_users now has permanent
             // FORCE ROW LEVEL SECURITY.
-            'app/Services/RowLevelSecurityCoverageMappingService.php',
+            // RowLevelSecurityCoverageMappingService.php is
+            // deliberately NOT in this list any more — Section 39A-5
+            // Wave 11 (the final wave of the 60-table RLS rollout)
+            // found a genuine need to update the shared RLS coverage
+            // registry once every table was moved into PREPARED_TABLES
+            // and MISSING_PREPARED_TABLES became genuinely empty.
             // ApplyTenantDatabaseContext.php and User.php are
             // deliberately NOT in this list any more — internal
             // login/panel access wiring (a later, distinct section)

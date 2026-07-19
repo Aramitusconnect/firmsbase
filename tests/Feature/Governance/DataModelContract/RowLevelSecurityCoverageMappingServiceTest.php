@@ -43,31 +43,19 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertSame($union, $tenantOwned);
     }
 
-    public function test_missing_prepared_tables_is_non_empty(): void
+    public function test_missing_prepared_tables_is_now_empty_after_wave_11(): void
     {
-        $this->assertNotEmpty($this->service->missingPreparedTables());
-    }
-
-    public function test_missing_prepared_tables_includes_known_later_phase_tenant_owned_tables(): void
-    {
-        $missing = $this->service->missingPreparedTables();
-
-        // Phase 12 trust accounting no longer has a spot-check example
-        // here: trust_ledger_entries and trust_accounts (and every
-        // other trust table) were moved into PREPARED_TABLES by
-        // Section 39A-5 Wave 10.
-        // Phase 14 webhooks.
-        $this->assertContains('webhook_events', $missing);
-        $this->assertContains('webhook_subscriptions', $missing);
-        // Phase 15 AI governance no longer has a spot-check example
-        // here: all five of its tables (ai_usage_events, ai_tool_actions,
-        // firm_ai_provider_keys, ai_approval_requests, ai_approval_events)
-        // were moved into PREPARED_TABLES by Section 39A-5 Wave 3.
-        // Phase 17 governance no longer has a spot-check example here
-        // either: legal_holds and deletion_requests were moved into
-        // PREPARED_TABLES by Section 39A-5 Wave 8, along with
-        // key_destruction_requests, support_access_requests,
-        // support_access_sessions, and deployment_health_checks.
+        // MISSING_PREPARED_TABLES held tenant-owned tables awaiting RLS
+        // preparation throughout this entire rollout. Section 39A-5
+        // Wave 11 (webhooks domain, 5 tables) closed the last remaining
+        // entries (webhook_subscriptions, webhook_events, webhook_secrets,
+        // webhook_deliveries, webhook_delivery_attempts) — this is the
+        // FINAL wave of the 60-table rollout, so this array is now
+        // genuinely empty. Per the constant's own docblock, an empty
+        // array today does not mean it can never be used again — a
+        // future, genuinely new tenant-owned table would still need to
+        // be added here first.
+        $this->assertEmpty($this->service->missingPreparedTables());
     }
 
     public function test_exempt_tables_includes_global_commercial_and_reference_tables(): void
@@ -170,8 +158,14 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // trust_refund_requests, and trust_transfer_requests moved from
         // MISSING_PREPARED_TABLES into PREPARED_TABLES (98 -> 108,
         // 15 -> 5); tenantOwnedTables() remains unchanged (113).
-        $this->assertCount(108, $this->service->preparedTables());
-        $this->assertCount(5, $this->service->missingPreparedTables());
+        // Narrowly updated AGAIN by Section 39A-5 Wave 11 — the FINAL
+        // wave of the 60-table rollout — webhook_subscriptions,
+        // webhook_events, webhook_secrets, webhook_deliveries, and
+        // webhook_delivery_attempts moved from MISSING_PREPARED_TABLES
+        // into PREPARED_TABLES (108 -> 113, 5 -> 0); tenantOwnedTables()
+        // remains unchanged (113). MISSING_PREPARED_TABLES is now empty.
+        $this->assertCount(113, $this->service->preparedTables());
+        $this->assertCount(0, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
         $this->assertCount(24, $this->service->exemptTables());
@@ -188,8 +182,6 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
 
     public function test_missing_prepared_tables_includes_the_section_39a4a1_registry_gap_tables(): void
     {
-        $missing = $this->service->missingPreparedTables();
-
         // customer_success_health_scores removed from this list by
         // Section 39A-5, Checkpoint 1 — it was moved into
         // PREPARED_TABLES (and given a real RLS policy + FORCE
@@ -236,12 +228,13 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // 10 tables implemented as one combined unit) — both moved into
         // PREPARED_TABLES (and given a real RLS policy + FORCE
         // activation) in that batch, so neither is any longer missing.
-        foreach ([
-            'webhook_deliveries',
-            'webhook_delivery_attempts', 'webhook_secrets',
-        ] as $table) {
-            $this->assertContains($table, $missing, "{$table} must be tracked in MISSING_PREPARED_TABLES.");
-        }
+        // webhook_deliveries, webhook_delivery_attempts, and
+        // webhook_secrets — the last remaining entries this test ever
+        // spot-checked — removed from this list by Section 39A-5 Wave 11
+        // (webhooks domain, 5 tables implemented as one combined unit,
+        // the FINAL wave of the 60-table rollout). MISSING_PREPARED_TABLES
+        // is now empty; see test_missing_prepared_tables_is_now_empty_after_wave_11().
+        $this->assertEmpty($this->service->missingPreparedTables());
     }
 
     public function test_forced_tables_is_a_subset_of_prepared_tables(): void
@@ -258,8 +251,14 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertTrue($this->service->isPrepared('firm_settings'));
         $this->assertFalse($this->service->isMissing('firm_settings'));
 
-        $this->assertTrue($this->service->isMissing('webhook_events'));
-        $this->assertFalse($this->service->isPrepared('webhook_events'));
+        // webhook_events moved from missing to prepared in Section
+        // 39A-5 Wave 11 (the final wave) — MISSING_PREPARED_TABLES is
+        // now empty, so there is no longer a live example of isMissing()
+        // returning true for a real tenant-owned table. The underlying
+        // check (a plain in_array() against an empty array) needs no
+        // positive example to remain correct.
+        $this->assertTrue($this->service->isPrepared('webhook_events'));
+        $this->assertFalse($this->service->isMissing('webhook_events'));
 
         $this->assertFalse($this->service->isPrepared('does_not_exist'));
         $this->assertFalse($this->service->isMissing('does_not_exist'));

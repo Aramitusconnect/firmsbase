@@ -219,15 +219,25 @@ class QualityGateFirewallTest extends TestCase
             'firm_settings must have permanent FORCE ROW LEVEL SECURITY active — Section 39A-3L Stage B is complete.'
         );
 
+        // Section 39A-5 Wave 11 (the final wave of the 60-table rollout)
+        // closed the last remaining uncovered tenant-owned table, so
+        // this test's original premise ("at least one uncovered table
+        // exists") no longer holds. TestCoverageMappingService::all()
+        // was updated in the same pass to cite the OTHER,
+        // still-genuinely-open reasons (offboarding_exports' uncertain
+        // classification, the registered-but-unimplemented
+        // cross-firm-pivot-mismatch remediation task, the firms
+        // root-table policy design, and the support-access policy shape
+        // design) rather than the now-resolved uncovered-table count.
         $uncoveredCount = count((new RowLevelSecurityCoverageMappingService())->missingPreparedTables());
-        $this->assertGreaterThan(0, $uncoveredCount, 'This test\'s own premise requires at least one currently-uncovered tenant-owned table to exist.');
+        $this->assertSame(0, $uncoveredCount, 'Wave 11 must have closed every remaining uncovered tenant-owned table.');
 
         $item = (new TestCoverageMappingService())->byKey('tenant_isolation_broken_scope_caught_by_rls');
 
         $this->assertNotSame(
             GovernanceMappingStatus::Implemented,
             $item->status,
-            "This control remains PartiallyImplemented — not because enforcement is inactive (it now is), but because {$uncoveredCount} uncovered tenant-owned tables still lack any RLS preparation at all."
+            'This control remains PartiallyImplemented for reasons unrelated to table-coverage completeness — see the notes for the specific still-open items.'
         );
 
         $this->assertStringContainsString(
@@ -238,7 +248,12 @@ class QualityGateFirewallTest extends TestCase
         $this->assertStringNotContainsString(
             'enforcement is inactive',
             strtolower($item->notes),
-            'The notes must not claim enforcement is inactive — it is now genuinely active for the covered tables.'
+            'The notes must not claim enforcement is inactive — it is now genuinely active for every tenant-owned table.'
+        );
+        $this->assertStringContainsString(
+            'cross-firm-pivot-mismatch',
+            $item->notes,
+            'The notes must cite an actual, still-open reason this control is not fully Implemented, now that table coverage itself is complete.'
         );
     }
 

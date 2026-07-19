@@ -80,6 +80,22 @@ class Section40LimitedPilotSafetyGateTest extends TestCase
         }
     }
 
+    /**
+     * Updated by Section 39A-5 Wave 11 (webhooks domain, the final
+     * wave of the 60-table RLS rollout): 39A-4 (uncovered tenant table
+     * classification) was, at every point before this wave, genuinely
+     * still outstanding — this test's name and original assertion
+     * reflected that real, historical state. Wave 11 closed the last 5
+     * remaining uncovered tables, so uncoveredTenantTables() is now
+     * genuinely, honestly empty — a real, positive end state computed
+     * live from RowLevelSecurityCoverageMappingService, not a hidden/
+     * suppressed gap. The method name is left unchanged (it names the
+     * historical concern this test guards, not a permanently-fixed
+     * count), but the assertion below is updated to check the true,
+     * current state so a FUTURE regression that reintroduces an
+     * uncovered table fails this test loudly rather than being masked
+     * by a stale "greater than zero" expectation.
+     */
     public function test_gate_reports_uncovered_tenant_tables_still_outstanding_for_39a4(): void
     {
         $gate = new Section40LimitedPilotSafetyGateService();
@@ -88,7 +104,7 @@ class Section40LimitedPilotSafetyGateTest extends TestCase
         $uncovered = $gate->uncoveredTenantTables();
 
         $this->assertSame($coverage->missingPreparedTables(), $uncovered);
-        $this->assertGreaterThan(0, count($uncovered), '39A-4 must still be outstanding at this point in the rollout.');
+        $this->assertCount(0, $uncovered, '39A-4 (uncovered tenant table classification) is fully complete as of Section 39A-5 Wave 11 — zero tenant-owned tables remain without RLS preparation.');
     }
 
     public function test_gate_confirms_firm_user_2fa_policy_exists(): void
@@ -140,7 +156,17 @@ class Section40LimitedPilotSafetyGateTest extends TestCase
         // ever un-forces one of these 52 tables, this test fails loudly
         // rather than silently tolerating it.
         $this->assertSame(0, $result['remaining_prepared_unforced_count']);
-        $this->assertGreaterThan(0, $result['uncovered_tenant_table_count']);
+
+        // Updated by Section 39A-5 Wave 11 (webhooks domain, the final
+        // wave of the 60-table RLS rollout): uncovered_tenant_table_count
+        // was, at every point before this wave, genuinely greater than
+        // zero — this assertion reflected that real, historical state.
+        // Wave 11 closed the last 5 remaining uncovered tables, so this
+        // count is now genuinely, honestly zero — a real, positive end
+        // state, not a hidden/suppressed gap. Deliberately exact (not
+        // "greater than zero") so a FUTURE regression that reintroduces
+        // an uncovered tenant-owned table fails this test loudly.
+        $this->assertSame(0, $result['uncovered_tenant_table_count']);
         $this->assertNotEmpty($result['public_production_launch_limitations']);
     }
 

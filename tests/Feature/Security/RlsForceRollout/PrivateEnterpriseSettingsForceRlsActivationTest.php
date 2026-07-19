@@ -62,6 +62,7 @@ use Tests\TestCase;
  */
 class PrivateEnterpriseSettingsForceRlsActivationTest extends TestCase
 {
+    // Narrowly updated by Section 39A-5 Wave 11 (webhooks domain, the final wave of the 60-table rollout, covering webhook_deliveries, webhook_delivery_attempts, webhook_events, webhook_secrets, webhook_subscriptions) for the same reason — additive only, no existing assertion removed or weakened. Total prepared/forced count is now 113.
     use RefreshDatabase, SetsUpDeploymentFirm;
 
     private const MIGRATION = 'database/migrations/2026_08_27_950011_prepare_row_level_security_and_force_rls_on_private_enterprise_settings_table.php';
@@ -83,7 +84,7 @@ class PrivateEnterpriseSettingsForceRlsActivationTest extends TestCase
         $preparedTables = $coverage->preparedTables();
         // Narrowly updated AGAIN by Section 39A-5 Wave 7 integration (e-signature domain, 4 tables) — additive only, no existing assertion removed or weakened.
         // Narrowly updated AGAIN by Section 39A-5 Wave 10 (trust accounting domain, 10 tables) — additive only, no existing assertion removed or weakened.
-        $this->assertCount(108, $preparedTables, 'Section 39A-5 Wave 2 through Wave 10 integration must have moved private_enterprise_settings and every sibling table from all nine later waves into PREPARED_TABLES.');
+        $this->assertCount(113, $preparedTables, 'Section 39A-5 Wave 2 through Wave 10 integration must have moved private_enterprise_settings and every sibling table from all nine later waves into PREPARED_TABLES.');
 
         foreach ($preparedTables as $table) {
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);
@@ -113,7 +114,7 @@ class PrivateEnterpriseSettingsForceRlsActivationTest extends TestCase
         // ai_approval_requests, ai_approval_events).
         // Narrowly updated AGAIN by Section 39A-5 Wave 7 (e-signature domain, 4 tables) — additive only, no existing assertion removed or weakened.
         // Narrowly updated AGAIN by Section 39A-5 Wave 10 (trust accounting domain, 10 tables) — additive only, no existing assertion removed or weakened.
-        $this->assertCount(108, $forced, 'Exactly 108 tables must have a FORCE-activation migration after Section 39A-5 Wave 10 — no more, no less.');
+        $this->assertCount(113, $forced, 'Exactly 108 tables must have a FORCE-activation migration after Section 39A-5 Wave 10 — no more, no less.');
 
         foreach ($forced as $table) {
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);

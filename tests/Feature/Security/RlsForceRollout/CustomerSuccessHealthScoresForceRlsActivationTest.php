@@ -569,6 +569,45 @@ class CustomerSuccessHealthScoresForceRlsActivationTest extends TestCase
             'tests/Feature/Security/RlsForceRollout/TimeEntriesForceRlsActivationTest.php',
             'tests/Feature/Security/RlsForceRollout/TimeTrackingSessionsForceRlsActivationTest.php',
             'tests/Feature/Security/RlsForceRollout/TimelineEventsForceRlsActivationTest.php',
+            // Section 39A-5 Wave 11 (webhooks domain, the final wave of
+            // the 60-table RLS rollout) is the second growth of the
+            // PREPARED_TABLES array since this checkpoint's own
+            // snapshot — the same mechanical "count bumped, 5 webhook
+            // tables added to local expected-tables arrays" update
+            // landed across every one of the following pre-existing
+            // *ForceRlsActivationTest.php files that had not yet been
+            // touched by an earlier wave's equivalent fix, plus the
+            // ~10 governance/firewall "section scope-lock" tests whose
+            // own hardcoded allowlists needed a narrow, explicitly-
+            // commented exemption for the shared RLS coverage registry
+            // update, plus two tests whose own premise ("at least one
+            // uncovered tenant table always exists") became genuinely
+            // false now that the entire 60-table backlog is closed —
+            // not a scope expansion of this checkpoint's actual
+            // production changes.
+            'tests/Feature/Security/RlsForceRollout/DeploymentHealthChecksForceRlsActivationTest.php',
+            'tests/Feature/Security/RlsForceRollout/FirmAiProviderKeysForceRlsActivationTest.php',
+            'tests/Feature/Security/RlsForceRollout/GeneratedDocumentsForceRlsActivationTest.php',
+            'tests/Feature/Security/RlsForceRollout/LegalHoldsForceRlsActivationTest.php',
+            'tests/Feature/Security/RlsForceRollout/PdfViewEventsForceRlsActivationTest.php',
+            'tests/Feature/Security/RlsForceRollout/PrivateEnterpriseSettingsForceRlsActivationTest.php',
+            'tests/Feature/Security/RlsForceRollout/SignatureCertificatesForceRlsActivationTest.php',
+            'tests/Feature/Security/RlsForceRollout/SignatureEventsForceRlsActivationTest.php',
+            'tests/Feature/Security/RlsForceRollout/SignatureRequestRecipientsForceRlsActivationTest.php',
+            'tests/Feature/Security/RlsForceRollout/SignatureRequestsForceRlsActivationTest.php',
+            'tests/Feature/Governance/AcceptanceTestMatrix/AcceptanceTestMatrixFirewallTest.php',
+            'tests/Feature/Governance/AdminControlCatalog/AdminControlUiBoundaryTest.php',
+            'tests/Feature/Governance/EntityFieldCatalog/EntityFieldCatalogFirewallTest.php',
+            'tests/Feature/Governance/FinalExecutiveRecommendation/FinalExecutiveRecommendationFirewallTest.php',
+            'tests/Feature/Governance/PrePilotRemediationBacklog/PrePilotRemediationFirewallTest.php',
+            'tests/Feature/Governance/ProfessionalReviewGate/ProfessionalReviewFirewallTest.php',
+            'tests/Feature/Governance/WorkflowStateMachines/WorkflowStateMachineFirewallTest.php',
+            'tests/Feature/Security/FirmUser2fa/FirmUser2faFirewallTest.php',
+            'tests/Feature/Security/LoginPolicy/LoginPolicyFirewallTest.php',
+            'tests/Feature/Security/SeedData/SeedDataAuditFirewallTest.php',
+            'tests/Feature/Security/SupportAccess/EmergencySupportApprovalFirewallTest.php',
+            'tests/Feature/Governance/Section40/Section40LimitedPilotSafetyGateTest.php',
+            'tests/Feature/Security/RlsEnforcement/RlsPreparationCoverageTest.php',
         ];
 
         $unexpected = array_values(array_diff($changed, $allowed));

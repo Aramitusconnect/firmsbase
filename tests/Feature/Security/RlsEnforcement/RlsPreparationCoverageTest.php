@@ -88,16 +88,30 @@ class RlsPreparationCoverageTest extends TestCase
 
     public function test_missing_prepared_tables_are_honestly_tracked_as_a_known_residual_gap(): void
     {
-        // Section 39A does not add new RLS policies for these 41
-        // Phase-7+ tables — see the final report for why (writing 41
-        // new per-domain policies in this pass would be exactly the
-        // kind of broad, unreviewed guess this section was told to
-        // avoid). This test proves the existing mapping service still
-        // honestly reports them as missing, rather than this section
-        // silently pretending they are covered.
+        // Section 39A originally did not add new RLS policies for the
+        // Phase-7+ tables discovered by later inventory sweeps — see
+        // the final report for why (writing dozens of new per-domain
+        // policies in a single pass would be exactly the kind of
+        // broad, unreviewed guess this section was told to avoid).
+        // This test originally proved the existing mapping service
+        // still honestly reported them as missing, rather than this
+        // section silently pretending they were covered.
+        //
+        // Updated by Section 39A-5 Wave 11 (webhooks domain, the final
+        // wave of the 60-table RLS rollout): every table that was ever
+        // discovered missing RLS preparation has now been prepared and
+        // force-enabled across Waves 1-11, so
+        // missingPreparedTables() is genuinely, honestly empty — a
+        // real, positive end state computed live from the mapping
+        // service, not a hidden/suppressed gap. This assertion is
+        // deliberately the mirror image of the original ("must be
+        // empty" rather than "must not be empty") so that if a FUTURE
+        // regression ever reintroduces an uncovered tenant-owned
+        // table, this test fails loudly rather than silently
+        // tolerating it.
         $missing = $this->coverage->missingPreparedTables();
 
-        $this->assertNotEmpty($missing, 'The known Phase 7+ RLS coverage gap must remain honestly tracked.');
+        $this->assertEmpty($missing, 'The Phase 7+ RLS coverage gap has been fully closed by Section 39A-5 Wave 11 — missingPreparedTables() must now honestly report zero uncovered tenant-owned tables.');
 
         foreach ($missing as $table) {
             $row = DB::selectOne('select relrowsecurity from pg_class where relname = ?', [$table]);

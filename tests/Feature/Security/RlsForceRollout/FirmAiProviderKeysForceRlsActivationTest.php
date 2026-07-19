@@ -91,6 +91,7 @@ use Tests\TestCase;
  */
 class FirmAiProviderKeysForceRlsActivationTest extends TestCase
 {
+    // Narrowly updated by Section 39A-5 Wave 11 (webhooks domain, the final wave of the 60-table rollout, covering webhook_deliveries, webhook_delivery_attempts, webhook_events, webhook_secrets, webhook_subscriptions) for the same reason — additive only, no existing assertion removed or weakened. Total prepared/forced count is now 113.
     use RefreshDatabase, SetsUpAiEntitledFirm;
 
     public function test_all_previously_forced_tables_remain_force_row_level_security_enabled(): void
@@ -144,7 +145,7 @@ class FirmAiProviderKeysForceRlsActivationTest extends TestCase
         $this->assertContains('firm_ai_provider_keys', $forced, 'firm_ai_provider_keys must be discoverable as FORCE-active by forcedTables().');
         // Narrowly updated AGAIN by Section 39A-5 Wave 7 (e-signature domain, 4 tables) — additive only, no existing assertion removed or weakened.
         // Narrowly updated AGAIN by Section 39A-5 Wave 10 (trust accounting domain, 10 tables) — additive only, no existing assertion removed or weakened.
-        $this->assertCount(108, $forced, 'Exactly 108 tables must have a FORCE-activation migration after Section 39A-5 Wave 10 — no more, no less.');
+        $this->assertCount(113, $forced, 'Exactly 108 tables must have a FORCE-activation migration after Section 39A-5 Wave 10 — no more, no less.');
     }
 
     public function test_the_policy_has_both_an_explicit_using_and_with_check_clause(): void

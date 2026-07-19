@@ -39,6 +39,7 @@ use Tests\TestCase;
  */
 class SignatureCertificatesForceRlsActivationTest extends TestCase
 {
+    // Narrowly updated by Section 39A-5 Wave 11 (webhooks domain, the final wave of the 60-table rollout, covering webhook_deliveries, webhook_delivery_attempts, webhook_events, webhook_secrets, webhook_subscriptions) for the same reason — additive only, no existing assertion removed or weakened. Total prepared/forced count is now 113.
     use RefreshDatabase;
 
     private const MIGRATION_PATH = 'database/migrations/2026_08_27_950038_prepare_row_level_security_and_force_rls_on_signature_certificates_table.php';
@@ -79,7 +80,7 @@ class SignatureCertificatesForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-5 Wave 9 (migration/export domain, 6 tables) — additive only, no existing assertion removed or weakened.
         // Narrowly updated AGAIN by Section 39A-5 Wave 10 (trust accounting domain, 10 tables) — additive only, no existing assertion removed or weakened.
         $this->assertCount(
-            108,
+            113,
             $coverage->forcedTables(),
             'Exactly 108 tables must have FORCE ROW LEVEL SECURITY active once this final checkpoint of the Wave 7 batch lands — no more, no fewer.'
         );
