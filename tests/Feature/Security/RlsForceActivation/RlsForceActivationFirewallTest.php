@@ -166,6 +166,10 @@ class RlsForceActivationFirewallTest extends TestCase
             // Narrowly updated AGAIN by Section 39A-5 Wave 9 (migration/
             // export domain, 6 tables implemented as one combined unit) —
             'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests',
+            // Narrowly updated AGAIN by Section 39A-5 Wave 10 (trust
+            // accounting domain, 10 tables implemented as one combined
+            // unit) —
+            'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

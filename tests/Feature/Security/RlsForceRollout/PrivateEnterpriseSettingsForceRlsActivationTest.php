@@ -82,7 +82,8 @@ class PrivateEnterpriseSettingsForceRlsActivationTest extends TestCase
         // runs against the fully-integrated state.
         $preparedTables = $coverage->preparedTables();
         // Narrowly updated AGAIN by Section 39A-5 Wave 7 integration (e-signature domain, 4 tables) — additive only, no existing assertion removed or weakened.
-        $this->assertCount(98, $preparedTables, 'Section 39A-5 Wave 2 through Wave 9 integration must have moved private_enterprise_settings and every sibling table from all eight later waves into PREPARED_TABLES.');
+        // Narrowly updated AGAIN by Section 39A-5 Wave 10 (trust accounting domain, 10 tables) — additive only, no existing assertion removed or weakened.
+        $this->assertCount(108, $preparedTables, 'Section 39A-5 Wave 2 through Wave 10 integration must have moved private_enterprise_settings and every sibling table from all nine later waves into PREPARED_TABLES.');
 
         foreach ($preparedTables as $table) {
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);
@@ -111,7 +112,8 @@ class PrivateEnterpriseSettingsForceRlsActivationTest extends TestCase
         // ai_usage_events, ai_tool_actions, firm_ai_provider_keys,
         // ai_approval_requests, ai_approval_events).
         // Narrowly updated AGAIN by Section 39A-5 Wave 7 (e-signature domain, 4 tables) — additive only, no existing assertion removed or weakened.
-        $this->assertCount(98, $forced, 'Exactly 98 tables must have a FORCE-activation migration after Section 39A-5 Wave 9 — no more, no less.');
+        // Narrowly updated AGAIN by Section 39A-5 Wave 10 (trust accounting domain, 10 tables) — additive only, no existing assertion removed or weakened.
+        $this->assertCount(108, $forced, 'Exactly 108 tables must have a FORCE-activation migration after Section 39A-5 Wave 10 — no more, no less.');
 
         foreach ($forced as $table) {
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);

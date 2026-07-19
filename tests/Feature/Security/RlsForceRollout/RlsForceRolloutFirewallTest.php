@@ -642,6 +642,16 @@ class RlsForceRolloutFirewallTest extends TestCase
             // implemented as one combined unit.
             'export_jobs', 'migration_projects', 'import_batches',
             'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests',
+            // Narrowly updated AGAIN by Section 39A-5 Wave 10 — the tenth
+            // coordinated multi-table wave, covering the trust accounting
+            // domain (trust_accounts, trust_ledgers, trust_balances,
+            // matter_trust_balances, trust_ledger_entries,
+            // trust_approval_events, trust_chargeback_events,
+            // trust_reconciliations, trust_refund_requests,
+            // trust_transfer_requests) implemented as one combined unit.
+            'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances',
+            'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events',
+            'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -714,8 +724,22 @@ class RlsForceRolloutFirewallTest extends TestCase
             'offboarding_requests',
         ];
 
+        // Section 39A-10 Wave 10's own ten tables — identical exemption
+        // shape as Wave 6/7/8/9 immediately above. Unlike those waves,
+        // this exemption is likely a no-op in practice: by the time this
+        // test runs, the coordinator's registry-update commit has already
+        // moved these ten tables out of MISSING_PREPARED_TABLES, so they
+        // will not even be visited by the loop below. It is added anyway
+        // to mirror every prior wave's precedent and to remain correct if
+        // ever run against a commit ordered before that registry update.
+        $wave10ExemptTables = [
+            'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances',
+            'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events',
+            'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests',
+        ];
+
         foreach ($coverage->missingPreparedTables() as $table) {
-            if (in_array($table, $wave6ExemptTables, true) || in_array($table, $wave7ExemptTables, true) || in_array($table, $wave8ExemptTables, true) || in_array($table, $wave9ExemptTables, true)) {
+            if (in_array($table, $wave6ExemptTables, true) || in_array($table, $wave7ExemptTables, true) || in_array($table, $wave8ExemptTables, true) || in_array($table, $wave9ExemptTables, true) || in_array($table, $wave10ExemptTables, true)) {
                 continue;
             }
 
@@ -1215,6 +1239,26 @@ class RlsForceRolloutFirewallTest extends TestCase
         $this->assertFileExists(base_path('database/migrations/2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php'));
         $this->assertFileExists(base_path('database/migrations/2026_08_29_970005_prepare_row_level_security_and_force_rls_on_fleet_migration_instance_status_table.php'));
         $this->assertFileExists(base_path('database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php'));
+    }
+
+    public function test_the_wave_10_force_rls_migration_files_exist(): void
+    {
+        // Section 39A-10 Wave 10 — the tenth coordinated multi-table wave
+        // (trust accounting domain), ten combined prepare+force
+        // migrations implemented and committed as one unit (no safe
+        // partial rollout — see this wave's own design doc §9 on the
+        // shared TrustConcurrencyLockService coupling), to be landed
+        // together via a later wave-integration commit.
+        $this->assertFileExists(base_path('database/migrations/2026_08_30_980001_prepare_row_level_security_and_force_rls_on_trust_accounts_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_30_980002_prepare_row_level_security_and_force_rls_on_trust_ledgers_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_30_980003_prepare_row_level_security_and_force_rls_on_trust_balances_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_30_980004_prepare_row_level_security_and_force_rls_on_matter_trust_balances_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_30_980005_prepare_row_level_security_and_force_rls_on_trust_ledger_entries_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_30_980006_prepare_row_level_security_and_force_rls_on_trust_approval_events_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_30_980007_prepare_row_level_security_and_force_rls_on_trust_chargeback_events_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_30_980008_prepare_row_level_security_and_force_rls_on_trust_reconciliations_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_30_980009_prepare_row_level_security_and_force_rls_on_trust_refund_requests_table.php'));
+        $this->assertFileExists(base_path('database/migrations/2026_08_30_980010_prepare_row_level_security_and_force_rls_on_trust_transfer_requests_table.php'));
     }
 
     public function test_no_ui_routes_or_controllers_were_introduced(): void
