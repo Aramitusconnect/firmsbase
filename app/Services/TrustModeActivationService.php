@@ -83,12 +83,12 @@ class TrustModeActivationService
             throw new \RuntimeException('This high-risk change request was not raised for this firm.');
         }
 
-        return TrustApprovalEvent::create([
+        return (new TenantContextService())->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
             'firm_id' => $firm->id,
             'event_type' => TrustApprovalEventType::TrustModeActivationLinked,
             'actor_firm_user_id' => $recordedBy->id,
             'high_risk_change_request_id' => $request->id,
-        ]);
+        ]));
     }
 
     private function assertIsTrustModeActivation(HighRiskChangeRequest $request): void

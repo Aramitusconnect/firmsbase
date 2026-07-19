@@ -54,18 +54,22 @@ class TrustRefundRequestService
             throw new \RuntimeException('Refund amount must be positive.');
         }
 
-        $request = TrustRefundRequest::create([
-            'firm_id' => $firm->id,
-            'trust_ledger_id' => $ledger->id,
-            'matter_id' => $matter?->id,
-            'amount_cents' => $amountCents,
-            'status' => TrustRefundRequestStatus::Requested,
-            'requested_by_firm_user_id' => $requestedBy->id,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use (
+            $firm, $ledger, $matter, $requestedBy, $amountCents
+        ) {
+            $request = TrustRefundRequest::create([
+                'firm_id' => $firm->id,
+                'trust_ledger_id' => $ledger->id,
+                'matter_id' => $matter?->id,
+                'amount_cents' => $amountCents,
+                'status' => TrustRefundRequestStatus::Requested,
+                'requested_by_firm_user_id' => $requestedBy->id,
+            ]);
 
-        $this->recordEvent($firm, $request, TrustApprovalEventType::RefundRequested, $requestedBy, $amountCents, $matter?->id);
+            $this->recordEvent($firm, $request, TrustApprovalEventType::RefundRequested, $requestedBy, $amountCents, $matter?->id);
 
-        return $request;
+            return $request;
+        });
     }
 
     public function approveRefund(Firm $firm, TrustRefundRequest $request, FirmUser $approvedBy): TrustRefundRequest
@@ -78,14 +82,16 @@ class TrustRefundRequestService
             throw new \RuntimeException('This refund request is not awaiting approval.');
         }
 
-        $request->update([
-            'status' => TrustRefundRequestStatus::Approved,
-            'approved_by_firm_user_id' => $approvedBy->id,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $request, $approvedBy) {
+            $request->update([
+                'status' => TrustRefundRequestStatus::Approved,
+                'approved_by_firm_user_id' => $approvedBy->id,
+            ]);
 
-        $this->recordEvent($firm, $request, TrustApprovalEventType::RefundApproved, $approvedBy, $request->amount_cents, $request->matter_id);
+            $this->recordEvent($firm, $request, TrustApprovalEventType::RefundApproved, $approvedBy, $request->amount_cents, $request->matter_id);
 
-        return $request->fresh();
+            return $request->fresh();
+        });
     }
 
     public function denyRefund(Firm $firm, TrustRefundRequest $request, FirmUser $deniedBy, string $reason): TrustRefundRequest
@@ -98,14 +104,16 @@ class TrustRefundRequestService
             throw new \RuntimeException('This refund request is not awaiting approval.');
         }
 
-        $request->update([
-            'status' => TrustRefundRequestStatus::Denied,
-            'denied_reason' => $reason,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $request, $deniedBy, $reason) {
+            $request->update([
+                'status' => TrustRefundRequestStatus::Denied,
+                'denied_reason' => $reason,
+            ]);
 
-        $this->recordEvent($firm, $request, TrustApprovalEventType::RefundDenied, $deniedBy, $request->amount_cents, $request->matter_id);
+            $this->recordEvent($firm, $request, TrustApprovalEventType::RefundDenied, $deniedBy, $request->amount_cents, $request->matter_id);
 
-        return $request->fresh();
+            return $request->fresh();
+        });
     }
 
     public function complete(Firm $firm, TrustRefundRequest $request, FirmUser $completedBy): TrustLedgerEntry
@@ -118,70 +126,69 @@ class TrustRefundRequestService
             throw new \RuntimeException('Only an Approved refund request can be completed.');
         }
 
-        // Section 39A-3L, Checkpoint 4 - matters is already a FORCE-RLS
-        // table from an earlier checkpoint (trust_ledgers is not yet
-        // RLS-enabled at all). These two reads used to work only by
-        // accident, relying on ambient database session context left
-        // active by MatterFactory's context-hold create() pattern
-        // earlier in the caller's flow. EntitlementService::resolve()
-        // now correctly clears any such ambient context when the
-        // eligibility check above returns, so these two reads are
-        // combined into one explicit whole-call wrap here rather than
-        // left unwrapped. This matters even more than in the transfer/
-        // adjustment flows: with $matter silently null, the
-        // `if ($matter)` gate below would silently SKIP the real
-        // cross-matter safety check instead of failing closed.
-        [$ledger, $matter] = (new TenantContextService())->runWithFirmContext($firm, fn () => [
-            $request->trustLedger,
-            $request->matter,
-        ]);
-
-        $this->tenantSafePolicy->assertTrustLedgerBelongsToFirm($ledger, $firm);
-
-        if ($matter) {
-            $this->crossMatterProtection->assertMatterEligibleForLedger($matter, $ledger);
-        }
-
-        $amountCents = $request->amount_cents;
-
-        $entry = $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance) use (
-            $firm, $ledger, $matter, $request, $amountCents
-        ) {
-            if ($lockedBalance->balance_cents < $amountCents) {
-                throw new \RuntimeException('Trust ledger balance is insufficient for this refund.');
-            }
-
-            if ($matter) {
-                $this->crossMatterProtection->assertDebitKeepsMatterBalanceNonNegative($lockedMatterBalance, -1 * $amountCents);
-            }
-
-            $entry = TrustLedgerEntry::create([
-                'firm_id' => $firm->id,
-                'trust_ledger_id' => $ledger->id,
-                'matter_id' => $matter?->id,
-                'entry_type' => TrustLedgerEntryType::Refund,
-                'amount_cents' => -1 * $amountCents,
-                'trust_refund_request_id' => $request->id,
-                'posted_at' => now(),
+        // Wave 10 - one outer wrap spans the ENTIRE remainder of this
+        // method: every trust-table write below (the Refund-type
+        // TrustLedgerEntry::create(), both balance recomputes,
+        // $request->update(), and the trailing TrustApprovalEvent::
+        // create() via recordEvent()) previously ran with no tenant
+        // context at all — a decoy-wrap bug where only the isolated
+        // matters read below was ever wrapped while the actual
+        // trust-table writes were not. The pre-existing narrow wrap
+        // below (matters/trustLedger reads) survives unchanged as a
+        // nested child — safe by construction, same $firm throughout.
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $request, $completedBy) {
+            [$ledger, $matter] = (new TenantContextService())->runWithFirmContext($firm, fn () => [
+                $request->trustLedger,
+                $request->matter,
             ]);
 
-            $this->balanceService->recomputeForLedger($ledger, $lockedBalance);
+            $this->tenantSafePolicy->assertTrustLedgerBelongsToFirm($ledger, $firm);
 
             if ($matter) {
-                $this->balanceService->recomputeForMatter($ledger, $matter, $lockedMatterBalance);
+                $this->crossMatterProtection->assertMatterEligibleForLedger($matter, $ledger);
             }
+
+            $amountCents = $request->amount_cents;
+
+            $entry = $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance) use (
+                $firm, $ledger, $matter, $request, $amountCents
+            ) {
+                if ($lockedBalance->balance_cents < $amountCents) {
+                    throw new \RuntimeException('Trust ledger balance is insufficient for this refund.');
+                }
+
+                if ($matter) {
+                    $this->crossMatterProtection->assertDebitKeepsMatterBalanceNonNegative($lockedMatterBalance, -1 * $amountCents);
+                }
+
+                $entry = TrustLedgerEntry::create([
+                    'firm_id' => $firm->id,
+                    'trust_ledger_id' => $ledger->id,
+                    'matter_id' => $matter?->id,
+                    'entry_type' => TrustLedgerEntryType::Refund,
+                    'amount_cents' => -1 * $amountCents,
+                    'trust_refund_request_id' => $request->id,
+                    'posted_at' => now(),
+                ]);
+
+                $this->balanceService->recomputeForLedger($ledger, $lockedBalance);
+
+                if ($matter) {
+                    $this->balanceService->recomputeForMatter($ledger, $matter, $lockedMatterBalance);
+                }
+
+                return $entry;
+            });
+
+            $request->update([
+                'status' => TrustRefundRequestStatus::Completed,
+                'completed_at' => now(),
+            ]);
+
+            $this->recordEvent($firm, $request, TrustApprovalEventType::RefundCompleted, $completedBy, $amountCents, $matter?->id);
 
             return $entry;
         });
-
-        $request->update([
-            'status' => TrustRefundRequestStatus::Completed,
-            'completed_at' => now(),
-        ]);
-
-        $this->recordEvent($firm, $request, TrustApprovalEventType::RefundCompleted, $completedBy, $amountCents, $matter?->id);
-
-        return $entry;
     }
 
     private function recordEvent(

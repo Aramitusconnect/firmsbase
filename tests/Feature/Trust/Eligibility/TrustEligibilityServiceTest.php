@@ -8,6 +8,7 @@ use App\Enums\PaymentMode;
 use App\Models\Firm;
 use App\Models\FirmSettings;
 use App\Services\EntitlementService;
+use App\Services\TenantContextService;
 use App\Services\TrustEligibilityService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\Trust\Concerns\SetsUpTrustEligibleFirm;
@@ -38,6 +39,37 @@ class TrustEligibilityServiceTest extends TestCase
         $decision = $this->service->evaluate($firm);
 
         $this->assertTrue($decision->allowed);
+    }
+
+    /**
+     * Dedicated regression test for the Phase 4 round 1 gap (Wave 10
+     * design doc §0b): hasApprovedTrustSetup()'s trust_approval_events
+     * read needs its own tenant-context wrap, independent of the
+     * pre-existing firm_settings wrap, since trust_approval_events is
+     * now FORCE-RLS'd. test_fully_configured_firm_is_eligible() above
+     * already proves this passes, but — empirically confirmed during
+     * this review — that test alone does NOT actually exercise the
+     * true no-context condition: makeTrustEligibleFirm()'s own many
+     * factory/service calls leave ambient PostgreSQL session context
+     * lingering at this same firm's id (factories' context-hold
+     * create() pattern never clears it, and runWithFirmContext() only
+     * ever restores to whatever was already ambient), which
+     * accidentally matches the firm under test and would mask a
+     * reintroduced version of this exact bug. This test explicitly
+     * clears context first, reproducing the real condition every one
+     * of the ~25 live call sites hits, and was confirmed (by
+     * temporarily reverting the fix during this review) to genuinely
+     * fail without it and pass only with the real fix in place.
+     */
+    public function test_fully_configured_firm_is_eligible_with_no_ambient_tenant_context(): void
+    {
+        $firm = $this->makeTrustEligibleFirm();
+
+        (new TenantContextService)->clearDatabaseTenantContext();
+
+        $decision = $this->service->evaluate($firm);
+
+        $this->assertTrue($decision->allowed, $decision->reason ?? 'expected eligible, but decision was denied');
     }
 
     public function test_legal_specialist_customer_type_is_always_denied(): void

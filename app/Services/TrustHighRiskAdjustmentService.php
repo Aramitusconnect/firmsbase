@@ -58,7 +58,7 @@ class TrustHighRiskAdjustmentService
             throw new \RuntimeException('Adjustment amount cannot be zero.');
         }
 
-        return TrustApprovalEvent::create([
+        return (new TenantContextService())->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
             'firm_id' => $firm->id,
             'event_type' => TrustApprovalEventType::AdjustmentRequested,
             'actor_firm_user_id' => $requestedBy->id,
@@ -68,7 +68,7 @@ class TrustHighRiskAdjustmentService
             'correlation_uuid' => (string) Str::uuid7(),
             'trust_ledger_id' => $ledger->id,
             'metadata_json' => ['reason' => $reason],
-        ]);
+        ]));
     }
 
     public function firstApprove(Firm $firm, TrustApprovalEvent $requestedEvent, FirmUser $firstApprover): TrustApprovalEvent
@@ -81,7 +81,7 @@ class TrustHighRiskAdjustmentService
             throw new \RuntimeException('This event is not a pending adjustment request.');
         }
 
-        return TrustApprovalEvent::create([
+        return (new TenantContextService())->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
             'firm_id' => $firm->id,
             'event_type' => TrustApprovalEventType::AdjustmentFirstApproved,
             'actor_firm_user_id' => $firstApprover->id,
@@ -90,7 +90,7 @@ class TrustHighRiskAdjustmentService
             'approved_entry_type' => TrustLedgerEntryType::Adjustment->value,
             'correlation_uuid' => $requestedEvent->correlation_uuid,
             'trust_ledger_id' => $requestedEvent->trust_ledger_id,
-        ]);
+        ]));
     }
 
     public function denyAdjustment(Firm $firm, TrustApprovalEvent $event, FirmUser $deniedBy): TrustApprovalEvent
@@ -103,7 +103,7 @@ class TrustHighRiskAdjustmentService
             throw new \RuntimeException('This event is not a pending adjustment awaiting a decision.');
         }
 
-        return TrustApprovalEvent::create([
+        return (new TenantContextService())->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
             'firm_id' => $firm->id,
             'event_type' => TrustApprovalEventType::AdjustmentDenied,
             'actor_firm_user_id' => $deniedBy->id,
@@ -112,7 +112,7 @@ class TrustHighRiskAdjustmentService
             'approved_entry_type' => TrustLedgerEntryType::Adjustment->value,
             'correlation_uuid' => $event->correlation_uuid,
             'trust_ledger_id' => $event->trust_ledger_id,
-        ]);
+        ]));
     }
 
     /**
@@ -130,78 +130,80 @@ class TrustHighRiskAdjustmentService
             throw new \RuntimeException('A second approval requires an AdjustmentFirstApproved trust_approval_events row.');
         }
 
-        // Section 39A-3L, Checkpoint 4 - firm_users/matters are already
-        // FORCE-RLS tables from earlier checkpoints (trust_ledgers is
-        // not yet RLS-enabled at all — confirmed via pg_class:
-        // relrowsecurity=false, relforcerowsecurity=false — so reading
-        // it here is unaffected either way). These three reads used to
-        // work only by accident, relying on
-        // ambient database session context left active by an earlier
-        // factory's context-hold create() pattern in the caller's flow.
-        // EntitlementService::resolve() now correctly clears any such
-        // ambient context when the eligibility check above returns, so
-        // these three reads are combined into one explicit whole-call
-        // wrap here rather than left unwrapped (and rather than each
-        // getting its own separate wrap).
-        [$firstApprover, $ledger, $matter] = (new TenantContextService())->runWithFirmContext($firm, fn () => [
-            $firstApprovedEvent->actor,
-            $firstApprovedEvent->trustLedger,
-            $firstApprovedEvent->matter,
-        ]);
-
-        $this->accessPolicy->assertDistinctApprovers($firstApprover, $secondApprover);
-
-        if (TrustLedgerEntry::query()->where('trust_approval_event_id', $firstApprovedEvent->id)->exists()) {
-            throw new \RuntimeException('This adjustment approval has already been posted.');
-        }
-
-        $amountCentsDelta = $firstApprovedEvent->amount_cents;
-
-        if ($matter) {
-            $this->crossMatterProtection->assertMatterEligibleForLedger($matter, $ledger);
-        }
-
-        $entry = $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance) use (
-            $firm, $ledger, $matter, $amountCentsDelta, $firstApprovedEvent
-        ) {
-            if ($lockedBalance->balance_cents + $amountCentsDelta < 0) {
-                throw new \RuntimeException('This adjustment would draw the trust ledger balance below zero.');
-            }
-
-            if ($matter) {
-                $this->crossMatterProtection->assertDebitKeepsMatterBalanceNonNegative($lockedMatterBalance, $amountCentsDelta);
-            }
-
-            $entry = TrustLedgerEntry::create([
-                'firm_id' => $firm->id,
-                'trust_ledger_id' => $ledger->id,
-                'matter_id' => $matter?->id,
-                'entry_type' => TrustLedgerEntryType::Adjustment,
-                'amount_cents' => $amountCentsDelta,
-                'trust_approval_event_id' => $firstApprovedEvent->id,
-                'posted_at' => now(),
+        // Wave 10 - one outer wrap spans the ENTIRE remainder of this
+        // method: every trust-table access below (the firm_users/matters
+        // reads, the already-posted duplicate-check against
+        // trust_ledger_entries, the Adjustment TrustLedgerEntry::create(),
+        // both balance recomputes, and the trailing
+        // TrustApprovalEvent::create()) previously ran with no tenant
+        // context at all except the isolated three-reads wrap, which
+        // survives unchanged as a nested child below — same $firm
+        // throughout, safe by construction. The pre-flight duplicate-
+        // posted check also moves inside this wrap (it queries
+        // trust_ledger_entries directly and would otherwise silently
+        // fail closed under FORCE RLS, masking a real duplicate-adjustment
+        // attempt as "never posted" instead of correctly detecting it).
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $firstApprovedEvent, $secondApprover) {
+            [$firstApprover, $ledger, $matter] = (new TenantContextService())->runWithFirmContext($firm, fn () => [
+                $firstApprovedEvent->actor,
+                $firstApprovedEvent->trustLedger,
+                $firstApprovedEvent->matter,
             ]);
 
-            $this->balanceService->recomputeForLedger($ledger, $lockedBalance);
+            $this->accessPolicy->assertDistinctApprovers($firstApprover, $secondApprover);
+
+            if (TrustLedgerEntry::query()->where('trust_approval_event_id', $firstApprovedEvent->id)->exists()) {
+                throw new \RuntimeException('This adjustment approval has already been posted.');
+            }
+
+            $amountCentsDelta = $firstApprovedEvent->amount_cents;
 
             if ($matter) {
-                $this->balanceService->recomputeForMatter($ledger, $matter, $lockedMatterBalance);
+                $this->crossMatterProtection->assertMatterEligibleForLedger($matter, $ledger);
             }
+
+            $entry = $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance) use (
+                $firm, $ledger, $matter, $amountCentsDelta, $firstApprovedEvent
+            ) {
+                if ($lockedBalance->balance_cents + $amountCentsDelta < 0) {
+                    throw new \RuntimeException('This adjustment would draw the trust ledger balance below zero.');
+                }
+
+                if ($matter) {
+                    $this->crossMatterProtection->assertDebitKeepsMatterBalanceNonNegative($lockedMatterBalance, $amountCentsDelta);
+                }
+
+                $entry = TrustLedgerEntry::create([
+                    'firm_id' => $firm->id,
+                    'trust_ledger_id' => $ledger->id,
+                    'matter_id' => $matter?->id,
+                    'entry_type' => TrustLedgerEntryType::Adjustment,
+                    'amount_cents' => $amountCentsDelta,
+                    'trust_approval_event_id' => $firstApprovedEvent->id,
+                    'posted_at' => now(),
+                ]);
+
+                $this->balanceService->recomputeForLedger($ledger, $lockedBalance);
+
+                if ($matter) {
+                    $this->balanceService->recomputeForMatter($ledger, $matter, $lockedMatterBalance);
+                }
+
+                return $entry;
+            });
+
+            TrustApprovalEvent::create([
+                'firm_id' => $firm->id,
+                'event_type' => TrustApprovalEventType::AdjustmentSecondApproved,
+                'actor_firm_user_id' => $secondApprover->id,
+                'amount_cents' => $amountCentsDelta,
+                'matter_id' => $matter?->id,
+                'approved_entry_type' => TrustLedgerEntryType::Adjustment->value,
+                'correlation_uuid' => $firstApprovedEvent->correlation_uuid,
+                'trust_ledger_id' => $ledger->id,
+            ]);
 
             return $entry;
         });
-
-        TrustApprovalEvent::create([
-            'firm_id' => $firm->id,
-            'event_type' => TrustApprovalEventType::AdjustmentSecondApproved,
-            'actor_firm_user_id' => $secondApprover->id,
-            'amount_cents' => $amountCentsDelta,
-            'matter_id' => $matter?->id,
-            'approved_entry_type' => TrustLedgerEntryType::Adjustment->value,
-            'correlation_uuid' => $firstApprovedEvent->correlation_uuid,
-            'trust_ledger_id' => $ledger->id,
-        ]);
-
-        return $entry;
     }
 }

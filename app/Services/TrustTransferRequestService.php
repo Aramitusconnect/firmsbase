@@ -72,19 +72,23 @@ class TrustTransferRequestService
             throw new \RuntimeException('The invoice does not belong to this firm/matter.');
         }
 
-        $request = TrustTransferRequest::create([
-            'firm_id' => $firm->id,
-            'trust_ledger_id' => $ledger->id,
-            'matter_id' => $matter->id,
-            'invoice_id' => $invoice->id,
-            'amount_cents' => $amountCents,
-            'status' => TrustTransferRequestStatus::Requested,
-            'requested_by_firm_user_id' => $requestedBy->id,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use (
+            $firm, $ledger, $matter, $invoice, $requestedBy, $amountCents
+        ) {
+            $request = TrustTransferRequest::create([
+                'firm_id' => $firm->id,
+                'trust_ledger_id' => $ledger->id,
+                'matter_id' => $matter->id,
+                'invoice_id' => $invoice->id,
+                'amount_cents' => $amountCents,
+                'status' => TrustTransferRequestStatus::Requested,
+                'requested_by_firm_user_id' => $requestedBy->id,
+            ]);
 
-        $this->recordEvent($firm, $request, TrustApprovalEventType::TransferRequested, $requestedBy, $amountCents, $matter->id);
+            $this->recordEvent($firm, $request, TrustApprovalEventType::TransferRequested, $requestedBy, $amountCents, $matter->id);
 
-        return $request;
+            return $request;
+        });
     }
 
     public function approveTransfer(Firm $firm, TrustTransferRequest $request, FirmUser $approvedBy): TrustTransferRequest
@@ -97,14 +101,16 @@ class TrustTransferRequestService
             throw new \RuntimeException('This transfer request is not awaiting approval.');
         }
 
-        $request->update([
-            'status' => TrustTransferRequestStatus::Approved,
-            'approved_by_firm_user_id' => $approvedBy->id,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $request, $approvedBy) {
+            $request->update([
+                'status' => TrustTransferRequestStatus::Approved,
+                'approved_by_firm_user_id' => $approvedBy->id,
+            ]);
 
-        $this->recordEvent($firm, $request, TrustApprovalEventType::TransferApproved, $approvedBy, $request->amount_cents, $request->matter_id);
+            $this->recordEvent($firm, $request, TrustApprovalEventType::TransferApproved, $approvedBy, $request->amount_cents, $request->matter_id);
 
-        return $request->fresh();
+            return $request->fresh();
+        });
     }
 
     public function denyTransfer(Firm $firm, TrustTransferRequest $request, FirmUser $deniedBy, string $reason): TrustTransferRequest
@@ -117,14 +123,16 @@ class TrustTransferRequestService
             throw new \RuntimeException('This transfer request is not awaiting approval.');
         }
 
-        $request->update([
-            'status' => TrustTransferRequestStatus::Denied,
-            'denied_reason' => $reason,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $request, $deniedBy, $reason) {
+            $request->update([
+                'status' => TrustTransferRequestStatus::Denied,
+                'denied_reason' => $reason,
+            ]);
 
-        $this->recordEvent($firm, $request, TrustApprovalEventType::TransferDenied, $deniedBy, $request->amount_cents, $request->matter_id);
+            $this->recordEvent($firm, $request, TrustApprovalEventType::TransferDenied, $deniedBy, $request->amount_cents, $request->matter_id);
 
-        return $request->fresh();
+            return $request->fresh();
+        });
     }
 
     /**
@@ -143,110 +151,113 @@ class TrustTransferRequestService
             throw new \RuntimeException('Only an Approved transfer request can be applied.');
         }
 
-        // Section 39A-3L, Checkpoint 4 - matters/invoices are already
-        // FORCE-RLS tables from earlier checkpoints (trust_ledgers is
-        // not yet RLS-enabled at all — confirmed via pg_class:
-        // relrowsecurity=false, relforcerowsecurity=false — so reading
-        // it here is unaffected either way). These three reads used to
-        // work only by accident, relying on
-        // ambient database session context left active by
-        // MatterFactory's context-hold create() pattern earlier in the
-        // caller's flow. EntitlementService::resolve() now correctly
-        // clears any such ambient context when the eligibility check
-        // above returns, so these three reads are combined into one
-        // explicit whole-call wrap here rather than left unwrapped (and
-        // rather than each getting its own separate wrap).
-        [$ledger, $matter, $invoice] = (new TenantContextService())->runWithFirmContext($firm, fn () => [
-            $request->trustLedger,
-            $request->matter,
-            $request->invoice,
-        ]);
-
-        $this->tenantSafePolicy->assertTrustLedgerBelongsToFirm($ledger, $firm);
-        $this->crossMatterProtection->assertMatterEligibleForLedger($matter, $ledger);
-
-        if (! in_array($invoice->status, [InvoiceStatus::Sent, InvoiceStatus::Approved, InvoiceStatus::PartiallyPaid], true)) {
-            throw new \RuntimeException('Payments cannot apply to an invoice that has not been sent/approved.');
-        }
-
-        $amountCents = $request->amount_cents;
-
-        $payment = $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance) use (
-            $firm, $ledger, $matter, $invoice, $request, $amountCents, $appliedBy
-        ) {
-            if ($lockedBalance->balance_cents < $amountCents) {
-                throw new \RuntimeException('Trust ledger balance is insufficient for this transfer.');
-            }
-
-            $this->crossMatterProtection->assertDebitKeepsMatterBalanceNonNegative($lockedMatterBalance, -1 * $amountCents);
-
-            $entry = \App\Models\TrustLedgerEntry::create([
-                'firm_id' => $firm->id,
-                'trust_ledger_id' => $ledger->id,
-                'matter_id' => $matter->id,
-                'entry_type' => TrustLedgerEntryType::WithdrawalToInvoice,
-                'amount_cents' => -1 * $amountCents,
-                'trust_transfer_request_id' => $request->id,
-                'posted_at' => now(),
+        // Section 39A-3L / Wave 10 - one outer wrap spans the ENTIRE
+        // remainder of this method: every trust-table write (the
+        // WithdrawalToInvoice TrustLedgerEntry::create(), both balance
+        // recomputes, $request->update(), and the trailing
+        // TrustApprovalEvent::create() via recordEvent()) previously ran
+        // with no tenant context at all — a decoy-wrap bug where only
+        // isolated matters/invoices/payments/classification reads were
+        // ever wrapped while the actual trust-table writes in between
+        // were not. The four pre-existing narrow wraps below (matters/
+        // invoices reads, Payment::create(), classify()+recordDecision(),
+        // applyToInvoice()) survive unchanged as nested children — safe
+        // by construction since runWithFirmContext() snapshots/restores
+        // context regardless of nesting depth, and every nested wrap uses
+        // this SAME $firm.
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $request, $appliedBy) {
+            [$ledger, $matter, $invoice] = (new TenantContextService())->runWithFirmContext($firm, fn () => [
+                $request->trustLedger,
+                $request->matter,
+                $request->invoice,
             ]);
 
-            $this->balanceService->recomputeForLedger($ledger, $lockedBalance);
-            $this->balanceService->recomputeForMatter($ledger, $matter, $lockedMatterBalance);
+            $this->tenantSafePolicy->assertTrustLedgerBelongsToFirm($ledger, $firm);
+            $this->crossMatterProtection->assertMatterEligibleForLedger($matter, $ledger);
 
-            $payment = (new TenantContextService())->runWithFirmContext($firm, fn () => Payment::create([
-                'firm_id' => $firm->id,
-                'client_id' => $ledger->client_id,
-                'matter_id' => $matter->id,
-                'invoice_id' => $invoice->id,
-                'amount_cents' => $amountCents,
-                'payment_method' => ManualPaymentMethod::Other,
-                'payment_classification' => PaymentClassification::OperatingPayment,
-                'status' => PaymentStatus::Initiated,
-                'external_reference' => "trust_transfer_request:{$request->id}",
-                'idempotency_key' => "trust-transfer-{$request->id}",
-                'recorded_by' => $appliedBy->user_id,
-            ]));
-
-            // Section 39A-3L, Checkpoint 18 - firm_settings is FORCE-RLS
-            // protected as of this checkpoint, and classify() reads
-            // firm_settings.payment_mode. classify() used to run here
-            // unwrapped, between the Payment::create() wrap above (whose
-            // finally already cleared context) and this wrap - once
-            // forced, that unwrapped read would silently resolve
-            // firm_settings to null and mis-classify the payment for a
-            // firm configured with payment_mode = Blocked. Moved inside
-            // this wrap (merged with recordDecision(), since $result is
-            // only ever used here) rather than given its own separate
-            // wrap, since a second consecutive wrap for the very next
-            // line would be pure boilerplate with no isolation benefit.
-            $payment = (new TenantContextService())->runWithFirmContext($firm, function () use ($payment, $firm, $appliedBy) {
-                $result = $this->classification->classify($firm, PaymentClassification::OperatingPayment);
-                $this->classification->recordDecision($payment, PaymentClassification::OperatingPayment, $result, $appliedBy->user);
-
-                return $payment->fresh();
-            });
-
-            if (! $payment->isAcceptedOperatingPayment()) {
-                throw new \RuntimeException('The trust-funded payment was not accepted as an operating payment.');
+            if (! in_array($invoice->status, [InvoiceStatus::Sent, InvoiceStatus::Approved, InvoiceStatus::PartiallyPaid], true)) {
+                throw new \RuntimeException('Payments cannot apply to an invoice that has not been sent/approved.');
             }
 
-            // $entry is never updated or deleted from here on — it is
-            // handed back purely for the caller's/tests' inspection.
-            (new TenantContextService())->runWithFirmContext($firm, function () use ($payment, $invoice) {
-                $this->application->applyToInvoice($payment, $invoice->fresh());
+            $amountCents = $request->amount_cents;
+
+            $payment = $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance) use (
+                $firm, $ledger, $matter, $invoice, $request, $amountCents, $appliedBy
+            ) {
+                if ($lockedBalance->balance_cents < $amountCents) {
+                    throw new \RuntimeException('Trust ledger balance is insufficient for this transfer.');
+                }
+
+                $this->crossMatterProtection->assertDebitKeepsMatterBalanceNonNegative($lockedMatterBalance, -1 * $amountCents);
+
+                $entry = \App\Models\TrustLedgerEntry::create([
+                    'firm_id' => $firm->id,
+                    'trust_ledger_id' => $ledger->id,
+                    'matter_id' => $matter->id,
+                    'entry_type' => TrustLedgerEntryType::WithdrawalToInvoice,
+                    'amount_cents' => -1 * $amountCents,
+                    'trust_transfer_request_id' => $request->id,
+                    'posted_at' => now(),
+                ]);
+
+                $this->balanceService->recomputeForLedger($ledger, $lockedBalance);
+                $this->balanceService->recomputeForMatter($ledger, $matter, $lockedMatterBalance);
+
+                $payment = (new TenantContextService())->runWithFirmContext($firm, fn () => Payment::create([
+                    'firm_id' => $firm->id,
+                    'client_id' => $ledger->client_id,
+                    'matter_id' => $matter->id,
+                    'invoice_id' => $invoice->id,
+                    'amount_cents' => $amountCents,
+                    'payment_method' => ManualPaymentMethod::Other,
+                    'payment_classification' => PaymentClassification::OperatingPayment,
+                    'status' => PaymentStatus::Initiated,
+                    'external_reference' => "trust_transfer_request:{$request->id}",
+                    'idempotency_key' => "trust-transfer-{$request->id}",
+                    'recorded_by' => $appliedBy->user_id,
+                ]));
+
+                // Section 39A-3L, Checkpoint 18 - firm_settings is FORCE-RLS
+                // protected as of this checkpoint, and classify() reads
+                // firm_settings.payment_mode. classify() used to run here
+                // unwrapped, between the Payment::create() wrap above (whose
+                // finally already cleared context) and this wrap - once
+                // forced, that unwrapped read would silently resolve
+                // firm_settings to null and mis-classify the payment for a
+                // firm configured with payment_mode = Blocked. Moved inside
+                // this wrap (merged with recordDecision(), since $result is
+                // only ever used here) rather than given its own separate
+                // wrap, since a second consecutive wrap for the very next
+                // line would be pure boilerplate with no isolation benefit.
+                $payment = (new TenantContextService())->runWithFirmContext($firm, function () use ($payment, $firm, $appliedBy) {
+                    $result = $this->classification->classify($firm, PaymentClassification::OperatingPayment);
+                    $this->classification->recordDecision($payment, PaymentClassification::OperatingPayment, $result, $appliedBy->user);
+
+                    return $payment->fresh();
+                });
+
+                if (! $payment->isAcceptedOperatingPayment()) {
+                    throw new \RuntimeException('The trust-funded payment was not accepted as an operating payment.');
+                }
+
+                // $entry is never updated or deleted from here on — it is
+                // handed back purely for the caller's/tests' inspection.
+                (new TenantContextService())->runWithFirmContext($firm, function () use ($payment, $invoice) {
+                    $this->application->applyToInvoice($payment, $invoice->fresh());
+                });
+
+                $request->update([
+                    'status' => TrustTransferRequestStatus::Applied,
+                    'applied_at' => now(),
+                ]);
+
+                $this->recordEvent($firm, $request, TrustApprovalEventType::TransferApplied, $appliedBy, $amountCents, $matter->id);
+
+                return $payment;
             });
-
-            $request->update([
-                'status' => TrustTransferRequestStatus::Applied,
-                'applied_at' => now(),
-            ]);
-
-            $this->recordEvent($firm, $request, TrustApprovalEventType::TransferApplied, $appliedBy, $amountCents, $matter->id);
 
             return $payment;
         });
-
-        return $payment;
     }
 
     private function recordEvent(

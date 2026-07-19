@@ -427,6 +427,67 @@ class DataModelContractFirewallTest extends TestCase
             'database/migrations/2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php',
             'database/migrations/2026_08_29_970005_prepare_row_level_security_and_force_rls_on_fleet_migration_instance_status_table.php',
             'database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php',
+            // Wave 10 (trust accounting domain) legitimately added ten
+            // combined prepare-and-force migrations (trust_accounts,
+            // trust_ledgers, trust_balances, matter_trust_balances,
+            // trust_ledger_entries, trust_approval_events,
+            // trust_chargeback_events, trust_reconciliations,
+            // trust_refund_requests, trust_transfer_requests), ten
+            // factory context-hold fixes, fixed
+            // TrustReconciliationService::run()'s fail-open bug (was
+            // silently reporting Balanced instead of Discrepancy once
+            // trust_accounts/trust_ledgers are forced), added the
+            // required second narrow wrap in
+            // TrustEligibilityService::evaluate() around
+            // hasApprovedTrustSetup()'s trust_approval_events read,
+            // collapsed the decoy-wrap pattern in
+            // TrustTransferRequestService::apply(),
+            // TrustRefundRequestService::complete(),
+            // TrustHighRiskAdjustmentService::secondApprove(), and
+            // TrustLedgerEntryReversalService::reverse() into single
+            // whole-method wraps, added a whole-method wrap plus a
+            // defensive null-check to TrustChargebackService::reverse(),
+            // and gave every remaining method across
+            // TrustAccountService, TrustLedgerService,
+            // TrustDepositService, TrustModeActivationService its own
+            // whole-method wrap. app/Services/TrustLedgerEntryReversalService.php
+            // (already a PROTECTED_FILES entry above, from Section 26)
+            // is included here by exact path for the same reason every
+            // other legitimately-evolving protected file above is:
+            // this is a real, separately-authorized, later change, not
+            // a violation of Section 26's own original boundary.
+            'database/migrations/2026_08_30_980001_prepare_row_level_security_and_force_rls_on_trust_accounts_table.php',
+            'database/migrations/2026_08_30_980002_prepare_row_level_security_and_force_rls_on_trust_ledgers_table.php',
+            'database/migrations/2026_08_30_980003_prepare_row_level_security_and_force_rls_on_trust_balances_table.php',
+            'database/migrations/2026_08_30_980004_prepare_row_level_security_and_force_rls_on_matter_trust_balances_table.php',
+            'database/migrations/2026_08_30_980005_prepare_row_level_security_and_force_rls_on_trust_ledger_entries_table.php',
+            'database/migrations/2026_08_30_980006_prepare_row_level_security_and_force_rls_on_trust_approval_events_table.php',
+            'database/migrations/2026_08_30_980007_prepare_row_level_security_and_force_rls_on_trust_chargeback_events_table.php',
+            'database/migrations/2026_08_30_980008_prepare_row_level_security_and_force_rls_on_trust_reconciliations_table.php',
+            'database/migrations/2026_08_30_980009_prepare_row_level_security_and_force_rls_on_trust_refund_requests_table.php',
+            'database/migrations/2026_08_30_980010_prepare_row_level_security_and_force_rls_on_trust_transfer_requests_table.php',
+            'database/factories/TrustAccountFactory.php',
+            'database/factories/TrustLedgerFactory.php',
+            'database/factories/TrustBalanceFactory.php',
+            'database/factories/MatterTrustBalanceFactory.php',
+            'database/factories/TrustLedgerEntryFactory.php',
+            'database/factories/TrustApprovalEventFactory.php',
+            'database/factories/TrustChargebackEventFactory.php',
+            'database/factories/TrustReconciliationFactory.php',
+            'database/factories/TrustRefundRequestFactory.php',
+            'database/factories/TrustTransferRequestFactory.php',
+            'app/Services/TrustAccountService.php',
+            'app/Services/TrustChargebackService.php',
+            'app/Services/TrustDepositService.php',
+            'app/Services/TrustEligibilityService.php',
+            'app/Services/TrustHighRiskAdjustmentService.php',
+            'app/Services/TrustLedgerEntryReversalService.php',
+            'app/Services/TrustLedgerService.php',
+            'app/Services/TrustModeActivationService.php',
+            'app/Services/TrustReconciliationService.php',
+            'app/Services/TrustRefundRequestService.php',
+            'app/Services/TrustTransferRequestService.php',
+            'tests/Feature/Trust/Ledgers/TrustLedgerEntryReversalServiceTest.php',
         ];
 
         return array_values(array_filter(

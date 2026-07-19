@@ -32,21 +32,23 @@ class TrustLedgerService
             throw new \RuntimeException('Client does not belong to this firm.');
         }
 
-        $ledger = TrustLedger::create([
-            'firm_id' => $firm->id,
-            'trust_account_id' => $account->id,
-            'client_id' => $client->id,
-            'status' => TrustLedgerStatus::Active,
-        ]);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $account, $client) {
+            $ledger = TrustLedger::create([
+                'firm_id' => $firm->id,
+                'trust_account_id' => $account->id,
+                'client_id' => $client->id,
+                'status' => TrustLedgerStatus::Active,
+            ]);
 
-        TrustBalance::create([
-            'firm_id' => $firm->id,
-            'trust_ledger_id' => $ledger->id,
-            'balance_cents' => 0,
-            'last_recomputed_at' => now(),
-        ]);
+            TrustBalance::create([
+                'firm_id' => $firm->id,
+                'trust_ledger_id' => $ledger->id,
+                'balance_cents' => 0,
+                'last_recomputed_at' => now(),
+            ]);
 
-        return $ledger;
+            return $ledger;
+        });
     }
 
     public function freeze(Firm $firm, TrustLedger $ledger): TrustLedger
@@ -54,9 +56,11 @@ class TrustLedgerService
         $this->eligibility->assertEligible($firm);
         $this->tenantSafePolicy->assertTrustLedgerBelongsToFirm($ledger, $firm);
 
-        $ledger->update(['status' => TrustLedgerStatus::Frozen]);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($ledger) {
+            $ledger->update(['status' => TrustLedgerStatus::Frozen]);
 
-        return $ledger->fresh();
+            return $ledger->fresh();
+        });
     }
 
     public function close(Firm $firm, TrustLedger $ledger): TrustLedger
@@ -64,8 +68,10 @@ class TrustLedgerService
         $this->eligibility->assertEligible($firm);
         $this->tenantSafePolicy->assertTrustLedgerBelongsToFirm($ledger, $firm);
 
-        $ledger->update(['status' => TrustLedgerStatus::Closed]);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($ledger) {
+            $ledger->update(['status' => TrustLedgerStatus::Closed]);
 
-        return $ledger->fresh();
+            return $ledger->fresh();
+        });
     }
 }

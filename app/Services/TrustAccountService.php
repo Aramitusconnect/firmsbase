@@ -21,30 +21,34 @@ class TrustAccountService
     {
         $this->eligibility->assertEligible($firm);
 
-        return TrustAccount::create([
+        return (new TenantContextService())->runWithFirmContext($firm, fn () => TrustAccount::create([
             'firm_id' => $firm->id,
             'account_name' => $accountName,
             'bank_name_reference' => $bankNameReference,
             'status' => TrustAccountStatus::Active,
             'opened_at' => now(),
-        ]);
+        ]));
     }
 
     public function suspend(Firm $firm, TrustAccount $account): TrustAccount
     {
         $this->eligibility->assertEligible($firm);
 
-        $account->update(['status' => TrustAccountStatus::Suspended]);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($account) {
+            $account->update(['status' => TrustAccountStatus::Suspended]);
 
-        return $account->fresh();
+            return $account->fresh();
+        });
     }
 
     public function close(Firm $firm, TrustAccount $account): TrustAccount
     {
         $this->eligibility->assertEligible($firm);
 
-        $account->update(['status' => TrustAccountStatus::Closed]);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($account) {
+            $account->update(['status' => TrustAccountStatus::Closed]);
 
-        return $account->fresh();
+            return $account->fresh();
+        });
     }
 }

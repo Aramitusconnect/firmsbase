@@ -43,16 +43,29 @@ class TrustChargebackService
             throw new \RuntimeException('A chargeback can only be reported against a Deposit entry.');
         }
 
-        return TrustChargebackEvent::create([
+        return (new TenantContextService())->runWithFirmContext($firm, fn () => TrustChargebackEvent::create([
             'firm_id' => $firm->id,
             'original_trust_ledger_entry_id' => $originalEntry->id,
             'amount_cents' => $amountCents,
             'reason' => $reason,
             'status' => TrustChargebackStatus::Reported,
             'reported_at' => now(),
-        ]);
+        ]));
     }
 
+    /**
+     * This method previously had ZERO tenant-context wrap of any kind:
+     * $chargeback->originalEntry and $originalEntry->trustLedger were
+     * both lazy-loaded with no context, and $originalEntry->trustLedger
+     * was accessed with no null-safety, risking a raw PHP crash rather
+     * than a named exception once trust_ledger_entries/trust_ledgers
+     * are FORCE-RLS'd and either lazy-load silently resolves to null.
+     * Both problems are fixed together: a whole-method wrap (covering
+     * both lazy-loads, the nested — already independently wrapped per
+     * TrustLedgerEntryReversalService::reverse() — call into the
+     * reversal service, the update(), and the trailing fresh()) plus a
+     * defensive null-check immediately after both lazy-loads resolve.
+     */
     public function reverse(Firm $firm, TrustChargebackEvent $chargeback, FirmUser $reversedBy): TrustChargebackEvent
     {
         $this->eligibility->assertEligible($firm);
@@ -63,22 +76,31 @@ class TrustChargebackService
             throw new \RuntimeException('Only a Reported chargeback can be reversed.');
         }
 
-        $originalEntry = $chargeback->originalEntry;
-        $ledger = $originalEntry->trustLedger;
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $chargeback, $reversedBy) {
+            $originalEntry = $chargeback->originalEntry;
+            $ledger = $originalEntry?->trustLedger;
 
-        $reversalEntry = $this->reversalService->reverse(
-            $firm,
-            $ledger,
-            $originalEntry,
-            TrustLedgerEntryType::ChargebackReversal,
-        );
+            if ($originalEntry === null || $ledger === null) {
+                throw new \RuntimeException(
+                    "TrustChargebackEvent [id={$chargeback->id}]'s original ledger entry or its trust ledger ".
+                    "could not be resolved under firm [id={$firm->id}]'s tenant context."
+                );
+            }
 
-        $chargeback->update([
-            'reversal_trust_ledger_entry_id' => $reversalEntry->id,
-            'status' => TrustChargebackStatus::Reversed,
-        ]);
+            $reversalEntry = $this->reversalService->reverse(
+                $firm,
+                $ledger,
+                $originalEntry,
+                TrustLedgerEntryType::ChargebackReversal,
+            );
 
-        return $chargeback->fresh();
+            $chargeback->update([
+                'reversal_trust_ledger_entry_id' => $reversalEntry->id,
+                'status' => TrustChargebackStatus::Reversed,
+            ]);
+
+            return $chargeback->fresh();
+        });
     }
 
     public function resolve(Firm $firm, TrustChargebackEvent $chargeback, FirmUser $resolvedBy): TrustChargebackEvent
@@ -91,11 +113,13 @@ class TrustChargebackService
             throw new \RuntimeException('Only a Reversed chargeback can be marked Resolved.');
         }
 
-        $chargeback->update([
-            'status' => TrustChargebackStatus::Resolved,
-            'resolved_at' => now(),
-        ]);
+        return (new TenantContextService())->runWithFirmContext($firm, function () use ($chargeback) {
+            $chargeback->update([
+                'status' => TrustChargebackStatus::Resolved,
+                'resolved_at' => now(),
+            ]);
 
-        return $chargeback->fresh();
+            return $chargeback->fresh();
+        });
     }
 }

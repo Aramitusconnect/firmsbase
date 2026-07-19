@@ -137,6 +137,21 @@ class TrustLedgerEntryReversalServiceTest extends TestCase
         app(\App\Services\TrustBalanceService::class)->recomputeForLedger($ledger);
         app(\App\Services\TrustBalanceService::class)->recomputeForMatter($ledger, $matter);
 
+        // Resolve the fresh copy of $original BEFORE clearing context.
+        // trust_ledger_entries is now (Wave 10) FORCE-RLS'd and this
+        // model does not use BelongsToTenant, so a bare ->fresh() call
+        // issued with no ambient app.current_firm_id would itself now
+        // return null (RLS's USING clause hides every row), which
+        // would make this test fail for a reason unrelated to what it
+        // is actually proving. The test's real subject is whether
+        // reverse() ITSELF correctly re-establishes context to resolve
+        // $originalEntry->matter internally — not whether a raw
+        // ->fresh() call outside any service wrap can see the row. So
+        // the fresh() read happens under the still-active context left
+        // by MatterFactory's context-hold create(), and only then do
+        // we clear context before calling into the service under test.
+        $originalFresh = $original->fresh();
+
         // Explicitly clear any ambient database tenant context left
         // over from Matter::factory()->create()'s context-hold
         // pattern above, so this test genuinely reproduces the
@@ -145,12 +160,21 @@ class TrustLedgerEntryReversalServiceTest extends TestCase
         // still-active session setting.
         (new \App\Services\TenantContextService())->clearDatabaseTenantContext();
 
-        $reversal = $this->service->reverse($firm, $ledger, $original->fresh());
+        $reversal = $this->service->reverse($firm, $ledger, $originalFresh);
 
         $this->assertSame($matter->id, $reversal->matter_id);
         $this->assertSame(TrustLedgerEntryType::Reversal, $reversal->entry_type);
         $this->assertSame(-10000, $reversal->amount_cents);
-        $this->assertSame(0, $ledger->balance->fresh()->balance_cents);
+
+        // $ledger->balance is being lazy-loaded here for the first time
+        // in this test (unlike the other test methods in this file,
+        // which access it earlier while context is still ambient).
+        // trust_balances is now (Wave 10) FORCE-RLS'd, so this relation
+        // read must run under the ledger's own firm context — same
+        // reasoning as $originalFresh above and the matterBalance read
+        // below, not a change to what this assertion actually proves.
+        $ledgerBalance = $this->runWithFirmContext($firm, fn () => $ledger->balance()->firstOrFail());
+        $this->assertSame(0, $ledgerBalance->balance_cents);
 
         $matterBalance = $this->runWithFirmContext($firm, fn () => \App\Models\MatterTrustBalance::query()
             ->where('trust_ledger_id', $ledger->id)

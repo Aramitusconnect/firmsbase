@@ -66,7 +66,18 @@ class TrustEligibilityService
             return TrustEligibilityDecision::deny('Firm has explicitly disabled trust_iolta_protection.');
         }
 
-        if (! $this->hasApprovedTrustSetup($firm)) {
+        // trust_approval_events is FORCE-RLS-protected as of this
+        // checkpoint. hasApprovedTrustSetup() queries it directly (an
+        // explicit ->where('firm_id', ...) does NOT bypass FORCE RLS's
+        // USING clause), so this call needs its own tenant context. This
+        // is a SECOND, separate, narrow wrap — a sibling to the
+        // firm_settings wrap above, not merged with it — since the two
+        // wraps protect two independent tables and should remain
+        // independently auditable, consistent with this method's own
+        // established convention.
+        $hasApprovedSetup = (new TenantContextService())->runWithFirmContext($firm, fn () => $this->hasApprovedTrustSetup($firm));
+
+        if (! $hasApprovedSetup) {
             return TrustEligibilityDecision::deny('No approved trust-mode activation exists for this firm (Phase 7 two-person approval not completed).');
         }
 

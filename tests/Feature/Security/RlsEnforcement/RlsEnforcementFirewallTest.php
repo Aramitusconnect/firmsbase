@@ -287,7 +287,25 @@ class RlsEnforcementFirewallTest extends TestCase
                 && $path !== 'database/migrations/2026_08_29_970003_prepare_row_level_security_and_force_rls_on_import_batches_table.php'
                 && $path !== 'database/migrations/2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php'
                 && $path !== 'database/migrations/2026_08_29_970005_prepare_row_level_security_and_force_rls_on_fleet_migration_instance_status_table.php'
-                && $path !== 'database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php',
+                && $path !== 'database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php'
+                // Wave 10 (the tenth coordinated multi-table wave of
+                // this arc, trust accounting domain) legitimately
+                // added ten combined prepare-and-force migrations
+                // together: trust_accounts, trust_ledgers,
+                // trust_balances, matter_trust_balances,
+                // trust_ledger_entries, trust_approval_events,
+                // trust_chargeback_events, trust_reconciliations,
+                // trust_refund_requests, and trust_transfer_requests.
+                && $path !== 'database/migrations/2026_08_30_980001_prepare_row_level_security_and_force_rls_on_trust_accounts_table.php'
+                && $path !== 'database/migrations/2026_08_30_980002_prepare_row_level_security_and_force_rls_on_trust_ledgers_table.php'
+                && $path !== 'database/migrations/2026_08_30_980003_prepare_row_level_security_and_force_rls_on_trust_balances_table.php'
+                && $path !== 'database/migrations/2026_08_30_980004_prepare_row_level_security_and_force_rls_on_matter_trust_balances_table.php'
+                && $path !== 'database/migrations/2026_08_30_980005_prepare_row_level_security_and_force_rls_on_trust_ledger_entries_table.php'
+                && $path !== 'database/migrations/2026_08_30_980006_prepare_row_level_security_and_force_rls_on_trust_approval_events_table.php'
+                && $path !== 'database/migrations/2026_08_30_980007_prepare_row_level_security_and_force_rls_on_trust_chargeback_events_table.php'
+                && $path !== 'database/migrations/2026_08_30_980008_prepare_row_level_security_and_force_rls_on_trust_reconciliations_table.php'
+                && $path !== 'database/migrations/2026_08_30_980009_prepare_row_level_security_and_force_rls_on_trust_refund_requests_table.php'
+                && $path !== 'database/migrations/2026_08_30_980010_prepare_row_level_security_and_force_rls_on_trust_transfer_requests_table.php',
         ));
 
         $this->assertEmpty($changed, 'Section 39A must add no migrations in this pass, but found: '.implode(', ', $changed));
