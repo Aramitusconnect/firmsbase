@@ -1,0 +1,104 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Unit\Integrations;
+
+use App\Enums\IntegrationType;
+use App\Integrations\Enums\ProviderKey;
+use PHPUnit\Framework\TestCase;
+use ReflectionEnum;
+
+/**
+ * Pure unit test — no framework boot, no database, no factories.
+ *
+ * Checkpoint 1 registers exactly one provider key ('test'). This test
+ * proves the enum's shape is stable/immutable/lowercase and — critically
+ * — that it shares no case name or backed value with the existing,
+ * unrelated App\Enums\IntegrationType enum (a Phase 16 enum for Stripe/
+ * EmailProvider/VirusScanning/Telemetry degradation modes). A collision
+ * here would mean code that branches on one enum's value could silently
+ * misinterpret a value from the other.
+ */
+final class ProviderKeyTest extends TestCase
+{
+    public function test_it_is_a_string_backed_enum(): void
+    {
+        $reflection = new ReflectionEnum(ProviderKey::class);
+
+        $this->assertTrue($reflection->isBacked());
+        $this->assertSame('string', (string) $reflection->getBackingType());
+    }
+
+    public function test_it_has_exactly_the_expected_single_case(): void
+    {
+        $cases = ProviderKey::cases();
+
+        $this->assertCount(1, $cases, 'ProviderKey must register exactly one case at Checkpoint 1.');
+        $this->assertSame('Test', $cases[0]->name);
+        $this->assertSame(ProviderKey::Test, $cases[0]);
+    }
+
+    public function test_backed_value_is_lowercase(): void
+    {
+        foreach (ProviderKey::cases() as $case) {
+            $this->assertSame(
+                strtolower($case->value),
+                $case->value,
+                "ProviderKey::{$case->name}'s backed value '{$case->value}' must be lowercase."
+            );
+        }
+    }
+
+    public function test_backed_value_is_stable_and_matches_documented_key(): void
+    {
+        // Locks the exact string, not just "is a string" — a silent
+        // rename here would be a breaking change to anything that has
+        // persisted or compared against 'test'.
+        $this->assertSame('test', ProviderKey::Test->value);
+    }
+
+    public function test_no_case_name_collides_with_integration_type(): void
+    {
+        $providerKeyNames = array_map(static fn (ProviderKey $case): string => $case->name, ProviderKey::cases());
+        $integrationTypeNames = array_map(static fn (IntegrationType $case): string => $case->name, IntegrationType::cases());
+
+        $this->assertEmpty(
+            array_intersect($providerKeyNames, $integrationTypeNames),
+            'ProviderKey must not share any case name with the unrelated App\\Enums\\IntegrationType enum.'
+        );
+    }
+
+    public function test_no_backed_value_collides_with_integration_type(): void
+    {
+        $providerKeyValues = array_map(static fn (ProviderKey $case): string => $case->value, ProviderKey::cases());
+        $integrationTypeValues = array_map(static fn (IntegrationType $case): string => $case->value, IntegrationType::cases());
+
+        // Read directly off the real IntegrationType enum (not a
+        // hand-copied literal list) so this test cannot drift from the
+        // production enum if it is ever extended.
+        $this->assertNotEmpty($integrationTypeValues, 'Sanity check: IntegrationType must not be empty for this comparison to be meaningful.');
+
+        $this->assertEmpty(
+            array_intersect($providerKeyValues, $integrationTypeValues),
+            'ProviderKey must not share any backed value with the unrelated App\\Enums\\IntegrationType enum. '
+                .'IntegrationType values: '.implode(', ', $integrationTypeValues)
+        );
+    }
+
+    public function test_integration_type_still_has_its_known_four_cases(): void
+    {
+        // Guards the assumption behind the two collision tests above:
+        // if IntegrationType's shape ever changes underneath this test,
+        // we want a loud, specific failure here rather than a silently
+        // weaker collision check.
+        $values = array_map(static fn (IntegrationType $case): string => $case->value, IntegrationType::cases());
+
+        sort($values);
+
+        $this->assertSame(
+            ['email_provider', 'stripe', 'telemetry', 'virus_scanning'],
+            $values
+        );
+    }
+}
