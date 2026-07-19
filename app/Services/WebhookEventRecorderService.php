@@ -41,34 +41,34 @@ class WebhookEventRecorderService
                 return null;
             }
 
-            // Wrapped in the recording firm's own context: build() may
-            // lazily load a subject's tenant-owned relations (e.g. a
-            // Task or MatterReadinessScore's ->matter), and record() is
-            // routinely called from inside a DB::afterCommit() closure
-            // after the caller's own runWithFirmContext() has already
-            // cleared context in its finally block.
-            $payload = (new TenantContextService())->runWithFirmContext($firm, fn () => $this->payloadBuilder->build($type, $subject));
+            // Whole method body wrapped as one atomic unit (build,
+            // create(), subscription read, and enqueue() fan-out) —
+            // fixes a decoy-wrap gap found during Wave 11 Phase 2 review
+            // that previously left everything but build() unwrapped.
+            return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $type, $subject) {
+                $payload = $this->payloadBuilder->build($type, $subject);
 
-            $event = WebhookEvent::create([
-                'firm_id' => $firm->id,
-                'event_type' => $type,
-                'subject_type' => get_class($subject),
-                'subject_id' => $subject->id ?? null,
-                'payload_json' => $payload,
-                'occurred_at' => now(),
-            ]);
+                $event = WebhookEvent::create([
+                    'firm_id' => $firm->id,
+                    'event_type' => $type,
+                    'subject_type' => get_class($subject),
+                    'subject_id' => $subject->id ?? null,
+                    'payload_json' => $payload,
+                    'occurred_at' => now(),
+                ]);
 
-            $matchingSubscriptions = WebhookSubscription::query()
-                ->where('firm_id', $firm->id)
-                ->where('status', WebhookSubscriptionStatus::Active->value)
-                ->get()
-                ->filter(fn (WebhookSubscription $subscription) => in_array($type->value, $subscription->event_types ?? [], true));
+                $matchingSubscriptions = WebhookSubscription::query()
+                    ->where('firm_id', $firm->id)
+                    ->where('status', WebhookSubscriptionStatus::Active->value)
+                    ->get()
+                    ->filter(fn (WebhookSubscription $subscription) => in_array($type->value, $subscription->event_types ?? [], true));
 
-            foreach ($matchingSubscriptions as $subscription) {
-                $this->deliveryService->enqueue($event, $subscription);
-            }
+                foreach ($matchingSubscriptions as $subscription) {
+                    $this->deliveryService->enqueue($event, $subscription);
+                }
 
-            return $event;
+                return $event;
+            });
         } catch (\Throwable $e) {
             Log::error('WebhookEventRecorderService::record() failed internally; core workflow continues unaffected.', [
                 'firm_id' => $firm->id,

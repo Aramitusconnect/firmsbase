@@ -67,18 +67,21 @@ class LeadCreatedWiringTest extends TestCase
     {
         $firm = $this->applyOneLeadRow(['name' => 'Imported Lead', 'email' => 'lead@example.com']);
 
-        $this->assertDatabaseCount('webhook_events', 1);
-        $this->assertDatabaseHas('webhook_events', ['event_type' => WebhookEventType::LeadCreated->value]);
+        // firm_leads AND webhook_events both have permanent FORCE ROW
+        // LEVEL SECURITY active — ImportApplyService::createRecordFor()'s
+        // FirmLead branch (and WebhookEventRecorderService::record()'s
+        // own wrap) both clear their own tenant context in a finally
+        // block before returning, so every post-call read below needs
+        // explicit tenant context re-established.
+        $this->runWithFirmContext($firm, function () {
+            $this->assertDatabaseCount('webhook_events', 1);
+            $this->assertDatabaseHas('webhook_events', ['event_type' => WebhookEventType::LeadCreated->value]);
 
-        // firm_leads has permanent FORCE ROW LEVEL SECURITY (Section
-        // 39A-3J) — ImportApplyService::createRecordFor()'s FirmLead
-        // branch clears its own tenant context in a finally block
-        // before returning, so this post-call read needs explicit
-        // tenant context re-established.
-        $lead = $this->runWithFirmContext($firm, fn () => FirmLead::query()->where('name', 'Imported Lead')->firstOrFail());
-        $event = WebhookEvent::query()->where('event_type', WebhookEventType::LeadCreated->value)->firstOrFail();
-        $this->assertSame($lead->id, $event->subject_id);
-        $this->assertSame(FirmLead::class, $event->subject_type);
+            $lead = FirmLead::query()->where('name', 'Imported Lead')->firstOrFail();
+            $event = WebhookEvent::query()->where('event_type', WebhookEventType::LeadCreated->value)->firstOrFail();
+            $this->assertSame($lead->id, $event->subject_id);
+            $this->assertSame(FirmLead::class, $event->subject_type);
+        });
     }
 
     public function test_lead_created_does_not_fire_when_the_row_fails_to_apply(): void

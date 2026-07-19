@@ -41,12 +41,19 @@ class ClientCreatedWiringTest extends TestCase
 
         $client = $service->convert($lead, ['display_name' => 'Converted Client']);
 
-        $this->assertDatabaseCount('webhook_events', 1);
-        $this->assertDatabaseHas('webhook_events', [
-            'event_type' => WebhookEventType::ClientCreated->value,
-            'subject_type' => Client::class,
-            'subject_id' => $client->id,
-        ]);
+        // webhook_events is permanently FORCE RLS'd (Wave 11) — a raw,
+        // no-context assertDatabaseCount/assertDatabaseHas would (fail
+        // closed and) find nothing regardless of what was actually
+        // persisted, since convert()'s own tenant context has already
+        // been cleared by the time this assertion runs.
+        $this->runWithFirmContext($firm, function () use ($client) {
+            $this->assertDatabaseCount('webhook_events', 1);
+            $this->assertDatabaseHas('webhook_events', [
+                'event_type' => WebhookEventType::ClientCreated->value,
+                'subject_type' => Client::class,
+                'subject_id' => $client->id,
+            ]);
+        });
     }
 
     public function test_client_created_does_not_fire_when_the_lead_is_already_converted(): void
@@ -99,8 +106,10 @@ class ClientCreatedWiringTest extends TestCase
         $confirmed = $service->confirmBatch($batch);
         $service->apply($confirmed);
 
-        $this->assertDatabaseCount('webhook_events', 1);
-        $this->assertDatabaseHas('webhook_events', ['event_type' => WebhookEventType::ClientCreated->value]);
+        $this->runWithFirmContext($firm, function () {
+            $this->assertDatabaseCount('webhook_events', 1);
+            $this->assertDatabaseHas('webhook_events', ['event_type' => WebhookEventType::ClientCreated->value]);
+        });
     }
 
     public function test_client_created_does_not_fire_when_the_import_row_fails(): void

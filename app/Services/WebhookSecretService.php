@@ -28,6 +28,10 @@ class WebhookSecretService
     }
 
     /**
+     * Relies entirely on ambient caller-supplied tenant context — no
+     * runWithFirmContext() wrap of its own. No production caller exists
+     * today; a future caller must supply context explicitly.
+     *
      * @return array{secret: WebhookSecret, rawSecret: string}
      */
     public function generate(Firm $firm, WebhookSubscription $subscription): array
@@ -54,6 +58,10 @@ class WebhookSecretService
     }
 
     /**
+     * Relies entirely on ambient caller-supplied tenant context — no
+     * runWithFirmContext() wrap of its own. No production caller exists
+     * today; a future caller must supply context explicitly.
+     *
      * @return array{secret: WebhookSecret, rawSecret: string}
      */
     public function rotate(Firm $firm, WebhookSecret $existing): array

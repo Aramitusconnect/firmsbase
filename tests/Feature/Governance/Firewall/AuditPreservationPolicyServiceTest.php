@@ -69,7 +69,12 @@ class AuditPreservationPolicyServiceTest extends TestCase
 
     public function test_existing_webhook_event_append_only_protection_still_throws(): void
     {
-        $event = WebhookEvent::factory()->create();
+        // webhook_events has permanent FORCE ROW LEVEL SECURITY active
+        // (Wave 11) and — unlike TrustLedgerEntry/AiUsageEvent's own
+        // factories — WebhookEventFactory has no context-hold create()
+        // override, so this bare create() needs an explicit wrap.
+        $firm = \App\Models\Firm::factory()->create();
+        $event = $this->runWithFirmContext($firm, fn () => WebhookEvent::factory()->forFirm($firm)->create());
 
         $this->expectException(\LogicException::class);
         $event->delete();

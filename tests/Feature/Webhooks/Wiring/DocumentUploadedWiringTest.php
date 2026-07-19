@@ -54,12 +54,18 @@ class DocumentUploadedWiringTest extends TestCase
             fileHash: hash('sha256', 'passport'),
         );
 
-        $this->assertDatabaseCount('webhook_events', 1);
-        $this->assertDatabaseHas('webhook_events', [
-            'event_type' => WebhookEventType::DocumentUploaded->value,
-            'subject_type' => Document::class,
-            'subject_id' => $document->id,
-        ]);
+        // webhook_events is permanently FORCE RLS'd (Wave 11) — a raw,
+        // no-context assertion would fail closed regardless of what
+        // was actually persisted, since upload()'s own tenant context
+        // has already been cleared by the time this assertion runs.
+        $this->runWithFirmContext($firm, function () use ($document) {
+            $this->assertDatabaseCount('webhook_events', 1);
+            $this->assertDatabaseHas('webhook_events', [
+                'event_type' => WebhookEventType::DocumentUploaded->value,
+                'subject_type' => Document::class,
+                'subject_id' => $document->id,
+            ]);
+        });
     }
 
     public function test_document_uploaded_does_not_fire_when_upload_policy_rejects_the_file(): void
@@ -122,8 +128,10 @@ class DocumentUploadedWiringTest extends TestCase
         $result = $service->scanAndPromote($attachment);
 
         $this->assertTrue($result->promoted);
-        $this->assertDatabaseCount('webhook_events', 1);
-        $this->assertDatabaseHas('webhook_events', ['event_type' => WebhookEventType::DocumentUploaded->value]);
+        $this->runWithFirmContext($firm, function () {
+            $this->assertDatabaseCount('webhook_events', 1);
+            $this->assertDatabaseHas('webhook_events', ['event_type' => WebhookEventType::DocumentUploaded->value]);
+        });
     }
 
     public function test_document_uploaded_does_not_fire_when_attachment_promotion_is_blocked(): void
@@ -161,15 +169,17 @@ class DocumentUploadedWiringTest extends TestCase
             fileHash: hash('sha256', 'replacement'),
         );
 
-        $this->assertDatabaseCount('webhook_events', 1);
-        $this->assertDatabaseHas('webhook_events', [
-            'event_type' => WebhookEventType::DocumentUploaded->value,
-            'subject_type' => Document::class,
-            'subject_id' => $replacement->id,
-        ]);
+        $this->runWithFirmContext($firm, function () use ($original, $replacement) {
+            $this->assertDatabaseCount('webhook_events', 1);
+            $this->assertDatabaseHas('webhook_events', [
+                'event_type' => WebhookEventType::DocumentUploaded->value,
+                'subject_type' => Document::class,
+                'subject_id' => $replacement->id,
+            ]);
 
-        // The original document is never re-fired as document.uploaded.
-        $this->assertDatabaseMissing('webhook_events', ['subject_type' => Document::class, 'subject_id' => $original->id]);
+            // The original document is never re-fired as document.uploaded.
+            $this->assertDatabaseMissing('webhook_events', ['subject_type' => Document::class, 'subject_id' => $original->id]);
+        });
     }
 
     public function test_document_uploaded_fires_exactly_once_from_bulk_import(): void
@@ -190,7 +200,9 @@ class DocumentUploadedWiringTest extends TestCase
         $confirmed = $service->confirmBatch($batch);
         $service->apply($confirmed);
 
-        $this->assertDatabaseCount('webhook_events', 1);
-        $this->assertDatabaseHas('webhook_events', ['event_type' => WebhookEventType::DocumentUploaded->value]);
+        $this->runWithFirmContext($firm, function () {
+            $this->assertDatabaseCount('webhook_events', 1);
+            $this->assertDatabaseHas('webhook_events', ['event_type' => WebhookEventType::DocumentUploaded->value]);
+        });
     }
 }

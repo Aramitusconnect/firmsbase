@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\TenantIsolationException;
 use App\Models\Firm;
 use App\Models\WebhookDelivery;
+use App\Models\WebhookDeliveryAttempt;
 use App\Models\WebhookEvent;
 use App\Models\WebhookSecret;
 use App\Models\WebhookSubscription;
@@ -41,6 +42,13 @@ class TenantSafeWebhookPolicyService
     {
         if ($secret->firm_id !== $firm->id) {
             throw new TenantIsolationException("WebhookSecret [id={$secret->id}] does not belong to firm [id={$firm->id}].");
+        }
+    }
+
+    public function assertWebhookDeliveryAttemptBelongsToFirm(WebhookDeliveryAttempt $attempt, Firm $firm): void
+    {
+        if ($attempt->firm_id !== $firm->id) {
+            throw new TenantIsolationException("WebhookDeliveryAttempt [id={$attempt->id}] does not belong to firm [id={$firm->id}].");
         }
     }
 }
