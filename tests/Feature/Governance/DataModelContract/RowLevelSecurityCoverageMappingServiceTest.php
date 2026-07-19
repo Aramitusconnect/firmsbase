@@ -156,8 +156,14 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // deployment_health_checks moved from MISSING_PREPARED_TABLES
         // into PREPARED_TABLES (86 -> 92, 27 -> 21); tenantOwnedTables()
         // remains unchanged (113).
-        $this->assertCount(92, $this->service->preparedTables());
-        $this->assertCount(21, $this->service->missingPreparedTables());
+        // Narrowly updated AGAIN by Section 39A-5 Wave 9 —
+        // export_jobs, migration_projects, import_batches,
+        // implementation_projects, fleet_migration_instance_status, and
+        // offboarding_requests moved from MISSING_PREPARED_TABLES into
+        // PREPARED_TABLES (92 -> 98, 21 -> 15); tenantOwnedTables()
+        // remains unchanged (113).
+        $this->assertCount(98, $this->service->preparedTables());
+        $this->assertCount(15, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
         $this->assertCount(24, $this->service->exemptTables());
@@ -211,12 +217,16 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // — both moved into PREPARED_TABLES (and given a real RLS
         // policy + FORCE activation) in that batch, so neither is any
         // longer missing.
+        // fleet_migration_instance_status and implementation_projects
+        // removed from this list by Section 39A-5 Wave 9 (migration/
+        // export domain, 6 tables implemented as one combined unit) —
+        // both moved into PREPARED_TABLES (and given a real RLS policy
+        // + FORCE activation) in that batch, so neither is any longer
+        // missing.
         foreach ([
             'trust_approval_events', 'webhook_deliveries',
             'webhook_delivery_attempts', 'webhook_secrets',
             'matter_trust_balances',
-            'fleet_migration_instance_status',
-            'implementation_projects',
         ] as $table) {
             $this->assertContains($table, $missing, "{$table} must be tracked in MISSING_PREPARED_TABLES.");
         }

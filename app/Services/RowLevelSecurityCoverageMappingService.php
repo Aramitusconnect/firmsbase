@@ -226,6 +226,27 @@ class RowLevelSecurityCoverageMappingService
         // All six moved here from MISSING_PREPARED_TABLES below.
         'legal_holds', 'deletion_requests', 'key_destruction_requests',
         'support_access_requests', 'support_access_sessions', 'deployment_health_checks',
+        // Section 39A-5 Wave 9 (migration/export domain) — six tables
+        // implemented and committed as ONE combined unit (not six
+        // independent checkpoints). Phase 1/2 read-only analysis found
+        // no shared writer coupling between the six, but Phase 4
+        // security review required a full per-firm-loop-and-merge
+        // rewrite of FleetMigrationOrchestrationService (fixing a
+        // genuine fail-open cross-firm authorization bug in its
+        // completion gate) and a mandatory ImplementationTaskService
+        // signature change (complete()/skip()/block() now take an
+        // explicit ImplementationProject parameter, since
+        // implementation_tasks has no firm_id of its own to key a wrap
+        // on):
+        // 2026_08_29_970001_prepare_row_level_security_and_force_rls_on_export_jobs_table.php,
+        // 2026_08_29_970002_prepare_row_level_security_and_force_rls_on_migration_projects_table.php,
+        // 2026_08_29_970003_prepare_row_level_security_and_force_rls_on_import_batches_table.php,
+        // 2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php,
+        // 2026_08_29_970005_prepare_row_level_security_and_force_rls_on_fleet_migration_instance_status_table.php,
+        // 2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php.
+        // All six moved here from MISSING_PREPARED_TABLES below.
+        'export_jobs', 'migration_projects', 'import_batches',
+        'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests',
     ];
 
     /**
@@ -309,14 +330,18 @@ class RowLevelSecurityCoverageMappingService
      * domain, implemented as one combined unit rather than six
      * independent checkpoints.
      *
+     * Section 39A-5 Wave 9 removed export_jobs, migration_projects,
+     * import_batches, implementation_projects,
+     * fleet_migration_instance_status, and offboarding_requests from
+     * this array (moved to PREPARED_TABLES above) — the ninth
+     * coordinated multi-table wave, covering the migration/export
+     * domain, implemented as one combined unit rather than six
+     * independent checkpoints.
+     *
      * @var array<int, string>
      */
     private const MISSING_PREPARED_TABLES = [
-        'export_jobs',
-        'fleet_migration_instance_status',
-        'implementation_projects', 'import_batches',
         'matter_trust_balances',
-        'migration_projects', 'offboarding_requests',
         'trust_accounts',
         'trust_approval_events', 'trust_balances', 'trust_chargeback_events',
         'trust_ledger_entries', 'trust_ledgers', 'trust_reconciliations',
