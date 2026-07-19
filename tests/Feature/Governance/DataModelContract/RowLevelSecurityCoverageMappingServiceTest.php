@@ -52,9 +52,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
     {
         $missing = $this->service->missingPreparedTables();
 
-        // Phase 12 trust accounting.
-        $this->assertContains('trust_ledger_entries', $missing);
-        $this->assertContains('trust_accounts', $missing);
+        // Phase 12 trust accounting no longer has a spot-check example
+        // here: trust_ledger_entries and trust_accounts (and every
+        // other trust table) were moved into PREPARED_TABLES by
+        // Section 39A-5 Wave 10.
         // Phase 14 webhooks.
         $this->assertContains('webhook_events', $missing);
         $this->assertContains('webhook_subscriptions', $missing);
@@ -162,8 +163,15 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // offboarding_requests moved from MISSING_PREPARED_TABLES into
         // PREPARED_TABLES (92 -> 98, 21 -> 15); tenantOwnedTables()
         // remains unchanged (113).
-        $this->assertCount(98, $this->service->preparedTables());
-        $this->assertCount(15, $this->service->missingPreparedTables());
+        // Narrowly updated AGAIN by Section 39A-5 Wave 10 — trust_accounts,
+        // trust_ledgers, trust_balances, matter_trust_balances,
+        // trust_ledger_entries, trust_approval_events,
+        // trust_chargeback_events, trust_reconciliations,
+        // trust_refund_requests, and trust_transfer_requests moved from
+        // MISSING_PREPARED_TABLES into PREPARED_TABLES (98 -> 108,
+        // 15 -> 5); tenantOwnedTables() remains unchanged (113).
+        $this->assertCount(108, $this->service->preparedTables());
+        $this->assertCount(5, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
         $this->assertCount(24, $this->service->exemptTables());
@@ -223,10 +231,14 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // both moved into PREPARED_TABLES (and given a real RLS policy
         // + FORCE activation) in that batch, so neither is any longer
         // missing.
+        // trust_approval_events and matter_trust_balances removed from
+        // this list by Section 39A-5 Wave 10 (trust accounting domain,
+        // 10 tables implemented as one combined unit) — both moved into
+        // PREPARED_TABLES (and given a real RLS policy + FORCE
+        // activation) in that batch, so neither is any longer missing.
         foreach ([
-            'trust_approval_events', 'webhook_deliveries',
+            'webhook_deliveries',
             'webhook_delivery_attempts', 'webhook_secrets',
-            'matter_trust_balances',
         ] as $table) {
             $this->assertContains($table, $missing, "{$table} must be tracked in MISSING_PREPARED_TABLES.");
         }

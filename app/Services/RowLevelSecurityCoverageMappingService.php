@@ -247,6 +247,31 @@ class RowLevelSecurityCoverageMappingService
         // All six moved here from MISSING_PREPARED_TABLES below.
         'export_jobs', 'migration_projects', 'import_batches',
         'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests',
+        // Section 39A-5 Wave 10 (trust accounting domain) — ten tables
+        // implemented and committed as ONE combined unit, more strongly
+        // than any prior wave: every table participates in a shared
+        // TrustConcurrencyLockService::withLockedBalances() locking
+        // primitive or an FK-linked authorization chain, so no safe
+        // split point existed. Fixed a genuine fail-open bug in
+        // TrustReconciliationService::run() (a silently-empty ledger
+        // relation under missing context could record a false
+        // "Balanced" result) and a universal pre-flight-gate gap in
+        // TrustEligibilityService::hasApprovedTrustSetup() (read by
+        // ~25 call sites across 7 services):
+        // 2026_08_30_980001_prepare_row_level_security_and_force_rls_on_trust_accounts_table.php,
+        // 2026_08_30_980002_prepare_row_level_security_and_force_rls_on_trust_ledgers_table.php,
+        // 2026_08_30_980003_prepare_row_level_security_and_force_rls_on_trust_balances_table.php,
+        // 2026_08_30_980004_prepare_row_level_security_and_force_rls_on_matter_trust_balances_table.php,
+        // 2026_08_30_980005_prepare_row_level_security_and_force_rls_on_trust_ledger_entries_table.php,
+        // 2026_08_30_980006_prepare_row_level_security_and_force_rls_on_trust_approval_events_table.php,
+        // 2026_08_30_980007_prepare_row_level_security_and_force_rls_on_trust_chargeback_events_table.php,
+        // 2026_08_30_980008_prepare_row_level_security_and_force_rls_on_trust_reconciliations_table.php,
+        // 2026_08_30_980009_prepare_row_level_security_and_force_rls_on_trust_refund_requests_table.php,
+        // 2026_08_30_980010_prepare_row_level_security_and_force_rls_on_trust_transfer_requests_table.php.
+        // All ten moved here from MISSING_PREPARED_TABLES below.
+        'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances',
+        'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events',
+        'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests',
     ];
 
     /**
@@ -338,14 +363,20 @@ class RowLevelSecurityCoverageMappingService
      * domain, implemented as one combined unit rather than six
      * independent checkpoints.
      *
+     * Section 39A-5 Wave 10 removed trust_accounts, trust_ledgers,
+     * trust_balances, matter_trust_balances, trust_ledger_entries,
+     * trust_approval_events, trust_chargeback_events,
+     * trust_reconciliations, trust_refund_requests, and
+     * trust_transfer_requests from this array (moved to PREPARED_TABLES
+     * above) — the tenth coordinated multi-table wave, covering the
+     * trust accounting domain, the largest and most tightly-coupled
+     * group in this rollout, implemented as one combined unit rather
+     * than ten independent checkpoints.
+     *
      * @var array<int, string>
      */
     private const MISSING_PREPARED_TABLES = [
-        'matter_trust_balances',
-        'trust_accounts',
-        'trust_approval_events', 'trust_balances', 'trust_chargeback_events',
-        'trust_ledger_entries', 'trust_ledgers', 'trust_reconciliations',
-        'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries',
+        'webhook_deliveries',
         'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets',
         'webhook_subscriptions',
     ];
