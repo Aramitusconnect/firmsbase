@@ -10,6 +10,7 @@ use App\Integrations\Models\IntegrationProvider;
 use App\Models\Concerns\BelongsToTenant;
 use Database\Factories\IntegrationProviderFactory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use ReflectionClass;
@@ -150,6 +151,175 @@ class IntegrationProviderTest extends TestCase
             $existing,
             'No real provider (google/microsoft/stripe/etc.) is registered in this mission — seeding a catalog row for one would be out of scope.'
         );
+    }
+
+    // ------------------------------------------------------------
+    // 3b. Migration reversibility — automated, repeatable proof
+    // ------------------------------------------------------------
+
+    /**
+     * Durable, automated replacement for the checkpoint's manual
+     * rollback/reapplication verification (which was previously only
+     * performed once by hand via direct psql queries against pg_class
+     * around `artisan migrate:rollback`/`migrate`, and never captured
+     * as a repeatable test).
+     *
+     * This targets the Checkpoint 2 migration file explicitly via
+     * `--path` (not a bare `--step=1`) so the test keeps proving the
+     * right thing even if a later migration is added after this one —
+     * `--step=1` would silently start rolling back whatever migration
+     * happens to be most-recently-applied at that point, which is not
+     * what this test is meant to prove.
+     *
+     * Safety note on running DDL mid-test under RefreshDatabase: this
+     * class's tests each run inside a real outer PostgreSQL transaction
+     * (RefreshDatabase migrates once for the whole run, then wraps each
+     * test method in `$connection->beginTransaction()` / `rollBack()`).
+     * PostgreSQL — unlike MySQL — supports fully transactional DDL, and
+     * Laravel's own Migrator wraps each migration's up()/down() in
+     * `$connection->transaction()` whenever
+     * `$grammar->supportsSchemaTransactions()` is true (true for pgsql)
+     * and the migration doesn't opt out; because the outer test
+     * transaction is already open, that inner call becomes a SAVEPOINT,
+     * not a second top-level transaction. So the DROP TABLE (rollback)
+     * and CREATE TABLE + INSERT (reapply) performed by this test happen
+     * entirely inside the test's own outer transaction and are fully
+     * undone by RefreshDatabase's normal end-of-test `rollBack()` —
+     * exactly like any other write a test makes. No other test in this
+     * class (or process) observes the table missing, and the table is
+     * guaranteed to exist again after this test regardless of how it
+     * ends, because rollback of the *outer* transaction — not any
+     * cleanup code in this method — is what restores it. This was
+     * confirmed empirically against a disposable database (running
+     * this test alongside the full class) before being finalized here.
+     */
+    public function test_migration_rollback_and_reapplication_restores_exact_prior_state(): void
+    {
+        $migrationFile = 'database/migrations/2026_09_01_010001_create_integration_providers_table.php';
+        $migrationName = '2026_09_01_010001_create_integration_providers_table';
+
+        $this->assertFileExists(
+            base_path($migrationFile),
+            'This test targets the Checkpoint 2 migration by an explicit path — the file must exist at the expected location.'
+        );
+
+        // 1. Confirm current state: the table exists with exactly the
+        // documented seed row, and the migration is recorded as run.
+        $this->assertTrue(Schema::hasTable('integration_providers'));
+
+        $before = DB::table('integration_providers')->where('code', 'test')->first();
+        $this->assertNotNull($before);
+        $this->assertSame('test', $before->code);
+        $this->assertSame('Internal Test Provider (non-production)', $before->display_name);
+
+        $this->assertNotNull(
+            DB::table('migrations')->where('migration', $migrationName)->first(),
+            'The Checkpoint 2 migration must already be recorded as run before this test can prove rollback/reapply.'
+        );
+
+        // 2. Roll back exactly this migration — targeted unambiguously
+        // by --path, not a bare --step=1.
+        $rollbackExit = Artisan::call('migrate:rollback', [
+            '--path' => $migrationFile,
+            '--force' => true,
+        ]);
+        $this->assertSame(0, $rollbackExit, 'migrate:rollback failed: '.Artisan::output());
+
+        // 3. The table must be gone — verified both via the schema
+        // builder and directly against the PostgreSQL catalog.
+        $this->assertFalse(
+            Schema::hasTable('integration_providers'),
+            'migrate:rollback targeted at the Checkpoint 2 migration must drop integration_providers.'
+        );
+        $this->assertNull(
+            DB::selectOne("select relname from pg_class where relname = 'integration_providers'"),
+            'integration_providers must be fully absent from the PostgreSQL catalog after rollback, not merely hidden from the schema builder.'
+        );
+        $this->assertNull(
+            DB::table('migrations')->where('migration', $migrationName)->first(),
+            'The rolled-back migration must no longer be recorded in the migrations table.'
+        );
+
+        // 4. Reapply exactly this migration.
+        $migrateExit = Artisan::call('migrate', [
+            '--path' => $migrationFile,
+            '--force' => true,
+        ]);
+        $this->assertSame(0, $migrateExit, 'migrate failed: '.Artisan::output());
+
+        // 5. Assert the exact prior state is restored — same columns,
+        // same single seed row with the same values — not merely "a
+        // table now exists."
+        $this->assertTrue(Schema::hasTable('integration_providers'));
+
+        $columns = Schema::getColumnListing('integration_providers');
+        sort($columns);
+        $expectedColumns = self::EXPECTED_COLUMNS;
+        sort($expectedColumns);
+        $this->assertSame(
+            $expectedColumns,
+            $columns,
+            'Reapplying the migration must restore exactly the documented column set.'
+        );
+
+        $this->assertSame(1, DB::table('integration_providers')->count());
+
+        $after = DB::table('integration_providers')->where('code', 'test')->first();
+        $this->assertNotNull($after);
+        $this->assertSame($before->code, $after->code);
+        $this->assertSame($before->display_name, $after->display_name);
+        $this->assertSame($before->category, $after->category);
+        $this->assertSame($before->auth_method, $after->auth_method);
+        $this->assertSame($before->status, $after->status);
+        $this->assertNull($after->module_code);
+        $this->assertNull($after->degradation_type_key);
+
+        $this->assertNotNull(
+            DB::table('migrations')->where('migration', $migrationName)->first(),
+            'The reapplied migration must be recorded as run again.'
+        );
+
+        // 6. No RLS ever gets silently (re)applied to this Global table
+        // by the rollback/reapply cycle either.
+        $row = DB::selectOne("select relrowsecurity from pg_class where relname = 'integration_providers'");
+        $this->assertNotNull($row);
+        $this->assertFalse((bool) $row->relrowsecurity);
+    }
+
+    /**
+     * Second, narrower proof of reversibility that calls the migration
+     * file's own up()/down() methods directly, bypassing Artisan's
+     * migrate/migrate:rollback commands and the `migrations` tracking
+     * table entirely. This still stays safely inside RefreshDatabase's
+     * outer per-test transaction — PostgreSQL supports transactional
+     * DDL, so the DROP TABLE and CREATE TABLE/INSERT performed here are
+     * just more writes inside that same outer transaction, undone by
+     * its normal end-of-test rollback regardless of how this method
+     * itself ends.
+     */
+    public function test_migration_down_and_up_restores_exact_prior_state(): void
+    {
+        $this->assertTrue(Schema::hasTable('integration_providers'));
+
+        $before = DB::table('integration_providers')->where('code', 'test')->first();
+        $this->assertNotNull($before, 'Expected the seeded test-provider row to exist before rollback.');
+
+        $migration = include database_path('migrations/2026_09_01_010001_create_integration_providers_table.php');
+        $migration->down();
+
+        $this->assertFalse(Schema::hasTable('integration_providers'), 'Table must be fully dropped after down().');
+
+        $migration->up();
+
+        $this->assertTrue(Schema::hasTable('integration_providers'), 'Table must be fully restored after up().');
+
+        $after = DB::table('integration_providers')->where('code', 'test')->first();
+        $this->assertNotNull($after, 'Expected the seeded test-provider row to be restored after up().');
+        $this->assertSame($before->code, $after->code);
+        $this->assertSame($before->display_name, $after->display_name);
+        $this->assertSame($before->category, $after->category);
+        $this->assertSame($before->auth_method, $after->auth_method);
+        $this->assertSame($before->status, $after->status);
     }
 
     // ------------------------------------------------------------
