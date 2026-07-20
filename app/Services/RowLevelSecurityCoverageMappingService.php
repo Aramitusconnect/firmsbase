@@ -303,6 +303,17 @@ class RowLevelSecurityCoverageMappingService
         // This table was never in MISSING_PREPARED_TABLES — it is added
         // directly here since prepare and force happened together.
         'firm_integrations',
+        // Stage B Checkpoint 4 (FirmsBase Integration Platform mission)
+        // — integration_credentials, a brand-new genuine tenant-owned
+        // table (own NOT NULL firm_id column, plus a real composite FK
+        // to firm_integrations(firm_id, id)) with RLS prepared and
+        // FORCE-activated in the very same migration, following the
+        // identical combined prepare+force shape used throughout this
+        // rollout:
+        // 2026_09_03_030002_prepare_row_level_security_and_force_rls_on_integration_credentials_table.php.
+        // This table was never in MISSING_PREPARED_TABLES — it is added
+        // directly here since prepare and force happened together.
+        'integration_credentials',
     ];
 
     /**

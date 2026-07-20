@@ -212,6 +212,24 @@ class IntegrationProviderTest extends TestCase
      * natural side-effect proof, not merely that integration_providers
      * round-trips.
      */
+    /**
+     * NARROW, DISCLOSED UPDATE (post-Checkpoint-4): Checkpoint 4 extended
+     * the same FK chain one level further — integration_credentials
+     * carries a real composite FK (firm_id, firm_integration_id) ->
+     * firm_integrations(firm_id, id) with cascadeOnDelete(), so
+     * firm_integrations can no longer be dropped/rolled back while
+     * integration_credentials still exists either. This test now rolls
+     * back integration_credentials' two migrations FIRST (in FK-dependency
+     * / reverse-chronological order: its RLS-prep migration, then its
+     * create-table migration), then firm_integrations' own two migrations,
+     * then integration_providers, and reapplies in forward order
+     * (integration_providers, then firm_integrations, then
+     * integration_credentials). This is a further strengthening of the
+     * test, not a weakening: it now proves cross-table rollback safety
+     * three tables deep, and asserts integration_credentials itself ends
+     * up correctly restored too, exactly as it already did for
+     * firm_integrations.
+     */
     public function test_migration_rollback_and_reapplication_restores_exact_prior_state(): void
     {
         $migrationFile = 'database/migrations/2026_09_01_010001_create_integration_providers_table.php';
@@ -221,6 +239,11 @@ class IntegrationProviderTest extends TestCase
         $firmIntegrationsCreateName = '2026_09_02_020001_create_firm_integrations_table';
         $firmIntegrationsRlsFile = 'database/migrations/2026_09_02_020002_prepare_row_level_security_and_force_rls_on_firm_integrations_table.php';
         $firmIntegrationsRlsName = '2026_09_02_020002_prepare_row_level_security_and_force_rls_on_firm_integrations_table';
+
+        $integrationCredentialsCreateFile = 'database/migrations/2026_09_03_030001_create_integration_credentials_table.php';
+        $integrationCredentialsCreateName = '2026_09_03_030001_create_integration_credentials_table';
+        $integrationCredentialsRlsFile = 'database/migrations/2026_09_03_030002_prepare_row_level_security_and_force_rls_on_integration_credentials_table.php';
+        $integrationCredentialsRlsName = '2026_09_03_030002_prepare_row_level_security_and_force_rls_on_integration_credentials_table';
 
         $this->assertFileExists(
             base_path($migrationFile),
@@ -253,8 +276,41 @@ class IntegrationProviderTest extends TestCase
         $this->assertTrue((bool) $firmIntegrationsRlsBefore->relrowsecurity);
         $this->assertTrue((bool) $firmIntegrationsRlsBefore->relforcerowsecurity);
 
-        // 2. Roll back integration_providers' one real dependent,
-        // firm_integrations, first — in FK-dependency / reverse-
+        // Confirm integration_credentials' own pre-rollback state too
+        // (Checkpoint 4 — one level further down the same FK chain).
+        $this->assertTrue(
+            Schema::hasTable('integration_credentials'),
+            'integration_credentials (Checkpoint 4) must exist before this test begins, since it is now firm_integrations\' one real FK dependent.'
+        );
+        $integrationCredentialsRlsBefore = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'integration_credentials'");
+        $this->assertNotNull($integrationCredentialsRlsBefore);
+        $this->assertTrue((bool) $integrationCredentialsRlsBefore->relrowsecurity);
+        $this->assertTrue((bool) $integrationCredentialsRlsBefore->relforcerowsecurity);
+
+        // 2. Roll back firm_integrations' one real dependent,
+        // integration_credentials, first — in FK-dependency / reverse-
+        // chronological order (its RLS-prep migration, then its
+        // create-table migration) — since integration_credentials holds a
+        // real composite FK (cascadeOnDelete()) against firm_integrations.
+        $credentialsRlsRollbackExit = Artisan::call('migrate:rollback', [
+            '--path' => $integrationCredentialsRlsFile,
+            '--force' => true,
+        ]);
+        $this->assertSame(0, $credentialsRlsRollbackExit, 'migrate:rollback of integration_credentials RLS-prep migration failed: '.Artisan::output());
+
+        $credentialsCreateRollbackExit = Artisan::call('migrate:rollback', [
+            '--path' => $integrationCredentialsCreateFile,
+            '--force' => true,
+        ]);
+        $this->assertSame(0, $credentialsCreateRollbackExit, 'migrate:rollback of integration_credentials create-table migration failed: '.Artisan::output());
+
+        $this->assertFalse(
+            Schema::hasTable('integration_credentials'),
+            'integration_credentials must be fully rolled back before firm_integrations can be safely rolled back.'
+        );
+
+        // 3. Roll back integration_providers' one real dependent,
+        // firm_integrations, next — in FK-dependency / reverse-
         // chronological order (its RLS-prep migration, then its
         // create-table migration) — since firm_integrations holds a real
         // FK (restrictOnDelete()) against integration_providers.
@@ -275,7 +331,7 @@ class IntegrationProviderTest extends TestCase
             'firm_integrations must be fully rolled back before integration_providers can be safely rolled back.'
         );
 
-        // 3. Roll back exactly this migration — targeted unambiguously
+        // 4. Roll back exactly this migration — targeted unambiguously
         // by --path, not a bare --step=1.
         $rollbackExit = Artisan::call('migrate:rollback', [
             '--path' => $migrationFile,
@@ -283,7 +339,7 @@ class IntegrationProviderTest extends TestCase
         ]);
         $this->assertSame(0, $rollbackExit, 'migrate:rollback failed: '.Artisan::output());
 
-        // 4. The table must be gone — verified both via the schema
+        // 5. The table must be gone — verified both via the schema
         // builder and directly against the PostgreSQL catalog.
         $this->assertFalse(
             Schema::hasTable('integration_providers'),
@@ -298,9 +354,10 @@ class IntegrationProviderTest extends TestCase
             'The rolled-back migration must no longer be recorded in the migrations table.'
         );
 
-        // 5. Reapply in forward order: integration_providers first, then
+        // 6. Reapply in forward order: integration_providers first, then
         // firm_integrations' two migrations (create-table, then its
-        // RLS-prep migration).
+        // RLS-prep migration), then integration_credentials' two
+        // migrations (create-table, then its RLS-prep migration).
         $migrateExit = Artisan::call('migrate', [
             '--path' => $migrationFile,
             '--force' => true,
@@ -319,7 +376,19 @@ class IntegrationProviderTest extends TestCase
         ]);
         $this->assertSame(0, $rlsMigrateExit, 'migrate of firm_integrations RLS-prep migration failed: '.Artisan::output());
 
-        // 6. Assert the exact prior state is restored — same columns,
+        $credentialsCreateMigrateExit = Artisan::call('migrate', [
+            '--path' => $integrationCredentialsCreateFile,
+            '--force' => true,
+        ]);
+        $this->assertSame(0, $credentialsCreateMigrateExit, 'migrate of integration_credentials create-table migration failed: '.Artisan::output());
+
+        $credentialsRlsMigrateExit = Artisan::call('migrate', [
+            '--path' => $integrationCredentialsRlsFile,
+            '--force' => true,
+        ]);
+        $this->assertSame(0, $credentialsRlsMigrateExit, 'migrate of integration_credentials RLS-prep migration failed: '.Artisan::output());
+
+        // 7. Assert the exact prior state is restored — same columns,
         // same single seed row with the same values — not merely "a
         // table now exists."
         $this->assertTrue(Schema::hasTable('integration_providers'));
@@ -351,13 +420,13 @@ class IntegrationProviderTest extends TestCase
             'The reapplied migration must be recorded as run again.'
         );
 
-        // 7. No RLS ever gets silently (re)applied to this Global table
+        // 8. No RLS ever gets silently (re)applied to this Global table
         // by the rollback/reapply cycle either.
         $row = DB::selectOne("select relrowsecurity from pg_class where relname = 'integration_providers'");
         $this->assertNotNull($row);
         $this->assertFalse((bool) $row->relrowsecurity);
 
-        // 8. Prove firm_integrations itself is correctly restored too, as
+        // 9. Prove firm_integrations itself is correctly restored too, as
         // a natural side-effect of proving cross-table rollback safety —
         // not just that integration_providers round-trips.
         $this->assertTrue(
@@ -388,6 +457,40 @@ class IntegrationProviderTest extends TestCase
         $this->assertNotNull(
             DB::table('migrations')->where('migration', $firmIntegrationsRlsName)->first(),
             'The reapplied firm_integrations RLS-prep migration must be recorded as run again.'
+        );
+
+        // 10. Prove integration_credentials itself is correctly restored
+        // too (Checkpoint 4 — one level further down the same FK chain),
+        // as a natural side-effect proof, not merely that firm_integrations
+        // round-trips.
+        $this->assertTrue(
+            Schema::hasTable('integration_credentials'),
+            'integration_credentials must be fully restored after reapplying its two migrations.'
+        );
+        $this->assertTrue(Schema::hasColumn('integration_credentials', 'firm_integration_id'));
+
+        $integrationCredentialsRlsAfter = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'integration_credentials'");
+        $this->assertNotNull($integrationCredentialsRlsAfter);
+        $this->assertTrue(
+            (bool) $integrationCredentialsRlsAfter->relrowsecurity,
+            'integration_credentials RLS must be re-enabled after reapplying its RLS-prep migration.'
+        );
+        $this->assertTrue(
+            (bool) $integrationCredentialsRlsAfter->relforcerowsecurity,
+            'integration_credentials FORCE RLS must be re-enabled after reapplying its RLS-prep migration.'
+        );
+
+        $integrationCredentialsPolicies = DB::select("select policyname from pg_policies where tablename = 'integration_credentials'");
+        $this->assertCount(1, $integrationCredentialsPolicies);
+        $this->assertSame('integration_credentials_tenant_isolation', $integrationCredentialsPolicies[0]->policyname);
+
+        $this->assertNotNull(
+            DB::table('migrations')->where('migration', $integrationCredentialsCreateName)->first(),
+            'The reapplied integration_credentials create-table migration must be recorded as run again.'
+        );
+        $this->assertNotNull(
+            DB::table('migrations')->where('migration', $integrationCredentialsRlsName)->first(),
+            'The reapplied integration_credentials RLS-prep migration must be recorded as run again.'
         );
     }
 
@@ -421,6 +524,20 @@ class IntegrationProviderTest extends TestCase
      * of the test (it now proves cross-table rollback safety at the
      * migration-object level too), not a weakening.
      */
+    /**
+     * NARROW, DISCLOSED UPDATE (post-Checkpoint-4): Checkpoint 4 extended
+     * the same FK chain one level further — integration_credentials'
+     * real composite FK (cascadeOnDelete()) against firm_integrations
+     * means firm_integrations' own down() now fails while
+     * integration_credentials still exists. This test now also invokes
+     * integration_credentials' two migration objects directly — tearing
+     * them down FIRST, in FK-dependency / reverse-chronological order
+     * (RLS-prep down(), then create-table down()) before firm_integrations'
+     * own down() calls, and building them back up in forward order after
+     * firm_integrations' own up() calls — and asserts integration_credentials
+     * ends up correctly restored too, exactly as it already did for
+     * firm_integrations.
+     */
     public function test_migration_down_and_up_restores_exact_prior_state(): void
     {
         $this->assertTrue(Schema::hasTable('integration_providers'));
@@ -437,12 +554,35 @@ class IntegrationProviderTest extends TestCase
         $this->assertTrue((bool) $firmIntegrationsRlsBefore->relrowsecurity);
         $this->assertTrue((bool) $firmIntegrationsRlsBefore->relforcerowsecurity);
 
+        $this->assertTrue(
+            Schema::hasTable('integration_credentials'),
+            'integration_credentials (Checkpoint 4) must exist before this test begins, since it is now firm_integrations\' one real FK dependent.'
+        );
+        $integrationCredentialsRlsBefore = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'integration_credentials'");
+        $this->assertNotNull($integrationCredentialsRlsBefore);
+        $this->assertTrue((bool) $integrationCredentialsRlsBefore->relrowsecurity);
+        $this->assertTrue((bool) $integrationCredentialsRlsBefore->relforcerowsecurity);
+
         $providersMigration = include database_path('migrations/2026_09_01_010001_create_integration_providers_table.php');
         $firmIntegrationsRlsMigration = include database_path('migrations/2026_09_02_020002_prepare_row_level_security_and_force_rls_on_firm_integrations_table.php');
         $firmIntegrationsCreateMigration = include database_path('migrations/2026_09_02_020001_create_firm_integrations_table.php');
+        $credentialsRlsMigration = include database_path('migrations/2026_09_03_030002_prepare_row_level_security_and_force_rls_on_integration_credentials_table.php');
+        $credentialsCreateMigration = include database_path('migrations/2026_09_03_030001_create_integration_credentials_table.php');
+
+        // Tear down firm_integrations' one real dependent,
+        // integration_credentials, FIRST — in FK-dependency / reverse-
+        // chronological order (RLS-prep down(), then create-table
+        // down()) — before firm_integrations' own down() calls.
+        $credentialsRlsMigration->down();
+        $credentialsCreateMigration->down();
+
+        $this->assertFalse(
+            Schema::hasTable('integration_credentials'),
+            'integration_credentials must be fully dropped before firm_integrations down() can succeed.'
+        );
 
         // Tear down firm_integrations' one real dependency on
-        // integration_providers first — in FK-dependency / reverse-
+        // integration_providers next — in FK-dependency / reverse-
         // chronological order (RLS-prep down(), then create-table
         // down()) — before integration_providers' own down().
         $firmIntegrationsRlsMigration->down();
@@ -465,6 +605,11 @@ class IntegrationProviderTest extends TestCase
         // then its RLS-prep migration's up().
         $firmIntegrationsCreateMigration->up();
         $firmIntegrationsRlsMigration->up();
+
+        // Rebuild integration_credentials in forward order: create-table
+        // up(), then its RLS-prep migration's up().
+        $credentialsCreateMigration->up();
+        $credentialsRlsMigration->up();
 
         $after = DB::table('integration_providers')->where('code', 'test')->first();
         $this->assertNotNull($after, 'Expected the seeded test-provider row to be restored after up().');
@@ -494,6 +639,28 @@ class IntegrationProviderTest extends TestCase
         $firmIntegrationsPolicies = DB::select("select policyname from pg_policies where tablename = 'firm_integrations'");
         $this->assertCount(1, $firmIntegrationsPolicies);
         $this->assertSame('firm_integrations_tenant_isolation', $firmIntegrationsPolicies[0]->policyname);
+
+        // Prove integration_credentials itself ends up correctly restored
+        // too (Checkpoint 4 — one level further down the same FK chain),
+        // as a natural side-effect proof, not merely that firm_integrations
+        // round-trips.
+        $this->assertTrue(Schema::hasTable('integration_credentials'), 'integration_credentials must be fully restored after up().');
+        $this->assertTrue(Schema::hasColumn('integration_credentials', 'firm_integration_id'));
+
+        $integrationCredentialsRlsAfter = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'integration_credentials'");
+        $this->assertNotNull($integrationCredentialsRlsAfter);
+        $this->assertTrue(
+            (bool) $integrationCredentialsRlsAfter->relrowsecurity,
+            'integration_credentials RLS must be re-enabled after reapplying its RLS-prep migration up().'
+        );
+        $this->assertTrue(
+            (bool) $integrationCredentialsRlsAfter->relforcerowsecurity,
+            'integration_credentials FORCE RLS must be re-enabled after reapplying its RLS-prep migration up().'
+        );
+
+        $integrationCredentialsPolicies = DB::select("select policyname from pg_policies where tablename = 'integration_credentials'");
+        $this->assertCount(1, $integrationCredentialsPolicies);
+        $this->assertSame('integration_credentials_tenant_isolation', $integrationCredentialsPolicies[0]->policyname);
     }
 
     // ------------------------------------------------------------

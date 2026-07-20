@@ -672,7 +672,7 @@ class RlsForceRolloutFirewallTest extends TestCase
             // from one hundred thirteen to one hundred fourteen — same
             // additive-only pattern, no existing assertion removed or
             // weakened.
-            'firm_integrations',
+            'firm_integrations', 'integration_credentials',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
