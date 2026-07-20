@@ -80,8 +80,9 @@ class DeploymentHealthChecksForceRlsActivationTest extends TestCase
 
         // Narrowly updated AGAIN by Section 39A-5 Wave 9 (migration/export domain, 6 tables) — additive only, no existing assertion removed or weakened.
         // Narrowly updated AGAIN by Section 39A-5 Wave 10 (trust accounting domain, 10 tables) — additive only, no existing assertion removed or weakened.
+        // Narrowly updated by Stage B Checkpoint 3 of the FirmsBase Integration Platform mission — firm_integrations added, bumping the forced-table total (113 -> 114).
         $this->assertCount(
-            113,
+            114,
             $coverage->forcedTables(),
             'Exactly 108 tables must have FORCE ROW LEVEL SECURITY active after this entire Wave 9 batch lands — no more, no fewer.'
         );

@@ -664,6 +664,15 @@ class RlsForceRolloutFirewallTest extends TestCase
             // 60-table RLS backlog.
             'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events',
             'webhook_secrets', 'webhook_subscriptions',
+            // Narrowly updated by Stage B Checkpoint 3 of the FirmsBase
+            // Integration Platform mission (firm_integrations, a brand-new
+            // genuine tenant-owned table, RLS prepared and FORCE-activated
+            // in the same migration, NOT part of the old 60-table rollout
+            // above) — extends the "exactly these tables are forced" list
+            // from one hundred thirteen to one hundred fourteen — same
+            // additive-only pattern, no existing assertion removed or
+            // weakened.
+            'firm_integrations',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

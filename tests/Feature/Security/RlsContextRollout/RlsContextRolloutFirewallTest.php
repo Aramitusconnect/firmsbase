@@ -176,6 +176,13 @@ class RlsContextRolloutFirewallTest extends TestCase
             // domain, the final wave of the 60-table rollout, 5 tables
             // implemented as one combined unit) —
             'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions',
+            // Narrowly updated by Stage B Checkpoint 3 of the FirmsBase
+            // Integration Platform mission (firm_integrations, a brand-new
+            // genuine tenant-owned table, RLS prepared and FORCE-activated
+            // in the same migration, NOT part of the old 60-table rollout
+            // above) for the same reason — additive only, no existing
+            // assertion removed or weakened.
+            'firm_integrations',
         ];
 
         // security_events is the final checkpoint in this arc: every

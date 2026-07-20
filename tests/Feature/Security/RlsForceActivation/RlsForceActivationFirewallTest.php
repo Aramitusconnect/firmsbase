@@ -175,6 +175,12 @@ class RlsForceActivationFirewallTest extends TestCase
             // implemented as one combined unit) — this test's own scope
             // (39A-3A) only asserts clients here.
             'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions',
+            // Narrowly updated by Stage B Checkpoint 3 of the FirmsBase
+            // Integration Platform mission (firm_integrations) for the
+            // same reason — this test's own scope (39A-3A) only asserts
+            // clients here — additive only, no existing assertion
+            // removed or weakened.
+            'firm_integrations',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

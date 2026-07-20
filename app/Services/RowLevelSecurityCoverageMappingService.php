@@ -292,6 +292,17 @@ class RowLevelSecurityCoverageMappingService
         // is now EMPTY — this closes the 60-table rollout in full.
         'webhook_subscriptions', 'webhook_events', 'webhook_secrets',
         'webhook_deliveries', 'webhook_delivery_attempts',
+        // Stage B Checkpoint 3 (FirmsBase Integration Platform mission,
+        // NOT part of the old 60-table Section 39A-5 rollout above,
+        // which is fully closed) — firm_integrations, a brand-new
+        // genuine tenant-owned table (own NOT NULL firm_id column) with
+        // RLS prepared and FORCE-activated in the very same migration,
+        // following the identical combined prepare+force shape used
+        // throughout the 39A-5 rollout:
+        // 2026_09_02_020002_prepare_row_level_security_and_force_rls_on_firm_integrations_table.php.
+        // This table was never in MISSING_PREPARED_TABLES — it is added
+        // directly here since prepare and force happened together.
+        'firm_integrations',
     ];
 
     /**
