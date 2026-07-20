@@ -432,6 +432,17 @@ class RowLevelSecurityCoverageMappingService
      * expected readers, and authorized writers. The original 22
      * entries above are untouched — this addition only appends.
      *
+     * Stage B Checkpoint 2 of the FirmsBase Integration Platform
+     * mission appended one further exemption at the end of this
+     * array: integration_providers. Confirmed by direct inspection of
+     * database/migrations/2026_09_01_010001_create_integration_providers_table.php
+     * to carry no firm_id or any other firm-referencing column at all
+     * — it is a platform-wide, seeded-only reference catalog exactly
+     * analogous to module_catalog above. See EXEMPT_TABLE_METADATA
+     * below for its documented reason, expected readers, and
+     * authorized writers. The 24 entries above are untouched — this
+     * addition only appends.
+     *
      * @var array<int, string>
      */
     private const EXEMPT_TABLES = [
@@ -444,6 +455,9 @@ class RowLevelSecurityCoverageMappingService
         'intake_templates',
         // Wave 1A (Section 39A-4B) additions — see docblock above.
         'module_catalog', 'readiness_scorecard_components',
+        // Stage B Checkpoint 2 (FirmsBase Integration Platform mission)
+        // addition — see docblock above.
+        'integration_providers',
     ];
 
     /**
@@ -841,6 +855,15 @@ class RowLevelSecurityCoverageMappingService
                 .'by component_key, not firm-scoped. Confirmed no firm_id/firm-referencing '
                 .'column by direct migration inspection. See EXEMPT_TABLE_METADATA.',
         ],
+        // Stage B Checkpoint 2 (FirmsBase Integration Platform mission)
+        // addition — see EXEMPT_TABLES docblock above.
+        'integration_providers' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Platform-wide, seeded-only integration provider reference catalog, '
+                .'addressed by code, not firm-scoped. Confirmed no firm_id/firm-referencing '
+                .'column by direct migration inspection. See EXEMPT_TABLE_METADATA.',
+        ],
         // 20 further platform-wide tables classified Global here but
         // NOT added to EXEMPT_TABLES (no human-approved exemption
         // request covers them — that array is reserved for tables with
@@ -1152,6 +1175,15 @@ class RowLevelSecurityCoverageMappingService
             'expected_readers' => ['ReadinessScorecardRegistry::evaluate() (reads active component_key rows to decide which registered evaluators to run)'],
             'authorized_writers' => [
                 'platform engineering only, via a data-seeding migration when a new readiness component ships — no runtime create/update path exists anywhere in app/ (confirmed by direct search; ReadinessScorecardRegistry only ever queries this table, it never writes to it)',
+            ],
+        ],
+        'integration_providers' => [
+            'reason' => 'Global, platform-wide, seeded-only integration provider reference catalog (Stage B Checkpoint 2 of the FirmsBase Integration Platform mission — matches module_catalog\'s exact table-design pattern per the migration\'s own doc comment); addressed by code, never firm-scoped. Confirmed by direct migration inspection to carry no firm_id or any other firm-referencing column (database/migrations/2026_09_01_010001_create_integration_providers_table.php). This is a code-defined-registry-backed seeded catalog per App\Integrations\Core\ProviderRegistry, and is never DB-editable at runtime by application logic.',
+            'expected_readers' => [
+                'App\Integrations\Core\ProviderRegistry-aware services and panels presenting provider metadata (display name, category, auth method, documentation-only OAuth scope and webhook event-type lists)',
+            ],
+            'authorized_writers' => [
+                'platform engineering only, via this table\'s own seeding migration (2026_09_01_010001_create_integration_providers_table.php) — no runtime create/update path exists anywhere in app/ (confirmed by direct search)',
             ],
         ],
     ];

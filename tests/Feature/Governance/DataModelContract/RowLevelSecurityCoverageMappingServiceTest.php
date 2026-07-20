@@ -168,7 +168,12 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertCount(0, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
-        $this->assertCount(24, $this->service->exemptTables());
+        // Narrowly updated by Stage B Checkpoint 2 of the FirmsBase
+        // Integration Platform mission — integration_providers (a new
+        // Global, no-RLS, seeded-only reference catalog, exactly
+        // analogous to module_catalog) added to the exemption registry
+        // (24 -> 25).
+        $this->assertCount(25, $this->service->exemptTables());
         $this->assertCount(113, $this->service->tenantOwnedTables());
         $forceMigrationFiles = glob(
             database_path('migrations/*_force_rls_on_*_table.php')
@@ -405,13 +410,20 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertSame(24, $summary[TenantOwnershipClassification::InheritedTenant->value]);
         $this->assertSame(3, $summary[TenantOwnershipClassification::Pivot->value]);
         $this->assertSame(10, $summary[TenantOwnershipClassification::Hybrid->value]);
-        $this->assertSame(44, $summary[TenantOwnershipClassification::Global->value]);
+        // Narrowly updated by Stage B Checkpoint 2 of the FirmsBase
+        // Integration Platform mission — integration_providers (a new
+        // Global, no-RLS, seeded-only reference catalog, exactly
+        // analogous to module_catalog) added to the exemption registry;
+        // it is classified Global, so the Global count and the overall
+        // table-inventory total both increase by one (44 -> 45,
+        // 208 -> 209).
+        $this->assertSame(45, $summary[TenantOwnershipClassification::Global->value]);
         $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
         $this->assertSame(8, $summary[TenantOwnershipClassification::System->value]);
         $this->assertSame(1, $summary[TenantOwnershipClassification::RootTenant->value]);
         $this->assertSame(1, $summary[TenantOwnershipClassification::Uncertain->value]);
 
-        $this->assertSame(208, array_sum($summary));
+        $this->assertSame(209, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void
