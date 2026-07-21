@@ -177,7 +177,13 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // FORCE-activated in the same migration) added directly to
         // PREPARED_TABLES (114 -> 115); tenantOwnedTables() is the union
         // of both and increases in step (114 -> 115).
-        $this->assertCount(115, $this->service->preparedTables());
+        // Narrowly updated AGAIN by Stage B Checkpoint 5 of the FirmsBase
+        // Integration Platform mission — integration_oauth_states (a
+        // brand-new genuine tenant-owned table, RLS prepared and
+        // FORCE-activated in the same migration) added directly to
+        // PREPARED_TABLES (115 -> 116); tenantOwnedTables() is the union
+        // of both and increases in step (115 -> 116).
+        $this->assertCount(116, $this->service->preparedTables());
         $this->assertCount(0, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
@@ -187,7 +193,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // analogous to module_catalog) added to the exemption registry
         // (24 -> 25).
         $this->assertCount(25, $this->service->exemptTables());
-        $this->assertCount(115, $this->service->tenantOwnedTables());
+        $this->assertCount(116, $this->service->tenantOwnedTables());
         $forceMigrationFiles = glob(
             database_path('migrations/*_force_rls_on_*_table.php')
         ) ?: [];
@@ -434,7 +440,15 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // fullTableInventory(); the DirectTenant count and the overall
         // table-inventory total both increase by one (114 -> 115,
         // 210 -> 211).
-        $this->assertSame(115, $summary[TenantOwnershipClassification::DirectTenant->value]);
+        // Narrowly updated AGAIN by Stage B Checkpoint 5 of the FirmsBase
+        // Integration Platform mission — integration_oauth_states (a
+        // brand-new genuine tenant-owned table, RLS prepared and
+        // FORCE-activated in the same migration) added directly to
+        // PREPARED_TABLES, so it is classified DirectTenant via
+        // fullTableInventory(); the DirectTenant count and the overall
+        // table-inventory total both increase by one (115 -> 116,
+        // 211 -> 212).
+        $this->assertSame(116, $summary[TenantOwnershipClassification::DirectTenant->value]);
         $this->assertSame(24, $summary[TenantOwnershipClassification::InheritedTenant->value]);
         $this->assertSame(3, $summary[TenantOwnershipClassification::Pivot->value]);
         $this->assertSame(10, $summary[TenantOwnershipClassification::Hybrid->value]);
@@ -451,7 +465,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertSame(1, $summary[TenantOwnershipClassification::RootTenant->value]);
         $this->assertSame(1, $summary[TenantOwnershipClassification::Uncertain->value]);
 
-        $this->assertSame(211, array_sum($summary));
+        $this->assertSame(212, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Tests\Unit\Integrations;
 
 use App\Integrations\Enums\ProviderKey;
+use App\Integrations\Exceptions\AuthorizationCodeAlreadyUsedException;
 use App\Integrations\Providers\TestProvider\TestProvider;
+use App\Integrations\Support\PkceService;
 use Illuminate\Support\Facades\Http;
 use ReflectionClass;
 use ReflectionProperty;
@@ -45,10 +47,20 @@ final class TestProviderStubTest extends TestCase
         $this->originalGetenv = getenv(self::ENV_FLAG);
         $this->originalEnvSuperglobal = $_ENV[self::ENV_FLAG] ?? null;
         $this->originalServerSuperglobal = $_SERVER[self::ENV_FLAG] ?? null;
+
+        // Several tests in this class now mint real TestProvider
+        // authorization codes (exchangeCodeForToken() requires a code
+        // minted via simulateAuthorizationGrant() since it enforces PKCE
+        // + single-use semantics) — TestProvider's own class docblock
+        // condition (a) requires resetSimulationState() from every test
+        // that exercises this registry, so it never leaks between tests.
+        TestProvider::resetSimulationState();
     }
 
     protected function tearDown(): void
     {
+        TestProvider::resetSimulationState();
+
         if ($this->originalGetenv === false) {
             putenv(self::ENV_FLAG);
         } else {
@@ -106,7 +118,10 @@ final class TestProviderStubTest extends TestCase
         $provider->isConfigured();
         $provider->supportedAuthMethods();
         $provider->authorizationUrl(['client_id' => 'x']);
-        $provider->exchangeCodeForToken('code', []);
+        $pkce = new PkceService();
+        $verifier = $pkce->generateVerifier();
+        $mintedCode = $provider->simulateAuthorizationGrant($pkce->challengeForVerifier($verifier));
+        $provider->exchangeCodeForToken($mintedCode, ['code_verifier' => $verifier]);
         $provider->refreshToken('refresh-token');
         $provider->requiredScopes();
         $provider->requiredCredentialFields();
@@ -162,9 +177,21 @@ final class TestProviderStubTest extends TestCase
     public function test_exchange_code_for_token_generates_different_access_and_refresh_tokens_each_call(): void
     {
         $provider = new TestProvider();
+        $pkce = new PkceService();
 
-        $first = $provider->exchangeCodeForToken('same-code', []);
-        $second = $provider->exchangeCodeForToken('same-code', []);
+        // Two distinct, freshly minted authorization codes — each
+        // exchanged exactly once — rather than the same code exchanged
+        // twice: this test proves non-hardcoded runtime generation, not
+        // replay rejection (see
+        // test_a_second_exchange_of_the_same_authorization_code_is_rejected()
+        // below for that separate proof).
+        $firstVerifier = $pkce->generateVerifier();
+        $firstCode = $provider->simulateAuthorizationGrant($pkce->challengeForVerifier($firstVerifier));
+        $first = $provider->exchangeCodeForToken($firstCode, ['code_verifier' => $firstVerifier]);
+
+        $secondVerifier = $pkce->generateVerifier();
+        $secondCode = $provider->simulateAuthorizationGrant($pkce->challengeForVerifier($secondVerifier));
+        $second = $provider->exchangeCodeForToken($secondCode, ['code_verifier' => $secondVerifier]);
 
         // A hardcoded constant would return the exact same string both
         // times — this is the only way to actually prove non-hardcoded
@@ -172,6 +199,26 @@ final class TestProviderStubTest extends TestCase
         $this->assertNotSame($first['access_token'], $second['access_token']);
         $this->assertNotSame($first['refresh_token'], $second['refresh_token']);
         $this->assertNotSame($first['access_token'], $first['refresh_token']);
+    }
+
+    public function test_a_second_exchange_of_the_same_authorization_code_is_rejected(): void
+    {
+        // Genuinely separate proof from the uniqueness test above: mints
+        // exactly ONE authorization code, exchanges it once
+        // successfully, then proves a second exchange of that SAME code
+        // is rejected — replay protection remains intact.
+        $provider = new TestProvider();
+        $pkce = new PkceService();
+
+        $verifier = $pkce->generateVerifier();
+        $code = $provider->simulateAuthorizationGrant($pkce->challengeForVerifier($verifier));
+
+        $tokenSet = $provider->exchangeCodeForToken($code, ['code_verifier' => $verifier]);
+        $this->assertArrayHasKey('access_token', $tokenSet);
+
+        $this->expectException(AuthorizationCodeAlreadyUsedException::class);
+
+        $provider->exchangeCodeForToken($code, ['code_verifier' => $verifier]);
     }
 
     public function test_refresh_token_generates_different_access_and_refresh_tokens_each_call(): void

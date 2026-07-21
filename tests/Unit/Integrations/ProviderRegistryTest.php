@@ -300,7 +300,7 @@ final class FakeOAuthOnlyProvider implements IntegrationProviderContract, Suppor
         return ['access_token' => 'fixture-token'];
     }
 
-    public function refreshToken(string $refreshToken): array
+    public function refreshToken(string $refreshToken, array $context = []): array
     {
         return ['access_token' => 'fixture-token'];
     }

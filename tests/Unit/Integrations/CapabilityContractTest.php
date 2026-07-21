@@ -14,6 +14,7 @@ use App\Integrations\Contracts\SupportsPullSyncContract;
 use App\Integrations\Contracts\SupportsPushSyncContract;
 use App\Integrations\Contracts\SupportsWebhooksContract;
 use App\Integrations\Providers\TestProvider\TestProvider;
+use App\Integrations\Support\PkceService;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 
@@ -32,6 +33,20 @@ use ReflectionClass;
  */
 final class CapabilityContractTest extends TestCase
 {
+    protected function tearDown(): void
+    {
+        // This class mints real TestProvider authorization codes (see
+        // test_no_single_provider_implements_capabilities_vacuously()
+        // below), so the static in-process authorization-code registry
+        // must be cleared afterward — TestProvider's own class docblock
+        // condition (a) requires this from every test that mints/
+        // exercises codes, so it does not leak into other tests sharing
+        // this process.
+        TestProvider::resetSimulationState();
+
+        parent::tearDown();
+    }
+
     /**
      * @return class-string[] all nine capability contracts: the root
      *                        plus the eight orthogonal Supports*
@@ -139,16 +154,25 @@ final class CapabilityContractTest extends TestCase
     {
         // Proves the implementations are not stub/no-op placeholders
         // that would make "implements X" declared-but-meaningless: two
-        // independent calls to the same secret-generating method must
-        // produce different runtime values (a hardcoded/vacuous
-        // implementation would return the same constant both times).
-        // Full non-hardcoded-secret coverage lives in
-        // TestProviderStubTest; this is the orthogonality-focused half
-        // of that same proof.
+        // independent calls to exchangeCodeForToken() — each against its
+        // own freshly minted, single-use authorization code (mirroring a
+        // real provider's single-use-code semantics; NOT the same code
+        // exchanged twice, which would instead exercise replay
+        // rejection) — must produce different runtime values (a
+        // hardcoded/vacuous implementation would return the same
+        // constant both times). Full non-hardcoded-secret coverage lives
+        // in TestProviderStubTest; this is the orthogonality-focused
+        // half of that same proof.
         $provider = new TestProvider();
+        $pkce = new PkceService();
 
-        $first = $provider->exchangeCodeForToken('some-code', []);
-        $second = $provider->exchangeCodeForToken('some-code', []);
+        $firstVerifier = $pkce->generateVerifier();
+        $firstCode = $provider->simulateAuthorizationGrant($pkce->challengeForVerifier($firstVerifier));
+        $first = $provider->exchangeCodeForToken($firstCode, ['code_verifier' => $firstVerifier]);
+
+        $secondVerifier = $pkce->generateVerifier();
+        $secondCode = $provider->simulateAuthorizationGrant($pkce->challengeForVerifier($secondVerifier));
+        $second = $provider->exchangeCodeForToken($secondCode, ['code_verifier' => $secondVerifier]);
 
         $this->assertNotSame($first['access_token'], $second['access_token']);
     }

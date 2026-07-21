@@ -230,6 +230,24 @@ class IntegrationProviderTest extends TestCase
      * up correctly restored too, exactly as it already did for
      * firm_integrations.
      */
+    /**
+     * NARROW, DISCLOSED UPDATE (post-Checkpoint-5): Checkpoint 5
+     * introduced a SECOND, independent real dependent of firm_integrations
+     * at the same level as integration_credentials —
+     * integration_oauth_states — carrying the identical composite-FK
+     * shape (firm_id, firm_integration_id) -> firm_integrations(firm_id,
+     * id) with cascadeOnDelete(). This test now also rolls back
+     * integration_oauth_states' two migrations FIRST, alongside
+     * integration_credentials' (order between the two does not matter to
+     * each other, since neither references the other — only each
+     * independently references firm_integrations), and reapplies it after
+     * integration_credentials in forward order. This is a further
+     * strengthening of the test, not a weakening: it now proves
+     * cross-table rollback safety for BOTH of firm_integrations' real
+     * dependents, and asserts integration_oauth_states itself ends up
+     * correctly restored too, exactly as it already did for
+     * integration_credentials.
+     */
     public function test_migration_rollback_and_reapplication_restores_exact_prior_state(): void
     {
         $migrationFile = 'database/migrations/2026_09_01_010001_create_integration_providers_table.php';
@@ -244,6 +262,11 @@ class IntegrationProviderTest extends TestCase
         $integrationCredentialsCreateName = '2026_09_03_030001_create_integration_credentials_table';
         $integrationCredentialsRlsFile = 'database/migrations/2026_09_03_030002_prepare_row_level_security_and_force_rls_on_integration_credentials_table.php';
         $integrationCredentialsRlsName = '2026_09_03_030002_prepare_row_level_security_and_force_rls_on_integration_credentials_table';
+
+        $oauthStatesCreateFile = 'database/migrations/2026_09_04_040001_create_integration_oauth_states_table.php';
+        $oauthStatesCreateName = '2026_09_04_040001_create_integration_oauth_states_table';
+        $oauthStatesRlsFile = 'database/migrations/2026_09_04_040002_prepare_row_level_security_and_force_rls_on_integration_oauth_states_table.php';
+        $oauthStatesRlsName = '2026_09_04_040002_prepare_row_level_security_and_force_rls_on_integration_oauth_states_table';
 
         $this->assertFileExists(
             base_path($migrationFile),
@@ -287,11 +310,25 @@ class IntegrationProviderTest extends TestCase
         $this->assertTrue((bool) $integrationCredentialsRlsBefore->relrowsecurity);
         $this->assertTrue((bool) $integrationCredentialsRlsBefore->relforcerowsecurity);
 
-        // 2. Roll back firm_integrations' one real dependent,
-        // integration_credentials, first — in FK-dependency / reverse-
-        // chronological order (its RLS-prep migration, then its
-        // create-table migration) — since integration_credentials holds a
-        // real composite FK (cascadeOnDelete()) against firm_integrations.
+        // Confirm integration_oauth_states' own pre-rollback state too
+        // (Checkpoint 5 — a second, independent dependent at the same
+        // level as integration_credentials).
+        $this->assertTrue(
+            Schema::hasTable('integration_oauth_states'),
+            'integration_oauth_states (Checkpoint 5) must exist before this test begins, since it is now also one of firm_integrations\' real FK dependents.'
+        );
+        $oauthStatesRlsBefore = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'integration_oauth_states'");
+        $this->assertNotNull($oauthStatesRlsBefore);
+        $this->assertTrue((bool) $oauthStatesRlsBefore->relrowsecurity);
+        $this->assertTrue((bool) $oauthStatesRlsBefore->relforcerowsecurity);
+
+        // 2. Roll back firm_integrations' real dependents first —
+        // integration_credentials and integration_oauth_states (order
+        // between the two does not matter to each other) — each in
+        // FK-dependency / reverse-chronological order (its RLS-prep
+        // migration, then its create-table migration) — since both hold
+        // a real composite FK (cascadeOnDelete()) against
+        // firm_integrations.
         $credentialsRlsRollbackExit = Artisan::call('migrate:rollback', [
             '--path' => $integrationCredentialsRlsFile,
             '--force' => true,
@@ -307,6 +344,23 @@ class IntegrationProviderTest extends TestCase
         $this->assertFalse(
             Schema::hasTable('integration_credentials'),
             'integration_credentials must be fully rolled back before firm_integrations can be safely rolled back.'
+        );
+
+        $oauthStatesRlsRollbackExit = Artisan::call('migrate:rollback', [
+            '--path' => $oauthStatesRlsFile,
+            '--force' => true,
+        ]);
+        $this->assertSame(0, $oauthStatesRlsRollbackExit, 'migrate:rollback of integration_oauth_states RLS-prep migration failed: '.Artisan::output());
+
+        $oauthStatesCreateRollbackExit = Artisan::call('migrate:rollback', [
+            '--path' => $oauthStatesCreateFile,
+            '--force' => true,
+        ]);
+        $this->assertSame(0, $oauthStatesCreateRollbackExit, 'migrate:rollback of integration_oauth_states create-table migration failed: '.Artisan::output());
+
+        $this->assertFalse(
+            Schema::hasTable('integration_oauth_states'),
+            'integration_oauth_states must be fully rolled back before firm_integrations can be safely rolled back.'
         );
 
         // 3. Roll back integration_providers' one real dependent,
@@ -387,6 +441,18 @@ class IntegrationProviderTest extends TestCase
             '--force' => true,
         ]);
         $this->assertSame(0, $credentialsRlsMigrateExit, 'migrate of integration_credentials RLS-prep migration failed: '.Artisan::output());
+
+        $oauthStatesCreateMigrateExit = Artisan::call('migrate', [
+            '--path' => $oauthStatesCreateFile,
+            '--force' => true,
+        ]);
+        $this->assertSame(0, $oauthStatesCreateMigrateExit, 'migrate of integration_oauth_states create-table migration failed: '.Artisan::output());
+
+        $oauthStatesRlsMigrateExit = Artisan::call('migrate', [
+            '--path' => $oauthStatesRlsFile,
+            '--force' => true,
+        ]);
+        $this->assertSame(0, $oauthStatesRlsMigrateExit, 'migrate of integration_oauth_states RLS-prep migration failed: '.Artisan::output());
 
         // 7. Assert the exact prior state is restored — same columns,
         // same single seed row with the same values — not merely "a
@@ -492,6 +558,47 @@ class IntegrationProviderTest extends TestCase
             DB::table('migrations')->where('migration', $integrationCredentialsRlsName)->first(),
             'The reapplied integration_credentials RLS-prep migration must be recorded as run again.'
         );
+
+        // 11. Prove integration_oauth_states itself is correctly restored
+        // too (Checkpoint 5 — a second, independent dependent at the same
+        // level as integration_credentials), as a natural side-effect
+        // proof, not merely that firm_integrations/integration_credentials
+        // round-trip.
+        $this->assertTrue(
+            Schema::hasTable('integration_oauth_states'),
+            'integration_oauth_states must be fully restored after reapplying its two migrations.'
+        );
+        $this->assertTrue(Schema::hasColumn('integration_oauth_states', 'firm_integration_id'));
+
+        $oauthStatesRlsAfter = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'integration_oauth_states'");
+        $this->assertNotNull($oauthStatesRlsAfter);
+        $this->assertTrue(
+            (bool) $oauthStatesRlsAfter->relrowsecurity,
+            'integration_oauth_states RLS must be re-enabled after reapplying its RLS-prep migration.'
+        );
+        $this->assertTrue(
+            (bool) $oauthStatesRlsAfter->relforcerowsecurity,
+            'integration_oauth_states FORCE RLS must be re-enabled after reapplying its RLS-prep migration.'
+        );
+
+        // integration_oauth_states carries TWO policies (base tenant
+        // isolation + the narrow self-lookup carve-out) — unlike
+        // integration_credentials' single policy.
+        $oauthStatesPolicies = DB::select("select policyname from pg_policies where tablename = 'integration_oauth_states' order by policyname");
+        $this->assertCount(2, $oauthStatesPolicies);
+        $this->assertSame(
+            ['integration_oauth_states_self_lookup', 'integration_oauth_states_tenant_isolation'],
+            array_map(fn ($p) => $p->policyname, $oauthStatesPolicies)
+        );
+
+        $this->assertNotNull(
+            DB::table('migrations')->where('migration', $oauthStatesCreateName)->first(),
+            'The reapplied integration_oauth_states create-table migration must be recorded as run again.'
+        );
+        $this->assertNotNull(
+            DB::table('migrations')->where('migration', $oauthStatesRlsName)->first(),
+            'The reapplied integration_oauth_states RLS-prep migration must be recorded as run again.'
+        );
     }
 
     /**
@@ -538,6 +645,17 @@ class IntegrationProviderTest extends TestCase
      * ends up correctly restored too, exactly as it already did for
      * firm_integrations.
      */
+    /**
+     * NARROW, DISCLOSED UPDATE (post-Checkpoint-5): Checkpoint 5
+     * introduced a SECOND, independent real dependent of firm_integrations
+     * at the same level as integration_credentials — integration_oauth_states
+     * — carrying the identical composite-FK shape. This test now also
+     * tears down/rebuilds integration_oauth_states' two migration objects
+     * directly, alongside integration_credentials' (order between the two
+     * does not matter to each other), and asserts integration_oauth_states
+     * ends up correctly restored too, exactly as it already did for
+     * integration_credentials.
+     */
     public function test_migration_down_and_up_restores_exact_prior_state(): void
     {
         $this->assertTrue(Schema::hasTable('integration_providers'));
@@ -563,22 +681,43 @@ class IntegrationProviderTest extends TestCase
         $this->assertTrue((bool) $integrationCredentialsRlsBefore->relrowsecurity);
         $this->assertTrue((bool) $integrationCredentialsRlsBefore->relforcerowsecurity);
 
+        $this->assertTrue(
+            Schema::hasTable('integration_oauth_states'),
+            'integration_oauth_states (Checkpoint 5) must exist before this test begins, since it is now also one of firm_integrations\' real FK dependents.'
+        );
+        $oauthStatesRlsBefore = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'integration_oauth_states'");
+        $this->assertNotNull($oauthStatesRlsBefore);
+        $this->assertTrue((bool) $oauthStatesRlsBefore->relrowsecurity);
+        $this->assertTrue((bool) $oauthStatesRlsBefore->relforcerowsecurity);
+
         $providersMigration = include database_path('migrations/2026_09_01_010001_create_integration_providers_table.php');
         $firmIntegrationsRlsMigration = include database_path('migrations/2026_09_02_020002_prepare_row_level_security_and_force_rls_on_firm_integrations_table.php');
         $firmIntegrationsCreateMigration = include database_path('migrations/2026_09_02_020001_create_firm_integrations_table.php');
         $credentialsRlsMigration = include database_path('migrations/2026_09_03_030002_prepare_row_level_security_and_force_rls_on_integration_credentials_table.php');
         $credentialsCreateMigration = include database_path('migrations/2026_09_03_030001_create_integration_credentials_table.php');
+        $oauthStatesRlsMigration = include database_path('migrations/2026_09_04_040002_prepare_row_level_security_and_force_rls_on_integration_oauth_states_table.php');
+        $oauthStatesCreateMigration = include database_path('migrations/2026_09_04_040001_create_integration_oauth_states_table.php');
 
-        // Tear down firm_integrations' one real dependent,
-        // integration_credentials, FIRST — in FK-dependency / reverse-
-        // chronological order (RLS-prep down(), then create-table
-        // down()) — before firm_integrations' own down() calls.
+        // Tear down firm_integrations' real dependents FIRST —
+        // integration_credentials and integration_oauth_states (order
+        // between the two does not matter to each other) — each in
+        // FK-dependency / reverse-chronological order (RLS-prep down(),
+        // then create-table down()) — before firm_integrations' own
+        // down() calls.
         $credentialsRlsMigration->down();
         $credentialsCreateMigration->down();
 
         $this->assertFalse(
             Schema::hasTable('integration_credentials'),
             'integration_credentials must be fully dropped before firm_integrations down() can succeed.'
+        );
+
+        $oauthStatesRlsMigration->down();
+        $oauthStatesCreateMigration->down();
+
+        $this->assertFalse(
+            Schema::hasTable('integration_oauth_states'),
+            'integration_oauth_states must be fully dropped before firm_integrations down() can succeed.'
         );
 
         // Tear down firm_integrations' one real dependency on
@@ -661,6 +800,37 @@ class IntegrationProviderTest extends TestCase
         $integrationCredentialsPolicies = DB::select("select policyname from pg_policies where tablename = 'integration_credentials'");
         $this->assertCount(1, $integrationCredentialsPolicies);
         $this->assertSame('integration_credentials_tenant_isolation', $integrationCredentialsPolicies[0]->policyname);
+
+        // Rebuild integration_oauth_states in forward order: create-table
+        // up(), then its RLS-prep migration's up().
+        $oauthStatesCreateMigration->up();
+        $oauthStatesRlsMigration->up();
+
+        // Prove integration_oauth_states itself ends up correctly
+        // restored too (Checkpoint 5 — a second, independent dependent at
+        // the same level as integration_credentials), as a natural
+        // side-effect proof, not merely that firm_integrations/
+        // integration_credentials round-trip.
+        $this->assertTrue(Schema::hasTable('integration_oauth_states'), 'integration_oauth_states must be fully restored after up().');
+        $this->assertTrue(Schema::hasColumn('integration_oauth_states', 'firm_integration_id'));
+
+        $oauthStatesRlsAfter = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'integration_oauth_states'");
+        $this->assertNotNull($oauthStatesRlsAfter);
+        $this->assertTrue(
+            (bool) $oauthStatesRlsAfter->relrowsecurity,
+            'integration_oauth_states RLS must be re-enabled after reapplying its RLS-prep migration up().'
+        );
+        $this->assertTrue(
+            (bool) $oauthStatesRlsAfter->relforcerowsecurity,
+            'integration_oauth_states FORCE RLS must be re-enabled after reapplying its RLS-prep migration up().'
+        );
+
+        $oauthStatesPolicies = DB::select("select policyname from pg_policies where tablename = 'integration_oauth_states' order by policyname");
+        $this->assertCount(2, $oauthStatesPolicies);
+        $this->assertSame(
+            ['integration_oauth_states_self_lookup', 'integration_oauth_states_tenant_isolation'],
+            array_map(fn ($p) => $p->policyname, $oauthStatesPolicies)
+        );
     }
 
     // ------------------------------------------------------------
