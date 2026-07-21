@@ -17,6 +17,11 @@ use App\Integrations\Enums\AuthMethod;
 use App\Integrations\Enums\HealthStatus;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Enums\ResourceType;
+use App\Integrations\Exceptions\AuthorizationCodeAlreadyUsedException;
+use App\Integrations\Exceptions\ExpiredAuthorizationCodeException;
+use App\Integrations\Exceptions\InvalidPkceVerifierException;
+use App\Integrations\Exceptions\SimulatedProviderFailureException;
+use App\Integrations\Support\PkceService;
 use Illuminate\Support\Str;
 
 /**
@@ -56,6 +61,26 @@ use Illuminate\Support\Str;
  * the framework's actual wire-location decision for a routing/identity
  * token, which remains explicitly deferred to Checkpoint 7 per §11.
  * SupportsWebhooksContract itself stays wire-location-agnostic.
+ *
+ * Checkpoint 5 addition — OAuth authorization-code simulation
+ * (checkpoint-00-final-specification.md §18; agent-h-security-architecture-review.md
+ * item 11, "APPROVED, with conditions"): $issuedAuthorizationCodes is a
+ * PRIVATE STATIC in-process array, a deliberate and narrow exception to
+ * this class's own "every method returns purely synthetic, in-memory
+ * data" rule — it is the one piece of state that survives across
+ * separate TestProvider resolutions within the same process, standing
+ * in for what a real provider's own server-side authorization-code
+ * store would do. Approved under three conditions, all of which the
+ * companion test suite (not this file) is responsible for satisfying:
+ * (a) resetSimulationState() must actually be called by every test that
+ * exercises reuse detection; (b) an explicit unit test must prove this
+ * class cannot be resolved/used when INTEGRATIONS_TEST_PROVIDER_ENABLED
+ * is unset or false; (c) this disclosure itself. Keyed on an opaque,
+ * non-secret UUID (`jti`-shaped) — never a token or verifier value.
+ * Never touches disk/cache/queue infrastructure. No DB/cache-backed
+ * replacement is required (the mechanism this stands in for — a real
+ * provider's own code store — is itself out of scope for TestProvider
+ * by design).
  */
 final class TestProvider implements
     IntegrationProviderContract,
@@ -68,6 +93,34 @@ final class TestProvider implements
     SupportsIncrementalSyncContract,
     SupportsDisconnectContract
 {
+    /**
+     * A magic, non-secret sentinel value: if passed as the
+     * authorization `$code` to exchangeCodeForToken(), or as the
+     * `$refreshToken` to refreshToken(), simulates a raw outbound-call
+     * failure (SimulatedProviderFailureException) instead of a normal
+     * response — the only way this checkpoint exercises
+     * OutboundProviderHttpClient's sanitization path end to end without
+     * a real network call. Never a value random_bytes()/Str::random()
+     * could plausibly generate by coincidence.
+     */
+    public const FAILURE_SENTINEL = '__simulate_provider_failure__';
+
+    /**
+     * @var array<string, array{code_challenge: string, external_account_id: string, granted_scopes: string[], used: bool, expires_at: \Illuminate\Support\Carbon}>
+     */
+    private static array $issuedAuthorizationCodes = [];
+
+    /**
+     * TEST-ONLY: clears the static authorization-code replay registry.
+     * MUST be called from every test's setUp()/tearDown() that exercises
+     * reuse/expiry detection — see class docblock condition (a). Never
+     * called from any production code path.
+     */
+    public static function resetSimulationState(): void
+    {
+        self::$issuedAuthorizationCodes = [];
+    }
+
     /**
      * Ephemeral, per-instance simulated webhook signing key — generated
      * fresh via Str::random() (random_bytes-backed), never a hardcoded
@@ -127,19 +180,94 @@ final class TestProvider implements
         return 'https://internal-test-provider.invalid/oauth/authorize?'.http_build_query($params);
     }
 
+    /**
+     * TEST-ONLY simulation surface: mints an opaque authorization code
+     * bound to the given PKCE code_challenge and simulated
+     * account/scope outcome, standing in for "the user completed the
+     * provider's hosted consent screen and the provider redirected back
+     * with ?code=...". No real provider consent UI exists to automate
+     * in this checkpoint (§21) — a test harness (or, in a real deploy,
+     * nothing — this method has no legitimate production caller) must
+     * call this directly to obtain a `code` value to submit to
+     * OAuthConnectionController's callback route, exactly as a real
+     * provider would hand one back via the browser redirect.
+     *
+     * @param  string[]|null $grantedScopes defaults to requiredScopes()
+     *                                      when null — pass a narrower
+     *                                      array to simulate a
+     *                                      missing-scope grant.
+     */
+    public function simulateAuthorizationGrant(
+        string $codeChallenge,
+        ?string $externalAccountId = null,
+        ?array $grantedScopes = null,
+        bool $expired = false,
+    ): string {
+        $code = (string) Str::uuid();
+
+        self::$issuedAuthorizationCodes[$code] = [
+            'code_challenge' => $codeChallenge,
+            'external_account_id' => $externalAccountId ?? 'test-external-account-'.Str::random(8),
+            'granted_scopes' => $grantedScopes ?? $this->requiredScopes(),
+            'used' => false,
+            'expires_at' => $expired ? now()->subMinute() : now()->addMinutes(5),
+        ];
+
+        return $code;
+    }
+
     public function exchangeCodeForToken(string $code, array $context): array
     {
+        if ($code === self::FAILURE_SENTINEL) {
+            throw new SimulatedProviderFailureException(
+                category: 'provider_rejected',
+                statusCode: 502,
+                message: 'Simulated provider failure during code exchange.',
+            );
+        }
+
+        $entry = self::$issuedAuthorizationCodes[$code] ?? null;
+
+        if ($entry === null) {
+            throw new ExpiredAuthorizationCodeException();
+        }
+
+        if ($entry['used']) {
+            throw new AuthorizationCodeAlreadyUsedException();
+        }
+
+        if (now()->greaterThan($entry['expires_at'])) {
+            throw new ExpiredAuthorizationCodeException();
+        }
+
+        $verifier = $context['code_verifier'] ?? '';
+
+        if (! is_string($verifier) || $verifier === '' || ! (new PkceService())->verify($verifier, $entry['code_challenge'])) {
+            throw new InvalidPkceVerifierException();
+        }
+
+        self::$issuedAuthorizationCodes[$code]['used'] = true;
+
         return [
             'access_token' => Str::random(40),
             'refresh_token' => Str::random(40),
             'token_type' => 'bearer',
             'expires_in' => 3600,
-            'scope' => implode(' ', $this->requiredScopes()),
+            'scope' => implode(' ', $entry['granted_scopes']),
+            'external_account_id' => $entry['external_account_id'],
         ];
     }
 
-    public function refreshToken(string $refreshToken): array
+    public function refreshToken(string $refreshToken, array $context = []): array
     {
+        if ($refreshToken === self::FAILURE_SENTINEL) {
+            throw new SimulatedProviderFailureException(
+                category: 'invalid_grant',
+                statusCode: 400,
+                message: 'Simulated provider failure during token refresh.',
+            );
+        }
+
         return [
             'access_token' => Str::random(40),
             'refresh_token' => Str::random(40),
