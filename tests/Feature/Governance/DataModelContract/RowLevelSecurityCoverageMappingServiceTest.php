@@ -193,7 +193,17 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // combined migration) added directly to PREPARED_TABLES
         // (116 -> 122); tenantOwnedTables() is the union of both and
         // increases in step (116 -> 122).
-        $this->assertCount(122, $this->service->preparedTables());
+        // Narrowly updated AGAIN by Stage B Checkpoint 7 of the FirmsBase
+        // Integration Platform mission ("Inbound Webhook Security") —
+        // integration_inbound_webhook_events (a brand-new genuine
+        // tenant-owned table, RLS prepared and FORCE-activated in the
+        // same migration) added directly to PREPARED_TABLES (122 -> 123);
+        // tenantOwnedTables() is the union of both and increases in step
+        // (122 -> 123). The other two Checkpoint 7 tables
+        // (integration_webhook_receipts, integration_webhook_routing_index)
+        // are correctly NOT in PREPARED_TABLES — both are RLS-exempt
+        // (see EXEMPT_TABLES and FULL_TABLE_INVENTORY_EXTRA below).
+        $this->assertCount(123, $this->service->preparedTables());
         $this->assertCount(0, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
@@ -202,8 +212,25 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Global, no-RLS, seeded-only reference catalog, exactly
         // analogous to module_catalog) added to the exemption registry
         // (24 -> 25).
-        $this->assertCount(25, $this->service->exemptTables());
-        $this->assertCount(122, $this->service->tenantOwnedTables());
+        // Narrowly updated AGAIN by a Stage B Checkpoint 7
+        // registry-classification correction — integration_webhook_routing_index
+        // promoted into EXEMPT_TABLES (25 -> 26). Unlike every other
+        // EXEMPT_TABLES entry, this table genuinely carries a NOT NULL
+        // firm_id column; it is exempt from RLS for a documented,
+        // independently-reviewed reason (no secret/credential material;
+        // must be queryable pre-tenant-context to bootstrap
+        // inbound-webhook identity resolution; its firm_id is a
+        // non-authoritative routing pointer, never treated as
+        // authoritative on its own — real tenant context is always
+        // re-derived under ordinary RLS afterward) rather than because
+        // it lacks a firm_id column — see EXEMPT_TABLE_METADATA for the
+        // full reasoning. This correction does not change
+        // tenantOwnedTables() or preparedTables(): the table was already
+        // classified Global (never DirectTenant) both before and after
+        // this correction — only its EXEMPT_TABLES bookkeeping
+        // membership changes.
+        $this->assertCount(26, $this->service->exemptTables());
+        $this->assertCount(123, $this->service->tenantOwnedTables());
         $forceMigrationFiles = glob(
             database_path('migrations/*_force_rls_on_*_table.php')
         ) ?: [];
@@ -468,7 +495,15 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // is classified DirectTenant via fullTableInventory(); the
         // DirectTenant count and the overall table-inventory total both
         // increase by six (116 -> 122, 212 -> 218).
-        $this->assertSame(122, $summary[TenantOwnershipClassification::DirectTenant->value]);
+        // Narrowly updated AGAIN by Stage B Checkpoint 7 of the FirmsBase
+        // Integration Platform mission ("Inbound Webhook Security") —
+        // integration_inbound_webhook_events (a brand-new genuine
+        // tenant-owned table, RLS prepared and FORCE-activated in the
+        // same migration) added directly to PREPARED_TABLES, so it is
+        // classified DirectTenant via fullTableInventory(); the
+        // DirectTenant count and the overall table-inventory total both
+        // increase by one (122 -> 123, 218 -> 219).
+        $this->assertSame(123, $summary[TenantOwnershipClassification::DirectTenant->value]);
         $this->assertSame(24, $summary[TenantOwnershipClassification::InheritedTenant->value]);
         $this->assertSame(3, $summary[TenantOwnershipClassification::Pivot->value]);
         $this->assertSame(10, $summary[TenantOwnershipClassification::Hybrid->value]);
@@ -479,13 +514,27 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // it is classified Global, so the Global count and the overall
         // table-inventory total both increase by one (44 -> 45,
         // 208 -> 209).
-        $this->assertSame(45, $summary[TenantOwnershipClassification::Global->value]);
+        // Narrowly updated AGAIN by Stage B Checkpoint 7 of the FirmsBase
+        // Integration Platform mission — integration_webhook_routing_index
+        // and integration_webhook_receipts (both Global in
+        // FULL_TABLE_INVENTORY_EXTRA, per each table's own "no RLS"
+        // disclaimer note) added directly to that inventory; the Global
+        // count and the overall table-inventory total both increase by
+        // two (45 -> 47, 219 -> 221). NOTE: integration_webhook_routing_index's
+        // subsequent promotion into EXEMPT_TABLES (a registry-bookkeeping
+        // correction — see test_exact_registry_counts_reconcile) does
+        // NOT change its classification here: it was Global before that
+        // correction and remains Global after it, since EXEMPT_TABLES
+        // membership and FULL_TABLE_INVENTORY_EXTRA classification are
+        // tracked independently and classificationSummary() only reads
+        // the latter.
+        $this->assertSame(47, $summary[TenantOwnershipClassification::Global->value]);
         $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
         $this->assertSame(8, $summary[TenantOwnershipClassification::System->value]);
         $this->assertSame(1, $summary[TenantOwnershipClassification::RootTenant->value]);
         $this->assertSame(1, $summary[TenantOwnershipClassification::Uncertain->value]);
 
-        $this->assertSame(218, array_sum($summary));
+        $this->assertSame(221, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

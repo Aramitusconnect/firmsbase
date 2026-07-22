@@ -41,11 +41,26 @@ class IntegrationSyncRunsForceRlsActivationTest extends TestCase
 
     private const POLICY_NAME = 'integration_sync_runs_tenant_isolation';
 
+    /**
+     * POST-CHECKPOINT-7 UPDATE: Checkpoint 7 ("inbound webhook security")
+     * added `triggering_webhook_event_id` via its own dedicated
+     * `2026_09_06_060005_add_triggering_webhook_event_id_to_integration_sync_runs_table`
+     * ALTER TABLE migration (frozen-design-post-security-review.md §11,
+     * fulfilling Checkpoint 6's own disclosed obligation — see this
+     * table's create migration docblock). Listed here in the same
+     * position the migration inserts it in the live schema
+     * (`->after('trigger_source')`), even though the assertion below
+     * sorts both sides before comparing and is therefore order-
+     * independent — this is purely for readability against the physical
+     * column order.
+     *
+     * @var list<string>
+     */
     private const EXPECTED_COLUMNS = [
         'id', 'firm_id', 'firm_integration_id', 'resource_type', 'sync_direction', 'run_type',
-        'trigger_source', 'status', 'retried_run_id', 'cancel_requested_at', 'items_total',
-        'items_succeeded', 'items_failed', 'items_skipped', 'error_summary', 'started_at',
-        'finished_at', 'created_at', 'updated_at',
+        'trigger_source', 'triggering_webhook_event_id', 'status', 'retried_run_id',
+        'cancel_requested_at', 'items_total', 'items_succeeded', 'items_failed', 'items_skipped',
+        'error_summary', 'started_at', 'finished_at', 'created_at', 'updated_at',
     ];
 
     /**
@@ -66,6 +81,29 @@ class IntegrationSyncRunsForceRlsActivationTest extends TestCase
      * identical rollback-order-dependency precedent
      * (reviews/checkpoint-05/precommit-failure-triage.md).
      *
+     * POST-CHECKPOINT-7 UPDATE: Checkpoint 7's
+     * `2026_09_06_060005_add_triggering_webhook_event_id_to_integration_sync_runs_table`
+     * migration ALTERs this table directly (adds
+     * `triggering_webhook_event_id` plus a composite FK into the
+     * Checkpoint 7 `integration_inbound_webhook_events` table). It is
+     * appended LAST here, in true creation-chronological order (it is
+     * timestamped 2026_09_06, after every other entry in this array) —
+     * `array_reverse()` therefore runs its down() FIRST, dropping the
+     * column/FK while integration_sync_runs still exists untouched, and
+     * runs its up() LAST during reapplication, after this array's own
+     * create-table migration has already recreated a bare
+     * integration_sync_runs. Without this, whole-wave rollback would drop
+     * and recreate integration_sync_runs via its original create
+     * migration alone, silently losing this column permanently (the
+     * `migrations` table would still show 060005 as "ran" even though the
+     * live column would be gone) — exactly the same class of bug this
+     * whole-wave mechanism already exists to prevent for
+     * integration_sync_items/integration_conflicts. 060005 does not
+     * depend on anything else in this array (only on
+     * integration_sync_runs, already covered, and on
+     * integration_inbound_webhook_events, a separate Checkpoint 7 table
+     * that is not part of this wave and is never touched by it).
+     *
      * @var list<string>
      */
     private const WHOLE_WAVE_MIGRATION_PATHS = [
@@ -81,6 +119,7 @@ class IntegrationSyncRunsForceRlsActivationTest extends TestCase
         'database/migrations/2026_09_05_054002_prepare_row_level_security_and_force_rls_on_integration_conflicts_table.php',
         'database/migrations/2026_09_05_055001_create_integration_outbox_events_table.php',
         'database/migrations/2026_09_05_055002_prepare_row_level_security_and_force_rls_on_integration_outbox_events_table.php',
+        'database/migrations/2026_09_06_060005_add_triggering_webhook_event_id_to_integration_sync_runs_table.php',
     ];
 
     /**

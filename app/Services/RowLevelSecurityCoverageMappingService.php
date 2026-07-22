@@ -351,6 +351,21 @@ class RowLevelSecurityCoverageMappingService
         // convention.
         'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings',
         'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events',
+        // Stage B Checkpoint 7 (FirmsBase Integration Platform mission,
+        // "Inbound Webhook Security") — integration_inbound_webhook_events,
+        // a brand-new genuine tenant-owned table (own NOT NULL firm_id
+        // column, plus a real composite FK to firm_integrations(firm_id,
+        // id)) with RLS prepared and FORCE-activated in the very same
+        // migration, following the identical combined prepare+force
+        // shape used throughout this rollout:
+        // 2026_09_06_060004_prepare_row_level_security_and_force_rls_on_integration_inbound_webhook_events_table.php.
+        // This table was never in MISSING_PREPARED_TABLES — it is added
+        // directly here since prepare and force happened together. The
+        // other two Checkpoint 7 tables (integration_webhook_receipts,
+        // integration_webhook_routing_index) deliberately receive NO RLS
+        // at all — see FULL_TABLE_INVENTORY_EXTRA below for their
+        // Global classification and explicit disclaimer notes.
+        'integration_inbound_webhook_events',
     ];
 
     /**
@@ -502,6 +517,26 @@ class RowLevelSecurityCoverageMappingService
      * authorized writers. The 24 entries above are untouched — this
      * addition only appends.
      *
+     * Stage B Checkpoint 7 registry-classification correction
+     * (post-implementation gap found by the pre-commit full test
+     * suite, test_every_table_with_a_not_null_firm_id_column_is_tracked_in_the_registry)
+     * appended one further exemption at the end of this array:
+     * integration_webhook_routing_index. UNLIKE every other entry in
+     * this array, this table is NOT a "no firm_id column" exemption —
+     * direct inspection of
+     * database/migrations/2026_09_06_060001_create_integration_webhook_routing_index_table.php
+     * confirms it carries a genuine NOT NULL firm_id column
+     * ($table->foreignId('firm_id')->constrained('firms')->cascadeOnDelete()).
+     * It is exempted anyway, for a documented, independently-reviewed
+     * reason distinct from the "Global, no firm_id" pattern above: see
+     * EXEMPT_TABLE_METADATA below for the full reason (no secret/
+     * credential material; must be queryable before any tenant context
+     * exists, to bootstrap inbound-webhook identity resolution; its
+     * firm_id is a non-authoritative routing pointer only — real
+     * authorization is always re-derived afterward under ordinary,
+     * unmodified RLS via TenantContextService::runWithFirmContext()).
+     * The 25 entries above are untouched — this addition only appends.
+     *
      * @var array<int, string>
      */
     private const EXEMPT_TABLES = [
@@ -517,6 +552,12 @@ class RowLevelSecurityCoverageMappingService
         // Stage B Checkpoint 2 (FirmsBase Integration Platform mission)
         // addition — see docblock above.
         'integration_providers',
+        // Stage B Checkpoint 7 registry-classification correction
+        // addition — see docblock above. Has a real NOT NULL firm_id
+        // column (unlike every other entry in this array); exempted
+        // for a documented, independently-reviewed reason instead —
+        // see EXEMPT_TABLE_METADATA below.
+        'integration_webhook_routing_index',
     ];
 
     /**
@@ -1029,6 +1070,50 @@ class RowLevelSecurityCoverageMappingService
             'ownership_path' => null,
             'notes' => 'Internal vendor/processor governance record; platform-wide, no firm_id.',
         ],
+        // Stage B Checkpoint 7 (FirmsBase Integration Platform mission,
+        // "Inbound Webhook Security") additions — see
+        // reviews/checkpoint-07/frozen-design-post-security-review.md
+        // §5.1/§10.1. Both carry an EXPLICIT DISCLAIMER note overriding
+        // this array's usual "Global => no RLS needed, no further
+        // scrutiny required" implication: neither table is an ordinary
+        // platform-reference catalog. integration_webhook_receipts is
+        // confirmed by direct inspection of its own create migration to
+        // carry no firm_id or any other firm-referencing column at
+        // all — but integration_webhook_routing_index is NOT: it
+        // genuinely DOES carry a NOT NULL firm_id column (by design),
+        // and was promoted into EXEMPT_TABLES (see that array's own
+        // docblock above) as a registry-classification correction; see
+        // EXEMPT_TABLE_METADATA below for its documented reason.
+        'integration_webhook_routing_index' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'DISCLAIMER: Global, no RLS — but NOT an ordinary platform-reference catalog, and NOT a '
+                .'"no firm_id" exemption either: this table genuinely carries a NOT NULL firm_id column (plus '
+                .'firm_integration_id), by deliberate design, and is promoted into EXEMPT_TABLES accordingly '
+                .'(see EXEMPT_TABLE_METADATA). It must be readable before any tenant context exists at all, '
+                .'to bootstrap inbound-webhook connection-identity resolution '
+                .'(App\\Integrations\\Services\\WebhookConnectionResolverService). Carries no secret/credential '
+                .'material — only a one-way sha256 hash of an opaque routing token. Written only by '
+                .'App\\Integrations\\Services\\ProviderConnectionService::enableWebhookRouting()/'
+                .'disableWebhookRouting()/disconnect(). See '
+                .'database/migrations/2026_09_06_060001_create_integration_webhook_routing_index_table.php '
+                .'§10.1 for the full "WHY THIS TABLE HAS NO RLS" reasoning. See EXEMPT_TABLE_METADATA.',
+        ],
+        'integration_webhook_receipts' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'DISCLAIMER: Global, no RLS — platform pre-tenant intake table, structurally incapable '
+                .'of holding tenant-identifying columns (no firm_id/firm_integration_id column exists, and '
+                .'none may ever be added — see the create migration\'s tenant-blindness note). NOT an '
+                .'ordinary platform-reference catalog: this is the durable record of every inbound webhook '
+                .'delivery whose routing token resolved, written before real tenant context is established. '
+                .'The legitimate path to discover which firm a delivery belonged to is '
+                .'integration_inbound_webhook_events.receipt_id pointing BACK to a specific receipt row — a '
+                .'forward pointer here would only add a de-anonymization channel. See '
+                .'database/migrations/2026_09_06_060002_create_integration_webhook_receipts_table.php §10.1 '
+                .'for the full reasoning, including why a session-GUC-gated RLS alternative was explicitly '
+                .'rejected (agent-7h-security-design-review.md §1.3).',
+        ],
 
         // --- Audit (4) — pure platform-wide append-only event logs -----
         'commission_events' => [
@@ -1100,7 +1185,7 @@ class RowLevelSecurityCoverageMappingService
 
     /**
      * Reason, expected readers, and authorized writers for every one
-     * of the (now 24) EXEMPT_TABLES entries. Readers/writers are
+     * of the (now 26) EXEMPT_TABLES entries. Readers/writers are
      * expressed as human-readable role/class descriptions, not a
      * runtime-enforced allowlist — this is documentation, mirroring
      * how the rest of this registry is declarative-only.
@@ -1243,6 +1328,36 @@ class RowLevelSecurityCoverageMappingService
             ],
             'authorized_writers' => [
                 'platform engineering only, via this table\'s own seeding migration (2026_09_01_010001_create_integration_providers_table.php) — no runtime create/update path exists anywhere in app/ (confirmed by direct search)',
+            ],
+        ],
+        'integration_webhook_routing_index' => [
+            'reason' => 'Stage B Checkpoint 7 registry-classification correction: unlike every other EXEMPT_TABLES '
+                .'entry, this table genuinely carries a NOT NULL firm_id column '
+                .'($table->foreignId(\'firm_id\')->constrained(\'firms\')->cascadeOnDelete(), per '
+                .'database/migrations/2026_09_06_060001_create_integration_webhook_routing_index_table.php) — it '
+                .'is exempt from RLS despite that, not because it lacks it. The independent security reviewer '
+                .'for this checkpoint (agent-7h-security-design-review.md §1.3) explicitly reviewed and approved '
+                .'this as a deliberate, narrow exception, for three reasons: (1) it holds no secret or credential '
+                .'material of any kind — only {firm_id, firm_integration_id, integration_provider_id, '
+                .'webhook_routing_token_hash}, and the hash is a one-way sha256 digest of an opaque routing '
+                .'token, never the token itself; (2) it MUST be queryable in a genuinely pre-tenant-context '
+                .'bootstrap step — an inbound webhook request arrives before any firm identity is authenticated, '
+                .'so app.current_firm_id cannot be SET LOCAL before this exact lookup resolves which firm the '
+                .'request belongs to, and a FORCE RLS policy here would make the entire bounded connection-'
+                .'identity-resolution mechanism (App\\Integrations\\Services\\WebhookConnectionResolverService) '
+                .'structurally impossible without a SECURITY DEFINER function or a session-GUC-gated carve-out '
+                .'policy, both explicitly rejected by that review; and (3) the firm_id read back from this table '
+                .'is never treated as authoritative on its own — every subsequent step re-establishes and '
+                .'re-verifies real tenant context via the ordinary, unmodified '
+                .'TenantContextService::runWithFirmContext() before anything RLS-protected is touched, so this '
+                .'table\'s firm_id is a non-authoritative routing pointer only, not a security boundary. Same '
+                .'justification category as integration_providers (Global, no-RLS), with the added nuance of '
+                .'carrying a firm_id column purely for pre-authentication routing.',
+            'expected_readers' => [
+                'App\\Integrations\\Services\\WebhookConnectionResolverService::resolveConnectionIdentity() — the sole pre-tenant-context read, returning only {firm_id, firm_integration_id, integration_provider_id, provider_key}, never a secret or hydrated model',
+            ],
+            'authorized_writers' => [
+                'App\\Integrations\\Services\\ProviderConnectionService::enableWebhookRouting()/disableWebhookRouting()/disconnect() — always in the same transaction that writes/clears firm_integrations.webhook_routing_token, so the plaintext-display column and this hashed-lookup row can never drift',
             ],
         ],
     ];

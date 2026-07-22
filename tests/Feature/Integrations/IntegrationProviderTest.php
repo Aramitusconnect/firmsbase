@@ -100,6 +100,64 @@ class IntegrationProviderTest extends TestCase
         'integration_outbox_events',
     ];
 
+    /**
+     * POST-CHECKPOINT-7 UPDATE: Checkpoint 7 ("inbound webhook security",
+     * reviews/checkpoint-07/frozen-design-post-security-review.md §5.1/
+     * §10/§11) added a FOURTH independent dependency chain reaching all
+     * the way back to integration_providers —
+     * integration_webhook_routing_index carries a real FK
+     * (restrictOnDelete()) directly into integration_providers
+     * (integration_provider_id), in addition to its own composite FK into
+     * firm_integrations, so integration_providers can no longer be
+     * dropped/rolled back while it exists either.
+     * integration_inbound_webhook_events is a second, independent direct
+     * dependent of firm_integrations from the same Checkpoint 7 wave.
+     * integration_webhook_receipts carries no FK into either table, but
+     * integration_inbound_webhook_events FK-references it (receipt_id),
+     * so it must be rolled back before that table. The trailing
+     * add_triggering_webhook_event_id_to_integration_sync_runs_table
+     * migration adds a real composite FK from the Checkpoint 6
+     * integration_sync_runs table into integration_inbound_webhook_events,
+     * so it must be rolled back before that table too — and because it
+     * ALTERs integration_sync_runs itself, it must ALSO be rolled back
+     * before CP6_WHOLE_WAVE_MIGRATION_PATHS' own sync_runs table is
+     * dropped below. Both rollback tests below therefore roll back this
+     * entire 5-migration Checkpoint 7 wave FIRST — before the Checkpoint
+     * 6 whole-wave block, since Checkpoint 7 is the newest layer and its
+     * own trailing migration reaches back into a Checkpoint 6 table — in
+     * exact reverse of its own creation order (§11: "down() runs exact
+     * reverse" of routing-index, receipts, events, events-RLS,
+     * sync_runs-FK), then reapply it LAST, after the Checkpoint 6
+     * whole-wave block, in forward (creation) order. This mirrors the
+     * exact whole-wave precedent Checkpoint 6 itself established to fix
+     * this identical class of problem (CP6_WHOLE_WAVE_MIGRATION_PATHS
+     * above) — order between this Checkpoint 7 wave and the pre-existing
+     * firm_integrations / integration_credentials /
+     * integration_oauth_states blocks does not matter to each other,
+     * except that this wave must be fully torn down before
+     * firm_integrations itself (its two direct dependents also
+     * composite-FK firm_integrations) and, independently, before
+     * integration_providers itself (routing_index's own direct FK).
+     *
+     * @var list<string>
+     */
+    private const CP7_WHOLE_WAVE_MIGRATION_PATHS = [
+        'database/migrations/2026_09_06_060001_create_integration_webhook_routing_index_table.php',
+        'database/migrations/2026_09_06_060002_create_integration_webhook_receipts_table.php',
+        'database/migrations/2026_09_06_060003_create_integration_inbound_webhook_events_table.php',
+        'database/migrations/2026_09_06_060004_prepare_row_level_security_and_force_rls_on_integration_inbound_webhook_events_table.php',
+        'database/migrations/2026_09_06_060005_add_triggering_webhook_event_id_to_integration_sync_runs_table.php',
+    ];
+
+    /**
+     * @var list<string>
+     */
+    private const CP7_WHOLE_WAVE_TABLES = [
+        'integration_webhook_routing_index',
+        'integration_webhook_receipts',
+        'integration_inbound_webhook_events',
+    ];
+
     // ------------------------------------------------------------
     // 1. Schema correctness
     // ------------------------------------------------------------
@@ -396,6 +454,46 @@ class IntegrationProviderTest extends TestCase
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 6) must exist before this test begins, since it is now also one of firm_integrations' real (direct or transitive) FK dependents.");
         }
 
+        // Confirm the Checkpoint 7 whole-wave tables' pre-rollback
+        // existence too (a FOURTH, independent dependency chain reaching
+        // integration_providers directly via
+        // integration_webhook_routing_index), plus the column it adds to
+        // the Checkpoint 6 integration_sync_runs table.
+        foreach (self::CP7_WHOLE_WAVE_MIGRATION_PATHS as $path) {
+            $this->assertFileExists(base_path($path));
+        }
+        foreach (self::CP7_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 7) must exist before this test begins, since it is now also one of integration_providers' real (direct or transitive) FK dependents.");
+        }
+        $this->assertTrue(
+            Schema::hasColumn('integration_sync_runs', 'triggering_webhook_event_id'),
+            'integration_sync_runs.triggering_webhook_event_id (Checkpoint 7) must exist before this test begins.'
+        );
+
+        // 1a. Roll back the Checkpoint 7 whole-wave dependency chain
+        // FIRST — before the Checkpoint 6 whole-wave block below, since
+        // Checkpoint 7 is the newest layer and its own trailing
+        // add_triggering_webhook_event_id_to_integration_sync_runs_table
+        // migration ALTERs the Checkpoint 6 integration_sync_runs table
+        // directly and must be undone before that table is dropped by the
+        // Checkpoint 6 whole-wave rollback (see CP7_WHOLE_WAVE_MIGRATION_PATHS
+        // docblock). It also must be fully torn down before
+        // integration_webhook_routing_index's direct FK into
+        // integration_providers can be safely dropped. Internal FK order
+        // matters within this wave itself, so it is rolled back as a
+        // unit, in exact reverse of its own creation order.
+        foreach (array_reverse(self::CP7_WHOLE_WAVE_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 7 whole-wave) failed: ".Artisan::output());
+        }
+        foreach (self::CP7_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 7) must not survive its whole-wave rollback.");
+        }
+        $this->assertFalse(
+            Schema::hasColumn('integration_sync_runs', 'triggering_webhook_event_id'),
+            'integration_sync_runs.triggering_webhook_event_id must not survive the Checkpoint 7 whole-wave rollback.'
+        );
+
         // 1b. Roll back the Checkpoint 6 whole-wave dependency chain —
         // internal FK order matters within the wave itself (see
         // CP6_WHOLE_WAVE_MIGRATION_PATHS docblock), so it is rolled back
@@ -551,6 +649,22 @@ class IntegrationProviderTest extends TestCase
         foreach (self::CP6_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 6) must be restored by the whole-wave reapplication.");
         }
+
+        // 6c. Reapply the Checkpoint 7 whole-wave dependency chain LAST —
+        // after the Checkpoint 6 whole-wave block, since its trailing
+        // migration needs integration_sync_runs (just recreated above) to
+        // already exist — in its own forward (creation) order.
+        foreach (self::CP7_WHOLE_WAVE_MIGRATION_PATHS as $path) {
+            $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 7 whole-wave) failed: ".Artisan::output());
+        }
+        foreach (self::CP7_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 7) must be restored by the whole-wave reapplication.");
+        }
+        $this->assertTrue(
+            Schema::hasColumn('integration_sync_runs', 'triggering_webhook_event_id'),
+            'integration_sync_runs.triggering_webhook_event_id must be restored by the Checkpoint 7 whole-wave reapplication.'
+        );
 
         // 7. Assert the exact prior state is restored — same columns,
         // same single seed row with the same values — not merely "a
@@ -803,6 +917,13 @@ class IntegrationProviderTest extends TestCase
         foreach (self::CP6_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 6) must exist before this test begins, since it is now also one of firm_integrations' real (direct or transitive) FK dependents.");
         }
+        foreach (self::CP7_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 7) must exist before this test begins, since it is now also one of integration_providers' real (direct or transitive) FK dependents.");
+        }
+        $this->assertTrue(
+            Schema::hasColumn('integration_sync_runs', 'triggering_webhook_event_id'),
+            'integration_sync_runs.triggering_webhook_event_id (Checkpoint 7) must exist before this test begins.'
+        );
 
         $providersMigration = include database_path('migrations/2026_09_01_010001_create_integration_providers_table.php');
         $firmIntegrationsRlsMigration = include database_path('migrations/2026_09_02_020002_prepare_row_level_security_and_force_rls_on_firm_integrations_table.php');
@@ -816,6 +937,33 @@ class IntegrationProviderTest extends TestCase
         $cp6Migrations = array_map(
             static fn (string $path) => include base_path($path),
             self::CP6_WHOLE_WAVE_MIGRATION_PATHS,
+        );
+
+        // Checkpoint 7 whole-wave migration objects, in creation order.
+        $cp7Migrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::CP7_WHOLE_WAVE_MIGRATION_PATHS,
+        );
+
+        // Tear down the Checkpoint 7 whole-wave dependency chain FIRST —
+        // before the Checkpoint 6 whole-wave teardown below, since
+        // Checkpoint 7's own trailing migration ALTERs the Checkpoint 6
+        // integration_sync_runs table directly and must be undone before
+        // that table is dropped (see CP7_WHOLE_WAVE_MIGRATION_PATHS
+        // docblock), and because integration_webhook_routing_index's
+        // direct FK into integration_providers must also be gone before
+        // integration_providers' own down() can succeed. Internal FK
+        // order matters within this wave itself, so it is torn down as a
+        // unit, in exact reverse of its own creation order.
+        foreach (array_reverse($cp7Migrations) as $migration) {
+            $migration->down();
+        }
+        foreach (self::CP7_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 7) must be fully dropped before the Checkpoint 6 whole-wave teardown can succeed.");
+        }
+        $this->assertFalse(
+            Schema::hasColumn('integration_sync_runs', 'triggering_webhook_event_id'),
+            'integration_sync_runs.triggering_webhook_event_id must not survive the Checkpoint 7 whole-wave teardown.'
         );
 
         // Tear down the Checkpoint 6 whole-wave dependency chain FIRST —
@@ -972,6 +1120,20 @@ class IntegrationProviderTest extends TestCase
         foreach (self::CP6_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 6) must be fully restored after up().");
         }
+
+        // Rebuild the Checkpoint 7 whole-wave dependency chain LAST — its
+        // trailing migration needs integration_sync_runs (just recreated
+        // above) to already exist — in its own forward (creation) order.
+        foreach ($cp7Migrations as $migration) {
+            $migration->up();
+        }
+        foreach (self::CP7_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 7) must be fully restored after up().");
+        }
+        $this->assertTrue(
+            Schema::hasColumn('integration_sync_runs', 'triggering_webhook_event_id'),
+            'integration_sync_runs.triggering_webhook_event_id must be restored after the Checkpoint 7 whole-wave up().'
+        );
     }
 
     // ------------------------------------------------------------
