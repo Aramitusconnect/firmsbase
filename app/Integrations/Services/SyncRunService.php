@@ -76,6 +76,7 @@ final class SyncRunService
         SyncTriggerSource $triggerSource,
         ?IntegrationSyncCursor $cursor = null,
         ?int $retriedRunId = null,
+        ?int $triggeringWebhookEventId = null,
     ): IntegrationSyncRun {
         $runType = $this->determineRunType($direction, $triggerSource, $cursor, $retriedRunId);
 
@@ -85,8 +86,21 @@ final class SyncRunService
             // caught UniqueConstraintViolationException's transaction-abort
             // to this savepoint only, so the catch block's re-SELECT below
             // still runs against a healthy outer transaction.
-            return DB::transaction(function () use ($connection, $resourceType, $direction, $runType, $triggerSource, $retriedRunId) {
-                return IntegrationSyncRun::query()->create([
+            return DB::transaction(function () use ($connection, $resourceType, $direction, $runType, $triggerSource, $retriedRunId, $triggeringWebhookEventId) {
+                // Checkpoint 7 addition (frozen design §11): optional,
+                // additive, backward-compatible
+                // `triggering_webhook_event_id`, included in this SAME
+                // single create() call — never a second UPDATE after
+                // the fact. Uses the query builder's forceCreate()
+                // (mass-assignment-unguarded) rather than plain
+                // create(): App\Integrations\Models\IntegrationSyncRun
+                // is outside this checkpoint's frozen file allowlist,
+                // so `triggering_webhook_event_id` cannot be added to
+                // its $fillable array — forceCreate() lets this one new
+                // column be set without touching that model file. See
+                // the 2026_09_06_060005_add_triggering_webhook_event_id_to_integration_sync_runs_table
+                // migration's own docblock for the full reasoning.
+                return IntegrationSyncRun::query()->forceCreate([
                     'firm_id' => $connection->firm_id,
                     'firm_integration_id' => $connection->id,
                     'resource_type' => $resourceType,
@@ -95,6 +109,7 @@ final class SyncRunService
                     'trigger_source' => $triggerSource,
                     'status' => SyncRunStatus::Pending,
                     'retried_run_id' => $retriedRunId,
+                    'triggering_webhook_event_id' => $triggeringWebhookEventId,
                 ]);
             });
         } catch (UniqueConstraintViolationException $e) {

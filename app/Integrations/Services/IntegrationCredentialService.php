@@ -356,6 +356,44 @@ class IntegrationCredentialService
     }
 
     /**
+     * Checkpoint 7 addition
+     * (reviews/checkpoint-07/frozen-design-post-security-review.md
+     * §5.2). Returns the single Active credential of $type for
+     * $connection, or null. Relies entirely on ambient tenant context
+     * (like decryptForOperation()) — verifies ambient context matches
+     * $connection->firm_id BEFORE querying, so this can never be called
+     * correctly before real tenant context has already been
+     * established (i.e. before
+     * App\Integrations\Services\WebhookConnectionResolverService's
+     * Step 2, `TenantContextService::runWithFirmContext()`, has already
+     * run). The `credential_type = ...` clause below is an ORDINARY
+     * post-RLS narrowing filter, executed only after RLS has already
+     * scoped the underlying read to `$connection->firm_id` — it can
+     * only narrow that read, never widen it the way a `USING` clause
+     * inside `CREATE POLICY` would. It is NOT, and must never become,
+     * an RLS policy predicate: no RLS policy anywhere in this codebase
+     * may reference `credential_type` (frozen design §7's bright-line
+     * guard — the permanently-retired `credential_type =
+     * 'webhook_signing_secret'` carve-out policy). Returns only the
+     * model — callers must still call decryptForOperation() to obtain
+     * plaintext.
+     */
+    public function findActiveCredential(FirmIntegration $connection, CredentialType $type): ?IntegrationCredential
+    {
+        if ((new TenantContextService())->currentFirmId() !== $connection->firm_id) {
+            throw new RuntimeException(
+                'Cannot look up active credential: no active tenant context, or the active context does not match this connection\'s firm.'
+            );
+        }
+
+        return IntegrationCredential::query()
+            ->where('firm_integration_id', $connection->id)
+            ->where('credential_type', $type->value)
+            ->where('status', IntegrationCredentialStatus::Active->value)
+            ->first();
+    }
+
+    /**
      * No decrypt call at all — returns only non-secret fields. Safe to
      * expose to any caller that already has read access to the
      * $credential model itself (e.g. via a future Filament/API layer),

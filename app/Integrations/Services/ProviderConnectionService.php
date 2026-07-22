@@ -20,6 +20,7 @@ use App\Integrations\Exceptions\OAuthRedirectUriMismatchException;
 use App\Integrations\Exceptions\SanitizedProviderHttpException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationCredential;
+use App\Integrations\Models\IntegrationWebhookRoutingIndex;
 use App\Integrations\Support\OutboundProviderHttpClient;
 use App\Integrations\Support\ProviderRedirectUrlValidator;
 use App\Models\FirmUser;
@@ -539,6 +540,23 @@ class ProviderConnectionService
                     'webhook_routing_token' => null,
                 ]);
 
+                // Checkpoint 7 addition (frozen design §4, checklist
+                // item 22, MODIFY): clear the corresponding
+                // integration_webhook_routing_index row in the SAME
+                // transaction as the firm_integrations.webhook_routing_token
+                // nulling above — otherwise a stale index row remains
+                // resolvable post-disconnect, letting a possessed
+                // routing token continue to resolve a connection
+                // identity for a connection that no longer has any
+                // usable credential anyway (it would still collapse to
+                // the same generic rejection via
+                // WebhookConnectionResolverService::activeAndPreviousWebhookSecretsFor()'s
+                // status check, but leaving the index row behind is an
+                // unnecessary, avoidable drift).
+                IntegrationWebhookRoutingIndex::query()
+                    ->where('firm_integration_id', $fresh->id)
+                    ->delete();
+
                 $this->events->record($fresh->firm, 'integration_oauth.disconnect', $fresh, $actor->user, [
                     'firm_integration_id' => $fresh->id,
                 ]);
@@ -546,6 +564,95 @@ class ProviderConnectionService
                 return $fresh;
             }
         );
+    }
+
+    /**
+     * Checkpoint 7 addition
+     * (reviews/checkpoint-07/frozen-design-post-security-review.md
+     * §4/§5.1, checklist item 6, MODIFY). Generates a fresh CSPRNG
+     * routing token (mirrors
+     * IntegrationOAuthStateService::generateRawState()'s exact
+     * `random_bytes(32)` discipline, never `Str::random()`), writes the
+     * plaintext-display copy to `firm_integrations.webhook_routing_token`
+     * and the hashed lookup row to `integration_webhook_routing_index`
+     * in the SAME transaction, so the two can never drift. Returns the
+     * raw token — the ONE time it is ever available in plaintext; it is
+     * never persisted anywhere in that form beyond this single display
+     * column, and this method never logs it.
+     *
+     * Any pre-existing routing-index row(s) for this connection are
+     * removed before the new one is inserted (rather than
+     * `updateOrCreate()`), so a connection can never accumulate more
+     * than one resolvable routing token at a time even if this method
+     * is called again without an intervening disableWebhookRouting().
+     */
+    public function enableWebhookRouting(FirmIntegration $connection): string
+    {
+        return (new TenantContextService())->runWithFirmContext(
+            $connection->firm_id,
+            function () use ($connection) {
+                $fresh = FirmIntegration::query()
+                    ->where('id', $connection->id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                $rawToken = $this->generateRawWebhookRoutingToken();
+                $tokenHash = hash('sha256', $rawToken);
+
+                $fresh->update(['webhook_routing_token' => $rawToken]);
+
+                IntegrationWebhookRoutingIndex::query()
+                    ->where('firm_integration_id', $fresh->id)
+                    ->delete();
+
+                IntegrationWebhookRoutingIndex::query()->create([
+                    'firm_id' => $fresh->firm_id,
+                    'firm_integration_id' => $fresh->id,
+                    'integration_provider_id' => $fresh->integration_provider_id,
+                    'webhook_routing_token_hash' => $tokenHash,
+                ]);
+
+                return $rawToken;
+            }
+        );
+    }
+
+    /**
+     * Checkpoint 7 addition (see enableWebhookRouting() above) — clears
+     * both the plaintext-display column and the hashed routing-index
+     * row in the SAME transaction. Idempotent: safe to call on a
+     * connection with no routing token currently enabled.
+     */
+    public function disableWebhookRouting(FirmIntegration $connection): void
+    {
+        (new TenantContextService())->runWithFirmContext(
+            $connection->firm_id,
+            function () use ($connection): void {
+                $fresh = FirmIntegration::query()
+                    ->where('id', $connection->id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                $fresh->update(['webhook_routing_token' => null]);
+
+                IntegrationWebhookRoutingIndex::query()
+                    ->where('firm_integration_id', $fresh->id)
+                    ->delete();
+            }
+        );
+    }
+
+    /**
+     * CSPRNG routing token: 32 raw bytes (256 bits) of entropy,
+     * base64url-encoded without padding — byte-for-byte the same
+     * construction as
+     * IntegrationOAuthStateService::generateRawState(), per frozen
+     * design §4's explicit requirement that this checkpoint stop using
+     * `Str::random()` for routing-token generation.
+     */
+    private function generateRawWebhookRoutingToken(): string
+    {
+        return rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
     }
 
     /**

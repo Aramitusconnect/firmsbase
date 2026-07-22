@@ -19,6 +19,11 @@ return Application::configure(basePath: dirname(__DIR__))
             // overhead on every check. See app/Http/Controllers/ReadinessController.php
             // and docs/ecs/container-architecture.md "Health checks".
             Route::get('/readyz', ReadinessController::class);
+
+            // Registers the Checkpoint 7 inbound webhook route file outside
+            // any implicit middleware group, consistent with the /readyz
+            // registration above — see routes/webhooks.php for why.
+            require __DIR__.'/../routes/webhooks.php';
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {

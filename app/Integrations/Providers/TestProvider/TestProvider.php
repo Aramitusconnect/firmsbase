@@ -21,6 +21,7 @@ use App\Integrations\Exceptions\AuthorizationCodeAlreadyUsedException;
 use App\Integrations\Exceptions\ExpiredAuthorizationCodeException;
 use App\Integrations\Exceptions\InvalidPkceVerifierException;
 use App\Integrations\Exceptions\SimulatedProviderFailureException;
+use App\Integrations\Services\InboundWebhookSignatureVerifier;
 use App\Integrations\Support\PkceService;
 use Illuminate\Support\Str;
 
@@ -123,17 +124,51 @@ final class TestProvider implements
 
     /**
      * Ephemeral, per-instance simulated webhook signing key — generated
-     * fresh via Str::random() (random_bytes-backed), never a hardcoded
-     * constant. Exists only so this single instance's
-     * verifyInboundSignature()/subscribe() calls are internally
-     * consistent for the lifetime of one resolution; it is not
-     * persisted anywhere (no credential table exists at Checkpoint 1).
+     * via a CSPRNG (`random_bytes(32)`, base64url-encoded without
+     * padding), byte-for-byte the same construction as
+     * IntegrationOAuthStateService::generateRawState() (Checkpoint 7
+     * requirement, reviews/checkpoint-07/frozen-design-post-security-review.md
+     * §4/§8 — the prior `Str::random(40)` stub is explicitly rejected).
+     * Never a hardcoded constant, never persisted anywhere (no
+     * credential table backs this simulation surface). Mutable (not
+     * `readonly`), specifically so `rotateWebhookSigningKey()` below can
+     * simulate a secret-rotation event within one instance's lifetime.
      */
-    private readonly string $webhookSigningKey;
+    private string $webhookSigningKey;
+
+    /**
+     * Checkpoint 7 addition: the previous signing key, set only by
+     * `rotateWebhookSigningKey()`, simulating the frozen design's
+     * 2-candidate secret-rotation overlap window (§8) — a signature
+     * produced with either the current OR the immediately-prior key
+     * verifies successfully, mirroring
+     * App\Integrations\Services\WebhookConnectionResolverService::activeAndPreviousWebhookSecretsFor()'s
+     * real (Active, most-recent-Rotated) 2-candidate contract.
+     */
+    private ?string $previousWebhookSigningKey = null;
 
     public function __construct()
     {
-        $this->webhookSigningKey = Str::random(40);
+        $this->webhookSigningKey = $this->generateWebhookSigningKey();
+    }
+
+    /**
+     * TEST-ONLY: simulates a secret-rotation event for this instance —
+     * the current signing key becomes the one and only "previous"
+     * candidate, and a fresh CSPRNG key becomes current. Mirrors the
+     * real credential lifecycle's "at most 2 candidates" bound: calling
+     * this twice in a row discards whatever was the FIRST previous key
+     * (never accumulates more than one).
+     */
+    public function rotateWebhookSigningKey(): void
+    {
+        $this->previousWebhookSigningKey = $this->webhookSigningKey;
+        $this->webhookSigningKey = $this->generateWebhookSigningKey();
+    }
+
+    private function generateWebhookSigningKey(): string
+    {
+        return rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
     }
 
     public function key(): ProviderKey
@@ -322,14 +357,55 @@ final class TestProvider implements
         ];
     }
 
+    /**
+     * Checkpoint 7 rewrite
+     * (reviews/checkpoint-07/frozen-design-post-security-review.md §8)
+     * — this simulation surface now follows the SAME signature contract
+     * as the real inbound webhook pipeline
+     * (App\Integrations\Http\Controllers\InboundWebhookController /
+     * App\Integrations\Services\InboundWebhookSignatureVerifier), which
+     * this method delegates to directly rather than reimplementing:
+     * `v1=<hex>` signature header, `X-Test-Provider-Timestamp` header,
+     * signing input `"v1" . ":" . <timestamp> . "." . <raw body>`,
+     * HMAC-SHA256 only, format-validated hex BEFORE hash_equals(),
+     * ±300s replay window, up to 2 candidates (current + previous, per
+     * rotateWebhookSigningKey() above).
+     *
+     * Header lookup is case-insensitive over the generic $headers array
+     * this interface's contract already requires
+     * (App\Integrations\Contracts\SupportsWebhooksContract stays
+     * wire-location-agnostic — this class's own header NAME convention,
+     * `X-Test-Provider-Signature`/`X-Test-Provider-Timestamp`, is purely
+     * this provider's internal simulation choice, matching the actual
+     * header names Checkpoint 7 froze for the real HTTP route). Because
+     * $headers here is a plain associative array (never real, possibly-
+     * repeated HTTP header lines), there is no artifact to represent a
+     * literal "duplicate header" with — that specific rejection rule is
+     * enforced where it structurally applies, in
+     * InboundWebhookController's own real-Request header extraction.
+     */
     public function verifyInboundSignature(string $rawBody, array $headers): bool
     {
-        $expected = hash_hmac('sha256', $rawBody, $this->webhookSigningKey);
-        $provided = $headers['signature'] ?? '';
+        $signatureRaw = $this->findHeaderCaseInsensitive($headers, 'X-Test-Provider-Signature');
+        $timestampRaw = $this->findHeaderCaseInsensitive($headers, 'X-Test-Provider-Timestamp');
 
-        return is_string($provided) && hash_equals($expected, $provided);
+        $candidates = array_values(array_filter(
+            [$this->webhookSigningKey, $this->previousWebhookSigningKey],
+            static fn (?string $key): bool => $key !== null,
+        ));
+
+        return (new InboundWebhookSignatureVerifier())->verify($candidates, $rawBody, $timestampRaw, $signatureRaw);
     }
 
+    /**
+     * Checkpoint 7 rewrite (frozen design §8): the `Str::uuid()`
+     * fallback for a missing/empty/non-string `event_id` is REMOVED —
+     * it would defeat idempotency by minting a fresh, unrelated id on
+     * every retried delivery of the SAME logical event. A malformed
+     * `event_id` now surfaces as `event_id => null` in the returned
+     * array — a distinct, caller-visible malformed-payload signal —
+     * never a randomly-generated substitute value.
+     */
     public function parseInboundEvent(string $rawBody, array $headers): array
     {
         $decoded = json_decode($rawBody, true);
@@ -338,11 +414,37 @@ final class TestProvider implements
             $decoded = [];
         }
 
+        $eventId = $decoded['event_id'] ?? null;
+
+        if (! is_string($eventId) || trim($eventId) === '') {
+            $eventId = null;
+        }
+
         return [
-            'event_id' => $decoded['event_id'] ?? (string) Str::uuid(),
+            'event_id' => $eventId,
             'event_type' => $decoded['event_type'] ?? $this->webhookEventTypes()[0],
             'payload' => $decoded['payload'] ?? [],
         ];
+    }
+
+    /**
+     * Case-insensitive key lookup over a generic associative array —
+     * this class's own substitute for a real HTTP header bag's
+     * case-insensitivity, since SupportsWebhooksContract's $headers
+     * parameter is deliberately just a plain array (see that
+     * interface's own docblock).
+     */
+    private function findHeaderCaseInsensitive(array $headers, string $name): ?string
+    {
+        $target = strtolower($name);
+
+        foreach ($headers as $key => $value) {
+            if (is_string($key) && strtolower($key) === $target) {
+                return is_string($value) ? $value : null;
+            }
+        }
+
+        return null;
     }
 
     public function subscribe(array $context): array
