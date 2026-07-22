@@ -330,6 +330,27 @@ class RowLevelSecurityCoverageMappingService
         // This table was never in MISSING_PREPARED_TABLES — it is added
         // directly here since prepare and force happened together.
         'integration_oauth_states',
+        // Stage B Checkpoint 6 (FirmsBase Integration Platform mission,
+        // "Transactional Outbox and Sync Persistence Foundation") — six
+        // brand-new genuine tenant-owned tables (each with its own
+        // NOT NULL firm_id column, plus real composite FKs to
+        // firm_integrations(firm_id, id) and, for the internal
+        // sync_runs -> sync_items -> conflicts chain, to each other),
+        // each with RLS prepared and FORCE-activated in its own
+        // combined migration, following the identical combined
+        // prepare+force shape used throughout this rollout:
+        // 2026_09_05_050002_prepare_row_level_security_and_force_rls_on_integration_sync_runs_table.php,
+        // 2026_09_05_051002_prepare_row_level_security_and_force_rls_on_integration_sync_items_table.php,
+        // 2026_09_05_052002_prepare_row_level_security_and_force_rls_on_integration_external_mappings_table.php,
+        // 2026_09_05_053002_prepare_row_level_security_and_force_rls_on_integration_sync_cursors_table.php,
+        // 2026_09_05_054002_prepare_row_level_security_and_force_rls_on_integration_conflicts_table.php,
+        // 2026_09_05_055002_prepare_row_level_security_and_force_rls_on_integration_outbox_events_table.php.
+        // None of these six tables was ever in MISSING_PREPARED_TABLES —
+        // each is added directly here since prepare and force happened
+        // together, matching every prior Stage B checkpoint's identical
+        // convention.
+        'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings',
+        'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events',
     ];
 
     /**

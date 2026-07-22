@@ -48,6 +48,58 @@ class IntegrationProviderTest extends TestCase
         'updated_at',
     ];
 
+    /**
+     * POST-CHECKPOINT-6 UPDATE: Checkpoint 6 added 5 tables that
+     * independently carry a real composite FK (firm_id,
+     * firm_integration_id) -> firm_integrations(firm_id, id) —
+     * integration_sync_runs, integration_external_mappings,
+     * integration_sync_cursors, integration_conflicts,
+     * integration_outbox_events — plus integration_sync_items, which is
+     * not itself a direct dependent of firm_integrations but is a
+     * composite-FK dependent of integration_sync_runs and must be rolled
+     * back before it. Both rollback tests below now also roll back this
+     * entire 12-migration Checkpoint 6 wave (in the frozen
+     * reverse-dependency order, frozen-design-post-review.md §2:
+     * outbox_events -> conflicts -> sync_cursors -> external_mappings ->
+     * sync_items -> sync_runs) before firm_integrations' own rollback —
+     * mirroring this checkpoint's own
+     * IntegrationSyncRunsForceRlsActivationTest::WHOLE_WAVE_MIGRATION_PATHS
+     * precedent and Checkpoint 5's identical rollback-order-dependency
+     * precedent (reviews/checkpoint-05/precommit-failure-triage.md).
+     * Order between this CP6 wave and the pre-existing
+     * integration_credentials / integration_oauth_states rollback blocks
+     * below does not matter — neither references the other, only each
+     * independently references firm_integrations.
+     *
+     * @var list<string>
+     */
+    private const CP6_WHOLE_WAVE_MIGRATION_PATHS = [
+        'database/migrations/2026_09_05_050001_create_integration_sync_runs_table.php',
+        'database/migrations/2026_09_05_050002_prepare_row_level_security_and_force_rls_on_integration_sync_runs_table.php',
+        'database/migrations/2026_09_05_051001_create_integration_sync_items_table.php',
+        'database/migrations/2026_09_05_051002_prepare_row_level_security_and_force_rls_on_integration_sync_items_table.php',
+        'database/migrations/2026_09_05_052001_create_integration_external_mappings_table.php',
+        'database/migrations/2026_09_05_052002_prepare_row_level_security_and_force_rls_on_integration_external_mappings_table.php',
+        'database/migrations/2026_09_05_053001_create_integration_sync_cursors_table.php',
+        'database/migrations/2026_09_05_053002_prepare_row_level_security_and_force_rls_on_integration_sync_cursors_table.php',
+        'database/migrations/2026_09_05_054001_create_integration_conflicts_table.php',
+        'database/migrations/2026_09_05_054002_prepare_row_level_security_and_force_rls_on_integration_conflicts_table.php',
+        'database/migrations/2026_09_05_055001_create_integration_outbox_events_table.php',
+        'database/migrations/2026_09_05_055002_prepare_row_level_security_and_force_rls_on_integration_outbox_events_table.php',
+    ];
+
+    /**
+     * @var list<string>
+     */
+    private const CP6_WHOLE_WAVE_TABLES = [
+        'integration_sync_runs',
+        'integration_sync_items',
+        'integration_external_mappings',
+        'integration_sync_cursors',
+        'integration_conflicts',
+        'integration_outbox_events',
+    ];
+
     // ------------------------------------------------------------
     // 1. Schema correctness
     // ------------------------------------------------------------
@@ -247,6 +299,18 @@ class IntegrationProviderTest extends TestCase
      * dependents, and asserts integration_oauth_states itself ends up
      * correctly restored too, exactly as it already did for
      * integration_credentials.
+     *
+     * NARROW, DISCLOSED UPDATE (post-Checkpoint-6): Checkpoint 6 added a
+     * THIRD independent dependency chain on firm_integrations — the
+     * 6-table / 12-migration Checkpoint 6 wave (see
+     * CP6_WHOLE_WAVE_MIGRATION_PATHS above). This test now also rolls
+     * back that entire wave (whole-wave order required internally —
+     * integration_sync_items and integration_conflicts are themselves
+     * composite-FK dependents of other CP6 tables, not just of
+     * firm_integrations) before firm_integrations' own rollback, and
+     * reapplies it in forward order afterward. Order between this wave
+     * and the pre-existing integration_credentials /
+     * integration_oauth_states blocks does not matter to each other.
      */
     public function test_migration_rollback_and_reapplication_restores_exact_prior_state(): void
     {
@@ -321,6 +385,30 @@ class IntegrationProviderTest extends TestCase
         $this->assertNotNull($oauthStatesRlsBefore);
         $this->assertTrue((bool) $oauthStatesRlsBefore->relrowsecurity);
         $this->assertTrue((bool) $oauthStatesRlsBefore->relforcerowsecurity);
+
+        // Confirm the Checkpoint 6 whole-wave tables' pre-rollback
+        // existence too (a THIRD, independent dependency chain on
+        // firm_integrations).
+        foreach (self::CP6_WHOLE_WAVE_MIGRATION_PATHS as $path) {
+            $this->assertFileExists(base_path($path));
+        }
+        foreach (self::CP6_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 6) must exist before this test begins, since it is now also one of firm_integrations' real (direct or transitive) FK dependents.");
+        }
+
+        // 1b. Roll back the Checkpoint 6 whole-wave dependency chain —
+        // internal FK order matters within the wave itself (see
+        // CP6_WHOLE_WAVE_MIGRATION_PATHS docblock), so it is rolled back
+        // as a unit, in exact reverse of its own creation order, before
+        // firm_integrations' other dependents or firm_integrations
+        // itself.
+        foreach (array_reverse(self::CP6_WHOLE_WAVE_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 6 whole-wave) failed: ".Artisan::output());
+        }
+        foreach (self::CP6_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 6) must not survive its whole-wave rollback.");
+        }
 
         // 2. Roll back firm_integrations' real dependents first —
         // integration_credentials and integration_oauth_states (order
@@ -453,6 +541,16 @@ class IntegrationProviderTest extends TestCase
             '--force' => true,
         ]);
         $this->assertSame(0, $oauthStatesRlsMigrateExit, 'migrate of integration_oauth_states RLS-prep migration failed: '.Artisan::output());
+
+        // 6b. Reapply the Checkpoint 6 whole-wave dependency chain last,
+        // in its own forward (creation) order.
+        foreach (self::CP6_WHOLE_WAVE_MIGRATION_PATHS as $path) {
+            $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 6 whole-wave) failed: ".Artisan::output());
+        }
+        foreach (self::CP6_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 6) must be restored by the whole-wave reapplication.");
+        }
 
         // 7. Assert the exact prior state is restored — same columns,
         // same single seed row with the same values — not merely "a
@@ -656,6 +754,18 @@ class IntegrationProviderTest extends TestCase
      * ends up correctly restored too, exactly as it already did for
      * integration_credentials.
      */
+    /**
+     * NARROW, DISCLOSED UPDATE (post-Checkpoint-6): Checkpoint 6 added a
+     * THIRD independent dependency chain on firm_integrations — the
+     * 6-table / 12-migration Checkpoint 6 wave (see
+     * CP6_WHOLE_WAVE_MIGRATION_PATHS above). This test now also includes
+     * and tears down/rebuilds that entire wave's migration objects
+     * directly, in the same whole-wave-order-required manner as
+     * IntegrationSyncRunsForceRlsActivationTest's own direct-call proof,
+     * before/after firm_integrations' own down()/up() calls. Order
+     * between this wave and the pre-existing integration_credentials /
+     * integration_oauth_states blocks does not matter to each other.
+     */
     public function test_migration_down_and_up_restores_exact_prior_state(): void
     {
         $this->assertTrue(Schema::hasTable('integration_providers'));
@@ -690,6 +800,10 @@ class IntegrationProviderTest extends TestCase
         $this->assertTrue((bool) $oauthStatesRlsBefore->relrowsecurity);
         $this->assertTrue((bool) $oauthStatesRlsBefore->relforcerowsecurity);
 
+        foreach (self::CP6_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 6) must exist before this test begins, since it is now also one of firm_integrations' real (direct or transitive) FK dependents.");
+        }
+
         $providersMigration = include database_path('migrations/2026_09_01_010001_create_integration_providers_table.php');
         $firmIntegrationsRlsMigration = include database_path('migrations/2026_09_02_020002_prepare_row_level_security_and_force_rls_on_firm_integrations_table.php');
         $firmIntegrationsCreateMigration = include database_path('migrations/2026_09_02_020001_create_firm_integrations_table.php');
@@ -697,6 +811,24 @@ class IntegrationProviderTest extends TestCase
         $credentialsCreateMigration = include database_path('migrations/2026_09_03_030001_create_integration_credentials_table.php');
         $oauthStatesRlsMigration = include database_path('migrations/2026_09_04_040002_prepare_row_level_security_and_force_rls_on_integration_oauth_states_table.php');
         $oauthStatesCreateMigration = include database_path('migrations/2026_09_04_040001_create_integration_oauth_states_table.php');
+
+        // Checkpoint 6 whole-wave migration objects, in creation order.
+        $cp6Migrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::CP6_WHOLE_WAVE_MIGRATION_PATHS,
+        );
+
+        // Tear down the Checkpoint 6 whole-wave dependency chain FIRST —
+        // internal FK order matters within the wave itself, so it is
+        // torn down as a unit, in exact reverse of its own creation
+        // order, before firm_integrations' other dependents or
+        // firm_integrations itself.
+        foreach (array_reverse($cp6Migrations) as $migration) {
+            $migration->down();
+        }
+        foreach (self::CP6_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 6) must be fully dropped before firm_integrations down() can succeed.");
+        }
 
         // Tear down firm_integrations' real dependents FIRST —
         // integration_credentials and integration_oauth_states (order
@@ -831,6 +963,15 @@ class IntegrationProviderTest extends TestCase
             ['integration_oauth_states_self_lookup', 'integration_oauth_states_tenant_isolation'],
             array_map(fn ($p) => $p->policyname, $oauthStatesPolicies)
         );
+
+        // Rebuild the Checkpoint 6 whole-wave dependency chain last, in
+        // its own forward (creation) order.
+        foreach ($cp6Migrations as $migration) {
+            $migration->up();
+        }
+        foreach (self::CP6_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 6) must be fully restored after up().");
+        }
     }
 
     // ------------------------------------------------------------

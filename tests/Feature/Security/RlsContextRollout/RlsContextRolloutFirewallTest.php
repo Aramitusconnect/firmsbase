@@ -182,7 +182,7 @@ class RlsContextRolloutFirewallTest extends TestCase
             // in the same migration, NOT part of the old 60-table rollout
             // above) for the same reason — additive only, no existing
             // assertion removed or weakened.
-            'firm_integrations', 'integration_credentials', 'integration_oauth_states',
+            'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events',
         ];
 
         // security_events is the final checkpoint in this arc: every

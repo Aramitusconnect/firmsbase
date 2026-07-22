@@ -673,6 +673,20 @@ class RlsForceRolloutFirewallTest extends TestCase
             // additive-only pattern, no existing assertion removed or
             // weakened.
             'firm_integrations', 'integration_credentials', 'integration_oauth_states',
+            // Narrowly updated AGAIN by Stage B Checkpoint 6 of the
+            // FirmsBase Integration Platform mission ("Transactional
+            // Outbox and Sync Persistence Foundation") — six brand-new
+            // genuine tenant-owned tables (integration_sync_runs,
+            // integration_sync_items, integration_external_mappings,
+            // integration_sync_cursors, integration_conflicts,
+            // integration_outbox_events), each RLS prepared and
+            // FORCE-activated in its own combined migration — extends
+            // the "exactly these tables are forced" list from one
+            // hundred sixteen to one hundred twenty-two — same
+            // additive-only pattern, no existing assertion removed or
+            // weakened.
+            'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings',
+            'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
