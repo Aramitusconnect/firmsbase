@@ -686,7 +686,7 @@ class RlsForceRolloutFirewallTest extends TestCase
             // additive-only pattern, no existing assertion removed or
             // weakened.
             'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings',
-            'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events',
+            'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
