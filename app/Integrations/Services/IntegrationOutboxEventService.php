@@ -122,6 +122,28 @@ final class IntegrationOutboxEventService
      * config/integrations.php, so the default (15) is supplied inline
      * here rather than via a config-file entry.
      *
+     * POST-DIFF-REVIEW FIX 2 (outbox timestamp-precision race
+     * remediation — agent-r5-remediation-design-review.md §2.2) — the
+     * eligibility predicate, the stale-lock predicate, and the
+     * locked_at write below now use statement_timestamp() instead of
+     * now(): now() is frozen at transaction START, so a still-open
+     * transaction (e.g. recordOnce() + claim() sharing one transaction)
+     * could see a same-transaction "due now" insert as not-yet-due,
+     * producing a false-negative race. statement_timestamp() is live
+     * per statement instead. locked_at is additionally written via
+     * to_timestamp(ceil(extract(epoch from statement_timestamp())))
+     * rather than a bare now()/statement_timestamp() assignment,
+     * because it is a lower-bound protective gate (stale-lock
+     * reclaim) and the column's implicit round-half-up cast to
+     * timestamp(0) could otherwise round the stored instant slightly
+     * EARLY roughly half the time; an explicit ceiling guarantees the
+     * stored value is never earlier than the true instant. The same
+     * ceiling is applied to fail()'s retry next_attempt_at write below
+     * for the identical reason (it is also a lower-bound gate).
+     * recordOnce()'s PHP-bound writes are deliberately untouched — see
+     * the design review for why floor-only PHP truncation is already
+     * correct on that side once the read side is live.
+     *
      * @return Collection<int, IntegrationOutboxEvent>
      */
     public function claim(int $firmId, int $limit = 1): Collection
@@ -133,14 +155,14 @@ final class IntegrationOutboxEventService
             'WITH candidate AS ('.
             '  SELECT id FROM integration_outbox_events '.
             '  WHERE firm_id = ? AND ('.
-            '    (status = ? AND next_attempt_at <= now()) '.
-            "    OR (status = ? AND locked_at <= now() - (? || ' minutes')::interval)".
+            '    (status = ? AND next_attempt_at <= statement_timestamp()) '.
+            "    OR (status = ? AND locked_at <= statement_timestamp() - (? || ' minutes')::interval)".
             '  ) '.
             '  ORDER BY next_attempt_at ASC, id ASC LIMIT ? '.
             '  FOR UPDATE SKIP LOCKED'.
             ') '.
             'UPDATE integration_outbox_events '.
-            'SET status = ?, lock_token = ?, locked_at = now(), attempts = attempts + 1 '.
+            'SET status = ?, lock_token = ?, locked_at = to_timestamp(ceil(extract(epoch from statement_timestamp()))), attempts = attempts + 1 '.
             'WHERE id IN (SELECT id FROM candidate) '.
             'RETURNING *',
             [
@@ -239,7 +261,7 @@ final class IntegrationOutboxEventService
         $row = DB::selectOne(
             'UPDATE integration_outbox_events '.
             "SET status = 'pending', lock_token = NULL, locked_at = NULL, ".
-            'next_attempt_at = now() + (? * interval \'1 second\'), last_error = ? '.
+            'next_attempt_at = to_timestamp(ceil(extract(epoch from statement_timestamp()))) + (? * interval \'1 second\'), last_error = ? '.
             "WHERE id = ? AND lock_token = ? AND status = 'processing' ".
             'RETURNING *',
             [$delaySeconds, $sanitizedError, $id, $lockToken]
