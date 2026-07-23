@@ -6,6 +6,8 @@ namespace App\Integrations\Services;
 
 use App\Integrations\Data\SanitizedPayloadReference;
 use App\Integrations\Models\IntegrationOutboxEvent;
+use App\Models\Firm;
+use App\Services\TimelineEventRecorder;
 use App\Services\WebhookRetryPolicyService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -39,8 +41,20 @@ final class IntegrationOutboxEventService
 
     private const DEFAULT_MAX_ATTEMPTS = 10;
 
-    public function __construct(private readonly WebhookRetryPolicyService $retryPolicy)
-    {
+    /**
+     * Checkpoint 9 (frozen design §7, agent-9e §5.3, APPROVED "raise
+     * the ceiling, never decrement"): requeue() never resets `attempts`
+     * — it raises `max_attempts` by this small fixed increment so
+     * `attempts < max_attempts` becomes true again without erasing the
+     * lifetime attempt count.
+     */
+    private const REQUEUE_MAX_ATTEMPTS_INCREMENT = 3;
+
+    public function __construct(
+        private readonly WebhookRetryPolicyService $retryPolicy,
+        private readonly TimelineEventRecorder $events,
+        private readonly IntegrationRequeueAuditLogger $requeueAudit,
+    ) {
     }
 
     /**
@@ -267,7 +281,35 @@ final class IntegrationOutboxEventService
                 [$sanitizedError, $id, $lockToken]
             );
 
-            return $row === null ? null : IntegrationOutboxEvent::hydrate([(array) $row])->first();
+            if ($row === null) {
+                return null;
+            }
+
+            $deadLettered = IntegrationOutboxEvent::hydrate([(array) $row])->first();
+
+            // Checkpoint 9 addition (frozen design §3): the dead-letter
+            // branch of fail() only — never the retry branch below.
+            // firm_id is already known from $current (read before the
+            // guarded UPDATE above), so the Firm lookup here needs no
+            // additional tenant-context wrap: this method is always
+            // invoked from within an already-active runWithFirmContext()
+            // call (see class docblock precedent throughout this
+            // checkpoint series), and `firms` itself carries no RLS
+            // predicate.
+            $firm = Firm::query()->find($current->firm_id);
+
+            if ($firm !== null) {
+                $this->events->record($firm, 'integration_outbox.event_dead_lettered', $deadLettered, null, [
+                    'outbox_event_id' => $deadLettered->id,
+                    'firm_integration_id' => $deadLettered->firm_integration_id,
+                    'event_type' => $deadLettered->event_type,
+                    'attempts' => $deadLettered->attempts,
+                    'max_attempts' => $deadLettered->max_attempts,
+                    'category' => $category,
+                ]);
+            }
+
+            return $deadLettered;
         }
 
         $delaySeconds = $this->retryPolicy->nextAttemptDelaySeconds($attempts, ['max_attempts' => $maxAttempts, 'category' => $category]);
@@ -302,5 +344,109 @@ final class IntegrationOutboxEventService
         );
 
         return $row === null ? null : IntegrationOutboxEvent::hydrate([(array) $row])->first();
+    }
+
+    /**
+     * Requeue a dead-lettered outbox event (Checkpoint 9, frozen design
+     * §7; agent-9e-requeue-governance.md §5/§8). A single guarded
+     * UPDATE, never check-then-write — mirrors every other method in
+     * this class. Guard order (agent-9e §8, verbatim): firm ownership
+     * -> correct terminal status (dead_lettered) -> not yet at the
+     * requeue ceiling -> not superseded by a newer event for the same
+     * logical operation -> connection not disconnected -> credential
+     * not revoked.
+     *
+     * Actor authority is checked by the CALLER before invocation
+     * (`IntegrationAccessPolicyService::assertCanConfigure()`, per
+     * frozen design §7/§9 — no dedicated `assertCanRetryOperation()`
+     * method), never inside this guarded SQL — role authority is not a
+     * row-state fact a WHERE clause can or should encode.
+     * $actorFirmUserId is accepted purely as evidence to record, never
+     * re-derived or re-authorized here.
+     *
+     * Attempt-reset design (agent-9e §5.3, APPROVED "raise the ceiling,
+     * never decrement"): `attempts` is left untouched; `max_attempts` is
+     * raised by `self::REQUEUE_MAX_ATTEMPTS_INCREMENT` so
+     * `attempts < max_attempts` becomes true again without erasing the
+     * lifetime attempt count. `last_error` is likewise left untouched —
+     * it continues to hold the dead-letter reason until this row's
+     * *next* genuine failure/success overwrites it (existing, accepted
+     * lifecycle, not something requeue introduces).
+     *
+     * Idempotency of a duplicate requeue request falls out of the same
+     * `AND status = 'dead_lettered'` guard used for every rejection case
+     * below: the first successful requeue already transitions the row
+     * away from `dead_lettered`, so a second call's guard clause
+     * structurally fails to match, returns zero rows, and this method
+     * returns null — exactly like every other guarded method in this
+     * class when its precondition no longer holds. The audit-evidence
+     * write below only fires when a row was actually returned, so a
+     * losing duplicate call never produces a phantom audit entry.
+     */
+    public function requeue(
+        int $id,
+        int $firmId,
+        string $reasonCode,
+        ?int $actorFirmUserId = null,
+    ): ?IntegrationOutboxEvent {
+        $row = DB::selectOne(
+            'UPDATE integration_outbox_events e '.
+            "SET status = 'pending', ".
+            'lock_token = NULL, '.
+            'locked_at = NULL, '.
+            'next_attempt_at = statement_timestamp(), '.
+            'max_attempts = e.max_attempts + ?, '.
+            'requeue_count = e.requeue_count + 1, '.
+            'requeued_at = statement_timestamp(), '.
+            'updated_at = statement_timestamp() '.
+            'WHERE e.id = ? '.
+            '  AND e.firm_id = ? '.
+            "  AND e.status = 'dead_lettered' ".
+            '  AND e.requeue_count < e.max_requeues '.
+            '  AND NOT EXISTS ('.
+            '    SELECT 1 FROM integration_outbox_events newer '.
+            '    WHERE newer.firm_id = e.firm_id '.
+            '      AND newer.firm_integration_id IS NOT DISTINCT FROM e.firm_integration_id '.
+            '      AND newer.resource_type IS NOT DISTINCT FROM e.resource_type '.
+            '      AND newer.resource_id IS NOT DISTINCT FROM e.resource_id '.
+            '      AND newer.id <> e.id '.
+            '      AND newer.created_at > e.created_at '.
+            "      AND newer.status IN ('pending', 'processing', 'completed')".
+            '  ) '.
+            '  AND ('.
+            '    e.firm_integration_id IS NULL '.
+            '    OR EXISTS ('.
+            '      SELECT 1 FROM firm_integrations fi '.
+            "      WHERE fi.id = e.firm_integration_id AND fi.status <> 'disconnected'".
+            '    )'.
+            '  ) '.
+            '  AND ('.
+            '    e.firm_integration_id IS NULL '.
+            '    OR EXISTS ('.
+            '      SELECT 1 FROM integration_credentials ic '.
+            "      WHERE ic.firm_integration_id = e.firm_integration_id AND ic.status = 'active'".
+            '    )'.
+            '  ) '.
+            'RETURNING e.*',
+            [self::REQUEUE_MAX_ATTEMPTS_INCREMENT, $id, $firmId]
+        );
+
+        if ($row === null) {
+            return null;
+        }
+
+        $requeued = IntegrationOutboxEvent::hydrate([(array) $row])->first();
+
+        $this->requeueAudit->record(
+            IntegrationRequeueAuditLogger::EVENT_OUTBOX_EVENT_REQUEUED,
+            table: 'integration_outbox_events',
+            firmId: $firmId,
+            id: $id,
+            reasonCode: $reasonCode,
+            actorFirmUserId: $actorFirmUserId,
+            requeueCount: $requeued->requeue_count,
+        );
+
+        return $requeued;
     }
 }

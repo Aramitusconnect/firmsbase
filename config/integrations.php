@@ -123,4 +123,25 @@ return [
         'platform_max_batches_per_run' => env('INTEGRATIONS_RETENTION_PLATFORM_MAX_BATCHES_PER_RUN', 50),
     ],
 
+    /*
+    |----------------------------------------------------------------
+    | Checkpoint 9 — usage records
+    |----------------------------------------------------------------
+    |
+    | NO DEFAULT (agent-9h-architecture-security-review.md §6.3,
+    | explicitly REJECTING Agent 9A's own 400-day placeholder
+    | recommendation) — matches the
+    | `oauth_states.unconsumed_expired_retention_hours` fail-safe
+    | precedent above: env('INTEGRATIONS_USAGE_RECORDS_RETENTION_DAYS')
+    | with NO second argument. `IntegrationUsageRecorderService::recordOnce()`
+    | leaves `retention_deadline` null when this resolves to null, rather
+    | than guessing a number; any future sweep method must check for
+    | null and no-op with a disclosed log event, never invent a value.
+    |
+    */
+
+    'usage_records' => [
+        'retention_days' => env('INTEGRATIONS_USAGE_RECORDS_RETENTION_DAYS'),
+    ],
+
 ];

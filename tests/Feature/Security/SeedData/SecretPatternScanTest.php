@@ -142,4 +142,95 @@ class SecretPatternScanTest extends TestCase
             $this->assertStringNotContainsString($needle, $source, 'DatabaseSeeder must not create demo firm/client/matter/document data.');
         }
     }
+
+    // ------------------------------------------------------------
+    // Checkpoint 9 extension — the 25 new/modified production files
+    // this checkpoint touched, none of which are covered by the
+    // config/seeders/factories globs above (app/Integrations/**,
+    // app/Services/**, app/ValueObjects/**, and the four new
+    // migrations). Reuses the SAME forbidden-pattern list and scan
+    // mechanism as every test above — no new taxonomy invented.
+    // ------------------------------------------------------------
+
+    /**
+     * @return string[] absolute paths, matching the frozen design's
+     *                   §14 production-file allowlist exactly (14 new
+     *                   + 11 modified).
+     */
+    private function checkpoint9ChangedFiles(): array
+    {
+        $relative = [
+            'database/migrations/2026_09_08_080001_create_integration_usage_records_table.php',
+            'database/migrations/2026_09_08_080002_prepare_row_level_security_and_force_rls_on_integration_usage_records_table.php',
+            'database/migrations/2026_09_08_081001_add_requeue_columns_to_integration_outbox_events_and_integration_sync_items_table.php',
+            'database/migrations/2026_09_08_082001_seed_integration_module_catalog_entry.php',
+            'app/Integrations/Models/IntegrationUsageRecord.php',
+            'app/Integrations/Data/SanitizedUsageMetadataReference.php',
+            'app/Integrations/Data/SanitizedSyncFailureSummary.php',
+            'app/Integrations/Services/IntegrationUsageRecorderService.php',
+            'app/Integrations/Enums/UsageOperationType.php',
+            'app/Services/IntegrationEntitlementPolicyService.php',
+            'app/ValueObjects/IntegrationAccessDecision.php',
+            'app/Integrations/Services/IntegrationRequeueAuditLogger.php',
+            'app/Services/RetentionGovernanceRegistryService.php',
+            'database/factories/IntegrationUsageRecordFactory.php',
+            'app/Integrations/Services/IntegrationAccessPolicyService.php',
+            'app/Integrations/Services/IntegrationOutboxEventService.php',
+            'app/Integrations/Services/SyncItemService.php',
+            'app/Integrations/Services/ProviderConnectionService.php',
+            'app/Integrations/Services/SyncRunService.php',
+            'app/Integrations/Services/HealthStateService.php',
+            'app/Integrations/Services/IntegrationConflictService.php',
+            'app/Integrations/Services/FinancialIntegrationAccessPolicyService.php',
+            'app/Integrations/Models/FirmIntegration.php',
+            'config/integrations.php',
+            'app/Services/RowLevelSecurityCoverageMappingService.php',
+        ];
+
+        return array_map(fn (string $path) => base_path($path), $relative);
+    }
+
+    public function test_checkpoint_9_changed_files_all_exist_at_the_expected_paths(): void
+    {
+        foreach ($this->checkpoint9ChangedFiles() as $path) {
+            $this->assertFileExists($path, "Checkpoint 9 changed-file inventory drifted from reality: {$path}");
+        }
+    }
+
+    public function test_no_checkpoint_9_changed_file_contains_a_hardcoded_secret_pattern(): void
+    {
+        foreach ($this->checkpoint9ChangedFiles() as $path) {
+            $source = file_get_contents($path);
+            $this->assertIsString($source);
+
+            foreach (['sk_live_', 'sk_test_', 'AKIA', 'ghp_', 'xoxb-', 'xoxp-'] as $pattern) {
+                $this->assertStringNotContainsString(
+                    $pattern,
+                    $source,
+                    basename($path)." (Checkpoint 9) must not contain a real-looking secret pattern: {$pattern}"
+                );
+            }
+        }
+    }
+
+    public function test_no_checkpoint_9_changed_file_contains_a_raw_env_default_secret_value(): void
+    {
+        // Belt-and-suspenders for this checkpoint's own config addition:
+        // env('INTEGRATIONS_USAGE_RECORDS_RETENTION_DAYS') must ship
+        // with NO second (default) argument — the frozen design's own
+        // fail-safe ruling — so grep for the one way that could regress
+        // into looking like a hardcoded value.
+        $configSource = file_get_contents(base_path('config/integrations.php'));
+
+        $this->assertMatchesRegularExpression(
+            "/env\\('INTEGRATIONS_USAGE_RECORDS_RETENTION_DAYS'\\)/",
+            $configSource,
+            'The usage-records retention_days key must call env() with no second argument.'
+        );
+        $this->assertDoesNotMatchRegularExpression(
+            "/env\\('INTEGRATIONS_USAGE_RECORDS_RETENTION_DAYS',\\s*\\d/",
+            $configSource,
+            'The usage-records retention_days key must NOT ship with a numeric default — that is exactly the fail-safe "no default" ruling this checkpoint\'s frozen design requires.'
+        );
+    }
 }

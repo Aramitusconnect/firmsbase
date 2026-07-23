@@ -12,10 +12,12 @@ use App\Integrations\Models\IntegrationOAuthState;
 use App\Integrations\Models\IntegrationOutboxEvent;
 use App\Integrations\Models\IntegrationSyncItem;
 use App\Integrations\Models\IntegrationSyncRun;
+use App\Integrations\Models\IntegrationUsageRecord;
 use App\Integrations\Services\RetentionSweepAuditLogger;
 use App\Jobs\RetentionSweepJob;
 use App\Models\Firm;
 use App\Models\FirmUser;
+use App\Services\RetentionGovernanceRegistryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -491,6 +493,75 @@ class RetentionSweepJobTest extends TestCase
 
         $exists = DB::table('integration_webhook_receipts')->where('routing_token_hash', $hash)->exists();
         $this->assertFalse($exists, 'The sweep must independently recompute from verification_outcome/received_at — NEVER trust the (deliberately wrong, far-future) stored retention_deadline column alone.');
+    }
+
+    // ------------------------------------------------------------
+    // Checkpoint 9 additions — integration_usage_records: NOT swept
+    // today (no sweepUsageRecords() method exists per the frozen
+    // design's "no default retention -> fail-safe no-op" ruling), and
+    // RetentionGovernanceRegistryService correctly reports
+    // NOT_CONFIGURED_FAIL_SAFE for the usage_records category while the
+    // config key is unset.
+    // ------------------------------------------------------------
+
+    public function test_retention_sweep_job_has_no_sweepusagerecords_method(): void
+    {
+        $reflection = new \ReflectionClass(RetentionSweepJob::class);
+
+        $this->assertFalse(
+            $reflection->hasMethod('sweepUsageRecords'),
+            'RetentionSweepJob must NOT have a sweepUsageRecords() method at Checkpoint 9 — the frozen design ships '.
+            'integration_usage_records.retention_deadline with NO default and explicitly defers building a sweep '.
+            'method until a future checkpoint. If this assertion fails, a sweepUsageRecords() method was added — '.
+            'that is a scope deviation from the frozen design, not something to silently accommodate.'
+        );
+    }
+
+    public function test_a_very_old_usage_record_with_a_past_retention_deadline_is_never_swept_today(): void
+    {
+        config(['integrations.usage_records.retention_days' => 1]);
+
+        $firm = Firm::factory()->create();
+        $connection = $this->connection($firm);
+        $record = $this->runWithFirmContext($firm, fn () => IntegrationUsageRecord::factory()
+            ->forFirmIntegration($connection)
+            ->create(['occurred_at' => now()->subYears(5), 'retention_deadline' => now()->subYears(4)]));
+
+        $this->sweep($firm);
+
+        $exists = $this->runWithFirmContext($firm, fn () => IntegrationUsageRecord::query()->find($record->id));
+        $this->assertNotNull($exists, 'No live sweep method exists for integration_usage_records yet — a record must survive RetentionSweepJob::handle() regardless of how far past its own retention_deadline it is.');
+    }
+
+    public function test_retention_governance_registry_reports_not_configured_fail_safe_for_usage_records_while_the_env_var_is_unset(): void
+    {
+        $this->assertNull(
+            config('integrations.usage_records.retention_days'),
+            'Sanity check: this key must genuinely be unset for this test to prove anything.'
+        );
+
+        $registry = new RetentionGovernanceRegistryService();
+
+        $this->assertSame(
+            RetentionGovernanceRegistryService::STATUS_NOT_CONFIGURED_FAIL_SAFE,
+            $registry->statusFor('usage_records')
+        );
+
+        $category = $registry->categoryFor('usage_records');
+        $this->assertNotNull($category);
+        $this->assertContains('integration_usage_records', $category['tables']);
+        $this->assertSame('integrations.usage_records.retention_days', $category['config_key']);
+        $this->assertNull($category['current_default'], 'current_default must reflect the live, currently-unset config value, not a hardcoded copy.');
+    }
+
+    public function test_retention_governance_registry_current_default_reflects_the_live_config_value_once_set(): void
+    {
+        config(['integrations.usage_records.retention_days' => 60]);
+
+        $registry = new RetentionGovernanceRegistryService();
+        $category = $registry->categoryFor('usage_records');
+
+        $this->assertSame(60, $category['current_default'], 'current_default must be resolved LIVE via config() at call time, never a hardcoded second copy of the number.');
     }
 
     // ------------------------------------------------------------

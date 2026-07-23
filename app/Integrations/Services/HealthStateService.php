@@ -11,6 +11,7 @@ use App\Integrations\Enums\HealthSummaryState;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationConnectionHealth;
 use App\Services\TenantContextService;
+use App\Services\TimelineEventRecorder;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -58,11 +59,23 @@ use Illuminate\Support\Str;
  */
 final class HealthStateService
 {
+    public function __construct(private readonly TimelineEventRecorder $events)
+    {
+    }
+
     public function recordSuccess(int $firmIntegrationId, int $firmId): void
     {
         (new TenantContextService())->runWithFirmContext($firmId, function () use ($firmIntegrationId, $firmId) {
             $connection = FirmIntegration::query()->where('id', $firmIntegrationId)->first();
             $connectionStatus = $connection?->status ?? ConnectionStatus::Active;
+
+            // Checkpoint 9 addition (frozen design §3): read BEFORE the
+            // upsert below, so the "did summary_state actually change"
+            // comparison compares against the row's state prior to this
+            // call, never its own just-written value.
+            $previousSummaryState = DB::table('integration_connection_health')
+                ->where('firm_integration_id', $firmIntegrationId)
+                ->value('summary_state');
 
             $summaryState = $this->computeSummaryState($connectionStatus, null, null, 0);
             $uuid = (string) Str::uuid7();
@@ -89,6 +102,7 @@ final class HealthStateService
             );
 
             $this->syncDenormalizedCache($connection, $summaryState, null);
+            $this->maybeRecordStateChangeEvent($connection, $previousSummaryState, $summaryState);
         });
     }
 
@@ -183,6 +197,13 @@ final class HealthStateService
                 $connection = FirmIntegration::query()->where('id', $firmIntegrationId)->first();
                 $connectionStatus = $connection?->status ?? ConnectionStatus::Active;
 
+                // Checkpoint 9 addition (frozen design §3): read BEFORE
+                // the upsert below, mirroring recordSuccess()'s
+                // identical "compare against prior state" discipline.
+                $previousSummaryState = DB::table('integration_connection_health')
+                    ->where('firm_integration_id', $firmIntegrationId)
+                    ->value('summary_state');
+
                 $existingFailures = (int) (DB::table('integration_connection_health')
                     ->where('firm_integration_id', $firmIntegrationId)
                     ->value('consecutive_failures') ?? 0);
@@ -250,8 +271,37 @@ final class HealthStateService
                 }
 
                 $this->syncDenormalizedCache($connection, $summaryState, $summaryText);
+                $this->maybeRecordStateChangeEvent($connection, $previousSummaryState, $summaryState);
             }
         );
+    }
+
+    /**
+     * Checkpoint 9 addition (frozen design §3):
+     * `integration_health.state_changed` fires ONLY on an actual
+     * `HealthSummaryState` transition — never on every poll. A null
+     * $previousSummaryState (no prior row exists yet) is treated as
+     * "establishing a baseline," not a transition, so the very first
+     * health signal for a connection never fires this event.
+     */
+    private function maybeRecordStateChangeEvent(
+        ?FirmIntegration $connection,
+        string|null $previousSummaryState,
+        HealthSummaryState $newSummaryState,
+    ): void {
+        if ($connection === null || $previousSummaryState === null) {
+            return;
+        }
+
+        if ($previousSummaryState === $newSummaryState->value) {
+            return;
+        }
+
+        $this->events->record($connection->firm, 'integration_health.state_changed', $connection, null, [
+            'firm_integration_id' => $connection->id,
+            'from' => $previousSummaryState,
+            'to' => $newSummaryState->value,
+        ]);
     }
 
     /**

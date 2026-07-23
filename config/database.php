@@ -131,6 +131,38 @@ return [
             'sslmode' => env('DB_SSLMODE', 'prefer'),
         ],
 
+        /*
+         * Checkpoint 9 addition — a structural duplicate of 'pgsql' above,
+         * pointing at the exact same physical database via the identical
+         * env() references (never a hardcoded/duplicated value, so the two
+         * connections can never drift apart). Its only purpose is to give
+         * TimelineEventRecorder::record() a genuinely separate PDO
+         * session/connection to write on when
+         * $independentOfAmbientTransaction is true — a transaction opened
+         * on THIS connection commits independently of whatever the
+         * ambient 'pgsql' connection's transaction is doing, which is the
+         * only correct way to make a single write durable even when the
+         * enclosing request/job transaction later rolls back (Postgres
+         * transactions are all-or-nothing per session; a SAVEPOINT cannot
+         * escape its own session's rollback). See
+         * app/Services/TimelineEventRecorder.php for the write path that
+         * uses this connection.
+         */
+        'pgsql_audit' => [
+            'driver' => 'pgsql',
+            'url' => env('DB_URL'),
+            'host' => env('DB_HOST', '127.0.0.1'),
+            'port' => env('DB_PORT', '5432'),
+            'database' => env('DB_DATABASE', 'laravel'),
+            'username' => env('DB_USERNAME', 'root'),
+            'password' => env('DB_PASSWORD', ''),
+            'charset' => env('DB_CHARSET', 'utf8'),
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'search_path' => 'public',
+            'sslmode' => env('DB_SSLMODE', 'prefer'),
+        ],
+
         'sqlsrv' => [
             'driver' => 'sqlsrv',
             'url' => env('DB_URL'),

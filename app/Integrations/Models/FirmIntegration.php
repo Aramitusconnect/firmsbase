@@ -80,6 +80,22 @@ class FirmIntegration extends Model
         'webhook_routing_token',
     ];
 
+    /**
+     * Checkpoint 9 addition (frozen-design-post-security-review.md §9;
+     * agent-9h-architecture-security-review.md §7.1): one-line,
+     * additive-only defense-in-depth fix. `webhook_routing_token` is a
+     * routing identifier, not a signature secret — possession alone
+     * never authorizes processing — but every other genuinely-sensitive-
+     * shaped column on a sibling model in this domain
+     * (IntegrationCredential.encrypted_payload_ciphertext,
+     * IntegrationOAuthState.opaque_token_hash/verifier_ciphertext, the
+     * routing-index sibling model's own hashed-token column) is
+     * already `$hidden`; this model was the one structural
+     * inconsistency. Zero behavioral impact on any existing caller — no
+     * caller relies on this surviving `->toArray()`/`->toJson()`.
+     */
+    protected $hidden = ['webhook_routing_token'];
+
     protected static function booted(): void
     {
         static::saving(function (FirmIntegration $model): void {

@@ -6,6 +6,8 @@ namespace App\Integrations\Services;
 
 use App\Integrations\Enums\SyncItemStatus;
 use App\Integrations\Models\IntegrationSyncItem;
+use App\Models\Firm;
+use App\Services\TimelineEventRecorder;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -25,6 +27,12 @@ final class SyncItemService
         SyncItemStatus::FailedPermanent,
         SyncItemStatus::Skipped,
     ];
+
+    public function __construct(
+        private readonly TimelineEventRecorder $events,
+        private readonly IntegrationRequeueAuditLogger $requeueAudit,
+    ) {
+    }
 
     /**
      * The owning run's own batch-loop write path — first-attempt
@@ -75,7 +83,13 @@ final class SyncItemService
             ]
         );
 
-        return IntegrationSyncItem::hydrate([(array) $row])->first();
+        $item = IntegrationSyncItem::hydrate([(array) $row])->first();
+
+        if ($status === SyncItemStatus::FailedPermanent) {
+            $this->recordRetryExhaustedEvent($item);
+        }
+
+        return $item;
     }
 
     /**
@@ -136,6 +150,131 @@ final class SyncItemService
             [$outcome->value, $nextAttemptAt, $lastError, $itemId]
         );
 
-        return $row === null ? null : IntegrationSyncItem::hydrate([(array) $row])->first();
+        if ($row === null) {
+            return null;
+        }
+
+        $item = IntegrationSyncItem::hydrate([(array) $row])->first();
+
+        if ($outcome === SyncItemStatus::FailedPermanent) {
+            $this->recordRetryExhaustedEvent($item);
+        }
+
+        return $item;
+    }
+
+    /**
+     * Checkpoint 9 addition (frozen design §3):
+     * `integration_sync.item_retry_exhausted` fires on transition INTO
+     * FailedPermanent only — covers both write paths that can produce
+     * that status (first-attempt processing via recordAttempt(), and
+     * the retry-claim path via resolveRetryOutcome()), since this
+     * table's own docblock states status is mutated ONLY through this
+     * class via those two paths.
+     */
+    private function recordRetryExhaustedEvent(IntegrationSyncItem $item): void
+    {
+        $firm = Firm::query()->find($item->firm_id);
+
+        if ($firm === null) {
+            return;
+        }
+
+        $this->events->record($firm, 'integration_sync.item_retry_exhausted', $item, null, [
+            'sync_item_id' => $item->id,
+            'sync_run_id' => $item->sync_run_id,
+            'resource_type' => $item->resource_type,
+            'external_id' => $item->external_id,
+            'attempt_count' => $item->attempt_count,
+        ]);
+    }
+
+    /**
+     * Requeue a permanently-failed sync item (Checkpoint 9, frozen
+     * design §7; agent-9e-requeue-governance.md §6/§8). A single
+     * guarded UPDATE, never check-then-write. Guard order: firm
+     * ownership -> correct terminal status (failed_permanent) -> not
+     * superseded by a later run's item for the same external_id already
+     * having succeeded -> connection not disconnected -> credential not
+     * revoked.
+     *
+     * Actor authority is checked by the CALLER before invocation
+     * (`IntegrationAccessPolicyService::assertCanConfigure()`, per
+     * frozen design §7/§9), never inside this guarded SQL.
+     * $actorFirmUserId is accepted purely as evidence to record.
+     *
+     * Re-transitions the row to `failed_retryable` unconditionally
+     * (subject to the guards above) rather than attempting to encode
+     * "is the structural blocker that originally produced
+     * FailedPermanent still true" inside this single-row SQL guard
+     * (agent-9e §6 item 4) — that question can only be answered by
+     * `SyncRetryPollJob`'s own next poll cycle, which already
+     * re-discovers and re-dead-letters a structurally-blocked item
+     * cheaply if the blocker still applies. `attempt_count` is left
+     * untouched (no ceiling column exists on this table; eligibility is
+     * governed by `status` alone, exactly as for first-pass
+     * processing). `terminal_at` IS actively cleared to NULL — unlike
+     * `last_error`, which is left untouched — because a `failed_retryable`
+     * item must not appear to a future retention sweep as if it were
+     * still in its terminal window.
+     */
+    public function requeueFromFailedPermanent(
+        int $itemId,
+        int $firmId,
+        string $reasonCode,
+        ?int $actorFirmUserId = null,
+    ): ?IntegrationSyncItem {
+        $row = DB::selectOne(
+            'UPDATE integration_sync_items item '.
+            "SET status = 'failed_retryable', ".
+            'next_attempt_at = statement_timestamp(), '.
+            'terminal_at = NULL, '.
+            'requeue_count = item.requeue_count + 1, '.
+            'requeued_at = statement_timestamp(), '.
+            'updated_at = statement_timestamp() '.
+            'FROM integration_sync_runs self_run '.
+            'WHERE item.id = ? '.
+            '  AND item.firm_id = ? '.
+            '  AND item.sync_run_id = self_run.id '.
+            "  AND item.status = 'failed_permanent' ".
+            '  AND NOT EXISTS ('.
+            '    SELECT 1 FROM integration_sync_items newer '.
+            '    JOIN integration_sync_runs newer_run ON newer_run.id = newer.sync_run_id '.
+            '    WHERE newer.firm_id = item.firm_id '.
+            '      AND item.external_id IS NOT NULL '.
+            '      AND newer.external_id = item.external_id '.
+            '      AND newer.id <> item.id '.
+            "      AND newer.status = 'succeeded' ".
+            '      AND newer_run.created_at > self_run.created_at'.
+            '  ) '.
+            '  AND EXISTS ('.
+            '    SELECT 1 FROM firm_integrations fi '.
+            "    WHERE fi.id = self_run.firm_integration_id AND fi.status <> 'disconnected'".
+            '  ) '.
+            '  AND EXISTS ('.
+            '    SELECT 1 FROM integration_credentials ic '.
+            "    WHERE ic.firm_integration_id = self_run.firm_integration_id AND ic.status = 'active'".
+            '  ) '.
+            'RETURNING item.*',
+            [$itemId, $firmId]
+        );
+
+        if ($row === null) {
+            return null;
+        }
+
+        $requeued = IntegrationSyncItem::hydrate([(array) $row])->first();
+
+        $this->requeueAudit->record(
+            IntegrationRequeueAuditLogger::EVENT_SYNC_ITEM_REQUEUED,
+            table: 'integration_sync_items',
+            firmId: $firmId,
+            id: $itemId,
+            reasonCode: $reasonCode,
+            actorFirmUserId: $actorFirmUserId,
+            requeueCount: $requeued->requeue_count,
+        );
+
+        return $requeued;
     }
 }

@@ -6,6 +6,7 @@ namespace App\Integrations\Services;
 
 use App\Enums\FirmUserRole;
 use App\Models\FirmUser;
+use App\Services\TimelineEventRecorder;
 use RuntimeException;
 
 /**
@@ -56,6 +57,10 @@ class IntegrationAccessPolicyService
         FirmUserRole::BillingStaff,
     ];
 
+    public function __construct(private readonly TimelineEventRecorder $events)
+    {
+    }
+
     public function canView(FirmUserRole $role): bool
     {
         return in_array($role, self::VIEW_ROLES, true);
@@ -81,9 +86,25 @@ class IntegrationAccessPolicyService
         return in_array($role, self::USAGE_VIEW_ROLES, true);
     }
 
+    /**
+     * Checkpoint 9 addition (frozen design §6/§9): management-tier
+     * ceiling, matching connect/configure/disconnect's existing ceiling
+     * — triggering outbound provider traffic and consuming rate-limit
+     * budget is not a "view"-level action. Required by Checkpoint 10's
+     * manual-sync-dispatch 11-step sequence (frozen design §11, step 5);
+     * this checkpoint ships the method, the future controller/dispatch
+     * action that calls it is Checkpoint 10 scope.
+     */
+    public function canSync(FirmUserRole $role): bool
+    {
+        return in_array($role, self::MANAGEMENT_ROLES, true);
+    }
+
     public function assertCanView(FirmUser $actor): void
     {
         if (! $this->canView($actor->role)) {
+            $this->recordDenied($actor, 'view');
+
             throw new RuntimeException(
                 'Only FirmOwner, Attorney, Paralegal, or LegalAssistant may view this integration connection.'
             );
@@ -93,6 +114,8 @@ class IntegrationAccessPolicyService
     public function assertCanConnect(FirmUser $actor): void
     {
         if (! $this->canConnect($actor->role)) {
+            $this->recordDenied($actor, 'connect');
+
             throw new RuntimeException('Only FirmOwner or Attorney may connect a non-financial integration.');
         }
     }
@@ -100,6 +123,8 @@ class IntegrationAccessPolicyService
     public function assertCanConfigure(FirmUser $actor): void
     {
         if (! $this->canConfigure($actor->role)) {
+            $this->recordDenied($actor, 'configure');
+
             throw new RuntimeException('Only FirmOwner or Attorney may configure a non-financial integration.');
         }
     }
@@ -107,6 +132,8 @@ class IntegrationAccessPolicyService
     public function assertCanDisconnect(FirmUser $actor): void
     {
         if (! $this->canDisconnect($actor->role)) {
+            $this->recordDenied($actor, 'disconnect');
+
             throw new RuntimeException('Only FirmOwner or Attorney may disconnect a non-financial integration.');
         }
     }
@@ -114,7 +141,45 @@ class IntegrationAccessPolicyService
     public function assertCanViewUsage(FirmUser $actor): void
     {
         if (! $this->canViewUsage($actor->role)) {
+            $this->recordDenied($actor, 'view_usage');
+
             throw new RuntimeException('Only FirmOwner or BillingStaff may view integration usage/billing impact.');
         }
+    }
+
+    public function assertCanSync(FirmUser $actor): void
+    {
+        if (! $this->canSync($actor->role)) {
+            $this->recordDenied($actor, 'sync');
+
+            throw new RuntimeException('Only FirmOwner or Attorney may trigger a manual sync.');
+        }
+    }
+
+    /**
+     * Checkpoint 9 addition (frozen design §3, §6):
+     * `integration_governance.action_denied`, fired on every
+     * `assertCan*()` denial in this class. TimelineEventRecorder
+     * requires a non-null Firm — `$actor->firm` is always resolvable
+     * (every FirmUser belongs to exactly one firm) and this method is
+     * only ever reached from within an already-active tenant context
+     * (every existing caller of this class's assertCan*() methods
+     * already wraps its call in TenantContextService::runWithFirmContext()).
+     *
+     * Passes `independentOfAmbientTransaction: true` — every assertCan*()
+     * caller throws in the very next statement after this call, and
+     * every real call site of assertCan*() runs inside
+     * runWithFirmContext()'s DB::transaction() closure. Without this
+     * flag, that thrown exception rolls back the ambient transaction
+     * and silently discards this very row along with it, every time
+     * (see TimelineEventRecorder::record()'s own docblock).
+     */
+    private function recordDenied(FirmUser $actor, string $action): void
+    {
+        $this->events->record($actor->firm, 'integration_governance.action_denied', null, $actor->user, [
+            'action' => $action,
+            'role' => $actor->role->value,
+            'policy_service' => self::class,
+        ], independentOfAmbientTransaction: true);
     }
 }

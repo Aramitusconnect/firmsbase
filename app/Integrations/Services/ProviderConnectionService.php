@@ -623,10 +623,17 @@ class ProviderConnectionService
                             fn () => $provider->revokeAtProvider(['firm_integration_id' => $fresh->id]),
                             'revokeAtProvider',
                         );
-                    } catch (SanitizedProviderHttpException) {
+                    } catch (SanitizedProviderHttpException $e) {
                         // Best-effort: local teardown proceeds regardless
                         // of whether the (simulated) remote revoke
-                        // succeeded.
+                        // succeeded. Checkpoint 9 addition (frozen
+                        // design §3): record the failure for audit
+                        // visibility — never blocks the teardown below.
+                        $this->events->record($fresh->firm, 'integration_oauth.provider_revocation_failed', $fresh, $actor->user, [
+                            'firm_integration_id' => $fresh->id,
+                            'category' => $e->category(),
+                            'status_code' => $e->statusCode(),
+                        ]);
                     }
                 }
 
@@ -635,6 +642,15 @@ class ProviderConnectionService
                     ->where('status', IntegrationCredentialStatus::Active->value)
                     ->get() as $credential) {
                     $this->credentialService->revoke($fresh, $credential, 'disconnect');
+
+                    // Checkpoint 9 addition (frozen design §3): fires
+                    // for EACH credential revoked inside this loop, not
+                    // once per disconnect() call.
+                    $this->events->record($fresh->firm, 'integration_oauth.credential_revoked', $fresh, $actor->user, [
+                        'firm_integration_id' => $fresh->id,
+                        'integration_credential_id' => $credential->id,
+                        'credential_type' => $credential->credential_type->value,
+                    ]);
                 }
 
                 $fresh = $this->transitionStatus($fresh, ConnectionStatus::Disconnected, null, [

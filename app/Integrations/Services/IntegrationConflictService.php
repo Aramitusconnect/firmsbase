@@ -7,6 +7,8 @@ namespace App\Integrations\Services;
 use App\Integrations\Enums\ConflictStatus;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationConflict;
+use App\Models\FirmUser;
+use App\Services\TimelineEventRecorder;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -35,6 +37,10 @@ use RuntimeException;
 final class IntegrationConflictService
 {
     private const PRIVILEGED_RESOURCE_TYPES = ['invoice', 'payment', 'document', 'message'];
+
+    public function __construct(private readonly TimelineEventRecorder $events)
+    {
+    }
 
     /**
      * Atomic, idempotent detection write (frozen-design-post-review.md
@@ -91,7 +97,20 @@ final class IntegrationConflictService
         );
 
         if ($row !== null) {
-            return IntegrationConflict::hydrate([(array) $row])->first();
+            $conflict = IntegrationConflict::hydrate([(array) $row])->first();
+
+            // Checkpoint 9 addition (frozen design §3): fires on the
+            // INSERT branch only — never the DO NOTHING branch, which
+            // silently references an already-existing open conflict
+            // rather than genuinely detecting a new one.
+            $this->events->record($connection->firm, 'integration_conflict.detected', $conflict, null, [
+                'integration_conflict_id' => $conflict->id,
+                'resource_type' => $resourceType,
+                'conflict_type' => $conflictType,
+                'requires_manual_review' => $requiresManualReview,
+            ]);
+
+            return $conflict;
         }
 
         return IntegrationConflict::query()
@@ -158,6 +177,32 @@ final class IntegrationConflictService
             'resolved_at' => $isResolvedShaped ? now() : $conflict->resolved_at,
         ]);
 
-        return $conflict->fresh();
+        $fresh = $conflict->fresh();
+
+        // Checkpoint 9 additions (frozen design §3):
+        // `integration_conflict.resolved` fires on a terminal transition
+        // into ANY resolved-shaped status (ResolvedLocalWins/
+        // ResolvedRemoteWins/ResolvedMerged/Ignored);
+        // `integration_conflict.expired` fires on the fully-automated
+        // Expired transition only.
+        if ($isResolvedShaped) {
+            $resolvingActor = $resolvedByFirmUserId === null
+                ? null
+                : FirmUser::query()->find($resolvedByFirmUserId)?->user;
+
+            $this->events->record($fresh->firm, 'integration_conflict.resolved', $fresh, $resolvingActor, [
+                'integration_conflict_id' => $fresh->id,
+                'new_status' => $fresh->status->value,
+                'resolved_by_firm_user_id' => $resolvedByFirmUserId,
+                'resolution_approved_by_firm_user_id' => $resolutionApprovedByFirmUserId,
+            ]);
+        } elseif ($newStatus === ConflictStatus::Expired) {
+            $this->events->record($fresh->firm, 'integration_conflict.expired', $fresh, null, [
+                'integration_conflict_id' => $fresh->id,
+                'resource_type' => $fresh->resource_type,
+            ]);
+        }
+
+        return $fresh;
     }
 }

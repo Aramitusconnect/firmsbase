@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Integrations\Services;
 
+use App\Integrations\Data\SanitizedSyncFailureSummary;
 use App\Integrations\Enums\SyncDirection;
 use App\Integrations\Enums\SyncRunStatus;
 use App\Integrations\Enums\SyncRunType;
@@ -12,6 +13,9 @@ use App\Integrations\Exceptions\SyncRunAlreadyInProgressException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationSyncCursor;
 use App\Integrations\Models\IntegrationSyncRun;
+use App\Models\FirmUser;
+use App\Models\User;
+use App\Services\TimelineEventRecorder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -45,6 +49,10 @@ final class SyncRunService
         ],
     ];
 
+    public function __construct(private readonly TimelineEventRecorder $events)
+    {
+    }
+
     /**
      * Starts a new run for a (connection, resource_type, direction)
      * scope. Layer 1 concurrency defense (partial unique index
@@ -77,6 +85,7 @@ final class SyncRunService
         ?IntegrationSyncCursor $cursor = null,
         ?int $retriedRunId = null,
         ?int $triggeringWebhookEventId = null,
+        ?int $actorFirmUserId = null,
     ): IntegrationSyncRun {
         $runType = $this->determineRunType($direction, $triggerSource, $cursor, $retriedRunId);
 
@@ -86,7 +95,7 @@ final class SyncRunService
             // caught UniqueConstraintViolationException's transaction-abort
             // to this savepoint only, so the catch block's re-SELECT below
             // still runs against a healthy outer transaction.
-            return DB::transaction(function () use ($connection, $resourceType, $direction, $runType, $triggerSource, $retriedRunId, $triggeringWebhookEventId) {
+            $run = DB::transaction(function () use ($connection, $resourceType, $direction, $runType, $triggerSource, $retriedRunId, $triggeringWebhookEventId) {
                 // Checkpoint 7 addition (frozen design §11): optional,
                 // additive, backward-compatible
                 // `triggering_webhook_event_id`, included in this SAME
@@ -112,6 +121,21 @@ final class SyncRunService
                     'triggering_webhook_event_id' => $triggeringWebhookEventId,
                 ]);
             });
+
+            // Checkpoint 9 addition (frozen design §3): fires ONLY on a
+            // genuinely successful insert (this line), never on the
+            // catch branch below, which re-attaches to an ALREADY-
+            // existing run rather than starting a new one.
+            $this->events->record($connection->firm, 'integration_sync.run_started', $run, $this->resolveOptionalActorUser($actorFirmUserId), [
+                'sync_run_id' => $run->id,
+                'firm_integration_id' => $connection->id,
+                'resource_type' => $resourceType,
+                'sync_direction' => $direction->value,
+                'run_type' => $runType->value,
+                'trigger_source' => $triggerSource->value,
+            ]);
+
+            return $run;
         } catch (UniqueConstraintViolationException $e) {
             $existing = IntegrationSyncRun::query()
                 ->where('firm_integration_id', $connection->id)
@@ -172,9 +196,30 @@ final class SyncRunService
      * review.md §8). Terminal statuses (Succeeded/PartialFailure/
      * Failed/Cancelled) never transition further; a new
      * IntegrationSyncRun row is always created for further work.
+     *
+     * Checkpoint 9 additions (frozen design §3): fires
+     * `integration_sync.run_completed` (Succeeded/PartialFailure),
+     * `integration_sync.run_failed` (Failed), or
+     * `integration_sync.run_cancelled` (Cancelled) on the terminal
+     * transitions this method performs — never on a non-terminal
+     * transition (e.g. into Running). $actorFirmUserId and
+     * $failureSummary are both new, OPTIONAL, trailing parameters —
+     * existing callers outside this checkpoint's frozen file allowlist
+     * (`app/Jobs/PullSyncJob.php`, `app/Jobs/PushSyncJob.php`) keep
+     * passing only `$errorSummary` as a plain string, unaffected.
+     * $failureSummary (a SanitizedSyncFailureSummary,
+     * agent-9h-architecture-security-review.md §2.3) is consumed for
+     * both `error_summary` (when the caller does not already supply a
+     * raw string) and the `run_failed` event's own metadata — never a
+     * blanket free-text string built ad hoc.
      */
-    public function transitionStatus(IntegrationSyncRun $run, SyncRunStatus $newStatus, ?string $errorSummary = null): IntegrationSyncRun
-    {
+    public function transitionStatus(
+        IntegrationSyncRun $run,
+        SyncRunStatus $newStatus,
+        ?string $errorSummary = null,
+        ?int $actorFirmUserId = null,
+        ?SanitizedSyncFailureSummary $failureSummary = null,
+    ): IntegrationSyncRun {
         $allowed = self::VALID_TRANSITIONS[$run->status->value] ?? [];
 
         if (! in_array($newStatus, $allowed, true)) {
@@ -182,6 +227,8 @@ final class SyncRunService
                 "Cannot transition sync run {$run->id} from {$run->status->value} to {$newStatus->value}."
             );
         }
+
+        $errorSummary ??= $failureSummary?->toSummaryText();
 
         $attributes = ['status' => $newStatus, 'error_summary' => $errorSummary ?? $run->error_summary];
 
@@ -195,7 +242,53 @@ final class SyncRunService
 
         $run->update($attributes);
 
-        return $run->fresh();
+        $fresh = $run->fresh();
+
+        $this->recordTerminalTransitionEvent($fresh, $newStatus, $actorFirmUserId, $failureSummary);
+
+        return $fresh;
+    }
+
+    /**
+     * Checkpoint 9 addition (frozen design §3). $actorFirmUserId is
+     * null for every non-manual transition (the ordinary case — most
+     * terminal transitions are driven by a batch loop/job, not a live
+     * user action).
+     */
+    private function recordTerminalTransitionEvent(
+        IntegrationSyncRun $run,
+        SyncRunStatus $newStatus,
+        ?int $actorFirmUserId,
+        ?SanitizedSyncFailureSummary $failureSummary,
+    ): void {
+        $actor = $this->resolveOptionalActorUser($actorFirmUserId);
+
+        $baseMetadata = [
+            'sync_run_id' => $run->id,
+            'firm_integration_id' => $run->firm_integration_id,
+            'items_total' => $run->items_total,
+            'items_succeeded' => $run->items_succeeded,
+            'items_failed' => $run->items_failed,
+            'items_skipped' => $run->items_skipped,
+        ];
+
+        if (in_array($newStatus, [SyncRunStatus::Succeeded, SyncRunStatus::PartialFailure], true)) {
+            $this->events->record($run->firm, 'integration_sync.run_completed', $run, $actor, $baseMetadata);
+
+            return;
+        }
+
+        if ($newStatus === SyncRunStatus::Failed) {
+            $this->events->record($run->firm, 'integration_sync.run_failed', $run, $actor, array_merge($baseMetadata, [
+                'error_summary' => $failureSummary?->toSummaryText() ?? $run->error_summary,
+            ]));
+
+            return;
+        }
+
+        if ($newStatus === SyncRunStatus::Cancelled) {
+            $this->events->record($run->firm, 'integration_sync.run_cancelled', $run, $actor, $baseMetadata);
+        }
     }
 
     /**
@@ -204,8 +297,25 @@ final class SyncRunService
      * between batches and stops, never mid-transaction. No Cancelling
      * status is added (principle 2 — a nullable timestamp is
      * sufficient).
+     *
+     * Checkpoint 9 addition: accepts an optional $actorFirmUserId for
+     * signature symmetry with startRun()'s new trailing parameter — a
+     * FirmUser-initiated cancellation request and the run's EVENTUAL
+     * terminal transition to Cancelled (which is what actually fires
+     * `integration_sync.run_cancelled`, per frozen design §3's "fires
+     * on: terminal transition to Cancelled") may happen in different
+     * processes/jobs entirely (this method only sets a cooperative
+     * flag; the owning batch loop performs the actual
+     * transitionStatus(Cancelled, ...) call later, outside this
+     * checkpoint's frozen file allowlist). No column exists on
+     * `integration_sync_runs` to durably carry "who requested this"
+     * across that gap, so this parameter is NOT yet persisted or
+     * forwarded automatically — a future caller that holds the same
+     * actor at both request- and completion-time should pass it
+     * directly to the later transitionStatus(..., $actorFirmUserId)
+     * call itself.
      */
-    public function requestCancellation(IntegrationSyncRun $run): IntegrationSyncRun
+    public function requestCancellation(IntegrationSyncRun $run, ?int $actorFirmUserId = null): IntegrationSyncRun
     {
         if ($run->isTerminal()) {
             throw new RuntimeException("Cannot request cancellation of already-terminal sync run {$run->id}.");
@@ -214,6 +324,21 @@ final class SyncRunService
         $run->update(['cancel_requested_at' => now()]);
 
         return $run->fresh();
+    }
+
+    /**
+     * Resolves an optional actor for audit-event recording only — never
+     * throws on an unresolvable id (the actor is evidence, not an
+     * authorization check; authorization already happened, if at all,
+     * before this service was ever called).
+     */
+    private function resolveOptionalActorUser(?int $actorFirmUserId): ?User
+    {
+        if ($actorFirmUserId === null) {
+            return null;
+        }
+
+        return FirmUser::query()->find($actorFirmUserId)?->user;
     }
 
     /**

@@ -6,6 +6,7 @@ namespace App\Integrations\Services;
 
 use App\Enums\FirmUserRole;
 use App\Models\FirmUser;
+use App\Services\TimelineEventRecorder;
 use RuntimeException;
 
 /**
@@ -77,6 +78,10 @@ class FinancialIntegrationAccessPolicyService
         FirmUserRole::BillingStaff,
     ];
 
+    public function __construct(private readonly TimelineEventRecorder $events)
+    {
+    }
+
     public function canRequest(FirmUserRole $role): bool
     {
         return in_array($role, self::REQUESTER_ROLES, true);
@@ -95,6 +100,8 @@ class FinancialIntegrationAccessPolicyService
     public function assertCanRequest(FirmUser $actor): void
     {
         if (! $this->canRequest($actor->role)) {
+            $this->recordDenied($actor, 'request');
+
             throw new RuntimeException(
                 'Only FirmOwner, Attorney, or BillingStaff may request a financial-tier integration action.'
             );
@@ -104,6 +111,8 @@ class FinancialIntegrationAccessPolicyService
     public function assertCanApprove(FirmUser $actor): void
     {
         if (! $this->canApprove($actor->role)) {
+            $this->recordDenied($actor, 'approve');
+
             throw new RuntimeException(
                 'Only FirmOwner or Attorney may approve a financial-tier integration action. '.
                 'BillingStaff may request but not approve.'
@@ -114,6 +123,8 @@ class FinancialIntegrationAccessPolicyService
     public function assertCanView(FirmUser $actor): void
     {
         if (! $this->canView($actor->role)) {
+            $this->recordDenied($actor, 'view');
+
             throw new RuntimeException(
                 'Only FirmOwner, Attorney, or BillingStaff may view a financial-tier integration connection.'
             );
@@ -125,6 +136,17 @@ class FinancialIntegrationAccessPolicyService
      * resolution on a financial-tier connection all require two
      * DIFFERENT approvers, both from {FirmOwner, Attorney} — mirrors
      * TrustAccessPolicyService::assertDistinctApprovers() exactly.
+     *
+     * Checkpoint 9 addition (frozen design §3, agent-9h-architecture-
+     * security-review.md §2.2): fires
+     * `integration_governance.distinct_approver_violation` on the
+     * failure path (same-actor violation) and
+     * `integration_governance.distinct_approvers_confirmed` on the
+     * success path — a dual-approval control that only audits its
+     * failure mode leaves no evidence trail for the compliance-relevant
+     * positive case ("who were the two approvers"). This is a narrow,
+     * one-event addition, NOT a blanket "action granted" event (which
+     * 9B correctly rejected as duplicative).
      */
     public function assertDistinctApprovers(FirmUser $first, FirmUser $second): void
     {
@@ -132,9 +154,37 @@ class FinancialIntegrationAccessPolicyService
         $this->assertCanApprove($second);
 
         if ($first->id === $second->id) {
+            $this->events->record($first->firm, 'integration_governance.distinct_approver_violation', null, $first->user, [
+                'first_approver_firm_user_id' => $first->id,
+                'second_approver_firm_user_id' => $second->id,
+            ], independentOfAmbientTransaction: true);
+
             throw new RuntimeException(
                 'The second approver must be a different firm user than the first approver.'
             );
         }
+
+        $this->events->record($first->firm, 'integration_governance.distinct_approvers_confirmed', null, $first->user, [
+            'first_approver_firm_user_id' => $first->id,
+            'second_approver_firm_user_id' => $second->id,
+        ]);
+    }
+
+    /**
+     * Checkpoint 9 addition (frozen design §3, §6):
+     * `integration_governance.action_denied`, fired on every
+     * `assertCan*()` denial in this class. Mirrors
+     * `IntegrationAccessPolicyService::recordDenied()` exactly,
+     * including passing `independentOfAmbientTransaction: true` for
+     * the same reason (see that method's docblock and
+     * TimelineEventRecorder::record()'s own docblock).
+     */
+    private function recordDenied(FirmUser $actor, string $action): void
+    {
+        $this->events->record($actor->firm, 'integration_governance.action_denied', null, $actor->user, [
+            'action' => $action,
+            'role' => $actor->role->value,
+            'policy_service' => self::class,
+        ], independentOfAmbientTransaction: true);
     }
 }
