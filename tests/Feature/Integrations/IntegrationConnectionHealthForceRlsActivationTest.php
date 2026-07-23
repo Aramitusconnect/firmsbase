@@ -10,6 +10,7 @@ use App\Integrations\Services\HealthStateService;
 use App\Models\Concerns\BelongsToTenant;
 use App\Models\Firm;
 use App\Services\TenantContextService;
+use App\Services\TimelineEventRecorder;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -81,7 +82,7 @@ class IntegrationConnectionHealthForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
 
-        $this->runWithFirmContext($firm, fn () => (new HealthStateService())->recordSuccess($connection->id, $firm->id));
+        $this->runWithFirmContext($firm, fn () => (new HealthStateService(new TimelineEventRecorder()))->recordSuccess($connection->id, $firm->id));
 
         $this->expectException(QueryException::class);
         $this->expectExceptionMessageMatches('/unique constraint|duplicate key/i');
@@ -186,7 +187,7 @@ class IntegrationConnectionHealthForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
-        $this->runWithFirmContext($firm, fn () => (new HealthStateService())->recordSuccess($connection->id, $firm->id));
+        $this->runWithFirmContext($firm, fn () => (new HealthStateService(new TimelineEventRecorder()))->recordSuccess($connection->id, $firm->id));
 
         $visibleIds = $this->runWithFirmContext($firm, fn () => DB::table('integration_connection_health')->pluck('firm_integration_id')->all());
 
@@ -210,7 +211,7 @@ class IntegrationConnectionHealthForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
-        $this->runWithFirmContext($firm, fn () => (new HealthStateService())->recordSuccess($connection->id, $firm->id));
+        $this->runWithFirmContext($firm, fn () => (new HealthStateService(new TimelineEventRecorder()))->recordSuccess($connection->id, $firm->id));
 
         $affected = $this->runWithFirmContext($firm, fn () => DB::table('integration_connection_health')
             ->where('firm_integration_id', $connection->id)
@@ -223,7 +224,7 @@ class IntegrationConnectionHealthForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
-        $this->runWithFirmContext($firm, fn () => (new HealthStateService())->recordSuccess($connection->id, $firm->id));
+        $this->runWithFirmContext($firm, fn () => (new HealthStateService(new TimelineEventRecorder()))->recordSuccess($connection->id, $firm->id));
 
         $affected = $this->runWithFirmContext($firm, fn () => DB::table('integration_connection_health')
             ->where('firm_integration_id', $connection->id)
@@ -241,7 +242,7 @@ class IntegrationConnectionHealthForceRlsActivationTest extends TestCase
         $firmA = Firm::factory()->create();
         $firmB = Firm::factory()->create();
         $connectionB = FirmIntegration::factory()->forFirm($firmB)->create();
-        $this->runWithFirmContext($firmB, fn () => (new HealthStateService())->recordSuccess($connectionB->id, $firmB->id));
+        $this->runWithFirmContext($firmB, fn () => (new HealthStateService(new TimelineEventRecorder()))->recordSuccess($connectionB->id, $firmB->id));
 
         $visibleIds = $this->runWithFirmContext($firmA, fn () => DB::table('integration_connection_health')->pluck('firm_integration_id')->all());
 
@@ -267,7 +268,7 @@ class IntegrationConnectionHealthForceRlsActivationTest extends TestCase
         $firmA = Firm::factory()->create();
         $firmB = Firm::factory()->create();
         $connectionB = FirmIntegration::factory()->forFirm($firmB)->create();
-        $this->runWithFirmContext($firmB, fn () => (new HealthStateService())->recordSuccess($connectionB->id, $firmB->id));
+        $this->runWithFirmContext($firmB, fn () => (new HealthStateService(new TimelineEventRecorder()))->recordSuccess($connectionB->id, $firmB->id));
 
         $affected = $this->runWithFirmContext($firmA, fn () => DB::table('integration_connection_health')
             ->where('firm_integration_id', $connectionB->id)
@@ -286,7 +287,7 @@ class IntegrationConnectionHealthForceRlsActivationTest extends TestCase
         $firmA = Firm::factory()->create();
         $firmB = Firm::factory()->create();
         $connectionB = FirmIntegration::factory()->forFirm($firmB)->create();
-        $this->runWithFirmContext($firmB, fn () => (new HealthStateService())->recordSuccess($connectionB->id, $firmB->id));
+        $this->runWithFirmContext($firmB, fn () => (new HealthStateService(new TimelineEventRecorder()))->recordSuccess($connectionB->id, $firmB->id));
 
         $affected = $this->runWithFirmContext($firmA, fn () => DB::table('integration_connection_health')
             ->where('firm_integration_id', $connectionB->id)
@@ -305,7 +306,7 @@ class IntegrationConnectionHealthForceRlsActivationTest extends TestCase
         $firmA = Firm::factory()->create();
         $firmB = Firm::factory()->create();
         $connectionA = FirmIntegration::factory()->forFirm($firmA)->create();
-        $this->runWithFirmContext($firmA, fn () => (new HealthStateService())->recordSuccess($connectionA->id, $firmA->id));
+        $this->runWithFirmContext($firmA, fn () => (new HealthStateService(new TimelineEventRecorder()))->recordSuccess($connectionA->id, $firmA->id));
 
         $this->expectException(QueryException::class);
         $this->expectExceptionMessageMatches('/row-level security policy|foreign key constraint/i');
@@ -323,7 +324,7 @@ class IntegrationConnectionHealthForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
-        $this->runWithFirmContext($firm, fn () => (new HealthStateService())->recordSuccess($connection->id, $firm->id));
+        $this->runWithFirmContext($firm, fn () => (new HealthStateService(new TimelineEventRecorder()))->recordSuccess($connection->id, $firm->id));
 
         (new TenantContextService())->clearDatabaseTenantContext();
 
@@ -346,7 +347,7 @@ class IntegrationConnectionHealthForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
-        $this->runWithFirmContext($firm, fn () => (new HealthStateService())->recordSuccess($connection->id, $firm->id));
+        $this->runWithFirmContext($firm, fn () => (new HealthStateService(new TimelineEventRecorder()))->recordSuccess($connection->id, $firm->id));
 
         (new TenantContextService())->clearDatabaseTenantContext();
 
@@ -358,7 +359,7 @@ class IntegrationConnectionHealthForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
-        $this->runWithFirmContext($firm, fn () => (new HealthStateService())->recordSuccess($connection->id, $firm->id));
+        $this->runWithFirmContext($firm, fn () => (new HealthStateService(new TimelineEventRecorder()))->recordSuccess($connection->id, $firm->id));
 
         (new TenantContextService())->clearDatabaseTenantContext();
 
@@ -373,7 +374,7 @@ class IntegrationConnectionHealthForceRlsActivationTest extends TestCase
 
         (new TenantContextService())->clearDatabaseTenantContext();
 
-        $this->runWithFirmContext($firm, fn () => (new HealthStateService())->recordSuccess($connection->id, $firm->id));
+        $this->runWithFirmContext($firm, fn () => (new HealthStateService(new TimelineEventRecorder()))->recordSuccess($connection->id, $firm->id));
 
         $this->assertNoDatabaseTenantContext();
     }

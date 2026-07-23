@@ -48,6 +48,26 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
      */
     private const DEPENDENT_MIGRATION_PATH = 'database/migrations/2026_09_06_060005_add_triggering_webhook_event_id_to_integration_sync_runs_table.php';
 
+    /**
+     * POST-CHECKPOINT-9 UPDATE: Checkpoint 9's
+     * `2026_09_08_080001_create_integration_usage_records_table` migration
+     * adds a real composite FK (firm_id, inbound_webhook_event_id) ->
+     * integration_inbound_webhook_events(firm_id, id) (ON DELETE SET
+     * NULL) — so integration_usage_records must now ALSO be rolled back
+     * before this table's own migrations, in addition to
+     * DEPENDENT_MIGRATION_PATH above, or dropping this table fails with
+     * "cannot drop table ... because other objects depend on it".
+     * Reapplied LAST, after this table's own migrations are restored.
+     * Rolled back in exact reverse of its own creation order (RLS-prep
+     * down(), then create-table down()).
+     *
+     * @var list<string>
+     */
+    private const CP9_USAGE_RECORDS_MIGRATION_PATHS = [
+        'database/migrations/2026_09_08_080001_create_integration_usage_records_table.php',
+        'database/migrations/2026_09_08_080002_prepare_row_level_security_and_force_rls_on_integration_usage_records_table.php',
+    ];
+
     private const POLICY_NAME = 'integration_inbound_webhook_events_tenant_isolation';
 
     private const EXPECTED_COLUMNS = [
@@ -423,6 +443,16 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
         $dependentRollbackExit = Artisan::call('migrate:rollback', ['--path' => self::DEPENDENT_MIGRATION_PATH, '--force' => true]);
         $this->assertSame(0, $dependentRollbackExit, Artisan::output());
 
+        // Checkpoint 9's integration_usage_records also FK-references this
+        // table (see CP9_USAGE_RECORDS_MIGRATION_PATHS docblock above) —
+        // it must roll back FIRST too, before this table's own migrations
+        // below.
+        foreach (array_reverse(self::CP9_USAGE_RECORDS_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 9 integration_usage_records) failed: ".Artisan::output());
+        }
+        $this->assertFalse(Schema::hasTable('integration_usage_records'), 'integration_usage_records must not survive its own rollback.');
+
         $rlsRollbackExit = Artisan::call('migrate:rollback', ['--path' => self::RLS_MIGRATION_PATH, '--force' => true]);
         $this->assertSame(0, $rlsRollbackExit, Artisan::output());
 
@@ -450,6 +480,14 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
         $dependentMigrateExit = Artisan::call('migrate', ['--path' => self::DEPENDENT_MIGRATION_PATH, '--force' => true]);
         $this->assertSame(0, $dependentMigrateExit, Artisan::output());
 
+        // Reapply Checkpoint 9's integration_usage_records LAST — after
+        // this table already exists again — in forward (creation) order.
+        foreach (self::CP9_USAGE_RECORDS_MIGRATION_PATHS as $path) {
+            $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 9 integration_usage_records) failed: ".Artisan::output());
+        }
+        $this->assertTrue(Schema::hasTable('integration_usage_records'), 'integration_usage_records must be restored by its own reapplication.');
+
         $this->assertTrue(Schema::hasTable('integration_inbound_webhook_events'));
 
         $rowAfterReapply = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'integration_inbound_webhook_events'");
@@ -469,8 +507,21 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
         $rlsMigration = include base_path(self::RLS_MIGRATION_PATH);
         $tableMigration = include base_path(self::TABLE_MIGRATION_PATH);
 
-        // Dependent migration (sync_runs FK) rolls back FIRST.
+        // Checkpoint 9's integration_usage_records also FK-references this
+        // table (see CP9_USAGE_RECORDS_MIGRATION_PATHS docblock above).
+        $usageRecordsMigrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::CP9_USAGE_RECORDS_MIGRATION_PATHS,
+        );
+
+        // Dependent migration (sync_runs FK) rolls back FIRST, then
+        // integration_usage_records, then this table's own migrations.
         $dependentMigration->down();
+        foreach (array_reverse($usageRecordsMigrations) as $migration) {
+            $migration->down();
+        }
+        $this->assertFalse(Schema::hasTable('integration_usage_records'));
+
         $rlsMigration->down();
         $tableMigration->down();
 
@@ -478,6 +529,14 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
 
         $tableMigration->up();
         $rlsMigration->up();
+
+        // Rebuild Checkpoint 9's integration_usage_records LAST — after
+        // this table already exists again.
+        foreach ($usageRecordsMigrations as $migration) {
+            $migration->up();
+        }
+        $this->assertTrue(Schema::hasTable('integration_usage_records'));
+
         $dependentMigration->up();
 
         $this->assertTrue(Schema::hasTable('integration_inbound_webhook_events'));

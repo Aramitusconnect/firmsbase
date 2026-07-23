@@ -11,10 +11,12 @@ use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationSyncCursor;
 use App\Integrations\Models\IntegrationSyncItem;
 use App\Integrations\Models\IntegrationSyncRun;
+use App\Integrations\Services\IntegrationRequeueAuditLogger;
 use App\Integrations\Services\SyncCursorService;
 use App\Integrations\Services\SyncItemService;
 use App\Integrations\Services\SyncRunService;
 use App\Models\Firm;
+use App\Services\TimelineEventRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -54,8 +56,8 @@ class SyncCursorAdvancementServiceTest extends TestCase
     {
         parent::setUp();
         $this->cursorService = new SyncCursorService();
-        $this->itemService = new SyncItemService();
-        $this->runService = new SyncRunService();
+        $this->itemService = new SyncItemService(new TimelineEventRecorder(), new IntegrationRequeueAuditLogger());
+        $this->runService = new SyncRunService(new TimelineEventRecorder());
     }
 
     // ------------------------------------------------------------

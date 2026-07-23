@@ -42,6 +42,27 @@ final class Checkpoint7RollbackReapplicationTest extends TestCase
         '2026_09_06_060005_add_triggering_webhook_event_id_to_integration_sync_runs_table',
     ];
 
+    /**
+     * POST-CHECKPOINT-9 UPDATE: Checkpoint 9's
+     * `2026_09_08_080001_create_integration_usage_records_table` migration
+     * adds a real composite FK (firm_id, inbound_webhook_event_id) ->
+     * integration_inbound_webhook_events(firm_id, id) (ON DELETE SET
+     * NULL) — so integration_usage_records must now be rolled back FIRST,
+     * before this whole-wave rollback drops
+     * 2026_09_06_060003_create_integration_inbound_webhook_events_table
+     * below, or the drop fails with "cannot drop table ... because other
+     * objects depend on it". Reapplied LAST, after this whole-wave
+     * reapplication has recreated the table it depends on. Rolled back
+     * in exact reverse of its own creation order (RLS-prep down(), then
+     * create-table down()).
+     *
+     * @var string[]
+     */
+    private const CP9_USAGE_RECORDS_MIGRATIONS = [
+        '2026_09_08_080001_create_integration_usage_records_table',
+        '2026_09_08_080002_prepare_row_level_security_and_force_rls_on_integration_usage_records_table',
+    ];
+
     public function test_all_five_migrations_exist_on_disk(): void
     {
         foreach (self::MIGRATIONS as $migration) {
@@ -81,6 +102,20 @@ final class Checkpoint7RollbackReapplicationTest extends TestCase
             $migrationInstances[$migration] = include base_path("database/migrations/{$migration}.php");
         }
 
+        // Checkpoint 9's integration_usage_records FK-references
+        // integration_inbound_webhook_events (see
+        // CP9_USAGE_RECORDS_MIGRATIONS docblock above) — it must be torn
+        // down FIRST, before this whole-wave rollback drops that table
+        // below.
+        $usageRecordsInstances = [];
+        foreach (self::CP9_USAGE_RECORDS_MIGRATIONS as $migration) {
+            $usageRecordsInstances[$migration] = include base_path("database/migrations/{$migration}.php");
+        }
+        foreach (array_reverse(self::CP9_USAGE_RECORDS_MIGRATIONS) as $migration) {
+            $usageRecordsInstances[$migration]->down();
+        }
+        $this->assertFalse(Schema::hasTable('integration_usage_records'));
+
         // Reverse order: 5, 4, 3, 2, 1.
         foreach (array_reverse(self::MIGRATIONS) as $migration) {
             $migrationInstances[$migration]->down();
@@ -103,6 +138,13 @@ final class Checkpoint7RollbackReapplicationTest extends TestCase
         foreach (self::MIGRATIONS as $migration) {
             $migrationInstances[$migration]->up();
         }
+
+        // Rebuild Checkpoint 9's integration_usage_records LAST — after
+        // integration_inbound_webhook_events already exists again.
+        foreach (self::CP9_USAGE_RECORDS_MIGRATIONS as $migration) {
+            $usageRecordsInstances[$migration]->up();
+        }
+        $this->assertTrue(Schema::hasTable('integration_usage_records'));
 
         $this->assertTrue(Schema::hasTable('integration_webhook_routing_index'));
         $this->assertTrue(Schema::hasTable('integration_webhook_receipts'));
@@ -137,6 +179,20 @@ final class Checkpoint7RollbackReapplicationTest extends TestCase
      */
     public function test_artisan_migrate_rollback_and_reapply_round_trip_succeeds(): void
     {
+        // Checkpoint 9's integration_usage_records FK-references
+        // integration_inbound_webhook_events (see
+        // CP9_USAGE_RECORDS_MIGRATIONS docblock above) — it must be rolled
+        // back FIRST, before this whole-wave rollback drops that table
+        // below.
+        foreach (array_reverse(self::CP9_USAGE_RECORDS_MIGRATIONS) as $migration) {
+            $exit = Artisan::call('migrate:rollback', [
+                '--path' => "database/migrations/{$migration}.php",
+                '--force' => true,
+            ]);
+            $this->assertSame(0, $exit, "Rollback of {$migration} (Checkpoint 9 integration_usage_records) failed: ".Artisan::output());
+        }
+        $this->assertFalse(Schema::hasTable('integration_usage_records'));
+
         foreach (array_reverse(self::MIGRATIONS) as $migration) {
             $exit = Artisan::call('migrate:rollback', [
                 '--path' => "database/migrations/{$migration}.php",
@@ -160,6 +216,17 @@ final class Checkpoint7RollbackReapplicationTest extends TestCase
         foreach (self::MIGRATIONS as $migration) {
             $this->assertNotNull(DB::table('migrations')->where('migration', $migration)->first());
         }
+
+        // Reapply Checkpoint 9's integration_usage_records LAST — after
+        // integration_inbound_webhook_events already exists again.
+        foreach (self::CP9_USAGE_RECORDS_MIGRATIONS as $migration) {
+            $exit = Artisan::call('migrate', [
+                '--path' => "database/migrations/{$migration}.php",
+                '--force' => true,
+            ]);
+            $this->assertSame(0, $exit, "Reapplying {$migration} (Checkpoint 9 integration_usage_records) failed: ".Artisan::output());
+        }
+        $this->assertTrue(Schema::hasTable('integration_usage_records'));
 
         $this->assertTrue(Schema::hasTable('integration_webhook_routing_index'));
         $this->assertTrue(Schema::hasTable('integration_webhook_receipts'));
@@ -188,12 +255,28 @@ final class Checkpoint7RollbackReapplicationTest extends TestCase
         $eventsMigration = include base_path('database/migrations/2026_09_06_060003_create_integration_inbound_webhook_events_table.php');
         $syncRunsMigration = include base_path('database/migrations/2026_09_06_060005_add_triggering_webhook_event_id_to_integration_sync_runs_table.php');
 
+        // Checkpoint 9's integration_usage_records FK-references
+        // integration_inbound_webhook_events (see
+        // CP9_USAGE_RECORDS_MIGRATIONS docblock above) — it must be torn
+        // down FIRST, before $eventsMigration->down() below drops that
+        // table.
+        $usageRecordsMigrations = array_map(
+            static fn (string $migration) => include base_path("database/migrations/{$migration}.php"),
+            self::CP9_USAGE_RECORDS_MIGRATIONS,
+        );
+
         $syncRunsMigration->down();
+        foreach (array_reverse($usageRecordsMigrations) as $migration) {
+            $migration->down();
+        }
         $rlsMigration->down();
         $eventsMigration->down();
 
         $eventsMigration->up();
         $rlsMigration->up();
+        foreach ($usageRecordsMigrations as $migration) {
+            $migration->up();
+        }
         $syncRunsMigration->up();
 
         $after = DB::selectOne(

@@ -72,7 +72,7 @@ class RefreshIntegrationTokenJobTest extends TestCase
                 new ProviderRedirectUrlValidator(),
             ),
             new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService())),
-            new IntegrationAccessPolicyService(),
+            new IntegrationAccessPolicyService(new TimelineEventRecorder()),
             new ProviderRegistry(),
             new OutboundProviderHttpClient(),
             new ProviderRedirectUrlValidator(),

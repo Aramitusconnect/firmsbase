@@ -95,6 +95,27 @@ class IntegrationExternalMappingsForceRlsActivationTest extends TestCase
         'integration_outbox_events',
     ];
 
+    /**
+     * POST-CHECKPOINT-9 UPDATE: Checkpoint 9's
+     * `2026_09_08_080001_create_integration_usage_records_table` migration
+     * adds a real composite FK (firm_id, sync_run_id) ->
+     * integration_sync_runs(firm_id, id) (ON DELETE SET NULL), and a
+     * second one into integration_sync_items — so
+     * integration_usage_records must now be rolled back FIRST, before
+     * this whole-wave rollback drops integration_sync_runs/
+     * integration_sync_items below, or the drop fails with "cannot drop
+     * table ... because other objects depend on it". Reapplied LAST,
+     * after the whole-wave reapplication has recreated both tables it
+     * depends on. Rolled back in exact reverse of its own creation order
+     * (RLS-prep down(), then create-table down()).
+     *
+     * @var list<string>
+     */
+    private const CP9_USAGE_RECORDS_MIGRATION_PATHS = [
+        'database/migrations/2026_09_08_080001_create_integration_usage_records_table.php',
+        'database/migrations/2026_09_08_080002_prepare_row_level_security_and_force_rls_on_integration_usage_records_table.php',
+    ];
+
     // ------------------------------------------------------------
     // 1. Schema correctness
     // ------------------------------------------------------------
@@ -458,6 +479,16 @@ class IntegrationExternalMappingsForceRlsActivationTest extends TestCase
             $this->assertTrue(Schema::hasTable($table));
         }
 
+        // Checkpoint 9's integration_usage_records now FK-references both
+        // integration_sync_runs and integration_sync_items (see
+        // CP9_USAGE_RECORDS_MIGRATION_PATHS docblock above) — it must be
+        // rolled back FIRST, before this whole-wave rollback below.
+        foreach (array_reverse(self::CP9_USAGE_RECORDS_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 9 integration_usage_records) failed: ".Artisan::output());
+        }
+        $this->assertFalse(Schema::hasTable('integration_usage_records'), 'integration_usage_records must not survive its own rollback.');
+
         foreach (array_reverse(self::WHOLE_WAVE_MIGRATION_PATHS) as $path) {
             $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
             $this->assertSame(0, $exit, Artisan::output());
@@ -481,6 +512,15 @@ class IntegrationExternalMappingsForceRlsActivationTest extends TestCase
         foreach (self::WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} must be restored by the whole-wave reapplication.");
         }
+
+        // Reapply Checkpoint 9's integration_usage_records LAST — after
+        // integration_sync_runs/integration_sync_items already exist again
+        // — in forward (creation) order.
+        foreach (self::CP9_USAGE_RECORDS_MIGRATION_PATHS as $path) {
+            $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 9 integration_usage_records) failed: ".Artisan::output());
+        }
+        $this->assertTrue(Schema::hasTable('integration_usage_records'), 'integration_usage_records must be restored by its own reapplication.');
 
         // This file's own table: byte-identical restoration proof.
         $columns = Schema::getColumnListing('integration_external_mappings');
@@ -507,6 +547,19 @@ class IntegrationExternalMappingsForceRlsActivationTest extends TestCase
             self::WHOLE_WAVE_MIGRATION_PATHS,
         );
 
+        // Checkpoint 9's integration_usage_records now FK-references both
+        // integration_sync_runs and integration_sync_items (see
+        // CP9_USAGE_RECORDS_MIGRATION_PATHS docblock above) — it must be
+        // torn down FIRST, before the whole-wave teardown below.
+        $usageRecordsMigrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::CP9_USAGE_RECORDS_MIGRATION_PATHS,
+        );
+        foreach (array_reverse($usageRecordsMigrations) as $migration) {
+            $migration->down();
+        }
+        $this->assertFalse(Schema::hasTable('integration_usage_records'));
+
         foreach (array_reverse($migrations) as $migration) {
             $migration->down();
         }
@@ -522,6 +575,13 @@ class IntegrationExternalMappingsForceRlsActivationTest extends TestCase
         foreach (self::WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table));
         }
+
+        // Rebuild Checkpoint 9's integration_usage_records LAST — after
+        // integration_sync_runs/integration_sync_items already exist again.
+        foreach ($usageRecordsMigrations as $migration) {
+            $migration->up();
+        }
+        $this->assertTrue(Schema::hasTable('integration_usage_records'));
 
         $row = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'integration_external_mappings'");
         $this->assertTrue((bool) $row->relrowsecurity);

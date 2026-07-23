@@ -10,6 +10,7 @@ use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationInboundWebhookEvent;
 use App\Integrations\Services\SyncRunService;
 use App\Models\Firm;
+use App\Services\TimelineEventRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -39,7 +40,7 @@ final class SyncRunTriggeringWebhookEventTest extends TestCase
 
         $run = $this->runWithFirmContext(
             $firm,
-            fn () => (new SyncRunService())->startRun($connection, 'contact', SyncDirection::Inbound, SyncTriggerSource::Connect),
+            fn () => (new SyncRunService(new TimelineEventRecorder()))->startRun($connection, 'contact', SyncDirection::Inbound, SyncTriggerSource::Connect),
         );
 
         $this->assertNull($run->triggering_webhook_event_id);
@@ -53,7 +54,7 @@ final class SyncRunTriggeringWebhookEventTest extends TestCase
 
         $run = $this->runWithFirmContext(
             $firm,
-            fn () => (new SyncRunService())->startRun(
+            fn () => (new SyncRunService(new TimelineEventRecorder()))->startRun(
                 $connection,
                 'contact',
                 SyncDirection::Inbound,
@@ -88,7 +89,7 @@ final class SyncRunTriggeringWebhookEventTest extends TestCase
         $this->expectExceptionMessageMatches('/foreign key constraint/i');
 
         $this->runWithFirmContext($firmA, function () use ($firmA, $connectionA, $eventB) {
-            (new SyncRunService())->startRun($connectionA, 'contact', SyncDirection::Inbound, SyncTriggerSource::Connect, null, null, $eventB->id);
+            (new SyncRunService(new TimelineEventRecorder()))->startRun($connectionA, 'contact', SyncDirection::Inbound, SyncTriggerSource::Connect, null, null, $eventB->id);
         });
     }
 
@@ -106,7 +107,7 @@ final class SyncRunTriggeringWebhookEventTest extends TestCase
 
         $run = $this->runWithFirmContext(
             $firm,
-            fn () => (new SyncRunService())->startRun($connection, 'contact', SyncDirection::Inbound, SyncTriggerSource::Connect, null, null, $event->id),
+            fn () => (new SyncRunService(new TimelineEventRecorder()))->startRun($connection, 'contact', SyncDirection::Inbound, SyncTriggerSource::Connect, null, null, $event->id),
         );
 
         DB::table('integration_inbound_webhook_events')->where('id', $event->id)->delete();

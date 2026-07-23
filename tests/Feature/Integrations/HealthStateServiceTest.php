@@ -10,6 +10,7 @@ use App\Integrations\Enums\HealthSummaryState;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Services\HealthStateService;
 use App\Models\Firm;
+use App\Services\TimelineEventRecorder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -45,7 +46,7 @@ class HealthStateServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new HealthStateService();
+        $this->service = new HealthStateService(new TimelineEventRecorder());
     }
 
     protected function tearDown(): void

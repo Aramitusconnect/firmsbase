@@ -10,6 +10,7 @@ use App\Integrations\Models\IntegrationConflict;
 use App\Integrations\Services\IntegrationConflictService;
 use App\Models\Firm;
 use App\Models\FirmUser;
+use App\Services\TimelineEventRecorder;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -43,7 +44,7 @@ class IntegrationConflictServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new IntegrationConflictService();
+        $this->service = new IntegrationConflictService(new TimelineEventRecorder());
     }
 
     // ------------------------------------------------------------

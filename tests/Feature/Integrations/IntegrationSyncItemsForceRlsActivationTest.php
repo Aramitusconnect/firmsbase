@@ -44,6 +44,7 @@ class IntegrationSyncItemsForceRlsActivationTest extends TestCase
     private const EXPECTED_COLUMNS = [
         'id', 'firm_id', 'sync_run_id', 'resource_type', 'local_type', 'local_id', 'external_id',
         'status', 'attempt_count', 'next_attempt_at', 'payload_hash', 'last_error', 'terminal_at',
+        'requeue_count', 'requeued_at',
         'created_at', 'updated_at',
     ];
 
@@ -93,6 +94,45 @@ class IntegrationSyncItemsForceRlsActivationTest extends TestCase
         'integration_conflicts',
         'integration_outbox_events',
     ];
+
+    /**
+     * POST-CHECKPOINT-9 UPDATE: Checkpoint 9's
+     * `2026_09_08_080001_create_integration_usage_records_table` migration
+     * adds a real composite FK (firm_id, sync_run_id) ->
+     * integration_sync_runs(firm_id, id) (ON DELETE SET NULL), and a
+     * second one into integration_sync_items — so
+     * integration_usage_records must now be rolled back FIRST, before
+     * this whole-wave rollback drops integration_sync_runs/
+     * integration_sync_items below, or the drop fails with "cannot drop
+     * table ... because other objects depend on it". Reapplied LAST,
+     * after the whole-wave reapplication has recreated both tables it
+     * depends on. Rolled back in exact reverse of its own creation order
+     * (RLS-prep down(), then create-table down()).
+     *
+     * @var list<string>
+     */
+    private const CP9_USAGE_RECORDS_MIGRATION_PATHS = [
+        'database/migrations/2026_09_08_080001_create_integration_usage_records_table.php',
+        'database/migrations/2026_09_08_080002_prepare_row_level_security_and_force_rls_on_integration_usage_records_table.php',
+    ];
+
+    /**
+     * POST-CHECKPOINT-9 UPDATE (part 2): Checkpoint 9's
+     * `2026_09_08_081001_add_requeue_columns_to_integration_outbox_events_and_integration_sync_items_table`
+     * migration ALTERs THIS table directly (adds requeue_count/
+     * requeued_at plus a supporting index), chronologically AFTER
+     * CP9_USAGE_RECORDS_MIGRATION_PATHS above. It must be rolled back
+     * FIRST — before even integration_usage_records above — or the
+     * requeue columns would be silently, permanently lost on
+     * reapplication (the migrations table would still record it as "ran"
+     * even though the live columns would be gone) — this table's own
+     * EXPECTED_COLUMNS above already includes requeue_count/requeued_at,
+     * so this is not merely theoretical: omitting this step fails
+     * test_migration_rollback_and_reapplication_restores_exact_prior_state's
+     * byte-identical column-set assertion. Reapplied LAST, after
+     * integration_usage_records above.
+     */
+    private const REQUEUE_COLUMNS_MIGRATION_PATH = 'database/migrations/2026_09_08_081001_add_requeue_columns_to_integration_outbox_events_and_integration_sync_items_table.php';
 
     // ------------------------------------------------------------
     // 1. Schema correctness
@@ -396,6 +436,23 @@ class IntegrationSyncItemsForceRlsActivationTest extends TestCase
             $this->assertTrue(Schema::hasTable($table));
         }
 
+        // Checkpoint 9's requeue-columns migration ALTERs this table
+        // directly and must be undone first, before even
+        // integration_usage_records below (see
+        // REQUEUE_COLUMNS_MIGRATION_PATH docblock above).
+        $requeueRollbackExit = Artisan::call('migrate:rollback', ['--path' => self::REQUEUE_COLUMNS_MIGRATION_PATH, '--force' => true]);
+        $this->assertSame(0, $requeueRollbackExit, 'migrate:rollback of the Checkpoint 9 requeue-columns migration failed: '.Artisan::output());
+
+        // Checkpoint 9's integration_usage_records now FK-references both
+        // integration_sync_runs and integration_sync_items (see
+        // CP9_USAGE_RECORDS_MIGRATION_PATHS docblock above) — it must be
+        // rolled back next, before this whole-wave rollback below.
+        foreach (array_reverse(self::CP9_USAGE_RECORDS_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 9 integration_usage_records) failed: ".Artisan::output());
+        }
+        $this->assertFalse(Schema::hasTable('integration_usage_records'), 'integration_usage_records must not survive its own rollback.');
+
         foreach (array_reverse(self::WHOLE_WAVE_MIGRATION_PATHS) as $path) {
             $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
             $this->assertSame(0, $exit, Artisan::output());
@@ -419,6 +476,20 @@ class IntegrationSyncItemsForceRlsActivationTest extends TestCase
         foreach (self::WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} must be restored by the whole-wave reapplication.");
         }
+
+        // Reapply Checkpoint 9's integration_usage_records LAST — after
+        // integration_sync_runs/integration_sync_items already exist again
+        // — in forward (creation) order.
+        foreach (self::CP9_USAGE_RECORDS_MIGRATION_PATHS as $path) {
+            $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 9 integration_usage_records) failed: ".Artisan::output());
+        }
+        $this->assertTrue(Schema::hasTable('integration_usage_records'), 'integration_usage_records must be restored by its own reapplication.');
+
+        // Reapply Checkpoint 9's requeue-columns migration LAST — after
+        // integration_usage_records above.
+        $requeueMigrateExit = Artisan::call('migrate', ['--path' => self::REQUEUE_COLUMNS_MIGRATION_PATH, '--force' => true]);
+        $this->assertSame(0, $requeueMigrateExit, 'migrate of the Checkpoint 9 requeue-columns migration failed: '.Artisan::output());
 
         // This file's own table: byte-identical restoration proof.
         $columns = Schema::getColumnListing('integration_sync_items');
@@ -445,6 +516,26 @@ class IntegrationSyncItemsForceRlsActivationTest extends TestCase
             self::WHOLE_WAVE_MIGRATION_PATHS,
         );
 
+        // Checkpoint 9's requeue-columns migration ALTERs this table
+        // directly and must be undone first, before even
+        // integration_usage_records below (see
+        // REQUEUE_COLUMNS_MIGRATION_PATH docblock above).
+        $requeueMigration = include base_path(self::REQUEUE_COLUMNS_MIGRATION_PATH);
+        $requeueMigration->down();
+
+        // Checkpoint 9's integration_usage_records now FK-references both
+        // integration_sync_runs and integration_sync_items (see
+        // CP9_USAGE_RECORDS_MIGRATION_PATHS docblock above) — it must be
+        // torn down next, before the whole-wave teardown below.
+        $usageRecordsMigrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::CP9_USAGE_RECORDS_MIGRATION_PATHS,
+        );
+        foreach (array_reverse($usageRecordsMigrations) as $migration) {
+            $migration->down();
+        }
+        $this->assertFalse(Schema::hasTable('integration_usage_records'));
+
         foreach (array_reverse($migrations) as $migration) {
             $migration->down();
         }
@@ -460,6 +551,17 @@ class IntegrationSyncItemsForceRlsActivationTest extends TestCase
         foreach (self::WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table));
         }
+
+        // Rebuild Checkpoint 9's integration_usage_records LAST — after
+        // integration_sync_runs/integration_sync_items already exist again.
+        foreach ($usageRecordsMigrations as $migration) {
+            $migration->up();
+        }
+        $this->assertTrue(Schema::hasTable('integration_usage_records'));
+
+        // Rebuild Checkpoint 9's requeue-columns migration LAST — after
+        // integration_usage_records above.
+        $requeueMigration->up();
 
         $row = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'integration_sync_items'");
         $this->assertTrue((bool) $row->relrowsecurity);

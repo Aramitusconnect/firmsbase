@@ -1199,7 +1199,7 @@ class ProviderConnectionServiceOAuthTest extends TestCase
      */
     public function test_reauthorize_authorization_matches_the_configure_permission_oracle_for_every_role(): void
     {
-        $policy = new IntegrationAccessPolicyService();
+        $policy = new IntegrationAccessPolicyService(new TimelineEventRecorder());
 
         foreach (FirmUserRole::cases() as $role) {
             [$firm, $connection, ] = $this->firmConnectionAndActor();
@@ -1289,7 +1289,7 @@ class ProviderConnectionServiceOAuthTest extends TestCase
                 new ProviderRedirectUrlValidator(),
             ),
             new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService())),
-            new IntegrationAccessPolicyService(),
+            new IntegrationAccessPolicyService(new TimelineEventRecorder()),
             new \App\Integrations\Core\ProviderRegistry(),
             new OutboundProviderHttpClient(),
             new ProviderRedirectUrlValidator(),

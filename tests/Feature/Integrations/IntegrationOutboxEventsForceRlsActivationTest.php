@@ -38,12 +38,50 @@ class IntegrationOutboxEventsForceRlsActivationTest extends TestCase
 
     private const RLS_MIGRATION_NAME = '2026_09_05_055002_prepare_row_level_security_and_force_rls_on_integration_outbox_events_table';
 
+    /**
+     * POST-CHECKPOINT-9 UPDATE (part 1): Checkpoint 9's
+     * `2026_09_08_081001_add_requeue_columns_to_integration_outbox_events_and_integration_sync_items_table`
+     * migration ALTERs this table directly (adds requeue_count/
+     * requeued_at/max_requeues plus a supporting index), positioned
+     * chronologically AFTER this table's own 2 migrations. It must be
+     * rolled back FIRST (before this table's own migrations below), or
+     * the requeue columns would be silently, permanently lost on
+     * reapply — the migrations table would still record it as "ran"
+     * even though the live columns would be gone, exactly the same bug
+     * class `integration_sync_runs.triggering_webhook_event_id`
+     * (migration 060005) already guards against in
+     * IntegrationSyncRunsForceRlsActivationTest. Reapplied LAST, after
+     * this table's own migrations are restored.
+     */
+    private const REQUEUE_COLUMNS_MIGRATION_PATH = 'database/migrations/2026_09_08_081001_add_requeue_columns_to_integration_outbox_events_and_integration_sync_items_table.php';
+
+    /**
+     * POST-CHECKPOINT-9 UPDATE (part 2): Checkpoint 9's
+     * `2026_09_08_080001_create_integration_usage_records_table` migration
+     * adds a real (bare, single-column) FK `outbox_event_id` ->
+     * integration_outbox_events(id) (nullOnDelete()) — a bare FK still
+     * blocks dropping the referenced table in PostgreSQL exactly like a
+     * composite one does, so integration_usage_records must now ALSO be
+     * rolled back before this table's own migrations, or dropping this
+     * table fails with "cannot drop table ... because other objects
+     * depend on it". Reapplied LAST, after this table's own migrations
+     * are restored (and after REQUEUE_COLUMNS_MIGRATION_PATH above,
+     * chronologically the older of the two).
+     *
+     * @var list<string>
+     */
+    private const CP9_USAGE_RECORDS_MIGRATION_PATHS = [
+        'database/migrations/2026_09_08_080001_create_integration_usage_records_table.php',
+        'database/migrations/2026_09_08_080002_prepare_row_level_security_and_force_rls_on_integration_usage_records_table.php',
+    ];
+
     private const POLICY_NAME = 'integration_outbox_events_tenant_isolation';
 
     private const EXPECTED_COLUMNS = [
         'id', 'firm_id', 'firm_integration_id', 'domain_event_id', 'event_type', 'resource_type',
         'resource_id', 'payload_json', 'payload_hash', 'status', 'lock_token', 'locked_at', 'attempts',
         'max_attempts', 'next_attempt_at', 'last_error', 'completed_at', 'dead_lettered_at', 'cancelled_at',
+        'requeue_count', 'requeued_at', 'max_requeues',
         'created_at', 'updated_at',
     ];
 
@@ -367,6 +405,22 @@ class IntegrationOutboxEventsForceRlsActivationTest extends TestCase
         );
         $this->assertNull($policyAfterRollback);
 
+        // Checkpoint 9's requeue-columns migration ALTERs this table
+        // directly and must be undone first (see
+        // REQUEUE_COLUMNS_MIGRATION_PATH docblock above).
+        $requeueRollbackExit = Artisan::call('migrate:rollback', ['--path' => self::REQUEUE_COLUMNS_MIGRATION_PATH, '--force' => true]);
+        $this->assertSame(0, $requeueRollbackExit, 'migrate:rollback of the Checkpoint 9 requeue-columns migration failed: '.Artisan::output());
+
+        // Checkpoint 9's integration_usage_records FK-references this
+        // table (see CP9_USAGE_RECORDS_MIGRATION_PATHS docblock above) —
+        // it must be rolled back next, before this table's own migrations
+        // below.
+        foreach (array_reverse(self::CP9_USAGE_RECORDS_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 9 integration_usage_records) failed: ".Artisan::output());
+        }
+        $this->assertFalse(Schema::hasTable('integration_usage_records'), 'integration_usage_records must not survive its own rollback.');
+
         $tableRollbackExit = Artisan::call('migrate:rollback', ['--path' => self::TABLE_MIGRATION_PATH, '--force' => true]);
         $this->assertSame(0, $tableRollbackExit, Artisan::output());
         $this->assertFalse(Schema::hasTable('integration_outbox_events'));
@@ -375,6 +429,18 @@ class IntegrationOutboxEventsForceRlsActivationTest extends TestCase
         $this->assertSame(0, $tableMigrateExit, Artisan::output());
         $rlsMigrateExit = Artisan::call('migrate', ['--path' => self::RLS_MIGRATION_PATH, '--force' => true]);
         $this->assertSame(0, $rlsMigrateExit, Artisan::output());
+
+        // Reapply Checkpoint 9's requeue-columns migration and
+        // integration_usage_records LAST — after this table already
+        // exists again — in forward (creation) order.
+        $requeueMigrateExit = Artisan::call('migrate', ['--path' => self::REQUEUE_COLUMNS_MIGRATION_PATH, '--force' => true]);
+        $this->assertSame(0, $requeueMigrateExit, Artisan::output());
+
+        foreach (self::CP9_USAGE_RECORDS_MIGRATION_PATHS as $path) {
+            $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 9 integration_usage_records) failed: ".Artisan::output());
+        }
+        $this->assertTrue(Schema::hasTable('integration_usage_records'), 'integration_usage_records must be restored by its own reapplication.');
 
         $this->assertTrue(Schema::hasTable('integration_outbox_events'));
 
@@ -397,6 +463,23 @@ class IntegrationOutboxEventsForceRlsActivationTest extends TestCase
         $rlsMigration = include base_path(self::RLS_MIGRATION_PATH);
         $tableMigration = include base_path(self::TABLE_MIGRATION_PATH);
 
+        // Checkpoint 9's requeue-columns migration ALTERs this table
+        // directly (see REQUEUE_COLUMNS_MIGRATION_PATH docblock above) and
+        // integration_usage_records FK-references it (see
+        // CP9_USAGE_RECORDS_MIGRATION_PATHS docblock above) — both must
+        // be torn down FIRST, before this table's own migrations below.
+        $requeueMigration = include base_path(self::REQUEUE_COLUMNS_MIGRATION_PATH);
+        $usageRecordsMigrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::CP9_USAGE_RECORDS_MIGRATION_PATHS,
+        );
+
+        $requeueMigration->down();
+        foreach (array_reverse($usageRecordsMigrations) as $migration) {
+            $migration->down();
+        }
+        $this->assertFalse(Schema::hasTable('integration_usage_records'));
+
         $rlsMigration->down();
         $tableMigration->down();
 
@@ -404,6 +487,15 @@ class IntegrationOutboxEventsForceRlsActivationTest extends TestCase
 
         $tableMigration->up();
         $rlsMigration->up();
+
+        // Rebuild Checkpoint 9's requeue-columns migration and
+        // integration_usage_records LAST — after this table already
+        // exists again.
+        $requeueMigration->up();
+        foreach ($usageRecordsMigrations as $migration) {
+            $migration->up();
+        }
+        $this->assertTrue(Schema::hasTable('integration_usage_records'));
 
         $this->assertTrue(Schema::hasTable('integration_outbox_events'));
 

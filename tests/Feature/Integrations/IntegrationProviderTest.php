@@ -201,6 +201,44 @@ class IntegrationProviderTest extends TestCase
         'integration_connection_health',
     ];
 
+    /**
+     * POST-CHECKPOINT-9 UPDATE: Checkpoint 9 ("usage, audit, retention,
+     * access, and governance") added a SIXTH independent dependency chain
+     * reaching all the way back to firm_integrations (transitively,
+     * integration_providers) — integration_usage_records carries a real
+     * composite FK (firm_id, firm_integration_id) ->
+     * firm_integrations(firm_id, id) with cascadeOnDelete(), identical in
+     * shape to integration_connection_health's own composite FK, PLUS
+     * three more composite FKs (ON DELETE SET NULL) into
+     * integration_sync_runs, integration_sync_items (both Checkpoint 6),
+     * and integration_inbound_webhook_events (Checkpoint 7). Both
+     * rollback tests below now also roll back this 2-migration Checkpoint
+     * 9 wave FIRST — before the Checkpoint 8 whole-wave block, since
+     * Checkpoint 9 is the newest layer — in exact reverse of its own
+     * creation order (RLS-prep down(), then create-table down()), then
+     * reapply it LAST, after the Checkpoint 8 whole-wave block, in
+     * forward (creation) order. Order between this wave and the
+     * pre-existing firm_integrations / integration_credentials /
+     * integration_oauth_states / Checkpoint 6 / Checkpoint 7 / Checkpoint
+     * 8 blocks does not matter to each other, except that this wave must
+     * be fully torn down before any of integration_sync_runs,
+     * integration_sync_items, integration_inbound_webhook_events, or
+     * firm_integrations itself.
+     *
+     * @var list<string>
+     */
+    private const CP9_WHOLE_WAVE_MIGRATION_PATHS = [
+        'database/migrations/2026_09_08_080001_create_integration_usage_records_table.php',
+        'database/migrations/2026_09_08_080002_prepare_row_level_security_and_force_rls_on_integration_usage_records_table.php',
+    ];
+
+    /**
+     * @var list<string>
+     */
+    private const CP9_WHOLE_WAVE_TABLES = [
+        'integration_usage_records',
+    ];
+
     // ------------------------------------------------------------
     // 1. Schema correctness
     // ------------------------------------------------------------
@@ -523,6 +561,31 @@ class IntegrationProviderTest extends TestCase
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 8) must exist before this test begins, since it is now also one of firm_integrations' real (direct or transitive) FK dependents.");
         }
 
+        // Confirm the Checkpoint 9 whole-wave table's pre-rollback
+        // existence too (a SIXTH, independent dependency chain reaching
+        // firm_integrations, transitively integration_providers, plus
+        // integration_sync_runs/integration_sync_items/
+        // integration_inbound_webhook_events).
+        foreach (self::CP9_WHOLE_WAVE_MIGRATION_PATHS as $path) {
+            $this->assertFileExists(base_path($path));
+        }
+        foreach (self::CP9_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 9) must exist before this test begins, since it is now also one of firm_integrations' real (direct or transitive) FK dependents.");
+        }
+
+        // 1a-pre-pre. Roll back the Checkpoint 9 whole-wave dependency
+        // chain FIRST — before the Checkpoint 8 whole-wave block below,
+        // since Checkpoint 9 is the newest layer (see
+        // CP9_WHOLE_WAVE_MIGRATION_PATHS docblock). Rolled back in exact
+        // reverse of its own creation order.
+        foreach (array_reverse(self::CP9_WHOLE_WAVE_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 9 whole-wave) failed: ".Artisan::output());
+        }
+        foreach (self::CP9_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 9) must not survive its whole-wave rollback.");
+        }
+
         // 1a-pre. Roll back the Checkpoint 8 whole-wave dependency chain
         // FIRST — before the Checkpoint 7 whole-wave block below, since
         // Checkpoint 8 is the newest layer (see
@@ -741,6 +804,19 @@ class IntegrationProviderTest extends TestCase
         }
         foreach (self::CP8_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 8) must be restored by the whole-wave reapplication.");
+        }
+
+        // 6e. Reapply the Checkpoint 9 whole-wave dependency chain LAST —
+        // after the Checkpoint 8 whole-wave block, since Checkpoint 9 is
+        // the newest layer, and after integration_sync_runs/
+        // integration_sync_items/integration_inbound_webhook_events
+        // already exist again — in its own forward (creation) order.
+        foreach (self::CP9_WHOLE_WAVE_MIGRATION_PATHS as $path) {
+            $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 9 whole-wave) failed: ".Artisan::output());
+        }
+        foreach (self::CP9_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 9) must be restored by the whole-wave reapplication.");
         }
 
         // 7. Assert the exact prior state is restored — same columns,
@@ -1004,6 +1080,9 @@ class IntegrationProviderTest extends TestCase
         foreach (self::CP8_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 8) must exist before this test begins, since it is now also one of firm_integrations' real (direct or transitive) FK dependents.");
         }
+        foreach (self::CP9_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 9) must exist before this test begins, since it is now also one of firm_integrations' real (direct or transitive) FK dependents.");
+        }
 
         $providersMigration = include database_path('migrations/2026_09_01_010001_create_integration_providers_table.php');
         $firmIntegrationsRlsMigration = include database_path('migrations/2026_09_02_020002_prepare_row_level_security_and_force_rls_on_firm_integrations_table.php');
@@ -1030,6 +1109,24 @@ class IntegrationProviderTest extends TestCase
             static fn (string $path) => include base_path($path),
             self::CP8_WHOLE_WAVE_MIGRATION_PATHS,
         );
+
+        // Checkpoint 9 whole-wave migration objects, in creation order.
+        $cp9Migrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::CP9_WHOLE_WAVE_MIGRATION_PATHS,
+        );
+
+        // Tear down the Checkpoint 9 whole-wave dependency chain FIRST —
+        // before the Checkpoint 8 whole-wave teardown below, since
+        // Checkpoint 9 is the newest layer (see
+        // CP9_WHOLE_WAVE_MIGRATION_PATHS docblock). Torn down as a unit,
+        // in exact reverse of its own creation order.
+        foreach (array_reverse($cp9Migrations) as $migration) {
+            $migration->down();
+        }
+        foreach (self::CP9_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 9) must be fully dropped before the Checkpoint 8 whole-wave teardown can succeed.");
+        }
 
         // Tear down the Checkpoint 8 whole-wave dependency chain FIRST —
         // before the Checkpoint 7 whole-wave teardown below, since
@@ -1241,6 +1338,18 @@ class IntegrationProviderTest extends TestCase
         }
         foreach (self::CP8_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 8) must be fully restored after up().");
+        }
+
+        // Rebuild the Checkpoint 9 whole-wave dependency chain LAST —
+        // after the Checkpoint 8 whole-wave block, since Checkpoint 9 is
+        // the newest layer, and after integration_sync_runs/
+        // integration_sync_items/integration_inbound_webhook_events
+        // already exist again — in its own forward (creation) order.
+        foreach ($cp9Migrations as $migration) {
+            $migration->up();
+        }
+        foreach (self::CP9_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 9) must be fully restored after up().");
         }
     }
 

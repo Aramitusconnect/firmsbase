@@ -8,7 +8,9 @@ use App\Integrations\Enums\OutboxEventStatus;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationOutboxEvent;
 use App\Integrations\Services\IntegrationOutboxEventService;
+use App\Integrations\Services\IntegrationRequeueAuditLogger;
 use App\Models\Firm;
+use App\Services\TimelineEventRecorder;
 use App\Services\WebhookRetryPolicyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -53,7 +55,7 @@ class IntegrationOutboxTimestampPrecisionTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new IntegrationOutboxEventService(new WebhookRetryPolicyService());
+        $this->service = new IntegrationOutboxEventService(new WebhookRetryPolicyService(), new TimelineEventRecorder(), new IntegrationRequeueAuditLogger());
     }
 
     protected function tearDown(): void

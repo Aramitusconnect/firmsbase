@@ -15,6 +15,7 @@ use App\Integrations\Models\IntegrationSyncCursor;
 use App\Integrations\Models\IntegrationSyncRun;
 use App\Integrations\Services\SyncRunService;
 use App\Models\Firm;
+use App\Services\TimelineEventRecorder;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use RuntimeException;
@@ -38,7 +39,7 @@ class SyncRunServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new SyncRunService();
+        $this->service = new SyncRunService(new TimelineEventRecorder());
     }
 
     // ------------------------------------------------------------

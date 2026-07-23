@@ -187,7 +187,7 @@ final class InboundWebhookLifecycleRevalidationTest extends TestCase
                 new ProviderRedirectUrlValidator(),
             ),
             $this->credentialService(),
-            new IntegrationAccessPolicyService(),
+            new IntegrationAccessPolicyService(new TimelineEventRecorder()),
             new \App\Integrations\Core\ProviderRegistry(),
             new OutboundProviderHttpClient(),
             new ProviderRedirectUrlValidator(),
