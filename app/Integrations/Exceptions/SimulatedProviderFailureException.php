@@ -26,10 +26,41 @@ use RuntimeException;
  */
 class SimulatedProviderFailureException extends RuntimeException
 {
+    /**
+     * CHECKPOINT 8 additions (agent-8e-retry-backoff-ratelimit-design.md
+     * §1 / agent-8h-architecture-security-review.md §2 item 7) — the
+     * same nine-category closed vocabulary
+     * SanitizedProviderHttpException defines, mirrored here purely for
+     * naming consistency at TestProvider call sites. This class's own
+     * constructor deliberately does NOT validate $category against
+     * these constants (unlike SanitizedProviderHttpException) — it
+     * already accepts a free string today and existing TestProvider
+     * call sites pass literal strings; OutboundProviderHttpClient::execute()
+     * remains the one enforcement boundary that constructs the closed,
+     * validated SanitizedProviderHttpException from whatever category
+     * this exception carries.
+     */
+    public const CATEGORY_RATE_LIMITED = 'rate_limited';
+
+    public const CATEGORY_AUTHENTICATION_FAILED = 'authentication_failed';
+
+    public const CATEGORY_AUTHORIZATION_FAILED = 'authorization_failed';
+
+    public const CATEGORY_MALFORMED_RESPONSE = 'malformed_response';
+
+    public const CATEGORY_VALIDATION_FAILED = 'validation_failed';
+
+    public const CATEGORY_CONFLICT = 'conflict';
+
+    public const CATEGORY_CONFIGURATION_ERROR = 'configuration_error';
+
+    public const CATEGORY_CONNECTION_UNAVAILABLE = 'connection_unavailable';
+
     public function __construct(
         private readonly string $category,
         private readonly ?int $statusCode,
         string $message,
+        private readonly ?string $retryAfterRaw = null,
     ) {
         parent::__construct($message);
     }
@@ -42,5 +73,17 @@ class SimulatedProviderFailureException extends RuntimeException
     public function statusCode(): ?int
     {
         return $this->statusCode;
+    }
+
+    /**
+     * The UNPARSED simulated Retry-After value, as TestProvider set it —
+     * the parsing/clamping boundary lives at
+     * OutboundProviderHttpClient::execute()'s translation point, not
+     * here, mirroring how SanitizedProviderHttpException never carries
+     * raw message/header text.
+     */
+    public function retryAfterRaw(): ?string
+    {
+        return $this->retryAfterRaw;
     }
 }

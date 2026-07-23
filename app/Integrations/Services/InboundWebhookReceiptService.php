@@ -49,17 +49,29 @@ use RuntimeException;
 final class InboundWebhookReceiptService
 {
     /**
-     * Fallback default for the receipt-evidence retention window
-     * (frozen design §13: "Invalid-request evidence: 7 days" — note
-     * this service never actually persists invalid-request rows at all
-     * (see class docblock), so in practice this window applies to
-     * verified/malformed rows). Supplied as an inline default rather
-     * than via a config/integrations.php entry — that file is outside
-     * this checkpoint's frozen production-file allowlist, mirroring
-     * App\Integrations\Services\IntegrationOutboxEventService's
-     * established precedent.
+     * Fallback default for the non-verified receipt-evidence retention
+     * window (frozen design §13: "Invalid-request evidence: 7 days").
      */
     private const DEFAULT_RETENTION_DAYS = 7;
+
+    /**
+     * Fallback default for the VERIFIED receipt-evidence retention
+     * window (frozen design §13: "Verified-receipt evidence: 30 days").
+     *
+     * CHECKPOINT 8 FIX (agent-8h-architecture-security-review.md §1 item
+     * 7 / §2 item 9): prior to this fix, retention_deadline was computed
+     * as a single flat 7-day window applied uniformly to EVERY receipt,
+     * regardless of verification_outcome — contradicting the frozen
+     * 7d/30d split above. This branches the computation on
+     * $outcome === WebhookVerificationOutcome::Verified so a verified
+     * receipt's stored retention_deadline now correctly reflects the
+     * frozen 30-day commitment. Retained as defense-in-depth: the
+     * Checkpoint 8 retention sweep independently recomputes eligibility
+     * from verification_outcome + received_at at sweep time rather than
+     * trusting this column alone (never trust a single layer for a
+     * destructive operation).
+     */
+    private const DEFAULT_VERIFIED_RETENTION_DAYS = 30;
 
     /**
      * Durably records a receipt for a signature-verified inbound
@@ -88,7 +100,9 @@ final class InboundWebhookReceiptService
     ): IntegrationWebhookReceipt {
         $now = now();
 
-        $retentionDays = (int) config('integrations.webhook.receipt_retention_days', self::DEFAULT_RETENTION_DAYS);
+        $retentionDays = $outcome === WebhookVerificationOutcome::Verified
+            ? (int) config('integrations.webhook.receipt_verified_retention_days', self::DEFAULT_VERIFIED_RETENTION_DAYS)
+            : (int) config('integrations.webhook.receipt_retention_days', self::DEFAULT_RETENTION_DAYS);
 
         $values = [
             'provider_key' => $providerKey,

@@ -848,6 +848,28 @@ class ProviderConnectionServiceOAuthTest extends TestCase
         $this->assertStringNotContainsString('Simulated provider failure', (string) $reReadFresh->error_reason);
     }
 
+    /**
+     * CHECKPOINT 8 GATE 2 UPDATE (reviews/checkpoint-08/
+     * agent-8h-architecture-security-review.md §1 item 4 — the frozen
+     * Gate 1/Gate 2 design): this test previously asserted a thrown
+     * RuntimeException, but that was only ever an INCIDENTAL side effect
+     * of the pre-Checkpoint-8 implementation — a disconnected connection
+     * happens to have no active refresh-token credential, so the old
+     * code path threw "No active refresh token for connection ..." by
+     * accident, not by design. Checkpoint 8 added an explicit, deliberate
+     * Gate 2 post-lock ConnectionStatus re-check inside
+     * ProviderConnectionService::refreshConnectionToken()'s
+     * withRefreshLock() callback: whenever the locked row's status is not
+     * Active, it now returns a silent, non-throwing no-op
+     * (['outcome' => 'not_active']), which the outer method turns into a
+     * failed (successful === false), non-throwing OAuthCallbackResult —
+     * closing the TOCTOU window between a caller's own pre-lock read and
+     * this lock's acquisition without ever surfacing an exception for a
+     * legitimate, already-recorded state transition. This test still
+     * proves exactly what it always proved — a disconnected connection's
+     * credential cannot be refreshed — just via the new, intended
+     * non-throwing signal instead of the old incidental exception.
+     */
     public function test_cannot_refresh_a_disconnected_connections_credential(): void
     {
         [$firm, $connection, $firmUser] = $this->firmConnectionAndActor();
@@ -858,9 +880,32 @@ class ProviderConnectionServiceOAuthTest extends TestCase
 
         $disconnected = $this->runWithFirmContext($firm, fn () => $connection->fresh());
 
-        $this->expectException(RuntimeException::class);
+        // No active credential of either type survives disconnect() (see
+        // test_disconnect_revokes_the_active_credentials) — captured here
+        // so the refresh attempt below can be proven to have created no
+        // new active credential, i.e. that no refresh actually happened.
+        $activeCredentialCountBefore = $this->runWithFirmContext($firm, fn () => IntegrationCredential::query()
+            ->where('firm_integration_id', $connection->id)
+            ->where('status', 'active')
+            ->count());
+        $this->assertSame(0, $activeCredentialCountBefore, 'Sanity check: disconnect() must already have left zero active credentials.');
 
-        $this->service()->refreshConnectionToken($disconnected);
+        $result = $this->service()->refreshConnectionToken($disconnected);
+
+        $this->assertFalse($result->successful, 'Refreshing a disconnected connection must never report success.');
+        $this->assertSame(
+            ConnectionStatus::Disconnected,
+            $result->status,
+            'Gate 2\'s no-op must not itself transition the connection away from Disconnected.'
+        );
+        $this->assertNotNull($result->errorMessage);
+        $this->assertStringContainsString('not Active', (string) $result->errorMessage);
+
+        $activeCredentialCountAfter = $this->runWithFirmContext($firm, fn () => IntegrationCredential::query()
+            ->where('firm_integration_id', $connection->id)
+            ->where('status', 'active')
+            ->count());
+        $this->assertSame(0, $activeCredentialCountAfter, 'No refresh must actually have happened — the active-credential count must remain zero.');
     }
 
     // ------------------------------------------------------------

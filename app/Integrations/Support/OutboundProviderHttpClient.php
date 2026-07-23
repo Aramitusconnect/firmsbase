@@ -11,6 +11,7 @@ use App\Integrations\Exceptions\OAuthAccountMismatchException;
 use App\Integrations\Exceptions\SanitizedProviderHttpException;
 use App\Integrations\Exceptions\SimulatedProviderFailureException;
 use Closure;
+use DateTimeImmutable;
 use Throwable;
 
 /**
@@ -70,7 +71,20 @@ final class OutboundProviderHttpClient
         } catch (InvalidPkceVerifierException|ExpiredAuthorizationCodeException|AuthorizationCodeAlreadyUsedException|OAuthAccountMismatchException $e) {
             throw $e;
         } catch (SimulatedProviderFailureException $e) {
-            throw new SanitizedProviderHttpException($e->category(), $e->statusCode(), $operationLabel);
+            // CHECKPOINT 8 addition (agent-8e-retry-backoff-ratelimit-design.md
+            // §4): translate the raw, unparsed simulated Retry-After
+            // value through RetryAfterParser HERE — the one enforcement
+            // boundary — before it can ever reach a
+            // SanitizedProviderHttpException. A malformed/malicious raw
+            // value degrades to null (never throws, per that parser's
+            // own never-throws contract), never leaks past this point
+            // unclamped.
+            $retryAfterSeconds = $e->retryAfterRaw() === null
+                ? null
+                : (new RetryAfterParser((int) config('integrations.outbox.max_backoff_seconds', 3600)))
+                    ->parse($e->retryAfterRaw(), new DateTimeImmutable());
+
+            throw new SanitizedProviderHttpException($e->category(), $e->statusCode(), $operationLabel, $retryAfterSeconds);
         } catch (Throwable) {
             throw new SanitizedProviderHttpException(SanitizedProviderHttpException::CATEGORY_UNKNOWN, null, $operationLabel);
         }

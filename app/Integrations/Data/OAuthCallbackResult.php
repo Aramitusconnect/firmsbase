@@ -19,6 +19,19 @@ use App\Integrations\Models\FirmIntegration;
  * success flag, and an OPTIONAL, already-sanitized, human-readable
  * error message safe to flash to the browser (never raw provider
  * response text, never a stack trace).
+ *
+ * $transitionedThisCall (Checkpoint 8 bugfix, diff-review §5 item 5):
+ * true ONLY when THIS specific call's own execution just performed a
+ * genuine `invalid_grant` -> ReauthorizationRequired transition inside
+ * refreshConnectionToken()'s catch block. Defaults to false everywhere
+ * else, including refreshConnectionToken()'s Gate 2 no-op path (the
+ * connection was already non-Active — e.g. already
+ * ReauthorizationRequired from a DIFFERENT, earlier transition — before
+ * this call ever started doing any work), which would otherwise be
+ * indistinguishable from a genuine same-call transition to a caller
+ * that only inspects $status/$successful. RefreshIntegrationToken::handle()
+ * relies on this flag to avoid calling
+ * HealthStateService::recordCredentialError() for a no-op.
  */
 final class OAuthCallbackResult
 {
@@ -27,6 +40,7 @@ final class OAuthCallbackResult
         public readonly ConnectionStatus $status,
         public readonly bool $successful,
         public readonly ?string $errorMessage = null,
+        public readonly bool $transitionedThisCall = false,
     ) {
     }
 }

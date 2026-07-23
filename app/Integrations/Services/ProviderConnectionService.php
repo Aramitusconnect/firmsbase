@@ -399,7 +399,22 @@ class ProviderConnectionService
             $connection->firm_id,
             function () use ($connection) {
                 try {
-                    $this->credentialService->withRefreshLock($connection, function (FirmIntegration $locked) {
+                    $outcome = $this->credentialService->withRefreshLock($connection, function (FirmIntegration $locked) {
+                        // CHECKPOINT 8 GATE 2 (agent-8h-architecture-security-review.md
+                        // §1 item 4 / §2 item 5): post-lock ConnectionStatus
+                        // re-check, using the ALREADY-locked $locked row —
+                        // closes the TOCTOU window between the
+                        // RefreshIntegrationToken job's own pre-lock Gate 1
+                        // read and this lock's acquisition (e.g. a
+                        // concurrent disconnect() completing in between,
+                        // which itself takes this same lockForUpdate() on
+                        // firm_integrations). Silent no-op, never an
+                        // exception — whatever transitioned the connection
+                        // away from Active already recorded its own event.
+                        if ($locked->status !== ConnectionStatus::Active) {
+                            return ['outcome' => 'not_active'];
+                        }
+
                         $refreshCredential = IntegrationCredential::query()
                             ->where('firm_integration_id', $locked->id)
                             ->where('credential_type', CredentialType::OauthRefreshToken->value)
@@ -425,7 +440,7 @@ class ProviderConnectionService
                         if ($accessCredential !== null
                             && $accessCredential->expires_at !== null
                             && $accessCredential->expires_at->isAfter(now()->addMinutes(2))) {
-                            return $accessCredential;
+                            return ['outcome' => 'already_fresh', 'credential' => $accessCredential];
                         }
 
                         if ($accessCredential === null) {
@@ -457,8 +472,14 @@ class ProviderConnectionService
                             $this->credentialService->rotate($locked, $refreshCredential, (string) $tokenSet['refresh_token']);
                         }
 
-                        return $newAccessCredential;
+                        return ['outcome' => 'refreshed', 'credential' => $newAccessCredential];
                     });
+
+                    if ($outcome['outcome'] === 'not_active') {
+                        $fresh = $connection->fresh();
+
+                        return new OAuthCallbackResult($fresh, $fresh->status, false, 'Connection is not Active; refresh skipped.');
+                    }
 
                     $fresh = $connection->fresh();
 
@@ -468,20 +489,101 @@ class ProviderConnectionService
 
                     return new OAuthCallbackResult($fresh, $fresh->status, true);
                 } catch (SanitizedProviderHttpException $e) {
-                    $fresh = $this->transitionStatus(
-                        $connection->fresh(),
-                        ConnectionStatus::ReauthorizationRequired,
-                        "Token refresh failed: {$e->category()}.",
-                    );
+                    if ($e->category() === SanitizedProviderHttpException::CATEGORY_INVALID_GRANT) {
+                        // Definitively invalid/expired/revoked refresh
+                        // token — the provider has told us, in the one
+                        // category OAuth reserves specifically for this
+                        // case, that no amount of retrying will ever
+                        // succeed. Terminal: transition now, do not retry.
+                        $fresh = $this->transitionStatus(
+                            $connection->fresh(),
+                            ConnectionStatus::ReauthorizationRequired,
+                            "Token refresh failed: {$e->category()}.",
+                        );
 
-                    $this->events->record($fresh->firm, 'integration_oauth.refresh_failed', $fresh, null, [
-                        'firm_integration_id' => $fresh->id,
+                        $this->events->record($fresh->firm, 'integration_oauth.refresh_failed', $fresh, null, [
+                            'firm_integration_id' => $fresh->id,
+                            'category' => $e->category(),
+                            'status_code' => $e->statusCode(),
+                        ]);
+
+                        return new OAuthCallbackResult(
+                            $fresh,
+                            $fresh->status,
+                            false,
+                            'Token refresh failed; reauthorization is required.',
+                            transitionedThisCall: true,
+                        );
+                    }
+
+                    // CHECKPOINT 8 CATEGORY SPLIT
+                    // (agent-8h-architecture-security-review.md §1 item 4 /
+                    // §2 item 5): network_error | provider_rejected |
+                    // timeout | unknown are ambiguous or transient — a
+                    // single failed attempt proves nothing about the
+                    // refresh token's own validity. Do NOT transition the
+                    // connection away from Active. Record the attempt,
+                    // then rethrow so the caller (the queued
+                    // RefreshIntegrationToken job) applies its own bounded
+                    // $tries/backoff() policy; only exhausting those
+                    // retries (the job's failed() hook ->
+                    // markRefreshExhausted() below) results in any status
+                    // change, and even then to Error, never
+                    // ReauthorizationRequired — Error does not imply the
+                    // credential itself is invalid.
+                    $this->events->record($connection->firm, 'integration_oauth.refresh_transient_failure', $connection->fresh(), null, [
+                        'firm_integration_id' => $connection->id,
                         'category' => $e->category(),
                         'status_code' => $e->statusCode(),
                     ]);
 
-                    return new OAuthCallbackResult($fresh, $fresh->status, false, 'Token refresh failed; reauthorization is required.');
+                    throw $e;
                 }
+            }
+        );
+    }
+
+    /**
+     * CHECKPOINT 8 addition (agent-8h-architecture-security-review.md §1
+     * item 4 / §2 item 5): called ONLY from RefreshIntegrationToken's
+     * failed() hook, once $tries is exhausted for a transient
+     * (non-invalid_grant) refresh-failure category. Transitions to
+     * ConnectionStatus::Error — never ReauthorizationRequired, which
+     * specifically implies the credential itself is known-invalid (that
+     * transition is reserved for the invalid_grant branch of
+     * refreshConnectionToken()'s catch block above). Keeps this class
+     * the sole writer of firm_integrations.status — the job never
+     * writes that column directly.
+     */
+    public function markRefreshExhausted(FirmIntegration $connection, string $category): FirmIntegration
+    {
+        return (new TenantContextService())->runWithFirmContext(
+            $connection->firm_id,
+            function () use ($connection, $category) {
+                $fresh = FirmIntegration::query()
+                    ->where('id', $connection->id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                if ($fresh->status !== ConnectionStatus::Active) {
+                    // Already moved on (reconnected, disconnected, or
+                    // already transitioned by a concurrent operation) —
+                    // nothing further for this exhaustion signal to do.
+                    return $fresh;
+                }
+
+                $fresh = $this->transitionStatus(
+                    $fresh,
+                    ConnectionStatus::Error,
+                    "Token refresh retries exhausted: {$category}.",
+                );
+
+                $this->events->record($fresh->firm, 'integration_oauth.refresh_exhausted', $fresh, null, [
+                    'firm_integration_id' => $fresh->id,
+                    'category' => $category,
+                ]);
+
+                return $fresh;
             }
         );
     }

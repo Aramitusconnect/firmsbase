@@ -10,6 +10,7 @@ use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationExternalMapping;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 /**
  * IntegrationExternalMappingService — the ONLY writer of
@@ -111,6 +112,45 @@ final class IntegrationExternalMappingService
             // silently swallowed.
             throw new ExternalMappingConflictException($localType, $localId, $externalId);
         }
+    }
+
+    /**
+     * CHECKPOINT 8 addition (agent-8h-architecture-security-review.md §1
+     * item 3 / §2 item 4): refreshes ONLY the two version-token columns
+     * on an already-resolved, still-live mapping row — e.g. a push job
+     * that successfully re-pushes an already-mapped object and needs to
+     * record the provider's fresh external_version_token. A single
+     * guarded UPDATE, `WHERE id = ? AND tombstoned_at IS NULL`, matching
+     * recordMapping()'s own "live-row-only" discipline — this method
+     * creates no new row, changes no
+     * (firm_integration_id, resource_type, local_type, local_id)
+     * identity tuple, and cannot resurrect a tombstoned mapping (the
+     * guard prevents that structurally). Throws if the guard matches
+     * zero rows (the mapping is gone or has since been tombstoned) —
+     * the caller must not assume success against a row that may have
+     * been concurrently tombstoned.
+     */
+    public function refreshVersionTokens(
+        IntegrationExternalMapping $mapping,
+        ?string $externalVersionToken,
+        ?string $localVersionToken,
+    ): IntegrationExternalMapping {
+        $affected = IntegrationExternalMapping::query()
+            ->where('id', $mapping->id)
+            ->whereNull('tombstoned_at')
+            ->update([
+                'external_version_token' => $externalVersionToken,
+                'local_version_token' => $localVersionToken,
+                'last_synced_at' => now(),
+            ]);
+
+        if ($affected === 0) {
+            throw new RuntimeException(
+                "Cannot refresh version tokens for mapping {$mapping->id}: it no longer exists or has been tombstoned."
+            );
+        }
+
+        return $mapping->fresh();
     }
 
     /**

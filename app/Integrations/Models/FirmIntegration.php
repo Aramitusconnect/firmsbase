@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Integrations\Models;
 
 use App\Integrations\Enums\ConnectionStatus;
+use App\Integrations\Enums\HealthSummaryState;
 use App\Models\Concerns\BelongsToTenant;
 use App\Models\Concerns\HasPublicUuid;
 use App\Models\Firm;
@@ -94,6 +95,15 @@ class FirmIntegration extends Model
             'connected_at' => 'datetime',
             'disconnected_at' => 'datetime',
             'last_health_check_at' => 'datetime',
+            // CHECKPOINT 8 addition (agent-8f-health-state-design.md §1,
+            // agent-8h-architecture-security-review.md §4.1's explicit
+            // "implementer's discretion" allowance): last_health_status
+            // is now written exclusively by HealthStateService as a
+            // denormalized cache of the SAME HealthSummaryState value
+            // it persists to integration_connection_health.summary_state
+            // — casting it here clarifies the read path without any
+            // schema/column change.
+            'last_health_status' => HealthSummaryState::class,
         ];
     }
 

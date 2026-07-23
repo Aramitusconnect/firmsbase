@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ReadinessController;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -26,6 +27,35 @@ return Application::configure(basePath: dirname(__DIR__))
             require __DIR__.'/../routes/webhooks.php';
         },
     )
+    ->withSchedule(function (Schedule $schedule): void {
+        // CHECKPOINT 8 — resolves checkpoint-00 §13/§23's frozen,
+        // explicit "no scheduler mechanism exists anywhere in this
+        // codebase" dependency NARROWLY
+        // (agent-8h-architecture-security-review.md §1 item 1; §2 item
+        // 1). Every command below is a plain, cheap, non-tenant Artisan
+        // command (never a ShouldQueue job itself) that enumerates
+        // active firms from the non-RLS `firms` table and dispatches
+        // one per-firm queued job each — see each command's own
+        // docblock. Actually RUNNING Laravel's scheduler
+        // (`schedule:work` or a cron/systemd-timer entry invoking
+        // `schedule:run` every minute) in every environment is a
+        // disclosed, non-blocking OPERATIONAL dependency this
+        // application-code change cannot itself satisfy — out of scope
+        // for this code-only mission per checkpoint-00 §19's
+        // environment restrictions, and must be handed to the eventual
+        // deployment/ops owner as a documented requirement.
+        $schedule->command('integrations:outbox:dispatch')
+            ->everyMinute()
+            ->withoutOverlapping();
+
+        $schedule->command('integrations:sync:retry-poll')
+            ->everyThreeMinutes()
+            ->withoutOverlapping();
+
+        $schedule->command('integrations:retention:sweep')
+            ->daily()
+            ->withoutOverlapping();
+    })
     ->withMiddleware(function (Middleware $middleware): void {
         // Trust the AWS ALB in front of this container for exactly the
         // header set AWS ELB/ALB actually sends: X-Forwarded-For,

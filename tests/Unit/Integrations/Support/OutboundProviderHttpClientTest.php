@@ -229,7 +229,21 @@ final class OutboundProviderHttpClientTest extends TestCase
         );
 
         $this->assertNotEmpty($categoryConstants);
-        $this->assertLessThanOrEqual(6, count($categoryConstants), 'The category enum must remain small and closed, not grow into an open string.');
+        // CHECKPOINT 8 UPDATE (reviews/checkpoint-08/diff-review.md §5
+        // item 4; agent-8h-architecture-security-review.md's frozen
+        // retry-taxonomy expansion): the closed category vocabulary grew
+        // intentionally and correctly from 5 to 13 — 8 new categories
+        // (rate_limited, authentication_failed, authorization_failed,
+        // malformed_response, validation_failed, conflict,
+        // configuration_error, connection_unavailable) were deliberately
+        // added to support Checkpoint 8's retry/health-signal
+        // classification. The ceiling below is bumped to the new, exact,
+        // intentionally authorized count — verified directly via
+        // reflection against the real source, not merely trusted — so
+        // this guard-rail still fails the moment the set grows again
+        // WITHOUT a deliberate, reviewed update.
+        $this->assertLessThanOrEqual(13, count($categoryConstants), 'The category enum must remain small and closed, not grow into an open string.');
+        $this->assertSame(13, count($categoryConstants), 'The category enum must be exactly the Checkpoint 8 frozen count of 13 — update this deliberately, with review, if it ever changes again.');
     }
 
     // ---------------------------------------------------------------

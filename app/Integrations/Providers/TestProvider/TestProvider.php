@@ -107,6 +107,22 @@ final class TestProvider implements
     public const FAILURE_SENTINEL = '__simulate_provider_failure__';
 
     /**
+     * CHECKPOINT 8 addition (agent-8h-architecture-security-review.md §1
+     * item 4 / §2 item 6): a SECOND, distinct sentinel — passed as the
+     * $refreshToken to refreshToken() — that simulates a TRANSIENT
+     * (network_error) outbound-call failure, as opposed to
+     * FAILURE_SENTINEL's existing invalid_grant simulation. Required so
+     * ProviderConnectionService::refreshConnectionToken()'s
+     * retry-vs-reauthorize category split (which only swallows-and-
+     * transitions for invalid_grant, and rethrows every other category
+     * for the RefreshIntegrationToken job's own bounded retry/backoff)
+     * is actually exercisable by a test. Never a value
+     * random_bytes()/Str::random() could plausibly generate by
+     * coincidence, same discipline as FAILURE_SENTINEL.
+     */
+    public const TRANSIENT_FAILURE_SENTINEL = '__simulate_transient_provider_failure__';
+
+    /**
      * @var array<string, array{code_challenge: string, external_account_id: string, granted_scopes: string[], used: bool, expires_at: \Illuminate\Support\Carbon}>
      */
     private static array $issuedAuthorizationCodes = [];
@@ -300,6 +316,14 @@ final class TestProvider implements
                 category: 'invalid_grant',
                 statusCode: 400,
                 message: 'Simulated provider failure during token refresh.',
+            );
+        }
+
+        if ($refreshToken === self::TRANSIENT_FAILURE_SENTINEL) {
+            throw new SimulatedProviderFailureException(
+                category: 'network_error',
+                statusCode: null,
+                message: 'Simulated transient provider failure during token refresh.',
             );
         }
 
@@ -500,14 +524,50 @@ final class TestProvider implements
         return [ResourceType::Contact->value, ResourceType::Task->value];
     }
 
+    /**
+     * CHECKPOINT 8 additive simulation knobs (agent-8c-sync-job-design.md
+     * §10.2), read out of the EXISTING $context/$cursor parameters —
+     * no contract signature change:
+     *  - $cursor === FAILURE_SENTINEL simulates a raw outbound-call
+     *    failure during pull (reuses the OAuth sentinel convention —
+     *    OutboundProviderHttpClient::execute() already knows how to
+     *    catch and sanitize SimulatedProviderFailureException, zero new
+     *    exception-handling code needed anywhere).
+     *  - $context['simulate_pages'] (int, default 1): multi-page pull
+     *    with deterministic cursor advancement — same $cursor + same
+     *    simulate_pages always yields the same sequence.
+     *  - $context['simulate_conflict_for'] (string external_id):
+     *    deterministically marks the first returned item with that
+     *    external_id, for a test to construct a local fixture that
+     *    disagrees with it and assert exactly one IntegrationConflict
+     *    row is created.
+     */
     public function pull(array $context, string $resourceType, ?string $cursor): array
     {
+        if ($cursor === self::FAILURE_SENTINEL) {
+            throw new SimulatedProviderFailureException(
+                category: 'network_error',
+                statusCode: null,
+                message: 'Simulated provider failure during pull.',
+            );
+        }
+
+        $totalPages = max(1, (int) ($context['simulate_pages'] ?? 1));
+        $currentPage = $cursor === null ? 1 : ((int) $cursor) + 1;
+
+        $items = [
+            ['external_id' => (string) Str::uuid(), 'resource_type' => $resourceType, 'version_token' => Str::random(12)],
+            ['external_id' => (string) Str::uuid(), 'resource_type' => $resourceType, 'version_token' => Str::random(12)],
+        ];
+
+        if (isset($context['simulate_conflict_for']) && is_string($context['simulate_conflict_for'])) {
+            $items[0]['external_id'] = $context['simulate_conflict_for'];
+            $items[0]['version_token'] = 'conflicting-'.Str::random(8);
+        }
+
         return [
-            'items' => [
-                ['external_id' => (string) Str::uuid(), 'resource_type' => $resourceType],
-                ['external_id' => (string) Str::uuid(), 'resource_type' => $resourceType],
-            ],
-            'next_cursor' => null,
+            'items' => $items,
+            'next_cursor' => $currentPage < $totalPages ? (string) $currentPage : null,
         ];
     }
 
@@ -523,10 +583,28 @@ final class TestProvider implements
         return [ResourceType::Contact->value, ResourceType::Task->value];
     }
 
+    /**
+     * CHECKPOINT 8 additive simulation knob (agent-8c-sync-job-design.md
+     * §10.2), read out of the EXISTING $payload/$context parameters —
+     * no contract signature change: a payload carrying
+     * '__simulate_failure' === FAILURE_SENTINEL simulates a raw
+     * outbound-call failure during push, reusing the same
+     * SimulatedProviderFailureException translation path
+     * OutboundProviderHttpClient::execute() already handles.
+     */
     public function push(array $context, string $resourceType, array $payload): array
     {
+        if (($payload['__simulate_failure'] ?? null) === self::FAILURE_SENTINEL) {
+            throw new SimulatedProviderFailureException(
+                category: 'provider_rejected',
+                statusCode: 502,
+                message: 'Simulated provider failure during push.',
+            );
+        }
+
         return [
-            'external_id' => (string) Str::uuid(),
+            'external_id' => $context['simulate_external_id'] ?? (string) Str::uuid(),
+            'version_token' => Str::random(12),
             'status' => 'synced',
         ];
     }

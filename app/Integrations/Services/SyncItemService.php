@@ -84,13 +84,24 @@ final class SyncItemService
      * call — Checkpoint 6 ships this primitive without building the
      * poller itself. Same guarded-UPDATE-RETURNING discipline as every
      * other claim in this checkpoint.
+     *
+     * CHECKPOINT 8 PREREQUISITE FIX (agent-8h-architecture-security-review.md
+     * §0/§2 item 0) — now() -> statement_timestamp(): now() is frozen at
+     * the wrapping transaction's start (TenantContextService::
+     * runWithFirmContext() always opens a real DB::transaction()), so a
+     * row whose next_attempt_at becomes due after the transaction opened
+     * but before this statement runs would be missed under the old
+     * predicate — the identical bug class fixed for
+     * IntegrationOutboxEventService::claim() in commit 9196d30.
+     * statement_timestamp() is live per-statement, never frozen by how
+     * long the wrapping transaction has been open.
      */
     public function claimForRetry(int $itemId): ?IntegrationSyncItem
     {
         $row = DB::selectOne(
             'UPDATE integration_sync_items '.
             "SET status = 'retrying' ".
-            "WHERE id = ? AND status = 'failed_retryable' AND next_attempt_at <= now() ".
+            "WHERE id = ? AND status = 'failed_retryable' AND next_attempt_at <= statement_timestamp() ".
             'RETURNING *',
             [$itemId]
         );

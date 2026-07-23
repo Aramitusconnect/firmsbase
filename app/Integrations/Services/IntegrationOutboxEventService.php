@@ -228,8 +228,22 @@ final class IntegrationOutboxEventService
      * must already be a short, non-secret reason string (mirrors
      * App\Integrations\Exceptions\SanitizedProviderHttpException's own
      * category-only discipline).
+     *
+     * CHECKPOINT 8 addition (agent-8h-architecture-security-review.md
+     * §1 item 2 / §2 item 2): optional fourth parameter $category,
+     * threaded straight into both isExhausted()/nextAttemptDelaySeconds()
+     * as ['max_attempts' => $maxAttempts, 'category' => $category].
+     * $category = null (the default) reproduces today's exact
+     * attempt-count-only behavior byte-for-byte — no existing caller or
+     * test passes a fourth argument. The generic outbox dispatcher is
+     * responsible for classifying every caught handler exception into
+     * one of the nine closed retry categories
+     * (App\Services\WebhookRetryPolicyService::TERMINAL_CATEGORIES plus
+     * the retryable ones) and passing that string through here — this
+     * class itself makes no HTTP/provider decisions, consistent with its
+     * own "primitives only" docblock.
      */
-    public function fail(int $id, string $lockToken, string $sanitizedError): ?IntegrationOutboxEvent
+    public function fail(int $id, string $lockToken, string $sanitizedError, ?string $category = null): ?IntegrationOutboxEvent
     {
         $current = DB::table('integration_outbox_events')
             ->where('id', $id)
@@ -244,7 +258,7 @@ final class IntegrationOutboxEventService
         $attempts = (int) $current->attempts;
         $maxAttempts = (int) $current->max_attempts;
 
-        if ($this->retryPolicy->isExhausted($attempts, ['max_attempts' => $maxAttempts])) {
+        if ($this->retryPolicy->isExhausted($attempts, ['max_attempts' => $maxAttempts, 'category' => $category])) {
             $row = DB::selectOne(
                 'UPDATE integration_outbox_events '.
                 "SET status = 'dead_lettered', dead_lettered_at = now(), last_error = ? ".
@@ -256,7 +270,7 @@ final class IntegrationOutboxEventService
             return $row === null ? null : IntegrationOutboxEvent::hydrate([(array) $row])->first();
         }
 
-        $delaySeconds = $this->retryPolicy->nextAttemptDelaySeconds($attempts, ['max_attempts' => $maxAttempts]);
+        $delaySeconds = $this->retryPolicy->nextAttemptDelaySeconds($attempts, ['max_attempts' => $maxAttempts, 'category' => $category]);
 
         $row = DB::selectOne(
             'UPDATE integration_outbox_events '.

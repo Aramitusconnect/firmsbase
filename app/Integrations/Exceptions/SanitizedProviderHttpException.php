@@ -34,18 +34,50 @@ final class SanitizedProviderHttpException extends RuntimeException
 
     public const CATEGORY_UNKNOWN = 'unknown';
 
+    /**
+     * CHECKPOINT 8 additions (agent-8e-retry-backoff-ratelimit-design.md
+     * §1 — the nine-category closed retry/dead-letter taxonomy;
+     * agent-8h-architecture-security-review.md §2 item 7). Every new
+     * category below is closed/validated exactly like the five original
+     * ones — never a free string.
+     */
+    public const CATEGORY_RATE_LIMITED = 'rate_limited';
+
+    public const CATEGORY_AUTHENTICATION_FAILED = 'authentication_failed';
+
+    public const CATEGORY_AUTHORIZATION_FAILED = 'authorization_failed';
+
+    public const CATEGORY_MALFORMED_RESPONSE = 'malformed_response';
+
+    public const CATEGORY_VALIDATION_FAILED = 'validation_failed';
+
+    public const CATEGORY_CONFLICT = 'conflict';
+
+    public const CATEGORY_CONFIGURATION_ERROR = 'configuration_error';
+
+    public const CATEGORY_CONNECTION_UNAVAILABLE = 'connection_unavailable';
+
     private const VALID_CATEGORIES = [
         self::CATEGORY_NETWORK_ERROR,
         self::CATEGORY_PROVIDER_REJECTED,
         self::CATEGORY_INVALID_GRANT,
         self::CATEGORY_TIMEOUT,
         self::CATEGORY_UNKNOWN,
+        self::CATEGORY_RATE_LIMITED,
+        self::CATEGORY_AUTHENTICATION_FAILED,
+        self::CATEGORY_AUTHORIZATION_FAILED,
+        self::CATEGORY_MALFORMED_RESPONSE,
+        self::CATEGORY_VALIDATION_FAILED,
+        self::CATEGORY_CONFLICT,
+        self::CATEGORY_CONFIGURATION_ERROR,
+        self::CATEGORY_CONNECTION_UNAVAILABLE,
     ];
 
     public function __construct(
         private readonly string $category,
         private readonly ?int $statusCode,
         string $operationLabel,
+        private readonly ?int $retryAfterSeconds = null,
     ) {
         if (! in_array($category, self::VALID_CATEGORIES, true)) {
             throw new InvalidArgumentException("Unknown provider-error category: \"{$category}\".");
@@ -68,5 +100,18 @@ final class SanitizedProviderHttpException extends RuntimeException
     public function statusCode(): ?int
     {
         return $this->statusCode;
+    }
+
+    /**
+     * The already-parsed-and-clamped Retry-After delay, in seconds — set
+     * ONLY by OutboundProviderHttpClient::execute()'s translation of a
+     * SimulatedProviderFailureException's raw retryAfterRaw() value
+     * through App\Integrations\Support\RetryAfterParser. Never the raw
+     * string — preserves this class's existing "never the original ...
+     * headers" discipline exactly.
+     */
+    public function retryAfterSeconds(): ?int
+    {
+        return $this->retryAfterSeconds;
     }
 }
