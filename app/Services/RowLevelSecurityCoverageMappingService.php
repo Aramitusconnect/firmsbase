@@ -366,6 +366,17 @@ class RowLevelSecurityCoverageMappingService
         // at all — see FULL_TABLE_INVENTORY_EXTRA below for their
         // Global classification and explicit disclaimer notes.
         'integration_inbound_webhook_events',
+        // Stage B Checkpoint 8 (FirmsBase Integration Platform mission)
+        // — integration_connection_health, a brand-new genuine
+        // tenant-owned table (own NOT NULL firm_id column, plus a real
+        // composite FK to firm_integrations(firm_id, id)) with RLS
+        // prepared and FORCE-activated in the very same migration,
+        // following the identical combined prepare+force shape used
+        // throughout this rollout:
+        // 2026_09_07_070002_prepare_row_level_security_and_force_rls_on_integration_connection_health_table.php.
+        // This table was never in MISSING_PREPARED_TABLES — it is added
+        // directly here since prepare and force happened together.
+        'integration_connection_health',
     ];
 
     /**

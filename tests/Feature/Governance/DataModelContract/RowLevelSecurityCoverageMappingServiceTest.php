@@ -203,7 +203,13 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // (integration_webhook_receipts, integration_webhook_routing_index)
         // are correctly NOT in PREPARED_TABLES — both are RLS-exempt
         // (see EXEMPT_TABLES and FULL_TABLE_INVENTORY_EXTRA below).
-        $this->assertCount(123, $this->service->preparedTables());
+        // Narrowly updated AGAIN by Stage B Checkpoint 8 of the FirmsBase
+        // Integration Platform mission — integration_connection_health
+        // (a brand-new genuine tenant-owned table, RLS prepared and
+        // FORCE-activated in the same migration) added directly to
+        // PREPARED_TABLES (123 -> 124); tenantOwnedTables() is the union
+        // of both and increases in step (123 -> 124).
+        $this->assertCount(124, $this->service->preparedTables());
         $this->assertCount(0, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
@@ -230,7 +236,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // this correction — only its EXEMPT_TABLES bookkeeping
         // membership changes.
         $this->assertCount(26, $this->service->exemptTables());
-        $this->assertCount(123, $this->service->tenantOwnedTables());
+        $this->assertCount(124, $this->service->tenantOwnedTables());
         $forceMigrationFiles = glob(
             database_path('migrations/*_force_rls_on_*_table.php')
         ) ?: [];
@@ -503,7 +509,15 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // classified DirectTenant via fullTableInventory(); the
         // DirectTenant count and the overall table-inventory total both
         // increase by one (122 -> 123, 218 -> 219).
-        $this->assertSame(123, $summary[TenantOwnershipClassification::DirectTenant->value]);
+        // Narrowly updated AGAIN by Stage B Checkpoint 8 of the
+        // FirmsBase Integration Platform mission —
+        // integration_connection_health (a brand-new genuine
+        // tenant-owned table, RLS prepared and FORCE-activated in the
+        // same migration) added directly to PREPARED_TABLES, so it is
+        // classified DirectTenant via fullTableInventory(); the
+        // DirectTenant count and the overall table-inventory total both
+        // increase by one (123 -> 124, 219 -> 220).
+        $this->assertSame(124, $summary[TenantOwnershipClassification::DirectTenant->value]);
         $this->assertSame(24, $summary[TenantOwnershipClassification::InheritedTenant->value]);
         $this->assertSame(3, $summary[TenantOwnershipClassification::Pivot->value]);
         $this->assertSame(10, $summary[TenantOwnershipClassification::Hybrid->value]);
@@ -534,7 +548,12 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertSame(1, $summary[TenantOwnershipClassification::RootTenant->value]);
         $this->assertSame(1, $summary[TenantOwnershipClassification::Uncertain->value]);
 
-        $this->assertSame(221, array_sum($summary));
+        // Overall total increases in step with the DirectTenant bump
+        // above (221 -> 222) — Stage B Checkpoint 8 adds exactly one
+        // new table to the inventory (integration_connection_health),
+        // classified DirectTenant, with no other classification bucket
+        // affected.
+        $this->assertSame(222, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void
