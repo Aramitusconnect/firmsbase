@@ -24,6 +24,7 @@ use App\Integrations\Services\SyncItemService;
 use App\Integrations\Support\OutboundProviderHttpClient;
 use App\Jobs\SyncRetryPollJob;
 use App\Models\Firm;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -169,6 +170,24 @@ class SyncRetryPollJobTest extends TestCase
     private function runJob(Firm $firm): void
     {
         $job = new SyncRetryPollJob($firm->id, 25);
+        $job->handle(
+            app(SyncItemService::class),
+            app(IntegrationExternalMappingService::class),
+            app(ProviderRegistry::class),
+            app(OutboundProviderHttpClient::class),
+            app(HealthStateService::class),
+        );
+    }
+
+    /**
+     * Identical wiring to runJob() above, but with an explicit,
+     * non-default batchSize — needed by the claim-limit-exact test,
+     * which must control this job-level property directly rather than
+     * relying on the fixed 25 runJob() always uses.
+     */
+    private function runJobWithBatchSize(Firm $firm, int $batchSize): void
+    {
+        $job = new SyncRetryPollJob($firm->id, $batchSize);
         $job->handle(
             app(SyncItemService::class),
             app(IntegrationExternalMappingService::class),
@@ -568,5 +587,326 @@ class SyncRetryPollJobTest extends TestCase
         $health = $this->runWithFirmContext($firm, fn () => DB::table('integration_connection_health')->where('firm_integration_id', $connection->id)->first());
         $this->assertSame('credential_error', $health->last_failure_category);
         $this->assertSame('action_required', $health->summary_state);
+    }
+
+    // ==============================================================
+    // Additive regression coverage — checkpoint-08-sync-item-timestamp-
+    // remediation, Agent E's independent review verdict
+    // (reviews/checkpoint-08-sync-item-timestamp-remediation/
+    // agent-e-independent-review.md §7/§8): the underlying claimForRetry()
+    // timestamp-precision race is already fixed (commit fa7f21c, now()
+    // -> statement_timestamp()) and proven fixed by the precision test
+    // above, but the mission's own required regression-test list named
+    // three specific properties still unproven in this file. The three
+    // tests below close exactly those gaps — no production code changes.
+    // ==============================================================
+
+    // ------------------------------------------------------------
+    // Mission item #3 — exact eligibility boundary is inclusive.
+    // Mirrors IntegrationOutboxTimestampPrecisionTest's Test 11
+    // (test_a_row_due_before_the_true_comparison_instant_is_correctly_claimable_under_literal_construction):
+    // fully clock-independent, literal-value predicate proof. Never
+    // relies on Carbon::setTestNow() (it has zero effect on this raw-SQL
+    // comparison — claimForRetry()'s predicate is evaluated entirely in
+    // Postgres against statement_timestamp(), never PHP's Carbon/now()),
+    // and never relies on a live statement_timestamp() read racing a
+    // chosen instant (which the EXISTING precision test above already
+    // covers, and which can only prove "time has passed", never "exact
+    // equality is included").
+    // ------------------------------------------------------------
+
+    public function test_next_attempt_at_exactly_equal_to_the_comparison_instant_is_claimable_under_literal_construction(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+        $run = $this->terminalRun($firm, $connection);
+
+        $item = $this->runWithFirmContext($firm, fn () => IntegrationSyncItem::factory()
+            ->forSyncRun($run)
+            ->failedRetryable()
+            ->create(['next_attempt_at' => now()->addHour()]));
+
+        $this->runWithFirmContext($firm, function () use ($item) {
+            // Deliberately chosen literal values — no clock dependency
+            // at all. next_attempt_at is a timestamp(0) column (same
+            // precision as integration_outbox_events.next_attempt_at);
+            // Postgres rounds .700000 UP to timestamp(0), i.e. this
+            // literal write is stored as 12:00:01.
+            DB::statement(
+                "UPDATE integration_sync_items SET next_attempt_at = TIMESTAMP '2026-01-01 12:00:00.700000' WHERE id = ?",
+                [$item->id]
+            );
+
+            $eligibleAt090 = DB::selectOne(
+                "SELECT (next_attempt_at <= TIMESTAMP '2026-01-01 12:00:00.900000') AS eligible FROM integration_sync_items WHERE id = ?",
+                [$item->id]
+            )->eligible;
+
+            $this->assertFalse(
+                (bool) $eligibleAt090,
+                'A next_attempt_at stored as 12:00:01 (rounded up from .700000) must not read as <= 12:00:00.900000 — this pins the exact, deterministic literal-value comparison claimForRetry()\'s predicate relies on, mirroring how IntegrationOutboxTimestampPrecisionTest\'s Test 11 pins the identical comparison for the outbox table.'
+            );
+
+            $eligibleAtExactEquality = DB::selectOne(
+                "SELECT (next_attempt_at <= TIMESTAMP '2026-01-01 12:00:01.000000') AS eligible FROM integration_sync_items WHERE id = ?",
+                [$item->id]
+            )->eligible;
+
+            $this->assertTrue(
+                (bool) $eligibleAtExactEquality,
+                'A next_attempt_at stored as exactly 12:00:01 must read as <= a comparison instant of exactly 12:00:01 — claimForRetry()\'s next_attempt_at <= statement_timestamp() predicate is <=-inclusive AT the boundary, not merely eventually-true-once-time-passes-it, independent of clock source.'
+            );
+
+            // One microsecond-equivalent EARLIER than the stored value
+            // must NOT be eligible — proves this is a genuine boundary
+            // proof (both directions), not an assertion that would
+            // trivially pass for any operator.
+            $eligibleJustBefore = DB::selectOne(
+                "SELECT (next_attempt_at <= TIMESTAMP '2026-01-01 12:00:00.999999') AS eligible FROM integration_sync_items WHERE id = ?",
+                [$item->id]
+            )->eligible;
+
+            $this->assertFalse(
+                (bool) $eligibleJustBefore,
+                'A comparison instant even 1 microsecond before the stored 12:00:01 value must NOT be eligible — confirms the boundary is exact, not a wide/rounded window.'
+            );
+        });
+
+        // Complementary black-box proof: the REAL, unmodified
+        // claimForRetry() must agree with the literal predicate proof
+        // above at a genuine, wide-margin past-due state (statement_
+        // timestamp() cannot itself be pinned to an arbitrary literal
+        // instant from PHP, so this half of the proof uses the file's
+        // own established wide-margin past-due fixture shape rather
+        // than attempting to reproduce exact equality against a live
+        // clock).
+        $this->runWithFirmContext($firm, function () use ($item) {
+            DB::table('integration_sync_items')->where('id', $item->id)->update([
+                'next_attempt_at' => now()->subMinutes(5),
+            ]);
+        });
+
+        $claimed = $this->runWithFirmContext($firm, fn () => (new SyncItemService())->claimForRetry($item->id));
+
+        $this->assertNotNull($claimed, 'The real claimForRetry() must agree with the literal predicate proof above: a due row is claimable.');
+        $this->assertSame(SyncItemStatus::Retrying, $claimed->status);
+    }
+
+    // ------------------------------------------------------------
+    // Mission item #10 / Agent E's required "Test B" — two genuinely
+    // concurrent PHYSICAL database connections cannot both claim the
+    // same item. claimForRetry() is a single-row, primary-key-targeted
+    // UPDATE (not a SKIP LOCKED CTE like IntegrationOutboxEventService
+    // ::claim()), so a second connection racing the SAME row BLOCKS on
+    // Postgres's native row lock rather than skipping it — the outbox's
+    // exact SKIP-LOCKED technique (IntegrationOutboxConcurrentClaimTest)
+    // cannot be copied verbatim (Agent D's test-gap plan §3 item 5).
+    // A short lock_timeout on the racing (worker_b) connection turns
+    // that indefinite block into a deterministic, bounded failure
+    // instead of hanging the suite — no sleep()/usleep() anywhere in
+    // this test. worker_b is the exact second-connection boilerplate
+    // this file's own tearDown() has always anticipated (see the class
+    // docblock and tearDown() above) but which, until now, no test
+    // method here ever actually opened.
+    // ------------------------------------------------------------
+
+    public function test_two_concurrent_physical_connections_racing_the_same_failed_retryable_row_result_in_exactly_one_successful_claim(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+        $run = $this->terminalRun($firm, $connection);
+
+        $item = $this->runWithFirmContext($firm, fn () => IntegrationSyncItem::factory()
+            ->forSyncRun($run)
+            ->failedRetryable()
+            ->create(['next_attempt_at' => now()->subMinute()]));
+
+        // Register a second, independent Laravel DB connection pointing
+        // at the SAME physical database/credentials as the default
+        // 'pgsql' connection, purely at test runtime — identical
+        // boilerplate to IntegrationOutboxConcurrentClaimTest, now
+        // actually exercised for claimForRetry() rather than left dead.
+        config(['database.connections.worker_b' => config('database.connections.pgsql')]);
+        DB::purge('worker_b');
+
+        $lockTimeoutMessage = null;
+
+        try {
+            // --- Connection A (default) --------------------------------
+            // Explicit DB::beginTransaction() (not the auto-committing
+            // DB::transaction(closure)) — the transaction must stay open
+            // across the switch to connection B, mirroring both the
+            // hard-prerequisite precision test above and
+            // IntegrationOutboxConcurrentClaimTest's own is_local=false
+            // set_config convention.
+            DB::beginTransaction();
+            DB::select('select set_config(?, ?, ?)', ['app.current_firm_id', (string) $firm->id, false]);
+
+            $claimedA = (new SyncItemService())->claimForRetry($item->id);
+
+            $this->assertNotNull($claimedA, 'Connection A must successfully claim the single failed_retryable row.');
+            $this->assertSame(SyncItemStatus::Retrying, $claimedA->status);
+
+            // Connection A's transaction is DELIBERATELY left open
+            // (uncommitted) here — this is the entire point of the
+            // test: the row's UPDATE lock, acquired by A's own claim,
+            // is still held by an in-flight, uncommitted transaction
+            // while connection B attempts to claim the SAME row.
+
+            // --- Connection B (worker_b) ------------------------------
+            DB::connection('worker_b')->beginTransaction();
+            DB::connection('worker_b')->select('select set_config(?, ?, ?)', ['app.current_firm_id', (string) $firm->id, false]);
+
+            // A short, explicit lock_timeout — B's attempt below is
+            // guaranteed to either succeed immediately (it must not,
+            // since A holds the row lock) or fail deterministically
+            // within this bound. This is what makes the test
+            // deterministic without any sleep()/usleep() wait.
+            DB::connection('worker_b')->statement("SET LOCAL lock_timeout = '200ms'");
+
+            try {
+                // The EXACT SQL text claimForRetry() executes (copied
+                // verbatim as of this file's writing — if
+                // claimForRetry()'s SQL changes, this literal copy must
+                // be updated to match), issued directly against
+                // connection B, since SyncItemService itself always
+                // executes against the default connection via the DB
+                // facade.
+                DB::connection('worker_b')->selectOne(
+                    'UPDATE integration_sync_items '.
+                    "SET status = 'retrying' ".
+                    "WHERE id = ? AND status = 'failed_retryable' AND next_attempt_at <= statement_timestamp() ".
+                    'RETURNING *',
+                    [$item->id]
+                );
+
+                $this->fail('Connection B\'s claim attempt must be blocked by connection A\'s held row lock and time out — it must never succeed while A\'s transaction is still open.');
+            } catch (QueryException $e) {
+                $lockTimeoutMessage = strtolower($e->getMessage());
+            }
+
+            $this->assertStringContainsString(
+                'lock timeout',
+                $lockTimeoutMessage,
+                'Connection B\'s claim attempt must fail specifically with PostgreSQL\'s lock_timeout error ("canceling statement due to lock timeout") — proving it was genuinely blocked by connection A\'s held row lock, not skipped, not a different/unrelated error.'
+            );
+
+            // B's failed statement poisons its own transaction — roll
+            // it back to release connection B cleanly. B never wrote
+            // anything (the UPDATE never completed).
+            DB::connection('worker_b')->rollBack();
+
+            // Now commit connection A's transaction — its claim is the
+            // only one that ever succeeded.
+            DB::commit();
+        } finally {
+            while (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+            if (array_key_exists('worker_b', config('database.connections', []))) {
+                while (DB::connection('worker_b')->transactionLevel() > 0) {
+                    DB::connection('worker_b')->rollBack();
+                }
+            }
+            DB::select('select set_config(?, ?, ?)', ['app.current_firm_id', '', false]);
+        }
+
+        // Fresh read, after A's commit, on a plain, uninvolved
+        // connection (no open transaction) — proves the final state
+        // reflects exactly one successful claim.
+        $final = $this->itemRow($firm, $item->id);
+        $this->assertSame('retrying', $final->status, 'The final state must be retrying — connection A\'s claim, and only connection A\'s claim, took effect.');
+
+        // Complementary, cheaper SEQUENTIAL proof of the same
+        // underlying guarantee (Agent D's test-gap plan §5, proposed
+        // Test B step 8): calling claimForRetry() a SECOND time on the
+        // SAME id, now that A's claim has committed and moved the row
+        // off failed_retryable, must return null — the row can never
+        // be claimed twice, concurrently OR sequentially.
+        $secondClaim = $this->runWithFirmContext($firm, fn () => (new SyncItemService())->claimForRetry($item->id));
+        $this->assertNull($secondClaim, 'A row already claimed (no longer failed_retryable) must never be claimable again — sequential double-claim must also be impossible.');
+    }
+
+    // ------------------------------------------------------------
+    // Mission item #9 / Agent E's required "Test C" — SyncRetryPollJob's
+    // claim limit (batchSize) is respected EXACTLY, not approximately.
+    // This is a job-level property (the candidate scan's
+    // ->limit($this->batchSize)), not a claimForRetry()-level property,
+    // so this test targets the job directly with an explicit,
+    // non-default batchSize — mirroring IntegrationOutboxTimestamp
+    // PrecisionTest::test_claiming_with_a_limit_below_the_eligible_pool_size_claims_exactly_the_limit's
+    // two-call structure. Uses pull-shaped items (no local_type/
+    // local_id) throughout, so every claimed item resolves
+    // deterministically and provider-independently via the honest-
+    // failure path, keeping this purely a counting proof with zero
+    // timing dependency.
+    // ------------------------------------------------------------
+
+    public function test_the_job_claims_exactly_batchsize_items_and_leaves_the_remainder_untouched_until_a_second_run(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+        $run = $this->terminalRun($firm, $connection);
+
+        $items = [];
+        for ($i = 0; $i < 5; $i++) {
+            $items[] = $this->runWithFirmContext($firm, fn () => IntegrationSyncItem::factory()
+                ->forSyncRun($run)
+                ->failedRetryable()
+                ->create([
+                    // Distinct, deterministic next_attempt_at values —
+                    // avoids any ambiguity from same-instant ties in the
+                    // job's ORDER BY next_attempt_at candidate scan.
+                    'next_attempt_at' => now()->subMinutes(10 - $i),
+                    'local_type' => null,
+                    'local_id' => null,
+                ]));
+        }
+
+        $before = [];
+        foreach ($items as $item) {
+            $before[$item->id] = $this->itemRow($firm, $item->id);
+        }
+
+        $this->runJobWithBatchSize($firm, 3);
+
+        $after = [];
+        foreach ($items as $item) {
+            $after[$item->id] = $this->itemRow($firm, $item->id);
+        }
+
+        $resolvedIds = array_keys(array_filter($after, fn ($row) => $row->status !== 'failed_retryable'));
+        $untouchedIds = array_keys(array_filter($after, fn ($row) => $row->status === 'failed_retryable'));
+
+        $this->assertCount(3, $resolvedIds, 'A run with an explicit batchSize=3 against a pool of 5 eligible items must claim/resolve EXACTLY 3 — not fewer, not more.');
+        $this->assertCount(2, $untouchedIds, 'The remaining 2 eligible items must be left completely untouched by a batchSize=3 run.');
+
+        foreach ($resolvedIds as $id) {
+            $this->assertSame('failed_permanent', $after[$id]->status, 'Each claimed pull-shaped item must resolve via the honest-failure path.');
+            $this->assertSame('pull_item_retry_not_supported_generically', $after[$id]->last_error);
+        }
+
+        foreach ($untouchedIds as $id) {
+            $this->assertSame(
+                Carbon::parse($before[$id]->next_attempt_at)->toDateTimeString(),
+                Carbon::parse($after[$id]->next_attempt_at)->toDateTimeString(),
+                'An untouched remainder item\'s next_attempt_at must be completely unchanged by a run that never claimed it.'
+            );
+            $this->assertSame(
+                (int) $before[$id]->attempt_count,
+                (int) $after[$id]->attempt_count,
+                'An untouched remainder item\'s attempt_count must be unchanged.'
+            );
+        }
+
+        // Run the job a SECOND time (same batchSize=3, only 2 eligible
+        // remain) — proves the first call did not over-claim past its
+        // own limit and the second call picks up exactly the rest.
+        $this->runJobWithBatchSize($firm, 3);
+
+        foreach ($untouchedIds as $id) {
+            $fresh = $this->itemRow($firm, $id);
+            $this->assertSame('failed_permanent', $fresh->status, 'The second run must resolve the previously-untouched remainder.');
+        }
     }
 }
