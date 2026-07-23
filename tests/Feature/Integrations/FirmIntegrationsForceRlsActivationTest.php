@@ -178,6 +178,43 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
         'integration_inbound_webhook_events',
     ];
 
+    /**
+     * POST-CHECKPOINT-8 UPDATE: Checkpoint 8 ("jobs, retries, health,
+     * dispatch, retention",
+     * reviews/checkpoint-08/agent-8h-architecture-security-review.md §1
+     * item 6) added a FIFTH independent dependency chain on
+     * firm_integrations — integration_connection_health (see
+     * database/migrations/2026_09_07_070001_create_integration_connection_health_table.php)
+     * carries a real composite FK (firm_id, firm_integration_id) ->
+     * firm_integrations(firm_id, id) with cascadeOnDelete(), identical in
+     * shape to integration_credentials'/integration_oauth_states' own
+     * composite FK. Unlike Checkpoint 7's
+     * integration_webhook_routing_index, it carries no FK into
+     * integration_providers at all. This test now also rolls back this
+     * 2-migration Checkpoint 8 wave FIRST — before the Checkpoint 7
+     * whole-wave block, since Checkpoint 8 is the newest layer — in exact
+     * reverse of its own creation order (RLS-prep down(), then
+     * create-table down()), then reapplies it LAST, after the Checkpoint
+     * 7 whole-wave block, in forward (creation) order. Order between this
+     * Checkpoint 8 wave and the pre-existing integration_credentials /
+     * integration_oauth_states / Checkpoint 6 / Checkpoint 7 blocks does
+     * not matter to each other, only each independently (or, for
+     * Checkpoint 7, additionally) references firm_integrations.
+     *
+     * @var list<string>
+     */
+    private const CP8_WHOLE_WAVE_MIGRATION_PATHS = [
+        'database/migrations/2026_09_07_070001_create_integration_connection_health_table.php',
+        'database/migrations/2026_09_07_070002_prepare_row_level_security_and_force_rls_on_integration_connection_health_table.php',
+    ];
+
+    /**
+     * @var list<string>
+     */
+    private const CP8_WHOLE_WAVE_TABLES = [
+        'integration_connection_health',
+    ];
+
     // ------------------------------------------------------------
     // 1. Schema correctness
     // ------------------------------------------------------------
@@ -786,6 +823,29 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
             'integration_sync_runs.triggering_webhook_event_id (Checkpoint 7) must exist before this test begins.'
         );
 
+        // Confirm the Checkpoint 8 whole-wave tables' pre-rollback
+        // existence too (a FIFTH, independent dependency chain on
+        // firm_integrations).
+        foreach (self::CP8_WHOLE_WAVE_MIGRATION_PATHS as $path) {
+            $this->assertFileExists(base_path($path));
+        }
+        foreach (self::CP8_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 8) must exist before this test begins, since it is now also one of firm_integrations' real FK dependents.");
+        }
+
+        // 1a-pre. Roll back the Checkpoint 8 whole-wave dependency chain
+        // FIRST — before the Checkpoint 7 whole-wave block below, since
+        // Checkpoint 8 is the newest layer (see
+        // CP8_WHOLE_WAVE_MIGRATION_PATHS docblock). Rolled back in exact
+        // reverse of its own creation order.
+        foreach (array_reverse(self::CP8_WHOLE_WAVE_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 8 whole-wave) failed: ".Artisan::output());
+        }
+        foreach (self::CP8_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 8) must not survive its whole-wave rollback.");
+        }
+
         // 1a. Roll back the Checkpoint 7 whole-wave dependency chain
         // FIRST — before the Checkpoint 6 whole-wave block below, since
         // Checkpoint 7 is the newest layer and its own trailing
@@ -957,6 +1017,17 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
             Schema::hasColumn('integration_sync_runs', 'triggering_webhook_event_id'),
             'integration_sync_runs.triggering_webhook_event_id must be restored by the Checkpoint 7 whole-wave reapplication.'
         );
+
+        // 5d. Reapply the Checkpoint 8 whole-wave dependency chain LAST —
+        // after the Checkpoint 7 whole-wave block, since Checkpoint 8 is
+        // the newest layer — in its own forward (creation) order.
+        foreach (self::CP8_WHOLE_WAVE_MIGRATION_PATHS as $path) {
+            $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 8 whole-wave) failed: ".Artisan::output());
+        }
+        foreach (self::CP8_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 8) must be restored by the whole-wave reapplication.");
+        }
 
         // 6. Schema restored exactly.
         $this->assertTrue(Schema::hasTable('firm_integrations'));
@@ -1146,6 +1217,9 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
             Schema::hasColumn('integration_sync_runs', 'triggering_webhook_event_id'),
             'integration_sync_runs.triggering_webhook_event_id (Checkpoint 7) must exist before this test begins.'
         );
+        foreach (self::CP8_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 8) must exist before this test begins, since it is now also one of firm_integrations' real FK dependents.");
+        }
 
         $rlsMigration = include base_path(self::RLS_MIGRATION_PATH);
         $tableMigration = include base_path(self::TABLE_MIGRATION_PATH);
@@ -1167,6 +1241,24 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
             static fn (string $path) => include base_path($path),
             self::CP7_WHOLE_WAVE_MIGRATION_PATHS,
         );
+
+        // Checkpoint 8 whole-wave migration objects, in creation order.
+        $cp8Migrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::CP8_WHOLE_WAVE_MIGRATION_PATHS,
+        );
+
+        // Tear down the Checkpoint 8 whole-wave dependency chain FIRST —
+        // before the Checkpoint 7 whole-wave teardown below, since
+        // Checkpoint 8 is the newest layer (see
+        // CP8_WHOLE_WAVE_MIGRATION_PATHS docblock). Torn down as a unit,
+        // in exact reverse of its own creation order.
+        foreach (array_reverse($cp8Migrations) as $migration) {
+            $migration->down();
+        }
+        foreach (self::CP8_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 8) must be fully dropped before the Checkpoint 7 whole-wave teardown can succeed.");
+        }
 
         // Tear down the Checkpoint 7 whole-wave dependency chain FIRST —
         // before the Checkpoint 6 whole-wave teardown below, since
@@ -1318,6 +1410,16 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
             Schema::hasColumn('integration_sync_runs', 'triggering_webhook_event_id'),
             'integration_sync_runs.triggering_webhook_event_id must be restored after the Checkpoint 7 whole-wave up().'
         );
+
+        // Rebuild the Checkpoint 8 whole-wave dependency chain LAST —
+        // after the Checkpoint 7 whole-wave block, since Checkpoint 8 is
+        // the newest layer — in its own forward (creation) order.
+        foreach ($cp8Migrations as $migration) {
+            $migration->up();
+        }
+        foreach (self::CP8_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 8) must be fully restored after up().");
+        }
     }
 
     // ------------------------------------------------------------

@@ -93,9 +93,17 @@ class SecretPatternScanTest extends TestCase
 
         // Section 39A-4B added two reviewed, read-only reporting
         // commands; neither writes/seeds any production data row.
+        // Checkpoint 8 added three further reviewed commands (outbox
+        // dispatch, retention sweep, and retry poll); each only
+        // dispatches jobs that process/sweep existing integration data
+        // (or, for the sweep command, deletes expired rows directly) —
+        // none creates demo/seed data of any kind.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
+            'DispatchOutboxEventsCommand.php',
+            'SweepIntegrationRetentionCommand.php',
+            'SyncRetryPollCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

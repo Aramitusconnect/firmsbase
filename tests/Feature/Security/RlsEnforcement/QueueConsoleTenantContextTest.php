@@ -47,11 +47,20 @@ class QueueConsoleTenantContextTest extends TestCase
         // reporting commands (schema tenant-firewall + RLS enforcement
         // report). Neither iterates tenant-owned data without explicit
         // firm context — both operate purely on schema/catalog
-        // metadata. Any OTHER command appearing here has not been
-        // reviewed for the silent-bypass risk this test exists to catch.
+        // metadata. Checkpoint 8 added three further reviewed commands
+        // (outbox dispatch, retention sweep, and retry poll) that each
+        // iterate tenant-owned data — all three do so via the
+        // TenantAwareJobContext::runInFirmContext() pattern this test
+        // documents, scoping every pass to an explicit firm rather than
+        // reading across firms unscoped. Any OTHER command appearing
+        // here has not been reviewed for the silent-bypass risk this
+        // test exists to catch.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
+            'DispatchOutboxEventsCommand.php',
+            'SweepIntegrationRetentionCommand.php',
+            'SyncRetryPollCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

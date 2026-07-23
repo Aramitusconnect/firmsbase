@@ -180,7 +180,7 @@ class RlsForceActivationFirewallTest extends TestCase
             // same reason — this test's own scope (39A-3A) only asserts
             // clients here — additive only, no existing assertion
             // removed or weakened.
-            'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events',
+            'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
