@@ -39,6 +39,21 @@ use Illuminate\Support\Facades\DB;
  * FORCE ROW LEVEL SECURITY policy requires (app.current_firm_id — see
  * TenantContextService), and commits — independently of, and before,
  * whatever happens next on the ambient connection/transaction.
+ *
+ * Precondition callers must honor: $firm must already be committed and
+ * visible to a genuinely separate Postgres session at call time. Two
+ * independent database sessions can never see each other's uncommitted
+ * rows — if $firm was created earlier in the SAME still-open ambient
+ * transaction as this call (never true for any real production caller,
+ * since a Firm always predates any request that could deny an action
+ * against it, but true by default for RefreshDatabase-based tests
+ * unless the fixture is deliberately committed on a separate connection
+ * first), this insert fails with a timeline_events_firm_id_foreign FK
+ * violation instead of producing the durable row this flag exists to
+ * guarantee. That failure still propagates and still denies the
+ * underlying action — it is not an authorization bypass — but it masks
+ * the intended denial exception/message and silently drops the audit
+ * row.
  */
 class TimelineEventRecorder
 {
