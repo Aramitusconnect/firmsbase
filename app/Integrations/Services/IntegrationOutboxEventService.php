@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Integrations\Services;
 
 use App\Integrations\Data\SanitizedPayloadReference;
+use App\Integrations\Enums\OutboxEventStatus;
+use App\Integrations\Enums\RequeueIneligibilityReason;
 use App\Integrations\Models\IntegrationOutboxEvent;
 use App\Models\Firm;
 use App\Services\TimelineEventRecorder;
@@ -448,5 +450,91 @@ final class IntegrationOutboxEventService
         );
 
         return $requeued;
+    }
+
+    /**
+     * Checkpoint 10 addition (frozen-design-post-security-review.md §5;
+     * agent-10h-architecture-security-review.md §4). Read-only,
+     * non-authoritative diagnostic re-check — NEVER a second guarded
+     * UPDATE, NEVER an automatic retry. Mirrors requeue()'s own
+     * WHERE-clause order EXACTLY (firm ownership/existence -> correct
+     * terminal status (dead_lettered) -> not yet at the requeue ceiling
+     * -> not superseded by a newer event for the same logical operation
+     * -> connection not disconnected -> credential not revoked) so this
+     * diagnostic can never disagree with the real guard about which
+     * condition governs. Call site: the requeue action handler, invoked
+     * ONLY when requeue() itself already returned null.
+     *
+     * Returns null (a rare race — the row now appears eligible) when
+     * every clause above passes; the caller must render this as a
+     * generic "please try again," never a fabricated specific reason.
+     */
+    public function diagnoseRequeueIneligibility(int $id, int $firmId): ?RequeueIneligibilityReason
+    {
+        $event = DB::table('integration_outbox_events')
+            ->where('id', $id)
+            ->where('firm_id', $firmId)
+            ->first();
+
+        if ($event === null) {
+            return RequeueIneligibilityReason::NotFoundOrCrossFirm;
+        }
+
+        if ($event->status !== OutboxEventStatus::DeadLettered->value) {
+            return RequeueIneligibilityReason::NotEligibleStatus;
+        }
+
+        if ((int) $event->requeue_count >= (int) $event->max_requeues) {
+            return RequeueIneligibilityReason::RequeueCeilingReached;
+        }
+
+        $isSuperseded = (bool) DB::selectOne(
+            'SELECT EXISTS ('.
+            '  SELECT 1 FROM integration_outbox_events newer '.
+            '  WHERE newer.firm_id = ? '.
+            '    AND newer.firm_integration_id IS NOT DISTINCT FROM ? '.
+            '    AND newer.resource_type IS NOT DISTINCT FROM ? '.
+            '    AND newer.resource_id IS NOT DISTINCT FROM ? '.
+            '    AND newer.id <> ? '.
+            '    AND newer.created_at > ? '.
+            "    AND newer.status IN ('pending', 'processing', 'completed')".
+            ') AS exists_flag',
+            [
+                $event->firm_id, $event->firm_integration_id, $event->resource_type,
+                $event->resource_id, $event->id, $event->created_at,
+            ]
+        )->exists_flag;
+
+        if ($isSuperseded) {
+            return RequeueIneligibilityReason::Superseded;
+        }
+
+        if ($event->firm_integration_id !== null) {
+            $connectionUsable = (bool) DB::selectOne(
+                'SELECT EXISTS ('.
+                '  SELECT 1 FROM firm_integrations fi '.
+                "  WHERE fi.id = ? AND fi.status <> 'disconnected'".
+                ') AS exists_flag',
+                [$event->firm_integration_id]
+            )->exists_flag;
+
+            if (! $connectionUsable) {
+                return RequeueIneligibilityReason::ConnectionDisconnected;
+            }
+
+            $hasActiveCredential = (bool) DB::selectOne(
+                'SELECT EXISTS ('.
+                '  SELECT 1 FROM integration_credentials ic '.
+                "  WHERE ic.firm_integration_id = ? AND ic.status = 'active'".
+                ') AS exists_flag',
+                [$event->firm_integration_id]
+            )->exists_flag;
+
+            if (! $hasActiveCredential) {
+                return RequeueIneligibilityReason::CredentialRevoked;
+            }
+        }
+
+        return null;
     }
 }

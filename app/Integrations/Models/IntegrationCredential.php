@@ -88,8 +88,20 @@ class IntegrationCredential extends Model
         'refresh_failure_reason',
     ];
 
+    /**
+     * Checkpoint 10 addition (frozen-design-post-security-review.md §8;
+     * agent-10h-architecture-security-review.md §7): second, independent
+     * instance of the exact gap Checkpoint 9 fixed on
+     * FirmIntegration.webhook_routing_token. One-line, additive-only
+     * defense-in-depth fix — this column is confirmed structurally inert
+     * today (no Checkpoint 4-9 code path ever writes a row with
+     * credential_type='webhook_signing_secret'), but Checkpoint 10 is the
+     * first checkpoint to put IntegrationCredential-adjacent data in
+     * front of a UI layer at all.
+     */
     protected $hidden = [
         'encrypted_payload_ciphertext',
+        'webhook_routing_token',
     ];
 
     /**

@@ -205,4 +205,75 @@ final class IntegrationConflictService
 
         return $fresh;
     }
+
+    /**
+     * Checkpoint 10 addition (frozen-design-post-security-review.md §7;
+     * agent-10h-architecture-security-review.md §6). The first half of
+     * the two-actor dual-approval flow required for privileged/flagged
+     * conflicts, since transitionStatus()'s own inline distinctness
+     * check (lines above) makes a naive single-actor resolved-shaped
+     * transition structurally impossible for those rows.
+     *
+     * Requires $conflict->isOpen() (same precondition as
+     * transitionStatus()) and $proposedOutcome->isResolvedShaped()
+     * (rejects AwaitingReview itself as a "proposed outcome" — it is not
+     * a real resolution shape). Writes status = AwaitingReview (the
+     * already-tested, non-resolved-shaped, no-actor-required transition
+     * shape — see IntegrationConflictServiceTest's
+     * test_transition_status_allows_detected_to_awaiting_review_with_no_actor_required)
+     * plus resolved_by_firm_user_id = $proposingFirmUserId —
+     * DELIBERATELY bypassing transitionStatus()'s resolved-shape branch
+     * for this proposal step only, since the row remains
+     * AwaitingReview/open, not resolved, after this call.
+     * transitionStatus()'s own distinctness check remains the sole,
+     * unmodified, un-bypassable enforcement for the LATER approval step
+     * (Actor B's "Approve Resolution" action, which calls
+     * transitionStatus() directly, unchanged).
+     *
+     * Only applicable to privileged/flagged conflicts — for
+     * non-privileged, non-flagged conflicts, a single actor continues to
+     * call transitionStatus() directly, unchanged.
+     *
+     * Actor authority (assertCanConfigure()) and entitlement
+     * (assertEnabled()) are checked by the CALLER before invocation,
+     * never inside this method — mirrors the frozen design's identical
+     * ruling for requeue()/requeueFromFailedPermanent().
+     */
+    public function proposeResolution(
+        IntegrationConflict $conflict,
+        ConflictStatus $proposedOutcome,
+        int $proposingFirmUserId,
+        ?string $resolutionNote = null,
+    ): IntegrationConflict {
+        if (! $conflict->isOpen()) {
+            throw new RuntimeException(
+                "Conflict {$conflict->id} cannot propose a resolution: it is not currently open ".
+                "(current status: {$conflict->status->value})."
+            );
+        }
+
+        if (! $proposedOutcome->isResolvedShaped()) {
+            throw new RuntimeException(
+                "Conflict {$conflict->id} cannot propose {$proposedOutcome->value}: it is not a resolved-shaped outcome."
+            );
+        }
+
+        $conflict->update([
+            'status' => ConflictStatus::AwaitingReview,
+            'resolved_by_firm_user_id' => $proposingFirmUserId,
+            'resolution_note' => $resolutionNote ?? $conflict->resolution_note,
+        ]);
+
+        $fresh = $conflict->fresh();
+
+        $proposingActor = FirmUser::query()->find($proposingFirmUserId)?->user;
+
+        $this->events->record($fresh->firm, 'integration_conflict.resolution_proposed', $fresh, $proposingActor, [
+            'integration_conflict_id' => $fresh->id,
+            'proposed_outcome' => $proposedOutcome->value,
+            'resolved_by_firm_user_id' => $proposingFirmUserId,
+        ]);
+
+        return $fresh;
+    }
 }

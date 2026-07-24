@@ -6,6 +6,7 @@ namespace Tests\Feature\Integrations;
 
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\OutboxEventStatus;
+use App\Integrations\Enums\RequeueIneligibilityReason;
 use App\Integrations\Enums\SyncItemStatus;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationCredential;
@@ -416,5 +417,261 @@ class IntegrationRequeueServiceTest extends TestCase
             }
         }
         $this->assertSame(1, $occurrences);
+    }
+
+    // ==============================================================
+    // Part 3: Checkpoint 10 addition — diagnoseRequeueIneligibility()
+    // on both services (frozen design §5; agent-10h §4). One test per
+    // RequeueIneligibilityReason case, plus the still-eligible
+    // null-return edge case. Read-only, non-authoritative — never
+    // gates/retries the actual requeue; every test below confirms the
+    // REAL requeue() call already returned null before consulting the
+    // diagnostic (except the null-return/not-found cases, which don't
+    // require a prior requeue() call at all).
+    // ==============================================================
+
+    public function test_outbox_diagnostic_returns_null_for_the_still_eligible_null_return_edge_case(): void
+    {
+        $firm = Firm::factory()->create();
+        $connection = $this->connection($firm);
+        $this->activeCredential($firm, $connection);
+        $event = $this->createWithFirmContext($firm, fn () => IntegrationOutboxEvent::factory()->forFirmIntegration($connection)->deadLettered()->create());
+
+        $reason = $this->runWithFirmContext($firm, fn () => $this->outboxService->diagnoseRequeueIneligibility($event->id, $firm->id));
+
+        $this->assertNull($reason, 'A genuinely-eligible dead-lettered event must diagnose as null.');
+    }
+
+    public function test_outbox_diagnostic_returns_not_found_or_cross_firm(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $connectionB = $this->connection($firmB);
+        $this->activeCredential($firmB, $connectionB);
+        $eventB = $this->createWithFirmContext($firmB, fn () => IntegrationOutboxEvent::factory()->forFirmIntegration($connectionB)->deadLettered()->create());
+
+        $reason = $this->runWithFirmContext($firmA, fn () => $this->outboxService->diagnoseRequeueIneligibility($eventB->id, $firmA->id));
+
+        $this->assertSame(RequeueIneligibilityReason::NotFoundOrCrossFirm, $reason);
+    }
+
+    public function test_outbox_diagnostic_returns_not_eligible_status(): void
+    {
+        $firm = Firm::factory()->create();
+        $connection = $this->connection($firm);
+        $this->activeCredential($firm, $connection);
+        $event = $this->createWithFirmContext($firm, fn () => IntegrationOutboxEvent::factory()->forFirmIntegration($connection)->create()); // pending
+
+        $result = $this->runWithFirmContext($firm, fn () => $this->outboxService->requeue($event->id, $firm->id, 'manual_retry'));
+        $this->assertNull($result);
+
+        $reason = $this->runWithFirmContext($firm, fn () => $this->outboxService->diagnoseRequeueIneligibility($event->id, $firm->id));
+        $this->assertSame(RequeueIneligibilityReason::NotEligibleStatus, $reason);
+    }
+
+    public function test_outbox_diagnostic_returns_requeue_ceiling_reached(): void
+    {
+        $firm = Firm::factory()->create();
+        $connection = $this->connection($firm);
+        $this->activeCredential($firm, $connection);
+        $event = $this->createWithFirmContext($firm, fn () => IntegrationOutboxEvent::factory()
+            ->forFirmIntegration($connection)->deadLettered()->create(['requeue_count' => 3, 'max_requeues' => 3]));
+
+        $result = $this->runWithFirmContext($firm, fn () => $this->outboxService->requeue($event->id, $firm->id, 'manual_retry'));
+        $this->assertNull($result);
+
+        $reason = $this->runWithFirmContext($firm, fn () => $this->outboxService->diagnoseRequeueIneligibility($event->id, $firm->id));
+        $this->assertSame(RequeueIneligibilityReason::RequeueCeilingReached, $reason);
+    }
+
+    public function test_outbox_diagnostic_returns_superseded(): void
+    {
+        $firm = Firm::factory()->create();
+        $connection = $this->connection($firm);
+        $this->activeCredential($firm, $connection);
+
+        $old = $this->createWithFirmContext($firm, fn () => IntegrationOutboxEvent::factory()
+            ->forFirmIntegration($connection)->deadLettered()
+            ->create(['resource_type' => 'contact', 'resource_id' => '1', 'created_at' => now()->subHour()]));
+        $this->createWithFirmContext($firm, fn () => IntegrationOutboxEvent::factory()
+            ->forFirmIntegration($connection)->completed()
+            ->create(['resource_type' => 'contact', 'resource_id' => '1', 'created_at' => now()]));
+
+        $result = $this->runWithFirmContext($firm, fn () => $this->outboxService->requeue($old->id, $firm->id, 'manual_retry'));
+        $this->assertNull($result);
+
+        $reason = $this->runWithFirmContext($firm, fn () => $this->outboxService->diagnoseRequeueIneligibility($old->id, $firm->id));
+        $this->assertSame(RequeueIneligibilityReason::Superseded, $reason);
+    }
+
+    public function test_outbox_diagnostic_returns_connection_disconnected(): void
+    {
+        $firm = Firm::factory()->create();
+        $connection = $this->connection($firm);
+        $this->activeCredential($firm, $connection);
+        $event = $this->createWithFirmContext($firm, fn () => IntegrationOutboxEvent::factory()->forFirmIntegration($connection)->deadLettered()->create());
+
+        $this->runWithFirmContext($firm, fn () => DB::table('firm_integrations')->where('id', $connection->id)->update(['status' => ConnectionStatus::Disconnected->value]));
+
+        $result = $this->runWithFirmContext($firm, fn () => $this->outboxService->requeue($event->id, $firm->id, 'manual_retry'));
+        $this->assertNull($result);
+
+        $reason = $this->runWithFirmContext($firm, fn () => $this->outboxService->diagnoseRequeueIneligibility($event->id, $firm->id));
+        $this->assertSame(RequeueIneligibilityReason::ConnectionDisconnected, $reason);
+    }
+
+    public function test_outbox_diagnostic_returns_credential_revoked(): void
+    {
+        $firm = Firm::factory()->create();
+        $connection = $this->connection($firm);
+        $credential = $this->activeCredential($firm, $connection);
+        $event = $this->createWithFirmContext($firm, fn () => IntegrationOutboxEvent::factory()->forFirmIntegration($connection)->deadLettered()->create());
+
+        $this->runWithFirmContext($firm, fn () => DB::table('integration_credentials')->where('id', $credential->id)->update(['status' => 'revoked']));
+
+        $result = $this->runWithFirmContext($firm, fn () => $this->outboxService->requeue($event->id, $firm->id, 'manual_retry'));
+        $this->assertNull($result);
+
+        $reason = $this->runWithFirmContext($firm, fn () => $this->outboxService->diagnoseRequeueIneligibility($event->id, $firm->id));
+        $this->assertSame(RequeueIneligibilityReason::CredentialRevoked, $reason);
+    }
+
+    public function test_sync_item_diagnostic_returns_null_for_the_still_eligible_null_return_edge_case(): void
+    {
+        $firm = Firm::factory()->create();
+        $connection = $this->connection($firm);
+        $this->activeCredential($firm, $connection);
+        $run = $this->syncRun($firm, $connection);
+        $item = $this->createWithFirmContext($firm, fn () => IntegrationSyncItem::factory()->forSyncRun($run)->failedPermanent()->create());
+
+        $reason = $this->runWithFirmContext($firm, fn () => $this->syncItemService->diagnoseRequeueIneligibility($item->id, $firm->id));
+
+        $this->assertNull($reason);
+    }
+
+    public function test_sync_item_diagnostic_returns_not_found_or_cross_firm(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $connectionB = $this->connection($firmB);
+        $this->activeCredential($firmB, $connectionB);
+        $runB = $this->syncRun($firmB, $connectionB);
+        $itemB = $this->createWithFirmContext($firmB, fn () => IntegrationSyncItem::factory()->forSyncRun($runB)->failedPermanent()->create());
+
+        $reason = $this->runWithFirmContext($firmA, fn () => $this->syncItemService->diagnoseRequeueIneligibility($itemB->id, $firmA->id));
+
+        $this->assertSame(RequeueIneligibilityReason::NotFoundOrCrossFirm, $reason);
+    }
+
+    public function test_sync_item_diagnostic_returns_not_eligible_status(): void
+    {
+        $firm = Firm::factory()->create();
+        $connection = $this->connection($firm);
+        $this->activeCredential($firm, $connection);
+        $run = $this->syncRun($firm, $connection);
+        $item = $this->createWithFirmContext($firm, fn () => IntegrationSyncItem::factory()->forSyncRun($run)->create()); // pending
+
+        $result = $this->runWithFirmContext($firm, fn () => $this->syncItemService->requeueFromFailedPermanent($item->id, $firm->id, 'manual_retry'));
+        $this->assertNull($result);
+
+        $reason = $this->runWithFirmContext($firm, fn () => $this->syncItemService->diagnoseRequeueIneligibility($item->id, $firm->id));
+        $this->assertSame(RequeueIneligibilityReason::NotEligibleStatus, $reason);
+    }
+
+    public function test_sync_item_diagnostic_never_returns_requeue_ceiling_reached_no_ceiling_column_exists(): void
+    {
+        $firm = Firm::factory()->create();
+        $connection = $this->connection($firm);
+        $this->activeCredential($firm, $connection);
+        $run = $this->syncRun($firm, $connection);
+        $item = $this->createWithFirmContext($firm, fn () => IntegrationSyncItem::factory()->forSyncRun($run)->failedPermanent()->create());
+
+        for ($i = 0; $i < 10; $i++) {
+            $requeued = $this->runWithFirmContext($firm, fn () => $this->syncItemService->requeueFromFailedPermanent($item->id, $firm->id, 'manual_retry'));
+            $this->assertNotNull($requeued);
+            $this->runWithFirmContext($firm, fn () => DB::table('integration_sync_items')->where('id', $item->id)->update(['status' => SyncItemStatus::FailedPermanent->value]));
+        }
+
+        $reason = $this->runWithFirmContext($firm, fn () => $this->syncItemService->diagnoseRequeueIneligibility($item->id, $firm->id));
+        $this->assertNotSame(RequeueIneligibilityReason::RequeueCeilingReached, $reason);
+    }
+
+    public function test_sync_item_diagnostic_returns_superseded(): void
+    {
+        $firm = Firm::factory()->create();
+        $connection = $this->connection($firm);
+        $this->activeCredential($firm, $connection);
+
+        $oldRun = $this->syncRun($firm, $connection);
+        $oldItem = $this->createWithFirmContext($firm, fn () => IntegrationSyncItem::factory()
+            ->forSyncRun($oldRun)->failedPermanent()->create(['external_id' => 'ext-shared']));
+
+        $newerRun = $this->createWithFirmContext($firm, fn () => IntegrationSyncRun::factory()->forFirmIntegration($connection)->succeeded()->create(['created_at' => now()->addMinute()]));
+        $this->createWithFirmContext($firm, fn () => IntegrationSyncItem::factory()
+            ->forSyncRun($newerRun)->succeeded()->create(['external_id' => 'ext-shared']));
+
+        $result = $this->runWithFirmContext($firm, fn () => $this->syncItemService->requeueFromFailedPermanent($oldItem->id, $firm->id, 'manual_retry'));
+        $this->assertNull($result);
+
+        $reason = $this->runWithFirmContext($firm, fn () => $this->syncItemService->diagnoseRequeueIneligibility($oldItem->id, $firm->id));
+        $this->assertSame(RequeueIneligibilityReason::Superseded, $reason);
+    }
+
+    public function test_sync_item_diagnostic_returns_connection_disconnected(): void
+    {
+        $firm = Firm::factory()->create();
+        $connection = $this->connection($firm);
+        $this->activeCredential($firm, $connection);
+        $run = $this->syncRun($firm, $connection);
+        $item = $this->createWithFirmContext($firm, fn () => IntegrationSyncItem::factory()->forSyncRun($run)->failedPermanent()->create());
+
+        $this->runWithFirmContext($firm, fn () => DB::table('firm_integrations')->where('id', $connection->id)->update(['status' => ConnectionStatus::Disconnected->value]));
+
+        $result = $this->runWithFirmContext($firm, fn () => $this->syncItemService->requeueFromFailedPermanent($item->id, $firm->id, 'manual_retry'));
+        $this->assertNull($result);
+
+        $reason = $this->runWithFirmContext($firm, fn () => $this->syncItemService->diagnoseRequeueIneligibility($item->id, $firm->id));
+        $this->assertSame(RequeueIneligibilityReason::ConnectionDisconnected, $reason);
+    }
+
+    public function test_sync_item_diagnostic_returns_credential_revoked(): void
+    {
+        $firm = Firm::factory()->create();
+        $connection = $this->connection($firm);
+        $credential = $this->activeCredential($firm, $connection);
+        $run = $this->syncRun($firm, $connection);
+        $item = $this->createWithFirmContext($firm, fn () => IntegrationSyncItem::factory()->forSyncRun($run)->failedPermanent()->create());
+
+        $this->runWithFirmContext($firm, fn () => DB::table('integration_credentials')->where('id', $credential->id)->update(['status' => 'revoked']));
+
+        $result = $this->runWithFirmContext($firm, fn () => $this->syncItemService->requeueFromFailedPermanent($item->id, $firm->id, 'manual_retry'));
+        $this->assertNull($result);
+
+        $reason = $this->runWithFirmContext($firm, fn () => $this->syncItemService->diagnoseRequeueIneligibility($item->id, $firm->id));
+        $this->assertSame(RequeueIneligibilityReason::CredentialRevoked, $reason);
+    }
+
+    public function test_diagnostic_methods_never_issue_an_update_insert_or_delete_statement(): void
+    {
+        $firm = Firm::factory()->create();
+        $connection = $this->connection($firm);
+        $this->activeCredential($firm, $connection);
+        $event = $this->createWithFirmContext($firm, fn () => IntegrationOutboxEvent::factory()->forFirmIntegration($connection)->deadLettered()->create());
+        $run = $this->syncRun($firm, $connection);
+        $item = $this->createWithFirmContext($firm, fn () => IntegrationSyncItem::factory()->forSyncRun($run)->failedPermanent()->create());
+
+        $capturedSql = [];
+        DB::listen(function ($query) use (&$capturedSql) {
+            $capturedSql[] = strtolower($query->sql);
+        });
+
+        $this->runWithFirmContext($firm, fn () => $this->outboxService->diagnoseRequeueIneligibility($event->id, $firm->id));
+        $this->runWithFirmContext($firm, fn () => $this->syncItemService->diagnoseRequeueIneligibility($item->id, $firm->id));
+
+        foreach ($capturedSql as $sql) {
+            $this->assertStringNotContainsString('update ', $sql, "diagnoseRequeueIneligibility() must never issue an UPDATE: {$sql}");
+            $this->assertStringNotContainsString('insert ', $sql, "diagnoseRequeueIneligibility() must never issue an INSERT: {$sql}");
+            $this->assertStringNotContainsString('delete ', $sql, "diagnoseRequeueIneligibility() must never issue a DELETE: {$sql}");
+        }
     }
 }

@@ -471,6 +471,224 @@ class IntegrationConflictServiceTest extends TestCase
     }
 
     // ------------------------------------------------------------
+    // IntegrationConflictService::proposeResolution() — Checkpoint 10
+    // addition (frozen design §7; diff-review.md §1.3/§1.4).
+    // ------------------------------------------------------------
+
+    public function test_propose_resolution_writes_awaiting_review_and_the_proposer_identity_for_a_non_privileged_conflict(): void
+    {
+        // Confirms diff-review.md §1.4's confirmed deviation: dual-
+        // approval is applied uniformly, so proposeResolution() works
+        // (and is expected to be used by the UI) for a non-privileged
+        // conflict too, not merely privileged/flagged ones — the frozen
+        // text's "non-privileged conflicts continue to use
+        // transitionStatus() directly" restriction is NOT enforced by
+        // this method itself (it only requires isOpen() +
+        // isResolvedShaped()), and this is the as-built, accepted
+        // behavior per the coordinator's own disclosed ruling.
+        $firm = Firm::factory()->create();
+        $conflict = $this->conflictFor($firm, ['resource_type' => 'contact', 'requires_manual_review' => false]);
+        $proposer = $this->firmUserFor($firm);
+
+        $updated = $this->runWithFirmContext(
+            $firm,
+            fn () => $this->service->proposeResolution($conflict, ConflictStatus::ResolvedLocalWins, $proposer->id, 'Proposed outcome: resolved_local_wins.'),
+        );
+
+        $this->assertSame(ConflictStatus::AwaitingReview, $updated->status);
+        $this->assertSame($proposer->id, $updated->resolved_by_firm_user_id);
+        $this->assertNull($updated->resolution_approved_by_firm_user_id, 'Proposal alone must never set the approver column.');
+        $this->assertNull($updated->resolved_at, 'The row remains open/AwaitingReview, not resolved, after a mere proposal.');
+    }
+
+    public function test_propose_resolution_succeeds_for_a_privileged_flagged_conflict(): void
+    {
+        $firm = Firm::factory()->create();
+        $conflict = $this->conflictFor($firm, ['resource_type' => 'invoice', 'requires_manual_review' => true]);
+        $proposer = $this->firmUserFor($firm);
+
+        $updated = $this->runWithFirmContext(
+            $firm,
+            fn () => $this->service->proposeResolution($conflict, ConflictStatus::ResolvedRemoteWins, $proposer->id),
+        );
+
+        $this->assertSame(ConflictStatus::AwaitingReview, $updated->status);
+        $this->assertSame($proposer->id, $updated->resolved_by_firm_user_id);
+    }
+
+    public function test_propose_resolution_records_the_resolution_proposed_audit_event_with_the_proposed_outcome_in_metadata(): void
+    {
+        $firm = Firm::factory()->create();
+        $conflict = $this->conflictFor($firm, ['resource_type' => 'contact']);
+        $proposer = $this->firmUserFor($firm);
+
+        $this->runWithFirmContext(
+            $firm,
+            fn () => $this->service->proposeResolution($conflict, ConflictStatus::ResolvedMerged, $proposer->id),
+        );
+
+        $event = $this->runWithFirmContext($firm, fn () => \App\Models\TimelineEvent::query()
+            ->where('event_type', 'integration_conflict.resolution_proposed')
+            ->latest('id')
+            ->first());
+
+        $this->assertNotNull($event);
+        $this->assertSame(ConflictStatus::ResolvedMerged->value, $event->metadata_json['proposed_outcome']);
+        $this->assertSame($proposer->id, $event->metadata_json['resolved_by_firm_user_id']);
+    }
+
+    public function test_propose_resolution_rejects_a_non_open_conflict(): void
+    {
+        $firm = Firm::factory()->create();
+        $resolver = $this->firmUserFor($firm);
+        $conflict = $this->conflictFor($firm, [
+            'resource_type' => 'contact',
+            'requires_manual_review' => false,
+            'status' => ConflictStatus::ResolvedLocalWins->value,
+            'resolved_by_firm_user_id' => $resolver->id,
+            'resolved_at' => now(),
+        ]);
+        $proposer = $this->firmUserFor($firm);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/not currently open/');
+
+        $this->runWithFirmContext(
+            $firm,
+            fn () => $this->service->proposeResolution($conflict, ConflictStatus::ResolvedRemoteWins, $proposer->id),
+        );
+    }
+
+    public function test_propose_resolution_rejects_awaiting_review_itself_as_a_proposed_outcome(): void
+    {
+        // AwaitingReview is explicitly NOT a "resolved-shaped" outcome
+        // (isResolvedShaped() excludes it) — proposing it makes no
+        // semantic sense as a target outcome.
+        $firm = Firm::factory()->create();
+        $conflict = $this->conflictFor($firm, ['resource_type' => 'contact']);
+        $proposer = $this->firmUserFor($firm);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/not a resolved-shaped outcome/');
+
+        $this->runWithFirmContext(
+            $firm,
+            fn () => $this->service->proposeResolution($conflict, ConflictStatus::AwaitingReview, $proposer->id),
+        );
+    }
+
+    public function test_propose_resolution_rejects_expired_as_a_proposed_outcome(): void
+    {
+        $firm = Firm::factory()->create();
+        $conflict = $this->conflictFor($firm, ['resource_type' => 'contact']);
+        $proposer = $this->firmUserFor($firm);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/not a resolved-shaped outcome/');
+
+        $this->runWithFirmContext(
+            $firm,
+            fn () => $this->service->proposeResolution($conflict, ConflictStatus::Expired, $proposer->id),
+        );
+    }
+
+    /**
+     * Per this checkpoint's own explicit note: proposeResolution() has
+     * NO precondition rejecting a re-proposal over an existing
+     * proposer (unlike ProposeConflictResolutionAction's own UI-layer
+     * guard, which checks resolved_by_firm_user_id === null before
+     * ever calling this method) — calling the SERVICE directly a
+     * second time with a different proposer silently OVERWRITES the
+     * first proposer/note. This is confirmed here directly (not
+     * asserted as rejected) so the actual, as-shipped service-level
+     * behavior is documented precisely rather than assumed.
+     */
+    public function test_propose_resolution_called_directly_a_second_time_overwrites_the_first_proposer_the_ui_layer_not_the_service_layer_is_what_prevents_this(): void
+    {
+        $firm = Firm::factory()->create();
+        $conflict = $this->conflictFor($firm, ['resource_type' => 'contact']);
+        $firstProposer = $this->firmUserFor($firm);
+        $secondProposer = $this->firmUserFor($firm);
+
+        $this->runWithFirmContext($firm, fn () => $this->service->proposeResolution($conflict, ConflictStatus::ResolvedLocalWins, $firstProposer->id, 'First proposal'));
+
+        $updated = $this->runWithFirmContext($firm, fn () => $this->service->proposeResolution($conflict->fresh(), ConflictStatus::ResolvedRemoteWins, $secondProposer->id, 'Second proposal'));
+
+        $this->assertSame($secondProposer->id, $updated->resolved_by_firm_user_id, 'The service method itself has no re-proposal guard — this is enforced only by the UI-layer Action, not this method.');
+        $this->assertSame('Second proposal', $updated->resolution_note);
+    }
+
+    // ------------------------------------------------------------
+    // transitionStatus()'s distinctness check as the FINAL,
+    // authoritative boundary for a proposeResolution()-originated row —
+    // proven directly at the service level per this checkpoint's own
+    // contingency clause.
+    // ------------------------------------------------------------
+
+    public function test_transition_status_still_rejects_same_actor_distinctness_for_a_privileged_conflict_resolved_by_firm_user_id_that_originated_from_propose_resolution(): void
+    {
+        $firm = Firm::factory()->create();
+        $conflict = $this->conflictFor($firm, ['resource_type' => 'invoice', 'requires_manual_review' => true]);
+        $proposer = $this->firmUserFor($firm);
+
+        $proposed = $this->runWithFirmContext(
+            $firm,
+            fn () => $this->service->proposeResolution($conflict, ConflictStatus::ResolvedLocalWins, $proposer->id),
+        );
+
+        $this->assertSame(ConflictStatus::AwaitingReview, $proposed->status);
+        $this->assertSame($proposer->id, $proposed->resolved_by_firm_user_id);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/requires a distinct, non-null resolution_approved_by_firm_user_id/');
+
+        // The SAME actor who proposed now attempts to "approve" their
+        // own proposal by calling transitionStatus() directly — this is
+        // exactly the bypass scenario the Ui test file's contingency
+        // clause requires this file to prove: transitionStatus()'s own
+        // distinctness check remains the final, un-bypassable
+        // enforcement even for a row whose resolved_by_firm_user_id
+        // came from a real proposeResolution() call, independent of any
+        // UI pre-check.
+        $this->runWithFirmContext(
+            $firm,
+            fn () => $this->service->transitionStatus(
+                $proposed,
+                ConflictStatus::ResolvedLocalWins,
+                resolvedByFirmUserId: $proposed->resolved_by_firm_user_id,
+                resolutionApprovedByFirmUserId: $proposer->id, // SAME as resolvedByFirmUserId
+            ),
+        );
+    }
+
+    public function test_transition_status_accepts_a_genuinely_distinct_approver_for_a_propose_resolution_originated_row(): void
+    {
+        $firm = Firm::factory()->create();
+        $conflict = $this->conflictFor($firm, ['resource_type' => 'invoice', 'requires_manual_review' => true]);
+        $proposer = $this->firmUserFor($firm);
+        $approver = $this->firmUserFor($firm);
+
+        $proposed = $this->runWithFirmContext(
+            $firm,
+            fn () => $this->service->proposeResolution($conflict, ConflictStatus::ResolvedLocalWins, $proposer->id),
+        );
+
+        $resolved = $this->runWithFirmContext(
+            $firm,
+            fn () => $this->service->transitionStatus(
+                $proposed,
+                ConflictStatus::ResolvedLocalWins,
+                resolvedByFirmUserId: $proposed->resolved_by_firm_user_id,
+                resolutionApprovedByFirmUserId: $approver->id,
+            ),
+        );
+
+        $this->assertSame(ConflictStatus::ResolvedLocalWins, $resolved->status);
+        $this->assertSame($proposer->id, $resolved->resolved_by_firm_user_id);
+        $this->assertSame($approver->id, $resolved->resolution_approved_by_firm_user_id);
+    }
+
+    // ------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------
 

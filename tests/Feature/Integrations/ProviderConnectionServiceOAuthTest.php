@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Integrations;
 
+use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
+use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Exceptions\OAuthAccountMismatchException;
 use App\Integrations\Exceptions\OAuthRedirectUriMismatchException;
 use App\Integrations\Exceptions\OAuthStateAlreadyConsumedException;
@@ -15,6 +17,7 @@ use App\Integrations\Exceptions\OAuthStateNotFoundException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationCredential;
 use App\Integrations\Models\IntegrationOAuthState;
+use App\Integrations\Models\IntegrationProvider;
 use App\Integrations\Providers\TestProvider\TestProvider;
 use App\Integrations\Services\IntegrationAccessPolicyService;
 use App\Integrations\Services\IntegrationCredentialService;
@@ -30,6 +33,8 @@ use App\Models\TimelineEvent;
 use App\Models\User;
 use App\Services\EmailBodyEncryptionService;
 use App\Services\EncryptionKeyService;
+use App\Services\EntitlementService;
+use App\Services\IntegrationEntitlementPolicyService;
 use App\Services\TimelineEventRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -1277,8 +1282,240 @@ class ProviderConnectionServiceOAuthTest extends TestCase
     }
 
     // ------------------------------------------------------------
+    // 12. Checkpoint 10 additions — startConnection(), assertEnabled()
+    // call sites, $currentUserId-gated webhook-routing-toggle
+    // signatures, external_account_id nulled on disconnect.
+    // ------------------------------------------------------------
+
+    public function test_start_connection_creates_a_pending_row_and_records_the_connection_created_audit_event(): void
+    {
+        [$firm, $provider, $firmUser] = $this->firmProviderAndActor();
+
+        $connection = $this->service()->startConnection($firm->id, $provider->id, $firmUser->user_id);
+
+        $this->assertSame(ConnectionStatus::Pending, $connection->status);
+        $this->assertSame($firm->id, $connection->firm_id);
+        $this->assertSame($provider->id, $connection->integration_provider_id);
+
+        $event = $this->runWithFirmContext($firm, fn () => TimelineEvent::query()->where('event_type', 'integration_oauth.connection_created')->latest('id')->first());
+        $this->assertNotNull($event);
+    }
+
+    public function test_start_connection_is_idempotent_for_a_double_click_double_submit(): void
+    {
+        [$firm, $provider, $firmUser] = $this->firmProviderAndActor();
+
+        $first = $this->service()->startConnection($firm->id, $provider->id, $firmUser->user_id);
+        $second = $this->service()->startConnection($firm->id, $provider->id, $firmUser->user_id);
+
+        $this->assertSame($first->id, $second->id, 'A second startConnection() call against a still-Pending, still-no-external-account-id row must return the SAME row.');
+
+        $count = $this->runWithFirmContext($firm, fn () => FirmIntegration::query()->where('firm_id', $firm->id)->count());
+        $this->assertSame(1, $count);
+    }
+
+    public function test_start_connection_does_not_reuse_a_row_that_already_has_an_external_account_id(): void
+    {
+        [$firm, $provider, $firmUser] = $this->firmProviderAndActor();
+
+        $first = $this->service()->startConnection($firm->id, $provider->id, $firmUser->user_id);
+        $this->runWithFirmContext($firm, fn () => DB::table('firm_integrations')->where('id', $first->id)->update(['external_account_id' => 'already-connected-account']));
+
+        $second = $this->service()->startConnection($firm->id, $provider->id, $firmUser->user_id);
+
+        $this->assertNotSame($first->id, $second->id, 'A row with a real external_account_id already set represents a completed connection, not an in-flight Pending one — startConnection() must create a genuinely new row for a reconnect.');
+    }
+
+    public function test_start_connection_requires_entitlement(): void
+    {
+        $firm = Firm::factory()->create(); // NOT entitled (no firmWithActiveKey())
+        $this->runWithFirmContext($firm, fn () => TenantEncryptionKey::factory()->forFirm($firm)->create());
+        $provider = $this->testProviderRow();
+        $firmUser = $this->firmUserFor($firm, FirmUserRole::FirmOwner);
+
+        $this->expectException(RuntimeException::class);
+
+        $this->service()->startConnection($firm->id, $provider->id, $firmUser->user_id);
+    }
+
+    public function test_start_connection_requires_the_connect_ceiling_role(): void
+    {
+        [$firm, $provider] = $this->firmProviderAndActor();
+        $paralegal = $this->firmUserFor($firm, FirmUserRole::Paralegal);
+
+        $this->expectException(RuntimeException::class);
+
+        $this->service()->startConnection($firm->id, $provider->id, $paralegal->user_id);
+    }
+
+    public function test_start_connection_rejects_a_nonexistent_provider_id(): void
+    {
+        [$firm, , $firmUser] = $this->firmProviderAndActor();
+
+        $this->expectException(RuntimeException::class);
+
+        $this->service()->startConnection($firm->id, 999999999, $firmUser->user_id);
+    }
+
+    public function test_start_connection_fails_closed_when_the_provider_is_not_a_registered_adapter(): void
+    {
+        [$firm, $provider, $firmUser] = $this->firmProviderAndActor();
+
+        config(['integrations.providers' => []]);
+
+        $this->expectException(RuntimeException::class);
+
+        $this->service()->startConnection($firm->id, $provider->id, $firmUser->user_id);
+    }
+
+    public function test_disconnect_nulls_external_account_id_per_frozen_design_0_ruling_1(): void
+    {
+        [$firm, $connection, $firmUser] = $this->firmConnectionAndActor();
+        $this->completeSuccessfulConnect($firm, $connection, $firmUser);
+
+        $fresh = $this->runWithFirmContext($firm, fn () => $connection->fresh());
+        $this->assertNotNull($fresh->external_account_id, 'Sanity check: a completed connect must have pinned an external_account_id.');
+
+        $result = $this->service()->disconnect($fresh, $firmUser->user_id);
+
+        $this->assertNull($result->external_account_id);
+    }
+
+    public function test_disconnect_nulling_external_account_id_allows_a_genuine_reconnect_to_the_same_external_account_without_a_uniqueness_violation(): void
+    {
+        [$firm, $connection, $firmUser] = $this->firmConnectionAndActor();
+        $firstFlow = $this->initiateFlow($connection, $firmUser);
+        $firstCode = $this->mintCode($firstFlow['codeChallenge'], externalAccountId: 'reconnect-same-account-id');
+        $this->service()->completeOAuthCallback($firstFlow['rawState'], $firstCode, $firmUser->user_id);
+
+        $fresh = $this->runWithFirmContext($firm, fn () => $connection->fresh());
+        $this->service()->disconnect($fresh, $firmUser->user_id);
+
+        // Checkpoint 10's own new reachable journey: start a BRAND NEW
+        // connection row for the same (firm, provider) after a full
+        // disconnect (finishCallback() unconditionally rejects
+        // completing OAuth against an already-Disconnected row, so
+        // startConnection() must be used, never a re-initiate on the
+        // old row).
+        $provider = $this->runWithFirmContext($firm, fn () => \App\Integrations\Models\IntegrationProvider::query()->find($connection->integration_provider_id));
+        $newConnection = $this->service()->startConnection($firm->id, $provider->id, $firmUser->user_id);
+
+        $reauthFlow = $this->initiateFlow($this->runWithFirmContext($firm, fn () => $newConnection->fresh()), $firmUser);
+        $reauthCode = $this->mintCode($reauthFlow['codeChallenge'], externalAccountId: 'reconnect-same-account-id');
+
+        $result = $this->service()->completeOAuthCallback($reauthFlow['rawState'], $reauthCode, $firmUser->user_id);
+
+        $this->assertTrue($result->successful, 'Reconnecting to the SAME external_account_id after a full disconnect must succeed — no lingering uniqueness violation from the old, now-nulled row.');
+    }
+
+    public function test_enable_webhook_routing_requires_current_user_id_gated_authorization(): void
+    {
+        [$firm, $connection, $firmUser] = $this->firmConnectionAndActor(FirmUserRole::FirmOwner);
+
+        $rawToken = $this->service()->enableWebhookRouting($connection, $firmUser->user_id);
+
+        $this->assertNotEmpty($rawToken);
+    }
+
+    public function test_enable_webhook_routing_denies_a_role_below_the_configure_ceiling(): void
+    {
+        [$firm, $connection] = $this->firmConnectionAndActor();
+        $legalAssistant = $this->firmUserFor($firm, FirmUserRole::LegalAssistant);
+
+        $this->expectException(RuntimeException::class);
+
+        $this->service()->enableWebhookRouting($connection, $legalAssistant->user_id);
+    }
+
+    public function test_enable_webhook_routing_requires_entitlement(): void
+    {
+        $firm = Firm::factory()->create(); // not entitled
+        $this->runWithFirmContext($firm, fn () => TenantEncryptionKey::factory()->forFirm($firm)->create());
+        $connection = $this->runWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->pending()->create(['external_account_id' => null]));
+        $firmUser = $this->firmUserFor($firm, FirmUserRole::FirmOwner);
+
+        $this->expectException(RuntimeException::class);
+
+        $this->service()->enableWebhookRouting($connection, $firmUser->user_id);
+    }
+
+    public function test_enable_webhook_routing_rejects_a_cross_firm_actor(): void
+    {
+        [$firmA, $connectionA] = $this->firmConnectionAndActor();
+        $firmB = $this->firmWithActiveKey();
+        $ownerB = $this->firmUserFor($firmB, FirmUserRole::FirmOwner);
+
+        $this->expectException(RuntimeException::class);
+
+        $this->service()->enableWebhookRouting($connectionA, $ownerB->user_id);
+    }
+
+    public function test_disable_webhook_routing_requires_current_user_id_gated_authorization_and_clears_the_token(): void
+    {
+        [$firm, $connection, $firmUser] = $this->firmConnectionAndActor(FirmUserRole::Attorney);
+
+        $this->service()->enableWebhookRouting($connection, $firmUser->user_id);
+        $this->service()->disableWebhookRouting($connection, $firmUser->user_id);
+
+        $fresh = $this->runWithFirmContext($firm, fn () => $connection->fresh());
+        $this->assertNull($fresh->webhook_routing_token);
+    }
+
+    public function test_disable_webhook_routing_denies_a_role_below_the_configure_ceiling(): void
+    {
+        [$firm, $connection] = $this->firmConnectionAndActor();
+        $billingStaff = $this->firmUserFor($firm, FirmUserRole::BillingStaff);
+
+        $this->expectException(RuntimeException::class);
+
+        $this->service()->disableWebhookRouting($connection, $billingStaff->user_id);
+    }
+
+    public function test_disable_webhook_routing_requires_entitlement(): void
+    {
+        $firm = Firm::factory()->create(); // not entitled
+        $this->runWithFirmContext($firm, fn () => TenantEncryptionKey::factory()->forFirm($firm)->create());
+        $connection = $this->runWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->pending()->create(['external_account_id' => null]));
+        $firmUser = $this->firmUserFor($firm, FirmUserRole::FirmOwner);
+
+        $this->expectException(RuntimeException::class);
+
+        $this->service()->disableWebhookRouting($connection, $firmUser->user_id);
+    }
+
+    public function test_rename_connection_requires_entitlement_and_the_configure_ceiling(): void
+    {
+        [$firm, $connection, $firmUser] = $this->firmConnectionAndActor(FirmUserRole::Attorney);
+
+        $renamed = $this->service()->renameConnection($connection, $firmUser->user_id, 'A New Name');
+        $this->assertSame('A New Name', $renamed->display_label);
+
+        $legalAssistant = $this->firmUserFor($firm, FirmUserRole::LegalAssistant);
+        $this->expectException(RuntimeException::class);
+        $this->service()->renameConnection($connection, $legalAssistant->user_id, 'Should not apply');
+    }
+
+    // ------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------
+
+    /**
+     * @return array{0: Firm, 1: IntegrationProvider, 2: FirmUser}
+     */
+    private function firmProviderAndActor(FirmUserRole $role = FirmUserRole::FirmOwner): array
+    {
+        $firm = $this->firmWithActiveKey();
+        $provider = $this->testProviderRow();
+        $firmUser = $this->firmUserFor($firm, $role);
+
+        return [$firm, $provider, $firmUser];
+    }
+
+    private function testProviderRow(): IntegrationProvider
+    {
+        return IntegrationProvider::query()->where('code', ProviderKey::Test->value)->first()
+            ?? IntegrationProvider::factory()->create(['code' => ProviderKey::Test->value]);
+    }
 
     private function service(): ProviderConnectionService
     {
@@ -1294,6 +1531,10 @@ class ProviderConnectionServiceOAuthTest extends TestCase
             new OutboundProviderHttpClient(),
             new ProviderRedirectUrlValidator(),
             new TimelineEventRecorder(),
+            // Checkpoint 10 addition (frozen design §4): ProviderConnectionService's
+            // constructor gained this 8th, required dependency — every
+            // manual construction site in this file must supply it.
+            app(IntegrationEntitlementPolicyService::class),
         );
     }
 
@@ -1314,6 +1555,18 @@ class ProviderConnectionServiceOAuthTest extends TestCase
         // earlier in the same chain and was the actual leak source.
         $key = $this->runWithFirmContext($firm, fn () => TenantEncryptionKey::factory()->forFirm($firm)->create());
         $this->encryptionKeyIds[$firm->id] = $key->id;
+
+        // Checkpoint 10 addition: initiateOAuthConnection()/disconnect()/
+        // enableWebhookRouting()/disableWebhookRouting() now all call
+        // assertEnabled() before the pre-existing role check (frozen
+        // design §4). Every existing test in this file predates that
+        // gate and is about proving OTHER behavior — defaulting every
+        // fixture firm to entitled keeps this file's existing ~50 tests
+        // green while still genuinely exercising the real assertEnabled()
+        // call (never bypassed/mocked). Tests that specifically need a
+        // disentitled firm build one directly via Firm::factory()->create()
+        // without going through this helper.
+        app(EntitlementService::class)->setForSource($firm, 'integration', EntitlementSource::AdminOverride, true);
 
         return $firm;
     }

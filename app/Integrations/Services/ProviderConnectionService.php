@@ -20,10 +20,12 @@ use App\Integrations\Exceptions\OAuthRedirectUriMismatchException;
 use App\Integrations\Exceptions\SanitizedProviderHttpException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationCredential;
+use App\Integrations\Models\IntegrationProvider;
 use App\Integrations\Models\IntegrationWebhookRoutingIndex;
 use App\Integrations\Support\OutboundProviderHttpClient;
 use App\Integrations\Support\ProviderRedirectUrlValidator;
 use App\Models\FirmUser;
+use App\Services\IntegrationEntitlementPolicyService;
 use App\Services\TenantContextService;
 use App\Services\TimelineEventRecorder;
 use DateTimeInterface;
@@ -81,7 +83,110 @@ class ProviderConnectionService
         private readonly OutboundProviderHttpClient $httpClient,
         private readonly ProviderRedirectUrlValidator $redirectValidator,
         private readonly TimelineEventRecorder $events,
+        private readonly IntegrationEntitlementPolicyService $entitlement,
     ) {
+    }
+
+    /**
+     * Checkpoint 10 addition (frozen-design-post-security-review.md §2;
+     * agent-10h-architecture-security-review.md §1). Required not only
+     * for a firm's first connection to a provider but for EVERY
+     * reconnect after a full disconnect — finishCallback() unconditionally
+     * rejects completing OAuth against an already-Disconnected row (see
+     * this file's own class docblock), so re-running
+     * initiateOAuthConnection() on the old row can never work.
+     *
+     * Idempotency is best-effort only (lockForUpdate()-guarded
+     * find-then-create against an existing (firm_id,
+     * integration_provider_id) row with status = Pending and
+     * external_account_id IS NULL) — NOT DB-enforced. The existing
+     * partial unique index on firm_integrations deliberately permits
+     * multiple concurrent NULL-external_account_id rows, so a true
+     * double-submit race could still create two Pending rows; that
+     * residual is accepted as a low-severity, purely-cosmetic gap, per
+     * the frozen design's explicit ruling not to add migration scope to
+     * close it.
+     */
+    public function startConnection(int $firmId, int $integrationProviderId, int $currentUserId): FirmIntegration
+    {
+        return (new TenantContextService())->runWithFirmContext(
+            $firmId,
+            function () use ($firmId, $integrationProviderId, $currentUserId) {
+                $actor = $this->resolveActingFirmUser($currentUserId, $firmId);
+
+                $this->entitlement->assertEnabled($actor->firm);
+                $this->accessPolicy->assertCanConnect($actor);
+
+                $provider = IntegrationProvider::query()->find($integrationProviderId);
+
+                if ($provider === null) {
+                    throw new RuntimeException(
+                        "Cannot start connection: integration_provider {$integrationProviderId} does not exist."
+                    );
+                }
+
+                // Fails before any row is created if this provider is not
+                // a genuinely registered, instantiable adapter — mirrors
+                // resolveProvider()'s own equivalent check below.
+                $this->providerRegistry->get(ProviderKey::from($provider->code));
+
+                $existing = FirmIntegration::query()
+                    ->where('firm_id', $firmId)
+                    ->where('integration_provider_id', $integrationProviderId)
+                    ->where('status', ConnectionStatus::Pending->value)
+                    ->whereNull('external_account_id')
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($existing !== null) {
+                    return $existing;
+                }
+
+                $connection = FirmIntegration::create([
+                    'firm_id' => $firmId,
+                    'integration_provider_id' => $integrationProviderId,
+                    'status' => ConnectionStatus::Pending,
+                    'connected_by_firm_user_id' => $actor->id,
+                ]);
+
+                $this->events->record($connection->firm, 'integration_oauth.connection_created', $connection, $actor->user, [
+                    'firm_integration_id' => $connection->id,
+                    'integration_provider_id' => $integrationProviderId,
+                ]);
+
+                return $connection;
+            }
+        );
+    }
+
+    /**
+     * Checkpoint 10 addition
+     * (frozen-design-post-security-review.md §12). Narrowly scoped to
+     * `display_label` — this is intentionally NOT a general-purpose
+     * "update connection" method (per the frozen design's Action-based,
+     * never Form-backed Edit-page ruling: there is no schema anywhere
+     * that could accidentally reference credential fields).
+     */
+    public function renameConnection(FirmIntegration $connection, int $currentUserId, string $displayLabel): FirmIntegration
+    {
+        return (new TenantContextService())->runWithFirmContext(
+            $connection->firm_id,
+            function () use ($connection, $currentUserId, $displayLabel) {
+                $actor = $this->resolveActingFirmUser($currentUserId, $connection->firm_id);
+
+                $this->entitlement->assertEnabled($connection->firm);
+                $this->accessPolicy->assertCanConfigure($actor);
+
+                $fresh = FirmIntegration::query()
+                    ->where('id', $connection->id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                $fresh->update(['display_label' => $displayLabel]);
+
+                return $fresh->fresh();
+            }
+        );
     }
 
     /**
@@ -104,6 +209,7 @@ class ProviderConnectionService
             function () use ($connection, $currentUserId, $redirectUri) {
                 $actor = $this->resolveActingFirmUser($currentUserId, $connection->firm_id);
 
+                $this->entitlement->assertEnabled($connection->firm);
                 $this->accessPolicy->assertCanConnect($actor);
 
                 $provider = $this->resolveProvider($connection);
@@ -604,6 +710,14 @@ class ProviderConnectionService
             function () use ($connection, $currentUserId) {
                 $actor = $this->resolveActingFirmUser($currentUserId, $connection->firm_id);
 
+                // Checkpoint 10 addition (frozen design §0 ruling 2 /
+                // §3.2 item 1): gating disconnect() on entitlement means
+                // a firm whose entitlement is later administratively
+                // revoked cannot use this path to clean up active
+                // connections. Accepted, disclosed, precedented residual
+                // — matches WebhookSubscriptionService::disable()'s
+                // identical, already-shipped shape exactly.
+                $this->entitlement->assertEnabled($connection->firm);
                 $this->accessPolicy->assertCanDisconnect($actor);
 
                 $fresh = FirmIntegration::query()
@@ -656,6 +770,18 @@ class ProviderConnectionService
                 $fresh = $this->transitionStatus($fresh, ConnectionStatus::Disconnected, null, [
                     'disconnected_at' => now(),
                     'webhook_routing_token' => null,
+                    // Checkpoint 10 addition (frozen design §0 ruling 1;
+                    // agent-10h-architecture-security-review.md §1.4):
+                    // disconnect() previously left external_account_id
+                    // set, creating a latent uniqueness-violation risk on
+                    // reconnect-to-the-same-external-account (the partial
+                    // unique index on (firm_id, integration_provider_id,
+                    // external_account_id) WHERE external_account_id IS
+                    // NOT NULL). Checkpoint 10 is the first checkpoint to
+                    // build a reachable "reconnect after disconnect"
+                    // journey (startConnection() above), making this a
+                    // real, not merely theoretical, risk starting now.
+                    'external_account_id' => null,
                 ]);
 
                 // Checkpoint 7 addition (frozen design §4, checklist
@@ -703,12 +829,28 @@ class ProviderConnectionService
      * `updateOrCreate()`), so a connection can never accumulate more
      * than one resolvable routing token at a time even if this method
      * is called again without an intervening disableWebhookRouting().
+     *
+     * Checkpoint 10 addition (frozen-design-post-security-review.md §3;
+     * agent-10h-architecture-security-review.md §2): this method
+     * previously had ZERO authorization checks of any kind — no actor
+     * parameter, no role check, no entitlement check — safe only because
+     * nothing called it yet. Checkpoint 10 is the first real caller, so
+     * the gate is added HERE, in-service, matching
+     * WebhookSubscriptionService's proven 5-for-5 precedent, rather than
+     * only in the UI action handler (which would leave this method
+     * itself permanently unguarded for any future non-UI caller). Zero
+     * existing callers exist, so this signature change is safe.
      */
-    public function enableWebhookRouting(FirmIntegration $connection): string
+    public function enableWebhookRouting(FirmIntegration $connection, int $currentUserId): string
     {
         return (new TenantContextService())->runWithFirmContext(
             $connection->firm_id,
-            function () use ($connection) {
+            function () use ($connection, $currentUserId) {
+                $actor = $this->resolveActingFirmUser($currentUserId, $connection->firm_id);
+
+                $this->entitlement->assertEnabled($connection->firm);
+                $this->accessPolicy->assertCanConfigure($actor);
+
                 $fresh = FirmIntegration::query()
                     ->where('id', $connection->id)
                     ->lockForUpdate()
@@ -740,12 +882,20 @@ class ProviderConnectionService
      * both the plaintext-display column and the hashed routing-index
      * row in the SAME transaction. Idempotent: safe to call on a
      * connection with no routing token currently enabled.
+     *
+     * Checkpoint 10 addition — see enableWebhookRouting()'s own
+     * docblock: identical authorization-gate rationale applies here.
      */
-    public function disableWebhookRouting(FirmIntegration $connection): void
+    public function disableWebhookRouting(FirmIntegration $connection, int $currentUserId): void
     {
         (new TenantContextService())->runWithFirmContext(
             $connection->firm_id,
-            function () use ($connection): void {
+            function () use ($connection, $currentUserId): void {
+                $actor = $this->resolveActingFirmUser($currentUserId, $connection->firm_id);
+
+                $this->entitlement->assertEnabled($connection->firm);
+                $this->accessPolicy->assertCanConfigure($actor);
+
                 $fresh = FirmIntegration::query()
                     ->where('id', $connection->id)
                     ->lockForUpdate()

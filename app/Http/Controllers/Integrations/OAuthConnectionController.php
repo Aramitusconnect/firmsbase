@@ -117,10 +117,10 @@ class OAuthConnectionController extends Controller
             $result = $this->connectionService->completeOAuthCallback($rawState, $code, $user->id);
 
             if (! $result->successful) {
-                return $this->buildRedirectResponse('warning', $result->errorMessage ?? 'The connection completed with warnings.');
+                return $this->buildRedirectResponse('warning', $result->errorMessage ?? 'The connection completed with warnings.', $result->firmIntegration);
             }
 
-            return $this->buildRedirectResponse('success', 'Integration connected successfully.');
+            return $this->buildRedirectResponse('success', 'Integration connected successfully.', $result->firmIntegration);
         } catch (OAuthStateNotFoundException|OAuthStateAlreadyConsumedException|OAuthStateExpiredException $e) {
             return $this->buildRedirectResponse('error', $e->getMessage());
         } catch (OAuthRedirectUriMismatchException|OAuthAccountMismatchException $e) {
@@ -133,16 +133,33 @@ class OAuthConnectionController extends Controller
     }
 
     /**
-     * The single, hardcoded, deterministic post-callback destination —
-     * see class docblock. $status/$message are flashed to the session
-     * for the firm panel to display (never embedded in the redirect
-     * URL's query string itself, so the authorization code and state
-     * value — already consumed and never placed in this URL to begin
-     * with — cannot linger in browser history via this response
-     * either).
+     * Checkpoint 10 retarget (frozen-design-post-security-review.md §11;
+     * agent-10h-architecture-security-review.md §11.5): this method's own
+     * long-standing docblock explicitly invited this change once a
+     * per-connection detail page existed ("A future UI checkpoint
+     * replacing this with a real per-connection detail page is
+     * expected"). $status/$message are flashed to the session for the
+     * firm panel to display (never embedded in the redirect URL's query
+     * string itself, so the authorization code and state value —
+     * already consumed and never placed in this URL to begin with —
+     * cannot linger in browser history via this response either).
+     *
+     * $connection is OPTIONAL: every success/warning outcome has one
+     * (from OAuthCallbackResult::$firmIntegration), but several early
+     * failure paths (missing state/code, an unresolvable/expired/
+     * already-consumed OAuth state) never reach a resolved connection at
+     * all — those still fall back to the firm dashboard, the one
+     * always-available, zero-request-suppliable-input destination,
+     * exactly as before.
      */
-    private function buildRedirectResponse(string $status, string $message): RedirectResponse
+    private function buildRedirectResponse(string $status, string $message, ?FirmIntegration $connection = null): RedirectResponse
     {
+        if ($connection !== null) {
+            return redirect()
+                ->route('filament.firm.resources.firm-integrations.view', ['record' => $connection])
+                ->with($status, $message);
+        }
+
         return redirect()
             ->route('filament.firm.pages.dashboard')
             ->with($status, $message);

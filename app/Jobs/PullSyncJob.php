@@ -62,6 +62,18 @@ final class PullSyncJob implements ShouldQueue
         public readonly string $resourceType,
         public readonly ?int $triggeringWebhookEventId = null,
         public readonly ?int $retriedRunId = null,
+        // Checkpoint 10 addition (frozen-design-post-security-review.md
+        // §11; agent-10h-architecture-security-review.md §12, "Manual
+        // sync"): additive, OPTIONAL, trailing scalar param — every
+        // existing caller that omits it (the scheduler poller, webhook
+        // dispatch, cursor-repair auto-fire, retry poller) is completely
+        // unaffected and preserves today's exact behavior (the job calls
+        // SyncRunService::startRun() itself, below). When the Livewire
+        // manual-sync action handler has ALREADY called startRun()
+        // synchronously (so the UI has an immediate run id to show), it
+        // passes that run's id here so this job does not double-create a
+        // second run for the same dispatch.
+        public readonly ?int $preCreatedRunId = null,
     ) {
     }
 
@@ -110,22 +122,36 @@ final class PullSyncJob implements ShouldQueue
                 return;
             }
 
-            $triggerSource = $this->retriedRunId !== null
-                ? SyncTriggerSource::RetryPoller
-                : ($this->triggeringWebhookEventId !== null ? SyncTriggerSource::Webhook : SyncTriggerSource::SchedulerPoller);
+            if ($this->preCreatedRunId !== null) {
+                // Checkpoint 10 addition: the dispatching Livewire
+                // handler already called SyncRunService::startRun()
+                // synchronously (SyncTriggerSource::Manual) before
+                // dispatching this job — re-fetch that SAME run fresh
+                // (never trust anything about it beyond its id) rather
+                // than creating a second one. Scoped to this connection
+                // to guard against a mismatched/foreign run id.
+                $run = IntegrationSyncRun::query()
+                    ->where('id', $this->preCreatedRunId)
+                    ->where('firm_integration_id', $connection->id)
+                    ->firstOrFail();
+            } else {
+                $triggerSource = $this->retriedRunId !== null
+                    ? SyncTriggerSource::RetryPoller
+                    : ($this->triggeringWebhookEventId !== null ? SyncTriggerSource::Webhook : SyncTriggerSource::SchedulerPoller);
 
-            try {
-                $run = $runs->startRun(
-                    $connection,
-                    $this->resourceType,
-                    SyncDirection::Inbound,
-                    $triggerSource,
-                    $cursor,
-                    $this->retriedRunId,
-                    $this->triggeringWebhookEventId,
-                );
-            } catch (SyncRunAlreadyInProgressException $e) {
-                $run = $e->existingRun;
+                try {
+                    $run = $runs->startRun(
+                        $connection,
+                        $this->resourceType,
+                        SyncDirection::Inbound,
+                        $triggerSource,
+                        $cursor,
+                        $this->retriedRunId,
+                        $this->triggeringWebhookEventId,
+                    );
+                } catch (SyncRunAlreadyInProgressException $e) {
+                    $run = $e->existingRun;
+                }
             }
 
             $claimedCursor = $cursors->claim($cursor->id, $run->id);

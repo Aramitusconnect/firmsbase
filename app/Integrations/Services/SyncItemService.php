@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Integrations\Services;
 
+use App\Integrations\Enums\RequeueIneligibilityReason;
 use App\Integrations\Enums\SyncItemStatus;
 use App\Integrations\Models\IntegrationSyncItem;
 use App\Models\Firm;
@@ -276,5 +277,96 @@ final class SyncItemService
         );
 
         return $requeued;
+    }
+
+    /**
+     * Checkpoint 10 addition (frozen-design-post-security-review.md §5;
+     * agent-10h-architecture-security-review.md §4). Read-only,
+     * non-authoritative diagnostic re-check — NEVER a second guarded
+     * UPDATE, NEVER an automatic retry. Mirrors
+     * requeueFromFailedPermanent()'s own WHERE-clause order EXACTLY
+     * (firm ownership/existence -> correct terminal status
+     * (failed_permanent) -> not superseded by a later run's item for the
+     * same external_id already having succeeded -> connection not
+     * disconnected -> credential not revoked) so this diagnostic can
+     * never disagree with the real guard about which condition governs.
+     * RequeueIneligibilityReason::RequeueCeilingReached is NEVER
+     * returned here — no ceiling column exists on this table (see
+     * requeueFromFailedPermanent()'s own docblock). Call site: the
+     * requeue action handler, invoked ONLY when
+     * requeueFromFailedPermanent() itself already returned null.
+     *
+     * Returns null (a rare race — the row now appears eligible) when
+     * every clause above passes; the caller must render this as a
+     * generic "please try again," never a fabricated specific reason.
+     */
+    public function diagnoseRequeueIneligibility(int $itemId, int $firmId): ?RequeueIneligibilityReason
+    {
+        $item = DB::table('integration_sync_items')
+            ->where('id', $itemId)
+            ->where('firm_id', $firmId)
+            ->first();
+
+        if ($item === null) {
+            return RequeueIneligibilityReason::NotFoundOrCrossFirm;
+        }
+
+        if ($item->status !== SyncItemStatus::FailedPermanent->value) {
+            return RequeueIneligibilityReason::NotEligibleStatus;
+        }
+
+        $run = DB::table('integration_sync_runs')->where('id', $item->sync_run_id)->first();
+
+        if ($run === null) {
+            // Structurally shouldn't happen (sync_run_id is a required
+            // FK) — treat as generically ineligible rather than throw
+            // from a read-only diagnostic.
+            return RequeueIneligibilityReason::NotEligibleStatus;
+        }
+
+        if ($item->external_id !== null) {
+            $isSuperseded = (bool) DB::selectOne(
+                'SELECT EXISTS ('.
+                '  SELECT 1 FROM integration_sync_items newer '.
+                '  JOIN integration_sync_runs newer_run ON newer_run.id = newer.sync_run_id '.
+                '  WHERE newer.firm_id = ? '.
+                '    AND newer.external_id = ? '.
+                '    AND newer.id <> ? '.
+                "    AND newer.status = 'succeeded' ".
+                '    AND newer_run.created_at > ?'.
+                ') AS exists_flag',
+                [$item->firm_id, $item->external_id, $item->id, $run->created_at]
+            )->exists_flag;
+
+            if ($isSuperseded) {
+                return RequeueIneligibilityReason::Superseded;
+            }
+        }
+
+        $connectionUsable = (bool) DB::selectOne(
+            'SELECT EXISTS ('.
+            '  SELECT 1 FROM firm_integrations fi '.
+            "  WHERE fi.id = ? AND fi.status <> 'disconnected'".
+            ') AS exists_flag',
+            [$run->firm_integration_id]
+        )->exists_flag;
+
+        if (! $connectionUsable) {
+            return RequeueIneligibilityReason::ConnectionDisconnected;
+        }
+
+        $hasActiveCredential = (bool) DB::selectOne(
+            'SELECT EXISTS ('.
+            '  SELECT 1 FROM integration_credentials ic '.
+            "  WHERE ic.firm_integration_id = ? AND ic.status = 'active'".
+            ') AS exists_flag',
+            [$run->firm_integration_id]
+        )->exists_flag;
+
+        if (! $hasActiveCredential) {
+            return RequeueIneligibilityReason::CredentialRevoked;
+        }
+
+        return null;
     }
 }
