@@ -23,6 +23,7 @@ use App\Services\EntitlementService;
 use App\Services\IntegrationEntitlementPolicyService;
 use App\Services\TimelineEventRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
@@ -74,6 +75,17 @@ final class InboundWebhookReplayProtectionTest extends TestCase
 
     public function test_a_timestamp_exactly_300_seconds_in_the_past_is_accepted(): void
     {
+        // Checkpoint 13 (frozen-test-closure-plan.md §4): freeze PHP time
+        // for the whole test so the client-constructed header timestamp
+        // (now()->subSeconds(300)) and the server's own internal
+        // now()->getTimestamp() replay-window check resolve to the
+        // IDENTICAL frozen instant, regardless of any real wall-clock
+        // second-tick that would otherwise elapse between building the
+        // header and the route handling it — which at the exact ±300s
+        // boundary is the difference between 300s (accepted) and 301s
+        // (rejected). Strengthens, never weakens, the boundary assertion.
+        Carbon::setTestNow(Carbon::parse('2026-07-01 12:00:00'));
+
         $fixture = $this->activeConnectionWithWebhookSecret();
         $body = $this->eventBody();
         $headers = $this->signedHeaders($fixture['secret'], $fixture['rawToken'], $body, now()->subSeconds(300)->getTimestamp());
@@ -83,6 +95,8 @@ final class InboundWebhookReplayProtectionTest extends TestCase
 
     public function test_a_timestamp_301_seconds_in_the_past_is_rejected(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-07-01 12:00:00'));
+
         $fixture = $this->activeConnectionWithWebhookSecret();
         $body = $this->eventBody();
         $headers = $this->signedHeaders($fixture['secret'], $fixture['rawToken'], $body, now()->subSeconds(301)->getTimestamp());
@@ -92,6 +106,8 @@ final class InboundWebhookReplayProtectionTest extends TestCase
 
     public function test_a_timestamp_exactly_300_seconds_in_the_future_is_accepted(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-07-01 12:00:00'));
+
         $fixture = $this->activeConnectionWithWebhookSecret();
         $body = $this->eventBody();
         $headers = $this->signedHeaders($fixture['secret'], $fixture['rawToken'], $body, now()->addSeconds(300)->getTimestamp());
@@ -101,6 +117,8 @@ final class InboundWebhookReplayProtectionTest extends TestCase
 
     public function test_a_timestamp_301_seconds_in_the_future_is_rejected(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-07-01 12:00:00'));
+
         $fixture = $this->activeConnectionWithWebhookSecret();
         $body = $this->eventBody();
         $headers = $this->signedHeaders($fixture['secret'], $fixture['rawToken'], $body, now()->addSeconds(301)->getTimestamp());

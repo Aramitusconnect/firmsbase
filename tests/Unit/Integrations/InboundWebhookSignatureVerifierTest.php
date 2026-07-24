@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Integrations;
 
 use App\Integrations\Services\InboundWebhookSignatureVerifier;
+use Illuminate\Support\Carbon;
 use ReflectionClass;
 use Tests\TestCase;
 
@@ -226,6 +227,16 @@ final class InboundWebhookSignatureVerifierTest extends TestCase
 
     public function test_a_timestamp_exactly_300_seconds_in_the_past_is_accepted(): void
     {
+        // Checkpoint 13 (frozen-test-closure-plan.md §4): freeze PHP time
+        // so the timestamp this test constructs (now()->subSeconds(300))
+        // and verify()'s own internal now()->getTimestamp() replay-window
+        // comparison resolve to the identical frozen instant — at the
+        // exact ±300s boundary a single real second-tick between the two
+        // now() reads is the difference between 300 (accepted) and 301
+        // (rejected). Makes the boundary proof deterministic; weakens
+        // nothing.
+        Carbon::setTestNow(Carbon::parse('2026-07-01 12:00:00'));
+
         $timestamp = (string) now()->subSeconds(300)->getTimestamp();
         $body = json_encode(['event_id' => 'evt-1']);
         $signature = $this->sign(self::SECRET, $timestamp, $body);
@@ -235,6 +246,8 @@ final class InboundWebhookSignatureVerifierTest extends TestCase
 
     public function test_a_timestamp_301_seconds_in_the_past_is_rejected(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-07-01 12:00:00'));
+
         $timestamp = (string) now()->subSeconds(301)->getTimestamp();
         $body = json_encode(['event_id' => 'evt-1']);
         $signature = $this->sign(self::SECRET, $timestamp, $body);
@@ -244,6 +257,8 @@ final class InboundWebhookSignatureVerifierTest extends TestCase
 
     public function test_a_timestamp_exactly_300_seconds_in_the_future_is_accepted(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-07-01 12:00:00'));
+
         $timestamp = (string) now()->addSeconds(300)->getTimestamp();
         $body = json_encode(['event_id' => 'evt-1']);
         $signature = $this->sign(self::SECRET, $timestamp, $body);
@@ -253,6 +268,8 @@ final class InboundWebhookSignatureVerifierTest extends TestCase
 
     public function test_a_timestamp_301_seconds_in_the_future_is_rejected(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-07-01 12:00:00'));
+
         $timestamp = (string) now()->addSeconds(301)->getTimestamp();
         $body = json_encode(['event_id' => 'evt-1']);
         $signature = $this->sign(self::SECRET, $timestamp, $body);

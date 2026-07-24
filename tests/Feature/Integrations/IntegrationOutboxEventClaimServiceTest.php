@@ -176,10 +176,27 @@ class IntegrationOutboxEventClaimServiceTest extends TestCase
 
         $originalToken = $this->runWithFirmContext($firm, fn () => $this->service->claim($firm->id, 10))->first()->lock_token;
 
-        $this->runWithFirmContext($firm, function () use ($event) {
-            DB::table('integration_outbox_events')->where('id', $event->id)->update([
-                'locked_at' => now()->subMinutes(14)->subSeconds(59),
-            ]);
+        // Checkpoint 13 (frozen-test-closure-plan.md §4): anchor the
+        // fixture's locked_at to PostgreSQL's OWN statement_timestamp()
+        // rather than PHP's now(). claim()'s stale-lock predicate compares
+        // locked_at against `statement_timestamp() - interval '15 minutes'`
+        // — a Postgres-side clock. Deriving the fixture's locked_at from
+        // PHP's now() instead introduces cross-process (PHP vs Postgres)
+        // clock drift that, right at the 14:59 boundary, could flip this
+        // strict-inequality proof. Reading statement_timestamp() here and
+        // subtracting the interval in SQL keeps BOTH the fixture value and
+        // the production comparison anchored to the identical clock source.
+        // The claim query below runs at a strictly-later
+        // statement_timestamp(), so the row's effective age is 14:59 plus
+        // the sub-second inter-statement delta — still strictly under the
+        // 15-minute bound, deterministically.
+        $anchor = $this->runWithFirmContext($firm, fn () => DB::selectOne('SELECT statement_timestamp() AS ts')->ts);
+
+        $this->runWithFirmContext($firm, function () use ($event, $anchor) {
+            DB::update(
+                "UPDATE integration_outbox_events SET locked_at = ?::timestamptz - interval '14 minutes 59 seconds' WHERE id = ?",
+                [$anchor, $event->id]
+            );
         });
 
         $reclaim = $this->runWithFirmContext($firm, fn () => $this->service->claim($firm->id, 10));

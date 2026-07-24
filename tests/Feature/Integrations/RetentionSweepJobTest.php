@@ -154,6 +154,19 @@ class RetentionSweepJobTest extends TestCase
 
     public function test_a_sync_item_past_sixty_days_from_terminal_at_is_deleted(): void
     {
+        // Checkpoint 13 P3 (DISABLE_BY_DEFAULT — agent-13h §3/§4 item 2):
+        // the three firm-data sweeps (sync items, sync runs, resolved
+        // conflicts) are now gated behind
+        // `integrations.retention.sweep_firm_data_enabled`, which defaults
+        // OFF. This test asserts the CORRECT, intentional behavior —
+        // deletion DOES occur when a human has explicitly enabled the
+        // kill-switch — so it must opt in exactly as this file's own
+        // existing OAuth-state opt-in test
+        // (test_an_unconsumed_expired_oauth_state_is_deleted_once_the_config_key_is_explicitly_set)
+        // does for its own flag. The default-off skip behavior is proven
+        // separately in RetentionSweepLegalHoldGuardTest.
+        config(['integrations.retention.sweep_firm_data_enabled' => true]);
+
         $firm = Firm::factory()->create();
         $connection = $this->connection($firm);
         $runId = $this->syncRun($firm, $connection);
@@ -201,6 +214,11 @@ class RetentionSweepJobTest extends TestCase
 
     public function test_a_sync_run_past_its_window_with_no_remaining_child_items_is_deleted(): void
     {
+        // Checkpoint 13 P3: firm-data sweep is default-off — opt in to
+        // assert the intentional "deletion occurs when enabled" behavior
+        // (see this file's sync-item variant above for the full rationale).
+        config(['integrations.retention.sweep_firm_data_enabled' => true]);
+
         $firm = Firm::factory()->create();
         $connection = $this->connection($firm);
         $run = $this->runWithFirmContext($firm, fn () => IntegrationSyncRun::factory()
@@ -240,6 +258,12 @@ class RetentionSweepJobTest extends TestCase
 
     public function test_a_sync_run_past_its_window_whose_child_items_have_all_aged_out_is_deleted_once_the_items_sweep_first(): void
     {
+        // Checkpoint 13 P3: BOTH the item sweep and the run sweep are
+        // firm-data sweeps gated behind the same default-off flag — enable
+        // it so this test still proves the items-before-runs ordering /
+        // NOT EXISTS cascade-guard interaction it was written to prove.
+        config(['integrations.retention.sweep_firm_data_enabled' => true]);
+
         $firm = Firm::factory()->create();
         $connection = $this->connection($firm);
         $run = $this->runWithFirmContext($firm, fn () => IntegrationSyncRun::factory()
@@ -280,6 +304,11 @@ class RetentionSweepJobTest extends TestCase
 
     public function test_a_resolved_conflict_past_365_days_is_deleted(): void
     {
+        // Checkpoint 13 P3: resolved-conflicts is a firm-data sweep gated
+        // behind the same default-off flag — opt in to assert deletion
+        // occurs when explicitly enabled (see the sync-item variant above).
+        config(['integrations.retention.sweep_firm_data_enabled' => true]);
+
         $firm = Firm::factory()->create();
         $connection = $this->connection($firm);
         $resolver = $this->runWithFirmContext($firm, fn () => FirmUser::factory()->create(['firm_id' => $firm->id]));
