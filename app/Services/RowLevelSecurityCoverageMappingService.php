@@ -560,6 +560,27 @@ class RowLevelSecurityCoverageMappingService
      * unmodified RLS via TenantContextService::runWithFirmContext()).
      * The 25 entries above are untouched — this addition only appends.
      *
+     * Checkpoint 11 (FirmsBase Integration Platform mission, "SuperAdmin
+     * Integration Oversight and Governance"; reviews/checkpoint-11/
+     * frozen-design-post-security-review.md §5) appended one further
+     * exemption at the end of this array: integration_platform_overview_summaries.
+     * Like integration_webhook_routing_index, this is NOT a "no firm_id"
+     * exemption — direct inspection of
+     * database/migrations/2026_09_09_090001_create_integration_platform_overview_summaries_table.php
+     * confirms it carries a genuine NOT NULL, UNIQUE firm_id column
+     * ($table->foreignId('firm_id')->constrained('firms')->cascadeOnDelete()->unique()).
+     * It is exempted anyway, for a documented reason: it backs an
+     * always-visible, cross-firm SuperAdmin overview list that must
+     * remain readable without a per-request, per-firm RLS context-switch
+     * cost, over a firm population of undocumented/unbounded size; every
+     * column is a sanitized count/status/timestamp snapshot, never raw
+     * resource content, a secret, or credential material; and there is
+     * exactly one writer (the scheduled per-firm summary-refresh job via
+     * App\Services\IntegrationPlatformOverviewSummaryService::refreshForFirm()).
+     * See EXEMPT_TABLE_METADATA below for the full reason/readers/
+     * writers. The 26 entries above are untouched — this addition only
+     * appends.
+     *
      * @var array<int, string>
      */
     private const EXEMPT_TABLES = [
@@ -581,6 +602,13 @@ class RowLevelSecurityCoverageMappingService
         // for a documented, independently-reviewed reason instead —
         // see EXEMPT_TABLE_METADATA below.
         'integration_webhook_routing_index',
+        // Checkpoint 11 (FirmsBase Integration Platform mission) addition
+        // — see docblock above. Has a real NOT NULL, UNIQUE firm_id
+        // column (like integration_webhook_routing_index, unlike every
+        // "no firm_id" entry above); exempted for a documented,
+        // independently-reviewed reason instead — see
+        // EXEMPT_TABLE_METADATA below.
+        'integration_platform_overview_summaries',
     ];
 
     /**
@@ -1122,6 +1150,27 @@ class RowLevelSecurityCoverageMappingService
                 .'database/migrations/2026_09_06_060001_create_integration_webhook_routing_index_table.php '
                 .'§10.1 for the full "WHY THIS TABLE HAS NO RLS" reasoning. See EXEMPT_TABLE_METADATA.',
         ],
+        // Checkpoint 11 (FirmsBase Integration Platform mission,
+        // "SuperAdmin Integration Oversight and Governance") addition —
+        // see reviews/checkpoint-11/frozen-design-post-security-review.md
+        // §5. Same DISCLAIMER category as integration_webhook_routing_index
+        // immediately above: genuinely carries a NOT NULL, UNIQUE firm_id
+        // column, exempted anyway for a documented reason — see
+        // EXEMPT_TABLE_METADATA.
+        'integration_platform_overview_summaries' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'DISCLAIMER: Global, no RLS — but NOT a "no firm_id" exemption: this table genuinely '
+                .'carries a NOT NULL, UNIQUE firm_id column (one row per firm), by deliberate design, and is '
+                .'exempted from RLS anyway (see EXEMPT_TABLE_METADATA). It backs an always-visible, cross-firm '
+                .'SuperAdmin overview list that must remain readable without a per-request, per-firm RLS '
+                .'context-switch cost. Every column is a sanitized count/status/timestamp snapshot, never raw '
+                .'resource content, a secret, or credential material. Written only by '
+                .'App\\Services\\IntegrationPlatformOverviewSummaryService::refreshForFirm() (an upsert-only '
+                .'sole writer). See '
+                .'database/migrations/2026_09_09_090001_create_integration_platform_overview_summaries_table.php '
+                .'for the full "WHY THIS TABLE HAS NO RLS AND NO FORCE RLS" reasoning. See EXEMPT_TABLE_METADATA.',
+        ],
         'integration_webhook_receipts' => [
             'classification' => TenantOwnershipClassification::Global,
             'ownership_path' => null,
@@ -1208,7 +1257,7 @@ class RowLevelSecurityCoverageMappingService
 
     /**
      * Reason, expected readers, and authorized writers for every one
-     * of the (now 26) EXEMPT_TABLES entries. Readers/writers are
+     * of the (now 27) EXEMPT_TABLES entries. Readers/writers are
      * expressed as human-readable role/class descriptions, not a
      * runtime-enforced allowlist — this is documentation, mirroring
      * how the rest of this registry is declarative-only.
@@ -1381,6 +1430,34 @@ class RowLevelSecurityCoverageMappingService
             ],
             'authorized_writers' => [
                 'App\\Integrations\\Services\\ProviderConnectionService::enableWebhookRouting()/disableWebhookRouting()/disconnect() — always in the same transaction that writes/clears firm_integrations.webhook_routing_token, so the plaintext-display column and this hashed-lookup row can never drift',
+            ],
+        ],
+        'integration_platform_overview_summaries' => [
+            'reason' => 'Checkpoint 11 (SuperAdmin Integration Oversight and Governance): unlike every "no firm_id" '
+                .'EXEMPT_TABLES entry above (except integration_webhook_routing_index), this table genuinely '
+                .'carries a NOT NULL, UNIQUE firm_id column '
+                .'($table->foreignId(\'firm_id\')->constrained(\'firms\')->cascadeOnDelete()->unique(), per '
+                .'database/migrations/2026_09_09_090001_create_integration_platform_overview_summaries_table.php) '
+                .'— it is exempt from RLS despite that, not because it lacks it. Reviewed and approved as a '
+                .'deliberate, narrow exception for three reasons: (1) it must be readable without a per-request, '
+                .'per-firm RLS context-switch cost, backing an always-visible SuperAdmin overview list over a firm '
+                .'population of undocumented/unbounded size — a FORCE RLS policy here would make a single '
+                .'cross-firm overview query structurally impossible without a SECURITY DEFINER function or a '
+                .'session-GUC-gated carve-out policy, both explicitly rejected for this mission; (2) every column '
+                .'is a sanitized count/status/timestamp snapshot only — connection counts, a derived health-state '
+                .'label, last sync outcome/timestamp, failure/dead-letter/conflict counts, an entitlement flag, '
+                .'and a computed_at staleness marker — never raw resource content, a secret, or credential '
+                .'material of any kind; and (3) there is exactly one writer, an upsert-only scheduled per-firm '
+                .'refresh job, so there is no live-write surface to protect. This table is never treated as '
+                .'authoritative for any per-firm LIVE drill-down (health, sync history, conflicts, etc.) — those '
+                .'reads always go through the ordinary, unmodified TenantContextService::runWithFirmContext() '
+                .'against the real, FORCE-RLS-protected tenant tables instead; this table\'s own firm_id is a '
+                .'convenience join/denormalization key for the overview list only, not a security boundary.',
+            'expected_readers' => [
+                'App\\Filament\\Pages\\PlatformIntegrationOverviewPage (the always-visible, cross-firm SuperAdmin overview list) via App\\Services\\IntegrationPlatformOversightReadService',
+            ],
+            'authorized_writers' => [
+                'App\\Services\\IntegrationPlatformOverviewSummaryService::refreshForFirm() — invoked exclusively by App\\Jobs\\RefreshIntegrationPlatformOverviewSummaryJob, one job per activated firm, dispatched by the integrations:platform-overview:refresh scheduled command',
             ],
         ],
     ];

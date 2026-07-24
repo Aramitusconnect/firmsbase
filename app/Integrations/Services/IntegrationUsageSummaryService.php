@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Integrations\Services;
 
 use App\Integrations\Data\IntegrationUsageSummary;
-use App\Integrations\Enums\SyncDirection;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationUsageRecord;
 use App\Services\TenantContextService;
@@ -63,7 +62,7 @@ final class IntegrationUsageSummaryService
                     providerKey: $row->provider_key,
                     capability: $row->capability,
                     operationType: $row->operation_type,
-                    direction: $row->direction !== null ? SyncDirection::from($row->direction) : null,
+                    direction: $row->direction,
                     totalQuantity: (int) $row->total_quantity,
                     unit: $row->unit,
                     firstOccurredAt: $row->first_occurred_at !== null ? Carbon::parse($row->first_occurred_at) : null,

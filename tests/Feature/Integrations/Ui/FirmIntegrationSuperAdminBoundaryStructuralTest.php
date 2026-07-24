@@ -26,6 +26,33 @@ use Tests\TestCase;
  *    `getMaskedMetadata()`-adjacent DTO-construction code — mirrors the
  *    proven `str_contains()`-scan convention from
  *    `IntegrationWebhookRoutingIndexNoRlsAndNoSecretColumnTest`.
+ *
+ * POST-CHECKPOINT-11 UPDATE (reviews/checkpoint-11/frozen-design-post-
+ * security-review.md §1, §12): Checkpoint 11 legitimately, deliberately
+ * introduces a SECOND, entirely separate Integration-domain surface
+ * under the `admin` panel — `app/Filament/Pages/Platform*.php` (3
+ * classes: PlatformIntegrationOverviewPage, PlatformFirmIntegrationsPage,
+ * PlatformFirmIntegrationDetailPage) and
+ * `app/Filament/Actions/Platform/*.php` (7 action classes) — this is
+ * expected, reviewed, DIFF_APPROVED new production surface (Checkpoint
+ * 11's own frozen production-file allowlist §12), not a violation of
+ * item 1's original "hard SuperAdmin boundary" rule. The REAL invariant
+ * that rule protected was never literally "zero Integration-domain
+ * classes under the admin panel, forever" — it was "no unauthorized
+ * SuperAdmin-shaped Integration class exists outside a reviewed,
+ * allowlisted surface, and Checkpoint 10's own Firm-panel tree
+ * (app/Filament/Firm/**) never gains a SuperAdmin-shaped sibling smuggled
+ * in alongside it." Both structural checks below are updated to encode
+ * exactly that distinction: they allowlist ONLY Checkpoint 11's own 10
+ * frozen files by exact basename, and continue to reject ANY other
+ * Integration-domain class anywhere under `app/Filament/Resources`,
+ * `app/Filament/Widgets`, or any other file under `app/Filament/Pages`/
+ * `app/Filament/Actions` not on that allowlist — including, critically,
+ * still rejecting one smuggled into `app/Filament/Firm/**` disguised as
+ * a legitimate Firm-panel file. This does not weaken the invariant; it
+ * narrows what counts as "authorized" from "nothing" to "exactly
+ * Checkpoint 11's own reviewed allowlist," mirroring Checkpoint 10's own
+ * 97-file cascade-update precedent for expected, reviewed breakage.
  */
 final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
 {
@@ -59,7 +86,17 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             return;
         }
 
-        $this->assertNoIntegrationDomainReferenceUnder($dir);
+        // POST-CHECKPOINT-11: exactly these 3 files are Checkpoint 11's
+        // own frozen, reviewed, DIFF_APPROVED admin-panel Integration
+        // oversight pages (§12) — legitimately live here, not a
+        // violation. Anything else Integration-domain-shaped under this
+        // directory (including a file with a DIFFERENT name that still
+        // references the Integration domain) remains rejected.
+        $this->assertNoIntegrationDomainReferenceUnder($dir, allowedBasenames: [
+            'PlatformIntegrationOverviewPage.php',
+            'PlatformFirmIntegrationsPage.php',
+            'PlatformFirmIntegrationDetailPage.php',
+        ]);
     }
 
     public function test_app_filament_widgets_directory_contains_no_integration_domain_class(): void
@@ -77,6 +114,17 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
 
     public function test_no_platform_integration_health_access_policy_service_shaped_class_exists_anywhere(): void
     {
+        // POST-CHECKPOINT-11 UPDATE: this originally forward-looking
+        // guard ("no such class may exist YET — Checkpoint 11 scope")
+        // is now retrospective — Checkpoint 11 has landed and did NOT
+        // use this literal name (it shipped
+        // PlatformFirmIntegrationBoundedAccessService/
+        // IntegrationPlatformOversightReadService instead, both
+        // legitimate, reviewed, DIFF_APPROVED classes on Checkpoint 11's
+        // own frozen allowlist — see this file's class docblock). The
+        // check itself needs no logic change: a class with this EXACT
+        // placeholder name was never authorized by any checkpoint and
+        // still must not exist under any name-collision scenario.
         $violations = [];
 
         foreach ($this->phpFilesUnder(base_path('app')) as $file) {
@@ -85,7 +133,7 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             }
         }
 
-        $this->assertEmpty($violations, 'No PlatformIntegrationHealthAccessPolicyService-shaped class may exist yet (Checkpoint 11 scope): '.implode(', ', $violations));
+        $this->assertEmpty($violations, 'No PlatformIntegrationHealthAccessPolicyService-shaped class may exist — no checkpoint ever authorized this literal name: '.implode(', ', $violations));
     }
 
     public function test_every_new_checkpoint_10_filament_class_lives_exclusively_under_app_filament_firm(): void
@@ -93,28 +141,78 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
         $filamentDir = base_path('app/Filament');
         $this->assertTrue(is_dir($filamentDir), 'app/Filament must exist.');
 
-        $nonFirmFilamentFiles = [];
+        // POST-CHECKPOINT-11: exactly these 10 files (3 Pages + 7
+        // Actions/Platform) are Checkpoint 11's own frozen, reviewed,
+        // DIFF_APPROVED admin-panel surface (§12) — a second,
+        // legitimately separate namespace from Checkpoint 10's
+        // app/Filament/Firm tree, explicitly authorized by frozen design
+        // §1 ("entirely new to the admin panel... distinct namespace
+        // from Checkpoint 10's Firm-panel classes, zero overlap"). Any
+        // OTHER file outside app/Filament/Firm and outside this exact
+        // allowlist remains rejected — including a file smuggled into
+        // app/Filament/Firm itself that doesn't belong there, which this
+        // check cannot see (it only enumerates NON-Firm files) but which
+        // test_no_file_under_app_filament_firm_contains_integration_credential_class_outside_the_one_allowed_dto_construction_site()
+        // and the Integration-domain sweep above cover from the other
+        // direction.
+        $checkpoint11AllowedRelativeFiles = [
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformIntegrationOverviewPage.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformFirmIntegrationsPage.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformFirmIntegrationDetailPage.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RequeueOutboxEventAsSupportAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RequeueSyncItemAsSupportAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'NudgeIntegrationQueueAsSupportAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RequestSupportAccessAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'EnterSupportAccessSessionAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'LeaveSupportAccessSessionAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RevokeSupportAccessSessionAction.php',
+        ];
+
+        $unauthorizedNonFirmFilamentFiles = [];
 
         foreach ($this->phpFilesUnder($filamentDir) as $file) {
             $relative = str_replace($filamentDir.DIRECTORY_SEPARATOR, '', $file);
 
-            if (! str_starts_with($relative, 'Firm'.DIRECTORY_SEPARATOR)) {
-                $nonFirmFilamentFiles[] = $relative;
+            if (str_starts_with($relative, 'Firm'.DIRECTORY_SEPARATOR)) {
+                continue;
             }
+
+            if (in_array($relative, $checkpoint11AllowedRelativeFiles, true)) {
+                continue;
+            }
+
+            $unauthorizedNonFirmFilamentFiles[] = $relative;
         }
 
         $this->assertEmpty(
-            $nonFirmFilamentFiles,
-            'Every file under app/Filament must live under app/Filament/Firm — found outside it: '.implode(', ', $nonFirmFilamentFiles)
+            $unauthorizedNonFirmFilamentFiles,
+            'Every file under app/Filament must live under app/Filament/Firm OR be one of Checkpoint 11\'s own '.
+            'exactly-10 frozen-allowlisted files — found unauthorized: '.implode(', ', $unauthorizedNonFirmFilamentFiles)
         );
     }
 
-    private function assertNoIntegrationDomainReferenceUnder(string $dir): void
+    /**
+     * @param  string[]  $allowedBasenames  basenames legitimately exempt
+     *                                      from this sweep (Checkpoint
+     *                                      11's own frozen allowlist for
+     *                                      the directory being checked)
+     *                                      — matched and skipped
+     *                                      entirely (both the basename
+     *                                      shortcut AND the source-scan
+     *                                      below), since these files
+     *                                      legitimately reference the
+     *                                      Integration domain by design.
+     */
+    private function assertNoIntegrationDomainReferenceUnder(string $dir, array $allowedBasenames = []): void
     {
         $violations = [];
 
         foreach ($this->phpFilesUnder($dir) as $file) {
             $basename = basename($file);
+
+            if (in_array($basename, $allowedBasenames, true)) {
+                continue;
+            }
 
             if (str_contains($basename, 'Integration') || str_contains($basename, 'FirmIntegration')) {
                 $violations[] = $file;
@@ -129,7 +227,7 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             }
         }
 
-        $this->assertEmpty($violations, "No Integration-domain class/reference may exist under {$dir}: ".implode(', ', $violations));
+        $this->assertEmpty($violations, "No unauthorized Integration-domain class/reference may exist under {$dir}: ".implode(', ', $violations));
     }
 
     // ------------------------------------------------------------

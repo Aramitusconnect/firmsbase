@@ -100,6 +100,28 @@ class PlatformStaffAccessPolicyService
     }
 
     /**
+     * Checkpoint 11 addition (frozen-design-post-security-review.md §11;
+     * agent-11h-architecture-security-review.md). The one new additive
+     * method this checkpoint adds — purely additive, no existing
+     * method's behavior changes. Reuses CLIENT_AND_MATTER_DATA_ROLES
+     * unchanged: SuperAdmin/PlatformAdmin/ImplementationSpecialist are
+     * unconditionally trusted for cross-firm integration oversight;
+     * SupportAgent also passes this coarse, role-level gate but — per
+     * PlatformFirmIntegrationBoundedAccessService, the new caller-layer
+     * chokepoint this method feeds — additionally requires an active,
+     * governed SupportAccessSession scoped to the exact target firm
+     * before any PER-FIRM drill-down read or mutating action is allowed
+     * (the always-visible, aggregate/sanitized platform overview itself
+     * requires no such session). Every other role (BillingAdmin,
+     * SalesManager, SalesRep, SecurityAuditor, ReadOnlyAuditor) is
+     * denied outright.
+     */
+    public function canAccessIntegrationOversight(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::CLIENT_AND_MATTER_DATA_ROLES, 'integration oversight');
+    }
+
+    /**
      * Blanket rule 9: a read_only_auditor may never mutate data,
      * regardless of any other role also held.
      */

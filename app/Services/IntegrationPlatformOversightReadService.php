@@ -1,0 +1,411 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services;
+
+use App\Integrations\Data\IntegrationUsageSummary;
+use App\Integrations\Data\PlatformIntegrationConnectionSummary;
+use App\Integrations\Enums\OutboxEventStatus;
+use App\Integrations\Enums\SyncItemStatus;
+use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Models\IntegrationConflict;
+use App\Integrations\Models\IntegrationOutboxEvent;
+use App\Integrations\Models\IntegrationSyncItem;
+use App\Integrations\Models\IntegrationSyncRun;
+use App\Integrations\Services\HealthStateService;
+use App\Integrations\Services\IntegrationUsageSummaryService;
+use App\Models\Firm;
+use App\Models\PlatformAdmin;
+use App\Models\SecurityEvent;
+use App\Models\TimelineEvent;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * IntegrationPlatformOversightReadService — Checkpoint 11 (frozen-
+ * design-post-security-review.md §7, §10, §12). The read-only aggregator
+ * behind every Checkpoint 11 Filament page. Every per-firm method below
+ * routes through PlatformFirmIntegrationBoundedAccessService::
+ * readWithinFirmAccess() — the single chokepoint that enforces
+ * role/support-access gating AND establishes tenant context — this
+ * class never queries a FORCE-RLS tenant table on its own.
+ *
+ * Data-exposure discipline (frozen design §10) is enforced HERE, at the
+ * read boundary, not left to the UI layer to remember:
+ *   - `FirmIntegration.webhook_routing_token` is never selected/read by
+ *     any method in this class.
+ *   - `IntegrationOutboxEvent.last_error`/`IntegrationSyncItem.last_error`
+ *     are never selected/read by any method in this class — only the
+ *     governed `sanitized_diagnostic_summary`/`last_failure_category`
+ *     columns on `integration_connection_health` are used for failure
+ *     context.
+ *   - `IntegrationConflict.resolution_note` is only included when
+ *     PlatformFirmIntegrationBoundedAccessService::hasActiveSupportAccessSessionFor()
+ *     is true for the exact firm — independent of, and never widened
+ *     by, the coarser role-ceiling check.
+ *   - `external_account_id` is always masked (see
+ *     PlatformIntegrationConnectionSummary::maskExternalAccountId()).
+ *   - `IntegrationConflict.local_value`/`external_value` are never
+ *     selected/read anywhere in this class.
+ */
+final class IntegrationPlatformOversightReadService
+{
+    private const AUDIT_HISTORY_LIMIT = 100;
+
+    private const SYNC_HISTORY_LIMIT = 25;
+
+    private const FAILED_ITEMS_LIMIT = 200;
+
+    private const CONFLICTS_LIMIT = 100;
+
+    /**
+     * Explicit column allowlist for every `FirmIntegration` read in this
+     * class — `webhook_routing_token` is never selected at the SQL
+     * level at all (frozen design §10 item 1), not merely omitted from
+     * PlatformIntegrationConnectionSummary::fromModel()'s output. Also
+     * deliberately excludes `error_reason` — this checkpoint does not
+     * surface it (unlike Checkpoint 10's own firm-facing DTO), relying
+     * only on `integration_connection_health`'s governed
+     * `sanitized_diagnostic_summary`/`last_failure_category` columns for
+     * failure context instead.
+     *
+     * @var array<int, string>
+     */
+    private const CONNECTION_COLUMNS = [
+        'id', 'uuid', 'firm_id', 'integration_provider_id', 'external_account_id',
+        'display_label', 'status', 'connected_at', 'disconnected_at',
+    ];
+
+    public function __construct(
+        private readonly PlatformFirmIntegrationBoundedAccessService $boundedAccess,
+        private readonly HealthStateService $healthState,
+        private readonly IntegrationUsageSummaryService $usageSummary,
+    ) {
+    }
+
+    /**
+     * The always-visible, aggregate/sanitized cross-firm overview — no
+     * support-access grant required (frozen design §2 item 3), only the
+     * coarse role-level gate. Reads the no-RLS
+     * `integration_platform_overview_summaries` snapshot table directly
+     * — never a live cross-firm query against any FORCE-RLS tenant
+     * table.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function overviewSummaries(PlatformAdmin $admin): Collection
+    {
+        $this->boundedAccess->assertCanAccessOversight($admin);
+
+        return DB::table('integration_platform_overview_summaries')
+            ->orderBy('firm_uuid')
+            ->get()
+            ->map(fn (object $row): array => (array) $row)
+            ->values();
+    }
+
+    /**
+     * @return Collection<int, PlatformIntegrationConnectionSummary>
+     */
+    public function connectionsForFirm(PlatformAdmin $admin, Firm $firm): Collection
+    {
+        return $this->boundedAccess->readWithinFirmAccess($admin, $firm, function () use ($firm): Collection {
+            return FirmIntegration::query()
+                ->where('firm_id', $firm->id)
+                ->orderBy('created_at')
+                ->get(self::CONNECTION_COLUMNS)
+                ->map(fn (FirmIntegration $connection): PlatformIntegrationConnectionSummary => $this->toConnectionSummary($connection))
+                ->values();
+        });
+    }
+
+    public function connectionDetail(PlatformAdmin $admin, Firm $firm, string $connectionUuid): ?PlatformIntegrationConnectionSummary
+    {
+        return $this->boundedAccess->readWithinFirmAccess($admin, $firm, function () use ($firm, $connectionUuid): ?PlatformIntegrationConnectionSummary {
+            $connection = FirmIntegration::query()
+                ->where('firm_id', $firm->id)
+                ->where('uuid', $connectionUuid)
+                ->first(self::CONNECTION_COLUMNS);
+
+            return $connection === null ? null : $this->toConnectionSummary($connection);
+        });
+    }
+
+    /**
+     * The required "usage" per-firm sub-view (frozen design §7; agent-
+     * 11h-architecture-security-review.md §14: `usageForFirm(int
+     * $firmId)`). Read-only reuse of Checkpoint 10's own
+     * `IntegrationUsageSummaryService::summariesForFirm()` aggregate-
+     * query shape (`SUM(quantity)`/`MIN`/`MAX(occurred_at)` only) — no
+     * new usage-aggregation mechanism is invented here. Routes through
+     * the same `readWithinFirmAccess()` chokepoint as every other
+     * per-firm method in this class; `IntegrationUsageSummaryService`
+     * additionally wraps its own nested `runWithFirmContext()` call
+     * (the same established, safe-to-nest pattern
+     * `HealthStateService::summariesForFirm()` already uses elsewhere
+     * in this checkpoint).
+     *
+     * `IntegrationUsageRecord` has no billing/cost column at all
+     * (confirmed against the model), and `IntegrationUsageSummary`
+     * carries none either — only sanitized quantity/unit/timestamp
+     * aggregates are ever returned here, never a raw provider payload
+     * or a cost figure.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function usageForFirm(PlatformAdmin $admin, Firm $firm): Collection
+    {
+        return $this->boundedAccess->readWithinFirmAccess($admin, $firm, function () use ($firm): Collection {
+            return $this->usageSummary->summariesForFirm($firm->id)
+                ->map(fn (IntegrationUsageSummary $summary): array => [
+                    'firm_integration_id' => $summary->firmIntegrationId,
+                    'connection_label' => $summary->connectionLabel,
+                    'provider_key' => $summary->providerKey,
+                    'capability' => $summary->capability,
+                    'operation_type' => $summary->operationType,
+                    'direction' => $summary->direction?->value,
+                    'total_quantity' => $summary->totalQuantity,
+                    'unit' => $summary->unit,
+                    'first_occurred_at' => $summary->firstOccurredAt,
+                    'last_occurred_at' => $summary->lastOccurredAt,
+                ])
+                ->values();
+        });
+    }
+
+    /**
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function syncHistoryForConnection(PlatformAdmin $admin, Firm $firm, int $connectionId): Collection
+    {
+        return $this->boundedAccess->readWithinFirmAccess($admin, $firm, function () use ($firm, $connectionId): Collection {
+            return IntegrationSyncRun::query()
+                ->where('firm_id', $firm->id)
+                ->where('firm_integration_id', $connectionId)
+                ->orderByDesc('created_at')
+                ->limit(self::SYNC_HISTORY_LIMIT)
+                ->get([
+                    'id', 'resource_type', 'sync_direction', 'run_type', 'trigger_source', 'status',
+                    'items_total', 'items_succeeded', 'items_failed', 'items_skipped', 'started_at', 'finished_at',
+                ])
+                ->map(fn (IntegrationSyncRun $run): array => [
+                    'id' => $run->id,
+                    'resource_type' => $run->resource_type,
+                    'sync_direction' => $run->sync_direction?->value,
+                    'run_type' => $run->run_type?->value,
+                    'trigger_source' => $run->trigger_source?->value,
+                    'status' => $run->status?->value,
+                    'items_total' => $run->items_total,
+                    'items_succeeded' => $run->items_succeeded,
+                    'items_failed' => $run->items_failed,
+                    'items_skipped' => $run->items_skipped,
+                    'started_at' => $run->started_at,
+                    'finished_at' => $run->finished_at,
+                ])
+                ->values();
+        });
+    }
+
+    /**
+     * Combined dead-lettered outbox events + failed-permanent sync
+     * items for one connection — mirrors
+     * App\Filament\Firm\Resources\FirmIntegrationResource\RelationManagers\FailedItemsRelationManager's
+     * array-row shape, EXCEPT `last_error` is deliberately OMITTED
+     * entirely (frozen design §10 item 2 — stricter than Checkpoint 10,
+     * which rendered it for the connection's own firm).
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function failedItemsForConnection(PlatformAdmin $admin, Firm $firm, int $connectionId): Collection
+    {
+        return $this->boundedAccess->readWithinFirmAccess($admin, $firm, function () use ($firm, $connectionId): Collection {
+            $outboxEvents = IntegrationOutboxEvent::query()
+                ->where('firm_id', $firm->id)
+                ->where('firm_integration_id', $connectionId)
+                ->where('status', OutboxEventStatus::DeadLettered->value)
+                ->orderByDesc('dead_lettered_at')
+                ->limit(self::FAILED_ITEMS_LIMIT)
+                // Explicit column allowlist — `last_error` is never
+                // selected at the SQL level at all (frozen design §10
+                // item 2), not merely omitted from the mapped output
+                // below.
+                ->get(['id', 'event_type', 'resource_type', 'resource_id', 'dead_lettered_at', 'requeue_count', 'max_requeues'])
+                ->map(fn (IntegrationOutboxEvent $event): array => [
+                    'id' => "outbox:{$event->id}",
+                    'type' => 'outbox_event',
+                    'model_id' => $event->id,
+                    'label' => $event->event_type,
+                    'detail' => trim(($event->resource_type ?? '').($event->resource_id !== null ? " #{$event->resource_id}" : '')),
+                    'failed_at' => $event->dead_lettered_at,
+                    'requeue_count' => $event->requeue_count,
+                    'max_requeues' => $event->max_requeues,
+                ]);
+
+            $syncItems = IntegrationSyncItem::query()
+                ->join('integration_sync_runs', 'integration_sync_runs.id', '=', 'integration_sync_items.sync_run_id')
+                ->where('integration_sync_items.firm_id', $firm->id)
+                ->where('integration_sync_runs.firm_integration_id', $connectionId)
+                ->where('integration_sync_items.status', SyncItemStatus::FailedPermanent->value)
+                ->orderByDesc('integration_sync_items.terminal_at')
+                ->limit(self::FAILED_ITEMS_LIMIT)
+                // Explicit column allowlist — `last_error` is never
+                // selected at the SQL level at all (frozen design §10
+                // item 2), not merely omitted from the mapped output
+                // below.
+                ->select([
+                    'integration_sync_items.id',
+                    'integration_sync_items.resource_type',
+                    'integration_sync_items.external_id',
+                    'integration_sync_items.terminal_at',
+                    'integration_sync_items.requeue_count',
+                ])
+                ->get()
+                ->map(fn (IntegrationSyncItem $item): array => [
+                    'id' => "sync_item:{$item->id}",
+                    'type' => 'sync_item',
+                    'model_id' => $item->id,
+                    'label' => $item->resource_type,
+                    'detail' => $item->external_id,
+                    'failed_at' => $item->terminal_at,
+                    'requeue_count' => $item->requeue_count,
+                    'max_requeues' => null,
+                ]);
+
+            return $outboxEvents->concat($syncItems)->sortByDesc('failed_at')->values();
+        });
+    }
+
+    /**
+     * `resolution_note` is only present when the acting admin currently
+     * holds an active SupportAccessSession for this exact firm (frozen
+     * design §10 item 3) — independent of, and never widened by, the
+     * coarser role-ceiling check `readWithinFirmAccess()` itself applies.
+     * `local_value`/`external_value` are never selected at all (frozen
+     * design §10 item 5).
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function conflictsForConnection(PlatformAdmin $admin, Firm $firm, int $connectionId): Collection
+    {
+        return $this->boundedAccess->readWithinFirmAccess($admin, $firm, function () use ($admin, $firm, $connectionId): Collection {
+            $canSeeResolutionNote = $this->boundedAccess->hasActiveSupportAccessSessionFor($admin, $firm);
+
+            return IntegrationConflict::query()
+                ->where('firm_id', $firm->id)
+                ->where('firm_integration_id', $connectionId)
+                ->orderByDesc('detected_at')
+                ->limit(self::CONFLICTS_LIMIT)
+                ->get([
+                    'id', 'conflict_type', 'resource_type', 'status', 'requires_manual_review',
+                    'resolution_note', 'detected_at', 'resolved_at', 'expires_at',
+                ])
+                ->map(fn (IntegrationConflict $conflict) => [
+                    'id' => $conflict->id,
+                    'conflict_type' => $conflict->conflict_type,
+                    'resource_type' => $conflict->resource_type,
+                    'status' => $conflict->status?->value,
+                    'requires_manual_review' => (bool) $conflict->requires_manual_review,
+                    'resolution_note' => $canSeeResolutionNote ? $conflict->resolution_note : null,
+                    'detected_at' => $conflict->detected_at,
+                    'resolved_at' => $conflict->resolved_at,
+                    'expires_at' => $conflict->expires_at,
+                ])
+                ->values();
+        });
+    }
+
+    /**
+     * Sanitized combined audit history for a firm: this firm's own
+     * integration-related `timeline_events` rows (frozen design §4:
+     * "Reads of timeline_events are unaffected — a SuperAdmin may freely
+     * read a firm's existing rows") plus this firm's own governance
+     * `security_events` rows written by this checkpoint's own
+     * support-access/oversight-action audit trail. Deliberately curated
+     * (event_type/occurred_at/actor only) rather than dumping raw
+     * metadata JSON — "sanitized," not "unrestricted."
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function sanitizedAuditHistoryForFirm(PlatformAdmin $admin, Firm $firm): Collection
+    {
+        return $this->boundedAccess->readWithinFirmAccess($admin, $firm, function () use ($firm): Collection {
+            $timelineRows = TimelineEvent::query()
+                ->where('firm_id', $firm->id)
+                ->where('event_type', 'like', 'integration%')
+                ->orderByDesc('occurred_at')
+                ->limit(self::AUDIT_HISTORY_LIMIT)
+                ->get(['event_type', 'actor_type', 'occurred_at'])
+                ->map(fn (TimelineEvent $event): array => [
+                    'source' => 'timeline',
+                    'event_type' => $event->event_type,
+                    'actor_type' => $event->actor_type,
+                    'occurred_at' => $event->occurred_at,
+                ]);
+
+            $securityRows = SecurityEvent::query()
+                ->where('firm_id', $firm->id)
+                ->whereIn('category', ['support_access', 'platform_integration_oversight'])
+                ->orderByDesc('created_at')
+                ->limit(self::AUDIT_HISTORY_LIMIT)
+                ->get(['event_type', 'actor_type', 'created_at'])
+                ->map(fn (SecurityEvent $event): array => [
+                    'source' => 'security',
+                    'event_type' => $event->event_type,
+                    'actor_type' => $event->actor_type,
+                    'occurred_at' => $event->created_at,
+                ]);
+
+            return $timelineRows
+                ->concat($securityRows)
+                ->sortByDesc('occurred_at')
+                ->take(self::AUDIT_HISTORY_LIMIT)
+                ->values();
+        });
+    }
+
+    /**
+     * Global, non-firm-specific retention configuration values (frozen
+     * design §7's "retention status" view item) — plain config() reads,
+     * never a new production surface, and never a claim of legal-hold
+     * safety (frozen design §14: LEGAL_HOLD_COVERAGE_UNRESOLVED remains
+     * unresolved).
+     *
+     * @return array<string, mixed>
+     */
+    public function retentionConfigSummary(PlatformAdmin $admin): array
+    {
+        $this->boundedAccess->assertCanAccessOversight($admin);
+
+        return [
+            'outbox_completed_retention_days' => config('integrations.outbox.completed_retention_days'),
+            'outbox_dead_lettered_retention_days' => config('integrations.outbox.dead_lettered_retention_days'),
+            'outbox_cancelled_retention_days' => config('integrations.outbox.cancelled_retention_days'),
+            'sync_runs_retention_days' => config('integrations.sync_runs.retention_days'),
+            'sync_items_retention_days' => config('integrations.sync_items.retention_days'),
+            'conflicts_retention_days' => config('integrations.conflicts.retention_days'),
+            'oauth_states_consumed_retention_hours' => config('integrations.oauth_states.consumed_retention_hours'),
+            'usage_records_retention_days' => config('integrations.usage_records.retention_days'),
+        ];
+    }
+
+    private function toConnectionSummary(FirmIntegration $connection): PlatformIntegrationConnectionSummary
+    {
+        $health = $this->healthState->summaryFor($connection);
+
+        $lastFailureCategory = DB::table('integration_connection_health')
+            ->where('firm_integration_id', $connection->id)
+            ->value('last_failure_category');
+
+        $webhookRoutingConfigured = DB::table('integration_webhook_routing_index')
+            ->where('firm_integration_id', $connection->id)
+            ->exists();
+
+        return PlatformIntegrationConnectionSummary::fromModel(
+            $connection,
+            $health,
+            $lastFailureCategory,
+            $webhookRoutingConfigured,
+        );
+    }
+}

@@ -55,6 +55,18 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('integrations:retention:sweep')
             ->daily()
             ->withoutOverlapping();
+
+        // CHECKPOINT 11 — SuperAdmin cross-firm integration oversight
+        // (reviews/checkpoint-11/frozen-design-post-security-review.md
+        // §5). Same shape as the three commands above: a plain, cheap,
+        // non-tenant Artisan command that enumerates active firms from
+        // the non-RLS `firms` table and dispatches one per-firm queued
+        // job each, refreshing the no-RLS
+        // `integration_platform_overview_summaries` snapshot table the
+        // platform-admin overview page reads.
+        $schedule->command('integrations:platform-overview:refresh')
+            ->everyFiveMinutes()
+            ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware): void {
         // Trust the AWS ALB in front of this container for exactly the
