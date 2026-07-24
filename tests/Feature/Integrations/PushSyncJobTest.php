@@ -15,6 +15,7 @@ use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationConflict;
 use App\Integrations\Models\IntegrationExternalMapping;
 use App\Integrations\Models\IntegrationSyncItem;
+use App\Integrations\Providers\TestProvider\TestProvider;
 use App\Integrations\Services\IntegrationConflictService;
 use App\Integrations\Services\IntegrationExternalMappingService;
 use App\Integrations\Services\SyncItemService;
@@ -426,5 +427,134 @@ class PushSyncJobTest extends TestCase
         $this->assertSame('failed', $run->status);
         $this->assertStringContainsString('provider_rejected', $run->error_summary);
         $this->assertStringNotContainsString('Simulated fixture failure', $run->error_summary);
+    }
+
+    // ------------------------------------------------------------
+    // CHECKPOINT 12 addition (frozen-design-post-security-review.md §8):
+    // genuine App\Integrations\Providers\TestProvider\TestProvider (not
+    // this file's own registerFakePushProvider() double above),
+    // registered exactly the way production config/integrations.php
+    // would, exercised through this job's real F2 $providerContext
+    // constructor parameter.
+    //
+    // RESOLVED DEVIATION (previously disclosed here as a workaround,
+    // now fixed): this block used to explain that providerContext
+    // ['__simulate_failure'] was structurally unreachable —
+    // TestProvider::push()'s FAILURE_SENTINEL/RATE_LIMIT_SENTINEL checks
+    // read $payload['__simulate_failure'], never $context, and
+    // PushSyncJob::handle() only ever passed $providerContext into
+    // push()'s $context argument, never merging it into $payload. That
+    // gap is now closed in App\Jobs\PushSyncJob::handle(): it routes
+    // providerContext['__simulate_failure'] into $payload before
+    // calling push() (the ONE key push() actually reads off $payload),
+    // so the sentinel below now genuinely reaches and throws inside
+    // genuine TestProvider, driven end-to-end through a real,
+    // unmodified PushSyncJob dispatch — no fake provider, no manual
+    // orchestration.
+    // ------------------------------------------------------------
+
+    public function test_a_provider_context_failure_sentinel_dispatched_through_a_real_push_sync_job_produces_a_genuine_sanitized_failure(): void
+    {
+        config(['integrations.providers' => [ProviderKey::Test->value => TestProvider::class]]);
+        TestProvider::resetSimulationState();
+
+        try {
+            $firm = Firm::factory()->create();
+            $connection = $this->connection($firm);
+
+            $this->dispatchPushWithProviderContext($connection, $firm->id, 'contact', 'App\\Models\\Contact', 960, 'local-v1', ['__simulate_failure' => TestProvider::FAILURE_SENTINEL]);
+
+            $run = $this->latestRun($firm, $connection);
+            $this->assertSame('failed', $run->status, 'A real PushSyncJob dispatch carrying providerContext[\'__simulate_failure\'] => FAILURE_SENTINEL must now genuinely reach and throw inside TestProvider::push(), routed through $payload by this checkpoint\'s fix.');
+            $this->assertStringContainsString('provider_rejected', $run->error_summary);
+            $this->assertStringNotContainsString('Simulated provider failure', $run->error_summary, 'The sanitized error_summary persisted by the job must never contain TestProvider\'s own raw, internal exception message.');
+
+            $mapping = $this->runWithFirmContext($firm, fn () => IntegrationExternalMapping::query()
+                ->where('firm_integration_id', $connection->id)
+                ->where('local_id', 960)
+                ->first());
+            $this->assertNull($mapping, 'A genuinely failed push must never create a mapping row.');
+        } finally {
+            TestProvider::resetSimulationState();
+        }
+    }
+
+    // ------------------------------------------------------------
+    // RESOLVED DEVIATION continued: F4's idempotency-key dedup, now
+    // proven via the job's OWN always-computed idempotency_key (see
+    // PushSyncJob::handle()'s own deterministic-hash docblock) rather
+    // than a manually-injected providerContext override. This supersedes
+    // this file's ORIGINAL Checkpoint 12 addition here, which (per the
+    // resolved deviation above) could only prove dedup via a
+    // test-injected providerContext['idempotency_key'] — a channel real
+    // production dispatch never populates.
+    // TestProvider::push() now reads $payload['idempotency_key'] FIRST
+    // (falling back to $context only for that narrower
+    // test-harness-only override case — see TestProvider::push()'s own
+    // docblock), so two real dispatches of the exact same (connection,
+    // resource_type, local_type, local_id, local_version_token), with NO
+    // providerContext involved at all, must now dedupe purely from the
+    // job's own real computed key.
+    // ------------------------------------------------------------
+
+    public function test_two_dispatches_of_the_same_local_record_at_the_same_version_dedupe_via_the_jobs_own_computed_idempotency_key(): void
+    {
+        config(['integrations.providers' => [ProviderKey::Test->value => TestProvider::class]]);
+        TestProvider::resetSimulationState();
+
+        try {
+            $firm = Firm::factory()->create();
+            $connection = $this->connection($firm);
+
+            $this->dispatchPushWithProviderContext($connection, $firm->id, 'contact', 'App\\Models\\Contact', 950, 'local-v1', null);
+
+            $mapping = $this->runWithFirmContext($firm, fn () => IntegrationExternalMapping::query()
+                ->where('firm_integration_id', $connection->id)
+                ->where('local_id', 950)
+                ->first());
+            $this->assertNotNull($mapping);
+            $firstExternalVersionToken = $mapping->external_version_token;
+
+            // A second, independent dispatch for the EXACT SAME
+            // (connection, resource_type, local_type, local_id,
+            // local_version_token) — e.g. a re-delivered/re-processed
+            // job for an unchanged local record. PushSyncJob::handle()
+            // computes the SAME deterministic idempotency_key both times
+            // purely from these five values — no providerContext at
+            // all. refreshVersionTokens() overwrites
+            // external_version_token with WHATEVER genuine TestProvider
+            // returns on this call: if dedup did NOT fire, TestProvider's
+            // fresh Str::random(12) would (with overwhelming probability)
+            // differ from the first call's token; if dedup DID fire, it
+            // is byte-for-byte identical.
+            $this->dispatchPushWithProviderContext($connection, $firm->id, 'contact', 'App\\Models\\Contact', 950, 'local-v1', null);
+
+            $fresh = $this->runWithFirmContext($firm, fn () => $mapping->fresh());
+            $this->assertSame(
+                $firstExternalVersionToken,
+                $fresh->external_version_token,
+                'A second real PushSyncJob dispatch for the identical local record/version must compute the IDENTICAL idempotency_key as the first, so genuine TestProvider must return its cached response (same external_version_token) rather than a freshly generated one — proving F4\'s dedup fired via the job\'s own real computed key, with zero providerContext involved.'
+            );
+        } finally {
+            TestProvider::resetSimulationState();
+        }
+    }
+
+    private function dispatchPushWithProviderContext(FirmIntegration $connection, int $firmId, string $resourceType, string $localType, int $localId, string $localVersionToken, ?array $providerContext): void
+    {
+        // PushSyncJob's constructor now declares providerContext as
+        // ?string (JobConstructorsCarryOnlyScalarSecretSafeTypesTest —
+        // no ShouldQueue constructor may carry an array-typed
+        // parameter), so this helper's own ?array param is JSON-encoded
+        // here before reaching the job.
+        $job = new PushSyncJob($connection->id, $firmId, $resourceType, $localType, $localId, $localVersionToken, providerContext: $providerContext !== null ? json_encode($providerContext) : null);
+        $job->handle(
+            app(SyncRunService::class),
+            app(SyncItemService::class),
+            app(IntegrationExternalMappingService::class),
+            app(IntegrationConflictService::class),
+            app(ProviderRegistry::class),
+            app(OutboundProviderHttpClient::class),
+        );
     }
 }

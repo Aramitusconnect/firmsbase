@@ -50,6 +50,20 @@ final class ProviderRegistry
     }
 
     /**
+     * Checkpoint 12 addition (frozen-design-post-security-review.md
+     * §2 F1): a non-throwing existence check — "is this key currently
+     * resolvable" — for callers (e.g. ConnectProviderAction's dropdown
+     * filter) that need to test resolvability without catching
+     * UnknownProviderException as control flow. Never changes get()'s
+     * existing throwing contract; purely additive, reuses the exact
+     * same registeredMap() filtering get() itself relies on.
+     */
+    public function has(ProviderKey $key): bool
+    {
+        return array_key_exists($key->value, $this->registeredMap());
+    }
+
+    /**
      * Build ProviderMetadata for a registered key by reflecting on the
      * resolved instance's actually-implemented capability interfaces —
      * never a hardcoded per-provider capability list.

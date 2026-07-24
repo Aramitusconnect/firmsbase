@@ -56,6 +56,23 @@ final class PushSyncJob implements ShouldQueue
         public readonly string $localVersionToken,
         public readonly ?int $triggeringWebhookEventId = null,
         public readonly ?int $retriedRunId = null,
+        // Checkpoint 12 addition (frozen-design-post-security-review.md
+        // §2 F2): additive, OPTIONAL, trailing nullable param — every
+        // existing caller that omits it is completely unaffected and
+        // preserves today's exact behavior (provider->push() continues
+        // to receive [] as its context argument). Exists so a test
+        // harness (or a future real caller) can drive knobs the
+        // provider's push() reads out of its $context parameter (e.g.
+        // TestProvider's idempotency_key-honoring knob) without this
+        // job inventing any provider-specific behavior of its own.
+        //
+        // Post-checkpoint-12 fix (JobConstructorsCarryOnlyScalarSecretSafeTypesTest):
+        // declared ?string, not ?array — every ShouldQueue constructor
+        // parameter in this codebase must be scalar/enum/DateTimeInterface
+        // so Laravel never serializes an array into the queue payload.
+        // Callers now pass a JSON-encoded string; decoded back to an
+        // array in handle() below before use.
+        public readonly ?string $providerContext = null,
     ) {
     }
 
@@ -157,8 +174,17 @@ final class PushSyncJob implements ShouldQueue
             // version produces the SAME key, while a legitimate
             // subsequent push of a CHANGED local record produces a NEW
             // one. Folded into the payload for a provider that honors
-            // idempotency keys; TestProvider itself does not need it
-            // (makes zero network calls, already synthetic).
+            // idempotency keys. Checkpoint 12 fix (post-integration gap
+            // found by 12H): this is also the value TestProvider's own
+            // idempotency-dedup simulation now keys off of —
+            // TestProvider::push() reads $payload['idempotency_key']
+            // first (falling back to $context['idempotency_key'] only
+            // for a narrower test-harness-only override) precisely
+            // because THIS key, always computed here for every real
+            // push, is what checkpoint-00-final-specification.md §16
+            // means by "TestProvider genuinely honors whatever
+            // idempotency key it's given" — not a value only present
+            // when a test manually injects one via providerContext.
             $idempotencyKey = hash(
                 'sha256',
                 "{$connection->id}:{$this->resourceType}:{$this->localType}:{$this->localId}:{$this->localVersionToken}",
@@ -171,8 +197,36 @@ final class PushSyncJob implements ShouldQueue
                 'existing_external_id' => $existingMapping?->external_id,
             ];
 
+            // Checkpoint 12 fix (post-integration gap found by 12H):
+            // providerContext flows into push()'s $context argument
+            // below, but TestProvider::push() (and every real provider
+            // contract's own convention — see agent-8c §10.2) checks
+            // '__simulate_failure' against $payload, not $context. A
+            // caller-supplied providerContext['__simulate_failure'] has
+            // to be routed into $payload for the sentinel to actually be
+            // reachable through a real job dispatch; every other
+            // providerContext key (if any are ever added) keeps flowing
+            // into $context unchanged, since '__simulate_failure' is the
+            // only key push() reads off $payload today.
+            //
+            // Decoded from the JSON-encoded constructor param — see
+            // this job's constructor docblock (§ post-checkpoint-12
+            // fix) for why the constructor-declared type is ?string
+            // rather than ?array. Only ever set by test code today
+            // (frozen design), so a defensive is_array() fallback to []
+            // on malformed input is sufficient.
+            $providerContext = [];
+            if ($this->providerContext !== null) {
+                $decoded = json_decode($this->providerContext, true);
+                $providerContext = is_array($decoded) ? $decoded : [];
+            }
+
+            if (array_key_exists('__simulate_failure', $providerContext)) {
+                $payload['__simulate_failure'] = $providerContext['__simulate_failure'];
+            }
+
             try {
-                $result = $httpClient->execute(fn () => $provider->push([], $this->resourceType, $payload), 'push');
+                $result = $httpClient->execute(fn () => $provider->push($providerContext, $this->resourceType, $payload), 'push');
             } catch (SanitizedProviderHttpException $e) {
                 $items->recordAttempt(
                     $connection->firm_id, $run->id, $this->resourceType, $this->localType, $this->localId,

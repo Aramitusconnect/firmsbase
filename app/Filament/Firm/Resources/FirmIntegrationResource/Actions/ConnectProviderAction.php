@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Filament\Firm\Resources\FirmIntegrationResource\Actions;
 
+use App\Integrations\Core\ProviderRegistry;
+use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\IntegrationProvider;
 use App\Integrations\Services\IntegrationAccessPolicyService;
 use App\Integrations\Services\ProviderConnectionService;
@@ -64,10 +66,28 @@ class ConnectProviderAction extends Action
         $this->schema([
             Select::make('integration_provider_id')
                 ->label('Provider')
-                ->options(static fn (): array => IntegrationProvider::query()
-                    ->orderBy('display_name')
-                    ->pluck('display_name', 'id')
-                    ->all())
+                // Checkpoint 12 addition (frozen-design-post-security-
+                // review.md §2 F1): the catalog row alone
+                // (status='active') is not sufficient — a row can exist
+                // in integration_providers without its ProviderKey
+                // being currently resolvable via ProviderRegistry (e.g.
+                // an environment-gated provider that is currently
+                // disabled). Filtering both closes the confirmed §18
+                // violation of an unfiltered dropdown rendering in
+                // every environment.
+                ->options(static function (ProviderRegistry $registry): array {
+                    return IntegrationProvider::query()
+                        ->where('status', 'active')
+                        ->orderBy('display_name')
+                        ->get(['id', 'display_name', 'code'])
+                        ->filter(static function (IntegrationProvider $provider) use ($registry): bool {
+                            $key = ProviderKey::tryFrom($provider->code);
+
+                            return $key !== null && $registry->has($key);
+                        })
+                        ->pluck('display_name', 'id')
+                        ->all();
+                })
                 ->required()
                 ->native(false),
         ]);

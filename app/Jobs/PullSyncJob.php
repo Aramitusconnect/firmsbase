@@ -74,6 +74,24 @@ final class PullSyncJob implements ShouldQueue
         // passes that run's id here so this job does not double-create a
         // second run for the same dispatch.
         public readonly ?int $preCreatedRunId = null,
+        // Checkpoint 12 addition (frozen-design-post-security-review.md
+        // §2 F2): additive, OPTIONAL, trailing nullable param — every
+        // existing caller that omits it is completely unaffected and
+        // preserves today's exact behavior (provider->pull() continues
+        // to receive [] as its context argument). Exists so a test
+        // harness (or a future real caller) can drive knobs the
+        // provider's pull() reads out of its $context parameter (e.g.
+        // TestProvider's simulate_pages/simulate_conflict_for/
+        // FAILURE_SENTINEL-shaped knobs) without this job inventing any
+        // provider-specific behavior of its own.
+        //
+        // Post-checkpoint-12 fix (JobConstructorsCarryOnlyScalarSecretSafeTypesTest):
+        // declared ?string, not ?array — every ShouldQueue constructor
+        // parameter in this codebase must be scalar/enum/DateTimeInterface
+        // so Laravel never serializes an array into the queue payload.
+        // Callers now pass a JSON-encoded string; decoded back to an
+        // array in handle() below before use.
+        public readonly ?string $providerContext = null,
     ) {
     }
 
@@ -246,6 +264,19 @@ final class PullSyncJob implements ShouldQueue
             return;
         }
 
+        // Decode the JSON-encoded providerContext string back into an
+        // array for the provider call below — see this job's
+        // constructor docblock (§ post-checkpoint-12 fix) for why the
+        // constructor-declared type is ?string rather than ?array. This
+        // parameter is only ever set by test code today (frozen
+        // design), so a defensive is_array() fallback to [] on
+        // malformed input is sufficient — no need to throw.
+        $providerContext = [];
+        if ($this->providerContext !== null) {
+            $decoded = json_decode($this->providerContext, true);
+            $providerContext = is_array($decoded) ? $decoded : [];
+        }
+
         $pageCursor = $cursor->cursor_value;
         $itemsTotal = 0;
         $itemsSucceeded = 0;
@@ -256,7 +287,7 @@ final class PullSyncJob implements ShouldQueue
 
         do {
             try {
-                $page = $httpClient->execute(fn () => $provider->pull([], $this->resourceType, $pageCursor), 'pull');
+                $page = $httpClient->execute(fn () => $provider->pull($providerContext, $this->resourceType, $pageCursor), 'pull');
             } catch (SanitizedProviderHttpException $e) {
                 $sanitizedErrorSummary = "pull_failed: {$e->category()}";
                 $sawBlockingFailure = true;

@@ -54,6 +54,20 @@ use Illuminate\Support\Str;
  *   internal/non-production so no later UI checkpoint could mistake it
  *   for a real provider.
  *
+ * CHECKPOINT 12 clarification, no behavior change
+ * (frozen-design-post-security-review.md §2 F6): no PROACTIVE-polling
+ * caller of checkHealth() exists for this or any other provider
+ * anywhere in this codebase today (no scheduler/command ever invokes
+ * it). The real, working health-transition mechanism is the REACTIVE
+ * App\Integrations\Services\HealthStateService::recordSuccess()/
+ * recordRateLimited()/recordCredentialError()/recordScopeError()/
+ * recordProviderError() signal chain, driven directly by job outcomes
+ * (App\Jobs\PullSyncJob, App\Jobs\PushSyncJob, App\Jobs\SyncRetryPollJob,
+ * App\Jobs\OutboxDispatchJob, App\Integrations\Jobs\RefreshIntegrationToken)
+ * — see checkHealth()'s own docblock below. checkHealth() exists solely
+ * to satisfy SupportsHealthCheckContract/CapabilityContractTest's
+ * non-vacuousness requirement.
+ *
  * Webhook simulation note (checkpoint-00-final-specification.md §11):
  * verifyInboundSignature()/parseInboundEvent() below read a
  * `'signature'` key out of the generic $headers array purely as
@@ -123,19 +137,63 @@ final class TestProvider implements
     public const TRANSIENT_FAILURE_SENTINEL = '__simulate_transient_provider_failure__';
 
     /**
+     * CHECKPOINT 12 addition (frozen-design-post-security-review.md §2
+     * F3): a THIRD, distinct sentinel — checked against pull()'s
+     * $cursor, push()'s $payload['__simulate_failure'], and
+     * refreshToken()'s $refreshToken, mirroring FAILURE_SENTINEL's/
+     * TRANSIENT_FAILURE_SENTINEL's exact detection pattern in each of
+     * those three methods — that simulates a rate-limited
+     * (CATEGORY_RATE_LIMITED) outbound-call failure carrying a
+     * synthetic Retry-After value, closing checkpoint-00-final-
+     * specification.md §18's requirement that TestProvider be able to
+     * exercise the reactive rate-limit signal chain
+     * (HealthStateService::recordRateLimited(), RetryAfterParser) end to
+     * end. Never a value random_bytes()/Str::random() could plausibly
+     * generate by coincidence, same discipline as the other two
+     * sentinels. Does NOT add or require any PROACTIVE rate-limiter gate
+     * call site (PerConnectionRateLimiter) — that remains explicitly
+     * deferred (frozen design §4 D1).
+     */
+    public const RATE_LIMIT_SENTINEL = '__simulate_rate_limited_provider_failure__';
+
+    /**
      * @var array<string, array{code_challenge: string, external_account_id: string, granted_scopes: string[], used: bool, expires_at: \Illuminate\Support\Carbon}>
      */
     private static array $issuedAuthorizationCodes = [];
 
     /**
-     * TEST-ONLY: clears the static authorization-code replay registry.
-     * MUST be called from every test's setUp()/tearDown() that exercises
-     * reuse/expiry detection — see class docblock condition (a). Never
-     * called from any production code path.
+     * CHECKPOINT 12 addition (frozen-design-post-security-review.md §2
+     * F4; checkpoint-00-final-specification.md §16): a SECOND private
+     * static in-process array, mirroring $issuedAuthorizationCodes'
+     * exact convention above — TEST-ONLY, never persisted, cleared only
+     * via resetSimulationState(). Keyed on the caller-supplied
+     * `$context['idempotency_key']` (an opaque string, never a
+     * token/secret), standing in for what a real provider's own
+     * idempotency-key store would do: a push() call carrying an
+     * idempotency key already seen returns the SAME response
+     * (external_id/version_token/status) instead of generating fresh
+     * random values, so a retried/duplicate dispatch of the same
+     * logical push is provably safe to replay. No DB/cache-backed
+     * replacement is required, same reasoning as
+     * $issuedAuthorizationCodes: the mechanism this stands in for (a
+     * real provider's own idempotency store) is itself out of scope for
+     * TestProvider by design.
+     *
+     * @var array<string, array{external_id: string, version_token: string, status: string}>
+     */
+    private static array $issuedIdempotentPushResponses = [];
+
+    /**
+     * TEST-ONLY: clears the static authorization-code replay registry
+     * and the static idempotency-key response registry. MUST be called
+     * from every test's setUp()/tearDown() that exercises reuse/expiry
+     * detection or idempotency-key dedup — see class docblock condition
+     * (a). Never called from any production code path.
      */
     public static function resetSimulationState(): void
     {
         self::$issuedAuthorizationCodes = [];
+        self::$issuedIdempotentPushResponses = [];
     }
 
     /**
@@ -327,6 +385,15 @@ final class TestProvider implements
             );
         }
 
+        if ($refreshToken === self::RATE_LIMIT_SENTINEL) {
+            throw new SimulatedProviderFailureException(
+                category: SimulatedProviderFailureException::CATEGORY_RATE_LIMITED,
+                statusCode: 429,
+                message: 'Simulated rate-limited provider failure during token refresh.',
+                retryAfterRaw: '30',
+            );
+        }
+
         return [
             'access_token' => Str::random(40),
             'refresh_token' => Str::random(40),
@@ -407,6 +474,21 @@ final class TestProvider implements
      * literal "duplicate header" with — that specific rejection rule is
      * enforced where it structurally applies, in
      * InboundWebhookController's own real-Request header extraction.
+     *
+     * CHECKPOINT 12 clarification, no behavior change
+     * (frozen-design-post-security-review.md §2 F6/§5 N1): this method
+     * has ZERO production callers. It exists to satisfy
+     * SupportsWebhooksContract/CapabilityContractTest's non-vacuousness
+     * requirement and to provide a documented reference construction
+     * matching the real inbound webhook route's header/HMAC convention
+     * (see the Checkpoint 7 rewrite note above). It is explicitly NOT
+     * the code path that verifies a genuine inbound TestProvider-
+     * originated webhook in production — that flows through the real,
+     * unmodified App\Integrations\Http\Controllers\InboundWebhookController
+     * / App\Integrations\Services\WebhookConnectionResolverService,
+     * driven by App\Integrations\Services\ProviderConnectionService::enableWebhookRouting()'s
+     * already-generic, provider-agnostic wiring — no TestProvider-
+     * specific glue is needed or was added anywhere in that pipeline.
      */
     public function verifyInboundSignature(string $rawBody, array $headers): bool
     {
@@ -429,6 +511,21 @@ final class TestProvider implements
      * `event_id` now surfaces as `event_id => null` in the returned
      * array — a distinct, caller-visible malformed-payload signal —
      * never a randomly-generated substitute value.
+     *
+     * CHECKPOINT 12 clarification, no behavior change
+     * (frozen-design-post-security-review.md §2 F6/§5 N1): this method
+     * has ZERO production callers. It exists to satisfy
+     * SupportsWebhooksContract/CapabilityContractTest's non-vacuousness
+     * requirement and to provide a documented reference construction
+     * matching the real inbound webhook route's header/HMAC convention.
+     * It is explicitly NOT the code path that verifies/parses a genuine
+     * inbound TestProvider-originated webhook in production — that
+     * flows through the real, unmodified
+     * App\Integrations\Http\Controllers\InboundWebhookController /
+     * App\Integrations\Services\WebhookConnectionResolverService, driven
+     * by App\Integrations\Services\ProviderConnectionService::enableWebhookRouting()'s
+     * already-generic, provider-agnostic wiring — no TestProvider-
+     * specific glue is needed or was added anywhere in that pipeline.
      */
     public function parseInboundEvent(string $rawBody, array $headers): array
     {
@@ -471,6 +568,19 @@ final class TestProvider implements
         return null;
     }
 
+    /**
+     * CHECKPOINT 12 clarification, no behavior change
+     * (frozen-design-post-security-review.md §2 F6/§5 N1): this method
+     * has ZERO production callers. It exists to satisfy
+     * SupportsWebhooksContract/CapabilityContractTest's non-vacuousness
+     * requirement and to provide a documented reference construction.
+     * It is explicitly NOT the code path that establishes a genuine
+     * inbound TestProvider webhook subscription in production — that
+     * flows through the real, unmodified
+     * App\Integrations\Services\ProviderConnectionService::enableWebhookRouting()'s
+     * already-generic, provider-agnostic wiring — no TestProvider-
+     * specific glue is needed or was added here.
+     */
     public function subscribe(array $context): array
     {
         return [
@@ -480,6 +590,19 @@ final class TestProvider implements
         ];
     }
 
+    /**
+     * CHECKPOINT 12 clarification, no behavior change
+     * (frozen-design-post-security-review.md §2 F6/§5 N1): this method
+     * has ZERO production callers. It exists to satisfy
+     * SupportsWebhooksContract/CapabilityContractTest's non-vacuousness
+     * requirement and to provide a documented reference construction.
+     * It is explicitly NOT the code path that renews a genuine inbound
+     * TestProvider webhook subscription in production — that flows
+     * through the real, unmodified
+     * App\Integrations\Services\ProviderConnectionService::enableWebhookRouting()'s
+     * already-generic, provider-agnostic wiring — no TestProvider-
+     * specific glue is needed or was added here.
+     */
     public function renewSubscription(array $context): array
     {
         return [
@@ -503,6 +626,22 @@ final class TestProvider implements
             .'treat a 2xx response as healthy.';
     }
 
+    /**
+     * CHECKPOINT 12 clarification, no behavior change
+     * (frozen-design-post-security-review.md §2 F6): no PROACTIVE-
+     * polling caller of this method exists for this or any other
+     * provider anywhere in this codebase today — no scheduler/command
+     * ever invokes checkHealth(). The real, working health-transition
+     * mechanism is the REACTIVE
+     * App\Integrations\Services\HealthStateService::recordSuccess()/
+     * recordRateLimited()/recordCredentialError()/recordScopeError()/
+     * recordProviderError() signal chain, driven directly by job
+     * outcomes (App\Jobs\PullSyncJob, App\Jobs\PushSyncJob,
+     * App\Jobs\SyncRetryPollJob, App\Jobs\OutboxDispatchJob,
+     * App\Integrations\Jobs\RefreshIntegrationToken). This method exists
+     * only to satisfy SupportsHealthCheckContract/CapabilityContractTest's
+     * non-vacuousness requirement.
+     */
     public function checkHealth(array $context): array
     {
         return [
@@ -541,6 +680,12 @@ final class TestProvider implements
      *    external_id, for a test to construct a local fixture that
      *    disagrees with it and assert exactly one IntegrationConflict
      *    row is created.
+     *
+     * CHECKPOINT 12 addition (frozen-design-post-security-review.md §2
+     * F3): $cursor === RATE_LIMIT_SENTINEL simulates a rate-limited
+     * outbound-call failure during pull, reusing the exact same
+     * FAILURE_SENTINEL-checked-against-$cursor pattern immediately
+     * below.
      */
     public function pull(array $context, string $resourceType, ?string $cursor): array
     {
@@ -549,6 +694,15 @@ final class TestProvider implements
                 category: 'network_error',
                 statusCode: null,
                 message: 'Simulated provider failure during pull.',
+            );
+        }
+
+        if ($cursor === self::RATE_LIMIT_SENTINEL) {
+            throw new SimulatedProviderFailureException(
+                category: SimulatedProviderFailureException::CATEGORY_RATE_LIMITED,
+                statusCode: 429,
+                message: 'Simulated rate-limited provider failure during pull.',
+                retryAfterRaw: '30',
             );
         }
 
@@ -591,6 +745,29 @@ final class TestProvider implements
      * outbound-call failure during push, reusing the same
      * SimulatedProviderFailureException translation path
      * OutboundProviderHttpClient::execute() already handles.
+     *
+     * CHECKPOINT 12 additions (frozen-design-post-security-review.md §2
+     * F3/F4):
+     *  - '__simulate_failure' === RATE_LIMIT_SENTINEL simulates a
+     *    rate-limited outbound-call failure during push, reusing the
+     *    exact same $payload['__simulate_failure'] check immediately
+     *    below.
+     *  - $payload['idempotency_key'] ?? $context['idempotency_key']
+     *    (checkpoint-00-final-specification.md §16): when present and
+     *    non-empty, a repeated push() call carrying the SAME idempotency
+     *    key returns the SAME stored response (external_id/version_token/
+     *    status) rather than generating fresh random values — see
+     *    $issuedIdempotentPushResponses' own docblock above. $payload is
+     *    checked FIRST (Checkpoint 12 fix, post-integration gap found by
+     *    12H) because App\Jobs\PushSyncJob::handle() ALWAYS folds its own
+     *    deterministic idempotency key into $payload for every real push
+     *    — that is the genuine, always-present key production dispatch
+     *    provides, not merely a value a test manually injects. $context
+     *    remains a fallback for call sites with no payload-level key of
+     *    their own (App\Jobs\SyncRetryPollJob's push() call site) and for
+     *    explicit test-harness overrides — this method's dedup behavior
+     *    is unconditionally correct regardless of whether any caller
+     *    currently populates either channel.
      */
     public function push(array $context, string $resourceType, array $payload): array
     {
@@ -602,11 +779,52 @@ final class TestProvider implements
             );
         }
 
-        return [
+        if (($payload['__simulate_failure'] ?? null) === self::RATE_LIMIT_SENTINEL) {
+            throw new SimulatedProviderFailureException(
+                category: SimulatedProviderFailureException::CATEGORY_RATE_LIMITED,
+                statusCode: 429,
+                message: 'Simulated rate-limited provider failure during push.',
+                retryAfterRaw: '30',
+            );
+        }
+
+        // Checkpoint 12 fix (post-integration gap found by 12H):
+        // originally this read ONLY $context['idempotency_key'], a
+        // channel populated exclusively by a test harness explicitly
+        // supplying providerContext — never by real production
+        // dispatch. App\Jobs\PushSyncJob::handle() ALWAYS computes and
+        // folds a deterministic idempotency_key into $payload for every
+        // real push (see its own docblock immediately above that
+        // computation) — that is the genuine, always-present key a real
+        // provider would be given, and checkpoint-00-final-
+        // specification.md §16 requires TestProvider to simulate
+        // honoring EXTERNAL-side idempotency keys, not just a
+        // test-injected one. Reading $payload first (falling back to
+        // $context only when no payload-level key is present — e.g.
+        // App\Jobs\SyncRetryPollJob's push() call site, which computes
+        // no idempotency_key of its own and relies purely on an
+        // explicitly-supplied providerContext override for this
+        // narrower test-harness scenario) makes this dedup logic key off
+        // the real production value whenever one exists, while
+        // preserving the context-only override path unchanged.
+        $idempotencyKey = $payload['idempotency_key'] ?? $context['idempotency_key'] ?? null;
+        $idempotencyKey = (is_string($idempotencyKey) && $idempotencyKey !== '') ? $idempotencyKey : null;
+
+        if ($idempotencyKey !== null && isset(self::$issuedIdempotentPushResponses[$idempotencyKey])) {
+            return self::$issuedIdempotentPushResponses[$idempotencyKey];
+        }
+
+        $response = [
             'external_id' => $context['simulate_external_id'] ?? (string) Str::uuid(),
             'version_token' => Str::random(12),
             'status' => 'synced',
         ];
+
+        if ($idempotencyKey !== null) {
+            self::$issuedIdempotentPushResponses[$idempotencyKey] = $response;
+        }
+
+        return $response;
     }
 
     // ---------------------------------------------------------------

@@ -82,6 +82,39 @@ final class PlatformIntegrationConnectionDetailRenderingTest extends TestCase
         $test->assertSee('Rendered Detail Connection');
     }
 
+    /**
+     * CHECKPOINT 12 addition (frozen-design-post-security-review.md §5
+     * N2, §8): mirrors
+     * FirmIntegrationConnectionLifecycleActionsTest::test_a_real_test_provider_connections_seeded_display_name_is_visible_on_the_view_page()
+     * at the SuperAdmin layer. FirmIntegrationFactory's default
+     * `integration_provider_id` resolves the real, migration-seeded
+     * `integration_providers` row (code='test', display_name='Internal
+     * Test Provider (non-production)' — byte-for-byte
+     * TestProvider::displayName()) — this proves that real, seeded copy
+     * (never TestProvider::displayName() called live, per N2) is
+     * genuinely visible on PlatformFirmIntegrationDetailPage's
+     * "Provider: {$connection->providerDisplayName}" line.
+     */
+    public function test_a_real_test_provider_connections_seeded_display_name_is_visible_on_the_superadmin_detail_page(): void
+    {
+        $firm = Firm::factory()->activated()->create();
+        $connection = $this->runWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create([
+            'display_label' => 'SuperAdmin Provider Name Visibility Fixture',
+        ]));
+
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        $this->actingAs($admin, 'platform_admin');
+
+        $test = Livewire::test(\App\Filament\Pages\PlatformFirmIntegrationDetailPage::class, [
+            'firmUuid' => $firm->uuid,
+            'connectionUuid' => $connection->uuid,
+        ]);
+
+        $test->assertOk();
+        $test->assertSee((new \App\Integrations\Providers\TestProvider\TestProvider())->displayName());
+    }
+
     public function test_the_detail_page_404s_for_a_connection_uuid_belonging_to_a_different_firm(): void
     {
         $firm = Firm::factory()->activated()->create();

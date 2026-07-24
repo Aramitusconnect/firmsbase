@@ -159,6 +159,35 @@ final class FirmIntegrationConnectionLifecycleActionsTest extends TestCase
     }
 
     // ------------------------------------------------------------
+    // 0b. CHECKPOINT 12 addition (frozen-design-post-security-review.md
+    // §5 N2, §8): the seeded `integration_providers` row (code='test' —
+    // see
+    // database/migrations/2026_09_01_010001_create_integration_providers_table.php)
+    // already carries display_name = 'Internal Test Provider
+    // (non-production)', byte-for-byte matching
+    // TestProvider::displayName(). FirmIntegrationFactory's own
+    // `integration_provider_id` default resolves that SAME seeded row —
+    // this proves the real, seeded (never TestProvider::displayName()
+    // called live, per N2) copy is genuinely visible in the rendered
+    // Firm UI for a real connection.
+    // ------------------------------------------------------------
+
+    public function test_a_real_test_provider_connections_seeded_display_name_is_visible_on_the_view_page(): void
+    {
+        $firm = $this->entitledFirm();
+        $connection = $this->connectionFor($firm, ['display_label' => 'Provider Name Visibility Fixture']);
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+
+        $test = $this->runWithFirmContext(
+            $firm,
+            fn () => Livewire::test(ViewFirmIntegration::class, ['record' => $connection->uuid])
+        );
+
+        $test->assertOk();
+        $test->assertSee((new TestProvider())->displayName());
+    }
+
+    // ------------------------------------------------------------
     // 1. ConnectProviderAction / startConnection() — full Livewire coverage
     // ------------------------------------------------------------
 

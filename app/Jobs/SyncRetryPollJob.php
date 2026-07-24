@@ -59,6 +59,23 @@ final class SyncRetryPollJob implements ShouldQueue
     public function __construct(
         public readonly int $firmId,
         public readonly int $batchSize = 25,
+        // Checkpoint 12 addition (frozen-design-post-security-review.md
+        // §2 F2 — a third hardcoded-[] call site, undercounted by 12C,
+        // confirmed by 12H at the old SyncRetryPollJob.php:152): additive,
+        // OPTIONAL, trailing nullable param — every existing caller that
+        // omits it is completely unaffected and preserves today's exact
+        // behavior (provider->push() continues to receive [] as its
+        // context argument). Job-side context passthrough only — this
+        // does NOT touch resolveOneRetry()'s retry-outcome/backoff logic
+        // (see frozen design D2).
+        //
+        // Post-checkpoint-12 fix (JobConstructorsCarryOnlyScalarSecretSafeTypesTest):
+        // declared ?string, not ?array — every ShouldQueue constructor
+        // parameter in this codebase must be scalar/enum/DateTimeInterface
+        // so Laravel never serializes an array into the queue payload.
+        // Callers now pass a JSON-encoded string; decoded back to an
+        // array in resolveOneRetry() below before use.
+        public readonly ?string $providerContext = null,
     ) {
     }
 
@@ -146,13 +163,45 @@ final class SyncRetryPollJob implements ShouldQueue
             ->whereNull('tombstoned_at')
             ->first();
 
+        // Checkpoint 12 fix (post-integration gap found by 12H, same as
+        // App\Jobs\PushSyncJob::handle()): providerContext flows into
+        // push()'s $context argument below, but TestProvider::push()
+        // checks '__simulate_failure' against $payload, not $context. A
+        // caller-supplied providerContext['__simulate_failure'] has to
+        // be routed into $payload for the sentinel to actually be
+        // reachable through a real job dispatch; every other
+        // providerContext key keeps flowing into $context unchanged.
+        // Unlike PushSyncJob, this job has no local_version_token
+        // available (IntegrationSyncItem carries no such column), so it
+        // computes no idempotency_key of its own — TestProvider::push()
+        // simply falls back to reading $context['idempotency_key'] for
+        // this call site, unchanged from before this fix.
+        //
+        // Decoded from the JSON-encoded constructor param — see this
+        // job's constructor docblock (§ post-checkpoint-12 fix) for why
+        // the constructor-declared type is ?string rather than ?array.
+        // Only ever set by test code today (frozen design), so a
+        // defensive is_array() fallback to [] on malformed input is
+        // sufficient.
+        $providerContext = [];
+        if ($this->providerContext !== null) {
+            $decoded = json_decode($this->providerContext, true);
+            $providerContext = is_array($decoded) ? $decoded : [];
+        }
+
+        $pushPayload = [
+            'local_type' => $item->local_type,
+            'local_id' => $item->local_id,
+            'existing_external_id' => $existingMapping?->external_id,
+        ];
+
+        if (array_key_exists('__simulate_failure', $providerContext)) {
+            $pushPayload['__simulate_failure'] = $providerContext['__simulate_failure'];
+        }
+
         try {
             $result = $httpClient->execute(
-                fn () => $provider->push([], $item->resource_type, [
-                    'local_type' => $item->local_type,
-                    'local_id' => $item->local_id,
-                    'existing_external_id' => $existingMapping?->external_id,
-                ]),
+                fn () => $provider->push($providerContext, $item->resource_type, $pushPayload),
                 'push',
             );
         } catch (SanitizedProviderHttpException $e) {

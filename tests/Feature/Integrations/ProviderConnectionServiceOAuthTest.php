@@ -968,6 +968,145 @@ class ProviderConnectionServiceOAuthTest extends TestCase
         $this->assertSame($first->disconnected_at?->toIso8601String(), $second->disconnected_at?->toIso8601String());
     }
 
+    /**
+     * CHECKPOINT 12 addition (frozen-design-post-security-review.md §3,
+     * §8): `integration_oauth.credential_revoked` already fires as a
+     * real side effect of ProviderConnectionService::disconnect()'s own
+     * per-credential loop (see that method's docblock) — every disconnect
+     * test above proves the RESULT (status/credential count) but never
+     * asserted the audit event itself exists. This is that missing
+     * assertion, not a new production behavior.
+     */
+    public function test_disconnect_records_a_credential_revoked_audit_event_for_each_active_credential_type(): void
+    {
+        [$firm, $connection, $firmUser] = $this->firmConnectionAndActor();
+        $this->completeSuccessfulConnect($firm, $connection, $firmUser);
+
+        $fresh = $this->runWithFirmContext($firm, fn () => $connection->fresh());
+        $this->service()->disconnect($fresh, $firmUser->user_id);
+
+        $events = $this->runWithFirmContext($firm, fn () => TimelineEvent::query()
+            ->where('event_type', 'integration_oauth.credential_revoked')
+            ->where('subject_type', FirmIntegration::class)
+            ->where('subject_id', $connection->id)
+            ->get());
+
+        // completeSuccessfulConnect() persists exactly two Active
+        // credentials (access + refresh — see
+        // test_successful_completion_persists_both_access_and_refresh_token_credentials
+        // above), and disconnect()'s own loop fires this event once PER
+        // credential revoked inside it, never once per disconnect() call.
+        $this->assertCount(2, $events, 'One integration_oauth.credential_revoked event must be recorded for EACH of the two Active credentials (access + refresh) revoked by disconnect().');
+
+        $credentialTypesInMetadata = $events->map(fn (TimelineEvent $event): ?string => $event->metadata_json['credential_type'] ?? null)->sort()->values()->all();
+        $this->assertSame(
+            [CredentialType::OauthAccessToken->value, CredentialType::OauthRefreshToken->value],
+            $credentialTypesInMetadata,
+            'Each event\'s metadata must identify WHICH credential type it revoked.'
+        );
+
+        foreach ($events as $event) {
+            $this->assertSame($connection->id, $event->metadata_json['firm_integration_id'] ?? null);
+            $this->assertArrayHasKey('integration_credential_id', $event->metadata_json);
+        }
+    }
+
+    /**
+     * CHECKPOINT 12 addition (frozen-design-post-security-review.md §3,
+     * §8): `integration_oauth.provider_revocation_failed` fires ONLY
+     * when disconnect()'s best-effort `$provider->revokeAtProvider()`
+     * call throws a SanitizedProviderHttpException (see disconnect()'s
+     * try/catch around
+     * App\Integrations\Support\OutboundProviderHttpClient::execute()).
+     * TestProvider's own revokeAtProvider() unconditionally
+     * `return true;` — it has no sentinel/failure-simulation branch at
+     * all (confirmed by reading TestProvider.php in full) — so this
+     * event structurally CANNOT be exercised with genuine TestProvider
+     * alone, exactly the same "otherwise-unreachable-with-TestProvider"
+     * situation PullSyncJobTest::registerFakePullProvider()/
+     * PushSyncJobTest::registerFakePushProvider() already established a
+     * precedent for solving via a small, deterministic, anonymous-class
+     * fake provider. The OAuth CONNECT step immediately below still
+     * uses genuine TestProvider throughout (this file's own "never
+     * mocking the OAuth flow itself" discipline) — the fake is swapped
+     * in only for the disconnect()/revokeAtProvider() step itself.
+     */
+    public function test_disconnect_records_a_provider_revocation_failed_audit_event_when_the_providers_own_revoke_call_fails(): void
+    {
+        [$firm, $connection, $firmUser] = $this->firmConnectionAndActor();
+        // Genuine TestProvider connect, exactly like every other test in
+        // this file.
+        $this->completeSuccessfulConnect($firm, $connection, $firmUser);
+
+        $failingProvider = new class implements
+            \App\Integrations\Contracts\IntegrationProviderContract,
+            \App\Integrations\Contracts\SupportsDisconnectContract {
+            public function key(): ProviderKey
+            {
+                return ProviderKey::Test;
+            }
+
+            public function displayName(): string
+            {
+                return 'Fake Revocation-Failing Provider';
+            }
+
+            public function description(): string
+            {
+                return 'Deterministic test fixture provider — simulates a provider whose own revoke call fails, which genuine TestProvider structurally cannot do.';
+            }
+
+            public function isConfigured(): bool
+            {
+                return true;
+            }
+
+            public function supportedAuthMethods(): array
+            {
+                return [\App\Integrations\Enums\AuthMethod::OAuth2];
+            }
+
+            public function revokeAtProvider(array $context): bool
+            {
+                throw new \App\Integrations\Exceptions\SimulatedProviderFailureException(
+                    category: 'provider_rejected',
+                    statusCode: 502,
+                    message: 'Simulated fixture failure — the real provider rejected the revoke call.',
+                );
+            }
+        };
+
+        $class = get_class($failingProvider);
+        app()->instance($class, $failingProvider);
+        config(['integrations.providers' => [ProviderKey::Test->value => $class]]);
+
+        $fresh = $this->runWithFirmContext($firm, fn () => $connection->fresh());
+        $this->service()->disconnect($fresh, $firmUser->user_id);
+
+        $event = $this->runWithFirmContext($firm, fn () => TimelineEvent::query()
+            ->where('event_type', 'integration_oauth.provider_revocation_failed')
+            ->where('subject_type', FirmIntegration::class)
+            ->where('subject_id', $connection->id)
+            ->latest('id')
+            ->first());
+
+        $this->assertNotNull($event, 'A provider revoke failure must be recorded as an audit event, never silently swallowed.');
+        $this->assertSame($connection->id, $event->metadata_json['firm_integration_id'] ?? null);
+        $this->assertSame('provider_rejected', $event->metadata_json['category'] ?? null);
+        $this->assertSame(502, $event->metadata_json['status_code'] ?? null);
+
+        // Best-effort semantics: local teardown must STILL have
+        // completed despite the provider-side failure.
+        $stillDisconnected = $this->runWithFirmContext($firm, fn () => $connection->fresh());
+        $this->assertSame(ConnectionStatus::Disconnected, $stillDisconnected->status, 'A failed provider-side revoke must never block local teardown — best-effort semantics.');
+
+        // Sanitized: the raw exception message must never leak into the
+        // audit metadata.
+        $metadataJson = json_encode($event->metadata_json);
+        $this->assertIsString($metadataJson);
+        $this->assertStringNotContainsString('Simulated fixture failure', $metadataJson);
+    }
+
     public function test_disconnect_revokes_rather_than_deletes_the_underlying_rows(): void
     {
         [$firm, $connection, $firmUser] = $this->firmConnectionAndActor();
