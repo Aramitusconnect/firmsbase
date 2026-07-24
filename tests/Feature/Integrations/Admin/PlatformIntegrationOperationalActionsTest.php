@@ -360,7 +360,7 @@ final class PlatformIntegrationOperationalActionsTest extends TestCase
 
         $this->assertNotNull($audit);
         $this->assertSame(PlatformAdmin::class, $audit->actor_type);
-        $this->assertSame($admin->id, $admin->id);
+        $this->assertSame($admin->id, $audit->actor_id);
     }
 
     public function test_requeue_actions_never_pass_a_firm_user_id_as_the_actor_only_null(): void
