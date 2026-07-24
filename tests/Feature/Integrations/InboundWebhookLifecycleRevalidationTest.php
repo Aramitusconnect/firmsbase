@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Integrations;
 
+use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
@@ -22,6 +23,8 @@ use App\Models\TenantEncryptionKey;
 use App\Models\User;
 use App\Services\EmailBodyEncryptionService;
 use App\Services\EncryptionKeyService;
+use App\Services\EntitlementService;
+use App\Services\IntegrationEntitlementPolicyService;
 use App\Services\TimelineEventRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
@@ -119,7 +122,7 @@ final class InboundWebhookLifecycleRevalidationTest extends TestCase
     {
         $fixture = $this->activeConnectionWithWebhookSecret();
 
-        $this->connectionService()->disableWebhookRouting($fixture['connection']);
+        $this->connectionService()->disableWebhookRouting($fixture['connection'], $fixture['firmUser']->user_id);
 
         $after = IntegrationWebhookRoutingIndex::query()->where('firm_integration_id', $fixture['connection']->id)->count();
         $this->assertSame(0, $after);
@@ -156,13 +159,14 @@ final class InboundWebhookLifecycleRevalidationTest extends TestCase
     private function activeConnectionWithWebhookSecret(): array
     {
         $firm = Firm::factory()->create();
+        app(EntitlementService::class)->setForSource($firm, 'integration', EntitlementSource::AdminOverride, true);
         $this->runWithFirmContext($firm, fn () => TenantEncryptionKey::factory()->forFirm($firm)->create());
 
         $user = User::factory()->create();
         $firmUser = $this->runWithFirmContext($firm, fn () => FirmUser::factory()->forFirm($firm)->forUser($user)->role(FirmUserRole::FirmOwner)->create());
 
         $connection = FirmIntegration::factory()->forFirm($firm)->create(['status' => ConnectionStatus::Active->value]);
-        $rawToken = $this->connectionService()->enableWebhookRouting($connection);
+        $rawToken = $this->connectionService()->enableWebhookRouting($connection, $firmUser->user_id);
 
         $secret = 'wh-secret-'.Str::random(32);
         $credential = $this->runWithFirmContext($firm, fn () => $this->credentialService()->store($connection->fresh(), CredentialType::WebhookSigningSecret, $secret));
@@ -192,6 +196,10 @@ final class InboundWebhookLifecycleRevalidationTest extends TestCase
             new OutboundProviderHttpClient(),
             new ProviderRedirectUrlValidator(),
             new TimelineEventRecorder(),
+            // Checkpoint 10 addition (frozen design §4): ProviderConnectionService's
+            // constructor gained this 8th, required dependency — every
+            // manual construction site in this file must supply it.
+            app(IntegrationEntitlementPolicyService::class),
         );
     }
 

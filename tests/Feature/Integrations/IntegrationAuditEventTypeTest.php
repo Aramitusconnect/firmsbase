@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Integrations;
 
+use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
 use App\Integrations\Enums\ConflictStatus;
 use App\Integrations\Enums\SyncDirection;
@@ -27,6 +28,7 @@ use App\Integrations\Services\SyncRunService;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\TimelineEvent;
+use App\Services\EntitlementService;
 use App\Services\TimelineEventRecorder;
 use App\Services\WebhookRetryPolicyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -60,12 +62,21 @@ class IntegrationAuditEventTypeTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * The closed, frozen set of 15 distinct new Checkpoint 9 event
-     * names. Any new string added to any of the seven producing files
-     * below that isn't in this list — or any of these 15 that stops
-     * appearing in source — must fail one of the two tests below.
+     * The closed, frozen set of new event names — originally the 15
+     * distinct new Checkpoint 9 event names, plus 2 new Checkpoint 10
+     * additions (`integration_oauth.connection_created`, fired by
+     * ProviderConnectionService::startConnection(), and
+     * `integration_conflict.resolution_proposed`, fired by
+     * IntegrationConflictService::proposeResolution()) — for 17 total.
+     * Any new string added to any of the seven producing files below
+     * that isn't in this list — or any of these 17 that stops appearing
+     * in source — must fail one of the two tests below.
      */
     private const CLOSED_TAXONOMY = [
+        // Checkpoint 10 addition (frozen-design-post-security-review.md
+        // §2; agent-10h-architecture-security-review.md §1): fired by
+        // ProviderConnectionService::startConnection().
+        'integration_oauth.connection_created',
         'integration_oauth.credential_revoked',
         'integration_oauth.provider_revocation_failed',
         'integration_sync.run_started',
@@ -78,6 +89,10 @@ class IntegrationAuditEventTypeTest extends TestCase
         'integration_conflict.detected',
         'integration_conflict.resolved',
         'integration_conflict.expired',
+        // Checkpoint 10 addition (frozen-design-post-security-review.md
+        // §7; agent-10h-architecture-security-review.md §6): fired by
+        // IntegrationConflictService::proposeResolution().
+        'integration_conflict.resolution_proposed',
         'integration_governance.action_denied',
         'integration_governance.distinct_approver_violation',
         'integration_governance.distinct_approvers_confirmed',
@@ -122,10 +137,10 @@ class IntegrationAuditEventTypeTest extends TestCase
         'integration_oauth.required_scope_missing',
     ];
 
-    public function test_the_closed_taxonomy_has_exactly_fifteen_distinct_event_names(): void
+    public function test_the_closed_taxonomy_has_exactly_seventeen_distinct_event_names(): void
     {
-        $this->assertCount(15, self::CLOSED_TAXONOMY);
-        $this->assertCount(15, array_unique(self::CLOSED_TAXONOMY), 'No duplicate event names in the closed taxonomy.');
+        $this->assertCount(17, self::CLOSED_TAXONOMY);
+        $this->assertCount(17, array_unique(self::CLOSED_TAXONOMY), 'No duplicate event names in the closed taxonomy.');
     }
 
     /**
@@ -423,6 +438,18 @@ class IntegrationAuditEventTypeTest extends TestCase
 
         $connection = $this->createWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
         $paralegal = FirmUser::factory()->role(FirmUserRole::Paralegal)->create(['firm_id' => $firm->id]);
+
+        // Checkpoint 10 addition: disconnect() now calls
+        // IntegrationEntitlementPolicyService::assertEnabled() before the
+        // pre-existing IntegrationAccessPolicyService::assertCanDisconnect()
+        // role check (frozen design §4, entitlement-before-permission
+        // ordering). This test is specifically about the ROLE-denial path,
+        // so the firm must be entitled here or the Paralegal would be
+        // rejected by the entitlement gate first and never reach the role
+        // check this test exists to exercise. Matches the idiom already
+        // used elsewhere in this suite for CP10-era fixtures, e.g.
+        // ProviderConnectionServiceOAuthTest::firmWithActiveKey().
+        app(EntitlementService::class)->setForSource($firm, 'integration', EntitlementSource::AdminOverride, true);
 
         $service = app(\App\Integrations\Services\ProviderConnectionService::class);
 

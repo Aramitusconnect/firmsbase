@@ -25,6 +25,7 @@ use App\Models\Firm;
 use App\Models\TenantEncryptionKey;
 use App\Services\EmailBodyEncryptionService;
 use App\Services\EncryptionKeyService;
+use App\Services\IntegrationEntitlementPolicyService;
 use App\Services\TimelineEventRecorder;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -77,6 +78,10 @@ class RefreshIntegrationTokenJobTest extends TestCase
             new OutboundProviderHttpClient(),
             new ProviderRedirectUrlValidator(),
             new TimelineEventRecorder(),
+            // Checkpoint 10 addition (frozen design §4): ProviderConnectionService's
+            // constructor gained this 8th, required dependency — every
+            // manual construction site in this file must supply it.
+            app(IntegrationEntitlementPolicyService::class),
         );
     }
 

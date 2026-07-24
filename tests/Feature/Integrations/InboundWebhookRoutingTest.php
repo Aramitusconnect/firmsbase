@@ -15,10 +15,13 @@ use App\Integrations\Services\ProviderConnectionService;
 use App\Integrations\Support\OutboundProviderHttpClient;
 use App\Integrations\Support\PkceService;
 use App\Integrations\Support\ProviderRedirectUrlValidator;
+use App\Enums\EntitlementSource;
 use App\Models\Firm;
 use App\Models\TenantEncryptionKey;
 use App\Services\EmailBodyEncryptionService;
 use App\Services\EncryptionKeyService;
+use App\Services\EntitlementService;
+use App\Services\IntegrationEntitlementPolicyService;
 use App\Services\TimelineEventRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
@@ -160,7 +163,7 @@ final class InboundWebhookRoutingTest extends TestCase
 
         // Re-enabling issues a brand-new token and removes the old
         // index row (ProviderConnectionService::enableWebhookRouting()).
-        $this->connectionService()->enableWebhookRouting($fixture['connection']);
+        $this->connectionService()->enableWebhookRouting($fixture['connection'], $this->webhookRoutingActorUserId($fixture['connection']));
 
         $body = $this->eventBody();
         $headers = $this->signedHeaders($fixture['secret'], $oldToken, $body);
@@ -245,11 +248,12 @@ final class InboundWebhookRoutingTest extends TestCase
     private function activeConnectionWithWebhookSecret(): array
     {
         $firm = Firm::factory()->create();
+        app(EntitlementService::class)->setForSource($firm, 'integration', EntitlementSource::AdminOverride, true);
         $this->runWithFirmContext($firm, fn () => TenantEncryptionKey::factory()->forFirm($firm)->create());
 
         $connection = FirmIntegration::factory()->forFirm($firm)->create(['status' => ConnectionStatus::Active->value]);
 
-        $rawToken = $this->connectionService()->enableWebhookRouting($connection);
+        $rawToken = $this->connectionService()->enableWebhookRouting($connection, $this->webhookRoutingActorUserId($connection));
 
         $secret = 'wh-secret-'.Str::random(32);
         $this->runWithFirmContext($firm, fn () => $this->credentialService()->store($connection->fresh(), CredentialType::WebhookSigningSecret, $secret));
@@ -276,6 +280,26 @@ final class InboundWebhookRoutingTest extends TestCase
             new OutboundProviderHttpClient(),
             new ProviderRedirectUrlValidator(),
             new TimelineEventRecorder(),
+            // Checkpoint 10 addition (frozen design §4): ProviderConnectionService's
+            // constructor gained this 8th, required dependency — every
+            // manual construction site in this file must supply it.
+            app(IntegrationEntitlementPolicyService::class),
+        );
+    }
+
+    /**
+     * Checkpoint 10 addition: enableWebhookRouting()/disableWebhookRouting()
+     * now require an authorized $currentUserId. FirmIntegrationFactory
+     * already creates an Active, Attorney-role FirmUser as
+     * connected_by_firm_user_id for every connection it builds, so that
+     * same FirmUser's user_id is reused here as the acting user rather
+     * than minting a second, unrelated one.
+     */
+    private function webhookRoutingActorUserId(FirmIntegration $connection): int
+    {
+        return $this->runWithFirmContext(
+            $connection->firm_id,
+            fn () => $connection->connectedByFirmUser->user_id,
         );
     }
 
