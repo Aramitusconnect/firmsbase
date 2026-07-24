@@ -217,6 +217,30 @@ final class PlatformIntegrationAuditViewTest extends TestCase
         $test->assertSee('support_access.requested');
     }
 
+    /**
+     * Security review Finding 3 (CHECKPOINT_11_SECURITY_IMPLEMENTATION_REJECTED):
+     * canAccessSecurityLogs() used to be checked ONLY inside
+     * PlatformFirmIntegrationDetailPage's Filament closure, never inside
+     * IntegrationPlatformOversightReadService::sanitizedAuditHistoryForFirm()
+     * itself. This proves the gate is now enforced at the SERVICE layer,
+     * by calling sanitizedAuditHistoryForFirm() directly (not via the UI
+     * page) with a role that passes the coarse assertCanAccessFirm()
+     * oversight/session gate (ImplementationSpecialist is one of
+     * PlatformFirmIntegrationBoundedAccessService::UNCONDITIONALLY_TRUSTED_ROLES,
+     * so it needs no support-access session) but is in NEITHER
+     * PlatformStaffAccessPolicyService::SECURITY_LOG_ROLES.
+     */
+    public function test_sanitized_audit_history_is_denied_at_the_service_layer_for_a_role_without_security_log_access(): void
+    {
+        $firm = Firm::factory()->activated()->create();
+        $admin = $this->adminWithRole(PlatformRoleCode::ImplementationSpecialist);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('no active role grants access to security logs');
+
+        app(IntegrationPlatformOversightReadService::class)->sanitizedAuditHistoryForFirm($admin, $firm);
+    }
+
     private function adminWithRole(PlatformRoleCode $role): PlatformAdmin
     {
         $admin = PlatformAdmin::factory()->create(['is_active' => true]);

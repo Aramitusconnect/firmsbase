@@ -70,6 +70,32 @@ use RuntimeException;
  *      re-checked fresh inside this action, never trusted from an
  *      earlier mount()/visible()-time check alone.
  *
+ * Post-review fixes (CHECKPOINT_11_SECURITY_IMPLEMENTATION_REJECTED
+ * Findings 1-2), applied in the same spirit as the four gap closures
+ * above — new code here, SupportAccessPolicyService/SupportAccessSessionService
+ * still untouched:
+ *   5. leaveSupportAccessSession() had no session-ownership check —
+ *      unlike enterSupportAccessSession()'s requested_by check above,
+ *      "leave is self-service only" (LeaveSupportAccessSessionAction's
+ *      own docblock) was previously enforced only by a Filament UI
+ *      form-options constraint. Now checked explicitly here:
+ *      $session->platform_admin_id === $admin->id, or denied.
+ *   6. SupportAccessPolicyService::logSessionAudit() (frozen) always
+ *      attributes actor_id = $session->platform_admin_id — the ORIGINAL
+ *      session holder, never the admin who actually performed a revoke.
+ *      Wrong specifically for RevokeSupportAccessSessionAction, whose
+ *      entire purpose is letting one admin revoke a DIFFERENT admin's
+ *      session.
+ *      leaveSupportAccessSession()/revokeSupportAccessSession() below
+ *      now ALSO call writeOversightAuditEvent() (the mechanism already
+ *      used correctly elsewhere in this file, for requeue/nudge/
+ *      retention-preview) with actor_id = $admin->id — the real acting
+ *      admin, resolved fresh — so a correctly-attributed
+ *      `security_events` row (category platform_integration_oversight)
+ *      exists for every leave/revoke, alongside (not replacing)
+ *      logSessionAudit()'s own support_access-category row, which still
+ *      serves support_access_sessions-table-level bookkeeping.
+ *
  * Operational actions (frozen design §7) — requeueOutboxEvent()/
  * requeueSyncItem()/nudgeQueue()/previewRetentionSweepDryRun() below
  * each ALWAYS call the existing, unmodified
@@ -262,7 +288,20 @@ final class PlatformFirmIntegrationBoundedAccessService
     {
         $this->assertCanAccessOversight($admin);
 
-        return $this->tenantContext->runWithFirmContext($session->firm_id, function () use ($session): SupportAccessSession {
+        // Security review Finding 1 (CHECKPOINT_11_SECURITY_IMPLEMENTATION_REJECTED):
+        // leave is self-service only (see LeaveSupportAccessSessionAction's
+        // own docblock) — that invariant used to be enforced ONLY by the
+        // Filament UI's own-sessions-only Select ->options() constraint,
+        // never inside this chokepoint itself. Enforced here now, with the
+        // same type-safe comparison style enterSupportAccessSession()
+        // already uses for requested_by above.
+        if ((int) $session->platform_admin_id !== (int) $admin->id) {
+            throw new RuntimeException('Only the platform admin who holds this support access session may leave it.');
+        }
+
+        $firm = Firm::query()->findOrFail($session->firm_id);
+
+        return $this->tenantContext->runWithFirmContext($firm, function () use ($admin, $firm, $session): SupportAccessSession {
             // Gap closure #3 (frozen design §8 item 3): end() has no
             // idempotency guard of its own — this fresh, locked re-read
             // immediately before calling end() supplies it (new code
@@ -280,6 +319,24 @@ final class PlatformFirmIntegrationBoundedAccessService
 
             $this->supportPolicy->logSessionAudit($ended, 'support_access.session_ended');
 
+            // Security review Finding 2: SupportAccessPolicyService::
+            // logSessionAudit() (frozen, unmodified) always attributes
+            // actor_id = $session->platform_admin_id — correct for the
+            // support_access-category, session-table-level bookkeeping
+            // row above, but leave is self-service by construction (see
+            // the ownership check above), so here that always equals the
+            // real acting admin anyway. Writing the companion, correctly-
+            // attributed security_events row here too keeps leave/revoke
+            // symmetric and gives this firm's oversight audit trail
+            // (sanitizedAuditHistoryForFirm(), category
+            // platform_integration_oversight) its own explicit record of
+            // the action, actor_id resolved fresh from $admin, never from
+            // any cached/session-owner property.
+            $this->writeOversightAuditEvent($firm, $admin, 'platform_integration_oversight.support_access_session_ended', [
+                'support_access_session_id' => $ended->id,
+                'support_access_session_uuid' => $ended->uuid,
+            ]);
+
             return $ended;
         });
     }
@@ -288,7 +345,9 @@ final class PlatformFirmIntegrationBoundedAccessService
     {
         $this->assertCanAccessOversight($admin);
 
-        return $this->tenantContext->runWithFirmContext($session->firm_id, function () use ($admin, $session): SupportAccessSession {
+        $firm = Firm::query()->findOrFail($session->firm_id);
+
+        return $this->tenantContext->runWithFirmContext($firm, function () use ($admin, $firm, $session): SupportAccessSession {
             // Gap closure #3 (frozen design §8 item 3) — identical
             // discipline as leaveSupportAccessSession() above, applied
             // to revoke().
@@ -301,6 +360,25 @@ final class PlatformFirmIntegrationBoundedAccessService
             $revoked = $this->supportSessions->revoke($fresh, $admin);
 
             $this->supportPolicy->logSessionAudit($revoked, 'support_access.session_revoked');
+
+            // Security review Finding 2: RevokeSupportAccessSessionAction's
+            // entire documented purpose is letting one admin end a
+            // DIFFERENT admin's session (e.g. an ImplementationSpecialist
+            // revoking a SupportAgent's session) — unlike leave, revoker
+            // and session owner are frequently different admins here.
+            // SupportAccessPolicyService::logSessionAudit() (frozen,
+            // unmodified) always writes actor_id = $revoked-
+            // >platform_admin_id, i.e. the ORIGINAL session holder, never
+            // the admin who actually performed the revoke — misattributing
+            // every cross-actor revoke's security_events row. This
+            // companion row is the correctly-attributed one: actor_id =
+            // $admin->id, the real acting admin, resolved fresh here, not
+            // trusted from any cached property.
+            $this->writeOversightAuditEvent($firm, $admin, 'platform_integration_oversight.support_access_session_revoked', [
+                'support_access_session_id' => $revoked->id,
+                'support_access_session_uuid' => $revoked->uuid,
+                'session_owner_platform_admin_id' => $revoked->platform_admin_id,
+            ]);
 
             return $revoked;
         });

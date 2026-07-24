@@ -223,6 +223,15 @@ class PlatformFirmIntegrationDetailPage extends Page implements HasTable
      * checked fresh inside this closure on every render, never trusted
      * from mount()-time alone — mirrors this file's own established
      * TOCTOU discipline for every other sub-view/action.
+     *
+     * Security review Finding 3: usageForFirm() itself now ALSO asserts
+     * canAccessPlatformBilling() internally (the authoritative gate —
+     * see IntegrationPlatformOversightReadService's class docblock).
+     * This closure's own check is kept deliberately, as belt-and-
+     * suspenders: it renders a friendly denial reason in place of the
+     * list; letting the service's exception propagate here instead would
+     * surface as an unhandled error on the page rather than a graceful
+     * denial message.
      */
     private function usageSection(
         PlatformAdmin $admin,
@@ -321,6 +330,11 @@ class PlatformFirmIntegrationDetailPage extends Page implements HasTable
      * directly (frozen design §11/§12 — no new policy method), re-
      * checked fresh inside this closure on every render, never trusted
      * from mount()-time alone.
+     *
+     * Security review Finding 3: retentionConfigSummary() itself now
+     * ALSO asserts canAccessSecurityLogs() internally (the authoritative
+     * gate). Kept here too as belt-and-suspenders for the same graceful-
+     * denial-message reason documented on usageSection() above.
      */
     private function retentionSection(PlatformAdmin $admin, IntegrationPlatformOversightReadService $readService): Section
     {
@@ -352,6 +366,12 @@ class PlatformFirmIntegrationDetailPage extends Page implements HasTable
      * (frozen design §11/§12 — the exact-fit match per 11C §4.11 — no
      * new policy method), re-checked fresh inside this closure on every
      * render, never trusted from mount()-time alone.
+     *
+     * Security review Finding 3: sanitizedAuditHistoryForFirm() itself
+     * now ALSO asserts canAccessSecurityLogs() internally (the
+     * authoritative gate). Kept here too as belt-and-suspenders for the
+     * same graceful-denial-message reason documented on usageSection()
+     * above.
      */
     private function auditHistorySection(PlatformAdmin $admin, Firm $firm, IntegrationPlatformOversightReadService $readService): Section
     {

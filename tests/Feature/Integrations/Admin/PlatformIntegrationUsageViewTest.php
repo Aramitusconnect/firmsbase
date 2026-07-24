@@ -207,6 +207,30 @@ final class PlatformIntegrationUsageViewTest extends TestCase
         $allowedTest->assertSee('424242');
     }
 
+    /**
+     * Security review Finding 3 (CHECKPOINT_11_SECURITY_IMPLEMENTATION_REJECTED):
+     * canAccessPlatformBilling() used to be checked ONLY inside
+     * PlatformFirmIntegrationDetailPage's Filament closure, never inside
+     * IntegrationPlatformOversightReadService::usageForFirm() itself.
+     * This proves the gate is now enforced at the SERVICE layer, by
+     * calling usageForFirm() directly (not via the UI page) with a role
+     * that passes the coarse assertCanAccessFirm() oversight/session gate
+     * (ImplementationSpecialist is one of
+     * PlatformFirmIntegrationBoundedAccessService::UNCONDITIONALLY_TRUSTED_ROLES,
+     * so it needs no support-access session) but is in NEITHER
+     * PlatformStaffAccessPolicyService::PLATFORM_BILLING_ROLES.
+     */
+    public function test_usage_for_firm_is_denied_at_the_service_layer_for_a_role_without_platform_billing_access(): void
+    {
+        $firm = Firm::factory()->activated()->create();
+        $admin = $this->adminWithRole(PlatformRoleCode::ImplementationSpecialist);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('no active role grants access to platform billing');
+
+        app(IntegrationPlatformOversightReadService::class)->usageForFirm($admin, $firm);
+    }
+
     public function test_the_only_real_usage_adjacent_surface_is_the_usage_records_retention_days_config_line_item(): void
     {
         $firm = Firm::factory()->activated()->create();

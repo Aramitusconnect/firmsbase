@@ -21,6 +21,7 @@ use App\Models\SecurityEvent;
 use App\Models\TimelineEvent;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 /**
  * IntegrationPlatformOversightReadService — Checkpoint 11 (frozen-
@@ -48,6 +49,24 @@ use Illuminate\Support\Facades\DB;
  *     PlatformIntegrationConnectionSummary::maskExternalAccountId()).
  *   - `IntegrationConflict.local_value`/`external_value` are never
  *     selected/read anywhere in this class.
+ *
+ * Security review Finding 3 (CHECKPOINT_11_SECURITY_IMPLEMENTATION_REJECTED):
+ * `PlatformStaffAccessPolicyService::canAccessPlatformBilling()`/
+ * `canAccessSecurityLogs()` used to be checked ONLY inside
+ * `PlatformFirmIntegrationDetailPage`'s Filament closures, never inside
+ * this read service itself — the one inconsistency against every other
+ * sensitive-field gate above (e.g. `resolution_note`'s active-session
+ * check), which all live in this class. `usageForFirm()` now asserts
+ * `canAccessPlatformBilling()` and `retentionConfigSummary()`/
+ * `sanitizedAuditHistoryForFirm()` now assert `canAccessSecurityLogs()`
+ * internally, throwing the same RuntimeException-with-decision-reason
+ * shape `PlatformFirmIntegrationBoundedAccessService::
+ * assertCanAccessOversight()` already uses for this checkpoint's other
+ * authorization denials. The Filament page's own pre-existing checks are
+ * kept as deliberate, documented belt-and-suspenders (see that class) —
+ * they render a friendly in-page denial message; letting this service's
+ * exception propagate there instead would surface as an unhandled error
+ * rather than a graceful denial.
  */
 final class IntegrationPlatformOversightReadService
 {
@@ -81,6 +100,7 @@ final class IntegrationPlatformOversightReadService
         private readonly PlatformFirmIntegrationBoundedAccessService $boundedAccess,
         private readonly HealthStateService $healthState,
         private readonly IntegrationUsageSummaryService $usageSummary,
+        private readonly PlatformStaffAccessPolicyService $staffAccess,
     ) {
     }
 
@@ -156,7 +176,9 @@ final class IntegrationPlatformOversightReadService
      */
     public function usageForFirm(PlatformAdmin $admin, Firm $firm): Collection
     {
-        return $this->boundedAccess->readWithinFirmAccess($admin, $firm, function () use ($firm): Collection {
+        return $this->boundedAccess->readWithinFirmAccess($admin, $firm, function () use ($admin, $firm): Collection {
+            $this->assertCanAccessPlatformBilling($admin);
+
             return $this->usageSummary->summariesForFirm($firm->id)
                 ->map(fn (IntegrationUsageSummary $summary): array => [
                     'firm_integration_id' => $summary->firmIntegrationId,
@@ -329,7 +351,9 @@ final class IntegrationPlatformOversightReadService
      */
     public function sanitizedAuditHistoryForFirm(PlatformAdmin $admin, Firm $firm): Collection
     {
-        return $this->boundedAccess->readWithinFirmAccess($admin, $firm, function () use ($firm): Collection {
+        return $this->boundedAccess->readWithinFirmAccess($admin, $firm, function () use ($admin, $firm): Collection {
+            $this->assertCanAccessSecurityLogs($admin);
+
             $timelineRows = TimelineEvent::query()
                 ->where('firm_id', $firm->id)
                 ->where('event_type', 'like', 'integration%')
@@ -376,6 +400,7 @@ final class IntegrationPlatformOversightReadService
     public function retentionConfigSummary(PlatformAdmin $admin): array
     {
         $this->boundedAccess->assertCanAccessOversight($admin);
+        $this->assertCanAccessSecurityLogs($admin);
 
         return [
             'outbox_completed_retention_days' => config('integrations.outbox.completed_retention_days'),
@@ -387,6 +412,36 @@ final class IntegrationPlatformOversightReadService
             'oauth_states_consumed_retention_hours' => config('integrations.oauth_states.consumed_retention_hours'),
             'usage_records_retention_days' => config('integrations.usage_records.retention_days'),
         ];
+    }
+
+    /**
+     * Security review Finding 3 — the billing-view ceiling, enforced
+     * here (not merely in the Filament layer). Mirrors
+     * PlatformFirmIntegrationBoundedAccessService::assertCanAccessOversight()'s
+     * own throw-with-decision-reason shape exactly.
+     */
+    private function assertCanAccessPlatformBilling(PlatformAdmin $admin): void
+    {
+        $decision = $this->staffAccess->canAccessPlatformBilling($admin);
+
+        if (! $decision->allowed) {
+            throw new RuntimeException($decision->reason ?? 'Not permitted to access platform billing data.');
+        }
+    }
+
+    /**
+     * Security review Finding 3 — the security-log/retention/audit-view
+     * ceiling, enforced here (not merely in the Filament layer). Mirrors
+     * PlatformFirmIntegrationBoundedAccessService::assertCanAccessOversight()'s
+     * own throw-with-decision-reason shape exactly.
+     */
+    private function assertCanAccessSecurityLogs(PlatformAdmin $admin): void
+    {
+        $decision = $this->staffAccess->canAccessSecurityLogs($admin);
+
+        if (! $decision->allowed) {
+            throw new RuntimeException($decision->reason ?? 'Not permitted to access security logs.');
+        }
     }
 
     private function toConnectionSummary(FirmIntegration $connection): PlatformIntegrationConnectionSummary

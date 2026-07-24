@@ -87,6 +87,28 @@ final class PlatformIntegrationRetentionViewTest extends TestCase
         app(IntegrationPlatformOversightReadService::class)->retentionConfigSummary($admin);
     }
 
+    /**
+     * Security review Finding 3 (CHECKPOINT_11_SECURITY_IMPLEMENTATION_REJECTED):
+     * canAccessSecurityLogs() used to be checked ONLY inside
+     * PlatformFirmIntegrationDetailPage's Filament closure, never inside
+     * IntegrationPlatformOversightReadService::retentionConfigSummary()
+     * itself. This proves the gate is now enforced at the SERVICE layer:
+     * ImplementationSpecialist passes the coarse
+     * assertCanAccessOversight() gate (it is one of
+     * PlatformFirmIntegrationBoundedAccessService::UNCONDITIONALLY_TRUSTED_ROLES)
+     * but is in NEITHER PlatformStaffAccessPolicyService::SECURITY_LOG_ROLES,
+     * so calling retentionConfigSummary() directly must still be denied.
+     */
+    public function test_retention_config_summary_is_denied_at_the_service_layer_for_a_role_without_security_log_access(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::ImplementationSpecialist);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('no active role grants access to security logs');
+
+        app(IntegrationPlatformOversightReadService::class)->retentionConfigSummary($admin);
+    }
+
     private function adminWithRole(PlatformRoleCode $role): PlatformAdmin
     {
         $admin = PlatformAdmin::factory()->create(['is_active' => true]);
