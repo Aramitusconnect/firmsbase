@@ -13,6 +13,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * RetentionSweepJob — Layer 2 of the retention sweep's two-layer
@@ -84,6 +85,10 @@ final class RetentionSweepJob implements ShouldQueue
      */
     private function sweepSyncItems(RetentionSweepAuditLogger $audit): void
     {
+        if ($this->firmDataSweepDisabled('integration_sync_items')) {
+            return;
+        }
+
         $retentionDays = (int) config('integrations.sync_items.retention_days', 60);
 
         $sql = $this->dryRun
@@ -119,6 +124,10 @@ final class RetentionSweepJob implements ShouldQueue
      */
     private function sweepSyncRuns(RetentionSweepAuditLogger $audit): void
     {
+        if ($this->firmDataSweepDisabled('integration_sync_runs')) {
+            return;
+        }
+
         $retentionDays = (int) config('integrations.sync_runs.retention_days', 180);
 
         $sql = $this->dryRun
@@ -244,6 +253,10 @@ final class RetentionSweepJob implements ShouldQueue
      */
     private function sweepResolvedConflicts(RetentionSweepAuditLogger $audit): void
     {
+        if ($this->firmDataSweepDisabled('integration_conflicts')) {
+            return;
+        }
+
         $retentionDays = (int) config('integrations.conflicts.retention_days', 365);
 
         $where = "firm_id = ? AND status NOT IN ('detected', 'awaiting_review') ".
@@ -341,6 +354,38 @@ final class RetentionSweepJob implements ShouldQueue
                 dryRun: $this->dryRun,
             );
         }
+    }
+
+    /**
+     * Checkpoint 13 P3 (finding #5, DISABLE_BY_DEFAULT —
+     * agent-13h-testing-release-review.md §3/§4 item 2). Kill-switch
+     * guard shared by the three FIRM-DATA, client/matter-adjacent sweeps
+     * (sync items, sync runs, resolved conflicts). Returns true (and
+     * logs a clear, greppable skip reason — never a silent no-op) when
+     * the flag is off, which is the default: these sweeps delete firm
+     * data that may be under a legal hold, and no legal-hold resolution
+     * layer exists yet, so they stay gated until a human explicitly sets
+     * `integrations.retention.sweep_firm_data_enabled` (or the
+     * INTEGRATIONS_RETENTION_SWEEP_FIRM_DATA_ENABLED env). The
+     * platform-owned webhook-receipts sweep (no client/matter linkage)
+     * and the outbox/OAuth-state sweeps are deliberately NOT guarded by
+     * this flag.
+     */
+    private function firmDataSweepDisabled(string $table): bool
+    {
+        if ((bool) config('integrations.retention.sweep_firm_data_enabled', false)) {
+            return false;
+        }
+
+        Log::warning('integration_retention.firm_data_sweep_skipped_disabled', [
+            'table' => $table,
+            'firm_id' => $this->firmId,
+            'dry_run' => $this->dryRun,
+            'reason' => 'integrations.retention.sweep_firm_data_enabled is disabled (default off) — '
+                .'firm-data retention sweeps are gated pending legal-hold resolution.',
+        ]);
+
+        return true;
     }
 
     /**

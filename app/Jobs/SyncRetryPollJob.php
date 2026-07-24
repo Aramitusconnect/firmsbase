@@ -19,6 +19,7 @@ use App\Integrations\Services\HealthStateService;
 use App\Integrations\Services\IntegrationExternalMappingService;
 use App\Integrations\Services\SyncItemService;
 use App\Integrations\Support\OutboundProviderHttpClient;
+use App\Services\WebhookRetryPolicyService;
 use App\Support\TenantAwareJobContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -56,6 +57,21 @@ final class SyncRetryPollJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels, TenantAwareJobContext;
 
+    /**
+     * Checkpoint 13 P2 (agent-13h-testing-release-review.md §2
+     * reconciliation #2 / §4 item 1): the retry-attempt ceiling for this
+     * job's inline single-item re-push path. Analogous to the outbox
+     * path's IntegrationOutboxEventService::DEFAULT_MAX_ATTEMPTS, and
+     * equal to WebhookRetryPolicyService::DEFAULT_RETRY_POLICY's own
+     * `max_attempts` (the shared, already-proven default). No migration
+     * and no new column: eligibility stays governed by `attempt_count`,
+     * which resolveRetryOutcome() already increments on every resolution
+     * — this only READS it (via WebhookRetryPolicyService::isExhausted())
+     * to stop a permanently-failing item retrying every poll cycle
+     * forever, exactly as the outbox path already does.
+     */
+    private const DEFAULT_MAX_ATTEMPTS = 5;
+
     public function __construct(
         public readonly int $firmId,
         public readonly int $batchSize = 25,
@@ -92,8 +108,15 @@ final class SyncRetryPollJob implements ShouldQueue
         ProviderRegistry $registry,
         OutboundProviderHttpClient $httpClient,
         HealthStateService $healthState,
+        // Checkpoint 13 P2: injected when the queue worker resolves
+        // handle() through the container. A no-dependency default keeps
+        // every existing direct `$job->handle(...5 services...)` call
+        // site working unchanged (this pure, stateless calculator has no
+        // constructor dependencies), so no test or caller that omits it
+        // is affected.
+        WebhookRetryPolicyService $retryPolicy = new WebhookRetryPolicyService,
     ): void {
-        $this->runInFirmContext($this->firmId, function () use ($items, $mappings, $registry, $httpClient, $healthState) {
+        $this->runInFirmContext($this->firmId, function () use ($items, $mappings, $registry, $httpClient, $healthState, $retryPolicy) {
             $candidateIds = IntegrationSyncItem::query()
                 ->where('firm_id', $this->firmId)
                 ->where('status', SyncItemStatus::FailedRetryable->value)
@@ -112,7 +135,7 @@ final class SyncRetryPollJob implements ShouldQueue
                     continue;
                 }
 
-                $this->resolveOneRetry($claimed, $items, $mappings, $registry, $httpClient, $healthState);
+                $this->resolveOneRetry($claimed, $items, $mappings, $registry, $httpClient, $healthState, $retryPolicy);
             }
         });
     }
@@ -124,6 +147,7 @@ final class SyncRetryPollJob implements ShouldQueue
         ProviderRegistry $registry,
         OutboundProviderHttpClient $httpClient,
         HealthStateService $healthState,
+        WebhookRetryPolicyService $retryPolicy,
     ): void {
         if ($item->local_type === null || $item->local_id === null) {
             $items->resolveRetryOutcome(
@@ -205,12 +229,35 @@ final class SyncRetryPollJob implements ShouldQueue
                 'push',
             );
         } catch (SanitizedProviderHttpException $e) {
-            $items->resolveRetryOutcome(
-                $item->id,
-                SyncItemStatus::FailedRetryable,
-                $this->nextAttemptAt(),
-                "retry_push_failed: {$e->category()}",
-            );
+            // Checkpoint 13 P2 (agent-13h-testing-release-review.md §2
+            // reconciliation #2): before unconditionally putting the item
+            // back as FailedRetryable (which previously let a
+            // permanently-failing push retry every poll cycle forever —
+            // attempt_count was incremented but never read), check the
+            // shared, already-proven retry ceiling. `attempt_count + 1`
+            // counts the attempt that just failed (resolveRetryOutcome()
+            // increments attempt_count as part of THIS resolution). On
+            // exhaustion, resolve FailedPermanent with an honest
+            // last_error that describes exhaustion and preserves the real
+            // final provider category — never a fabricated provider-side
+            // reason. Only the attempt-count ceiling is used here (no
+            // category/backoff-curve changes), per the frozen scope. The
+            // health signal still fires either way, because the push
+            // genuinely failed with this category.
+            if ($retryPolicy->isExhausted($item->attempt_count + 1, ['max_attempts' => self::DEFAULT_MAX_ATTEMPTS])) {
+                $items->resolveRetryOutcome(
+                    $item->id,
+                    SyncItemStatus::FailedPermanent,
+                    lastError: "retry_exhausted_after_max_attempts: {$e->category()}",
+                );
+            } else {
+                $items->resolveRetryOutcome(
+                    $item->id,
+                    SyncItemStatus::FailedRetryable,
+                    $this->nextAttemptAt(),
+                    "retry_push_failed: {$e->category()}",
+                );
+            }
 
             $this->recordHealthSignal($connection, $e->category(), $healthState);
 

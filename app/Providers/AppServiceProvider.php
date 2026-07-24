@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Http\Middleware\EstablishFirmTenantContextForLivewireUpdate;
 use App\Models\PlatformAdmin;
 use App\Models\SecurityEvent;
 use App\Models\User;
@@ -9,7 +10,9 @@ use App\Services\TenantContextService;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Livewire\Livewire;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -27,6 +30,28 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->registerAuthenticationAuditLogging();
+        $this->registerLivewireUpdateRoute();
+    }
+
+    /**
+     * CP13 P1 (p1-livewire-fix-frozen-design.md §5). Replace Livewire's
+     * default `/livewire/update` route with an identical one that also
+     * carries EstablishFirmTenantContextForLivewireUpdate, so firm-panel
+     * Filament actions re-establish tenant context BEFORE Livewire's
+     * `ModelSynth::hydrate()` re-fetches their FORCE-RLS-protected
+     * `#[Locked]` record properties. This provider's boot() runs after
+     * LivewireServiceProvider::boot(), and RouteCollection keys by
+     * method+URI, so this later `POST /livewire/update` registration
+     * overwrites the default one (and `findUpdateRoute()` additionally
+     * prefers any `*livewire.update`-named route). URI and update-URI are
+     * unchanged; the middleware itself no-ops for every non-firm-panel
+     * (Admin/SuperAdmin) component, so those surfaces are unaffected.
+     */
+    private function registerLivewireUpdateRoute(): void
+    {
+        Livewire::setUpdateRoute(fn ($handle) => Route::post('/livewire/update', $handle)
+            ->middleware(['web', EstablishFirmTenantContextForLivewireUpdate::class])
+            ->name('livewire.update'));
     }
 
     /**

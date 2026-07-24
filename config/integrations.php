@@ -121,6 +121,19 @@ return [
         // with no RLS backstop at all (agent-8g-retention-cleanup-design.md
         // §6 item 3).
         'platform_max_batches_per_run' => env('INTEGRATIONS_RETENTION_PLATFORM_MAX_BATCHES_PER_RUN', 50),
+
+        // Checkpoint 13 P3 (finding #5, DISABLE_BY_DEFAULT —
+        // agent-13h-testing-release-review.md §3/§4 item 2). Kill-switch
+        // for the three FIRM-DATA, client/matter-adjacent retention
+        // sweeps (sync items, sync runs, resolved conflicts), which have
+        // no legal-hold resolution layer today. Defaults OFF so this
+        // unattended destructive path cannot delete firm data that might
+        // be under a legal hold until a human explicitly enables it. The
+        // platform-owned webhook-receipts sweep (no client/matter
+        // linkage) and the outbox/OAuth-state sweeps are NOT gated by
+        // this flag. This is purely a switch — it builds no legal-hold
+        // resolution layer (explicitly out of scope for this checkpoint).
+        'sweep_firm_data_enabled' => env('INTEGRATIONS_RETENTION_SWEEP_FIRM_DATA_ENABLED', false),
     ],
 
     /*
