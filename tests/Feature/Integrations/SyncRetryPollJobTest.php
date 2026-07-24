@@ -13,6 +13,7 @@ use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Enums\SyncItemStatus;
 use App\Integrations\Exceptions\SimulatedProviderFailureException;
+use App\Integrations\Exceptions\UnknownProviderException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationExternalMapping;
 use App\Integrations\Models\IntegrationSyncItem;
@@ -910,5 +911,125 @@ class SyncRetryPollJobTest extends TestCase
             $fresh = $this->itemRow($firm, $id);
             $this->assertSame('failed_permanent', $fresh->status, 'The second run must resolve the previously-untouched remainder.');
         }
+    }
+
+    // ==============================================================
+    // Fast-follow — test-gate reviewer's disclosed, non-blocking
+    // Checkpoint 12 coverage gap: SyncRetryPollJob (the third job this
+    // checkpoint modified, adding the providerContext parameter) had
+    // neither a tenant-context-restoration test nor a cross-firm-denial
+    // test anywhere in the suite, despite PullSyncJob and PushSyncJob
+    // each having dedicated coverage for both properties. The three
+    // tests below close that gap, mirroring PullSyncJobTest's exact
+    // style/pattern (see tests/Feature/Integrations/PullSyncJobTest.php
+    // ::test_tenant_context_is_restored_after_a_successful_run(),
+    // ::test_tenant_context_is_restored_even_when_the_connection_is_not_found(),
+    // and ::test_a_connection_belonging_to_a_different_firm_is_denied())
+    // but adapted to SyncRetryPollJob's own attack surface: it takes
+    // only a firmId (never a connection id it must independently
+    // verify), so its cross-firm property is "a Firm A retry item is
+    // completely invisible/untouched to a poll run dispatched for Firm
+    // B" rather than "a connection id claimed under the wrong firm is
+    // denied". handle() runs its whole body through
+    // $this->runInFirmContext() (App\Support\TenantAwareJobContext),
+    // which — confirmed by reading both call sites directly, not merely
+    // trusted from the prior review — is the exact same
+    // TenantContextService::runWithFirmContext() primitive
+    // PullSyncJob/PushSyncJob's own runWithFirmContext() call sites use
+    // and tests/TestCase.php's runWithFirmContext()/
+    // assertNoDatabaseTenantContext() helpers exercise.
+    // ==============================================================
+
+    public function test_tenant_context_is_restored_after_a_successful_run(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+        $run = $this->terminalRun($firm, $connection);
+
+        $this->runWithFirmContext($firm, fn () => IntegrationSyncItem::factory()
+            ->forSyncRun($run)
+            ->failedRetryable()
+            ->create(['next_attempt_at' => now()->subMinute(), 'local_type' => 'App\\Models\\Contact', 'local_id' => 555]));
+
+        $this->registerFakePushProvider('ext-context-restore', 'v1');
+
+        $this->assertNoDatabaseTenantContext();
+        $this->runJob($firm);
+        $this->assertNoDatabaseTenantContext();
+    }
+
+    public function test_tenant_context_is_restored_even_when_the_job_throws_mid_processing(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+        $run = $this->terminalRun($firm, $connection);
+
+        $this->runWithFirmContext($firm, fn () => IntegrationSyncItem::factory()
+            ->forSyncRun($run)
+            ->failedRetryable()
+            ->create(['next_attempt_at' => now()->subMinute(), 'local_type' => 'App\\Models\\Contact', 'local_id' => 321]));
+
+        // Deregister the Test provider entirely (setUp() normally
+        // registers it) — ProviderRegistry::get() then throws
+        // UnknownProviderException from inside resolveOneRetry(), i.e.
+        // from INSIDE the still-open runInFirmContext() callback, a
+        // cheap and natural way to force handle() to throw mid-run
+        // without any new fixture machinery, mirroring the shape (not
+        // the exact trigger) of PullSyncJobTest's own "connection not
+        // found" exception-path restoration test.
+        config(['integrations.providers' => []]);
+
+        $this->assertNoDatabaseTenantContext();
+
+        try {
+            $this->runJob($firm);
+            $this->fail('Expected UnknownProviderException.');
+        } catch (UnknownProviderException $e) {
+            // expected
+        }
+
+        $this->assertNoDatabaseTenantContext('Even when handle() throws mid-processing, runInFirmContext()\'s finally-cleanup must restore no-context.');
+    }
+
+    public function test_a_firm_a_retry_item_is_left_completely_untouched_by_a_poll_run_dispatched_for_a_different_firm(): void
+    {
+        $firmA = $this->firm();
+        $firmB = $this->firm();
+        $connectionA = $this->connection($firmA);
+        $runA = $this->terminalRun($firmA, $connectionA);
+
+        $item = $this->runWithFirmContext($firmA, fn () => IntegrationSyncItem::factory()
+            ->forSyncRun($runA)
+            ->failedRetryable()
+            ->create(['next_attempt_at' => now()->subMinute(), 'local_type' => null, 'local_id' => null]));
+
+        $before = $this->itemRow($firmA, $item->id);
+
+        // Firm B has no connection, no run, and — critically — no
+        // failed_retryable items of its own. Dispatch the SAME job
+        // scoped to Firm B's own firmId: both the job's own explicit
+        // ->where('firm_id', $this->firmId) candidate-scan guard AND
+        // the app.current_firm_id tenant context runInFirmContext()
+        // establishes for Firm B must make Firm A's due, otherwise-
+        // eligible item completely invisible.
+        $this->runJob($firmB);
+
+        $after = $this->itemRow($firmA, $item->id);
+
+        $this->assertSame(
+            'failed_retryable',
+            $after->status,
+            'A poll run dispatched for a different firm must never claim or resolve another firm\'s retry item.'
+        );
+        $this->assertSame(
+            Carbon::parse($before->next_attempt_at)->toDateTimeString(),
+            Carbon::parse($after->next_attempt_at)->toDateTimeString(),
+            'Firm A\'s item next_attempt_at must be completely unchanged by a cross-firm poll run.'
+        );
+        $this->assertSame(
+            (int) $before->attempt_count,
+            (int) $after->attempt_count,
+            'Firm A\'s item attempt_count must be completely unchanged by a cross-firm poll run.'
+        );
     }
 }
