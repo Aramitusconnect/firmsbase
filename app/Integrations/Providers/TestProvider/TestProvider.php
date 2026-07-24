@@ -859,9 +859,9 @@ final class TestProvider implements
     }
 
     /**
-     * Independent, defense-in-depth re-check of the same environment
-     * gate config('integrations.providers') already uses to decide
-     * whether to register this class at all
+     * Independent re-check of the same two conditions
+     * config('integrations.providers') already uses to decide whether
+     * to register this class at all
      * (checkpoint-00-final-specification.md §18/§21) — deliberately
      * does not rely solely on the registry map having filtered this
      * class out correctly elsewhere. Reads the environment variable
@@ -872,9 +872,24 @@ final class TestProvider implements
      * "never call env() outside a config file" guidance, as an
      * explicit second, independent gate rather than the sole source of
      * truth.
+     *
+     * Checkpoint 14 correction (agent-14h-final-readiness-review.md):
+     * the env-var check alone is NOT defense-in-depth against a
+     * misconfigured production environment — it is a single point of
+     * failure that a single wrongly-set INTEGRATIONS_TEST_PROVIDER_ENABLED
+     * value in production would defeat entirely, since nothing here
+     * previously inspected the environment name itself. The
+     * `! app()->environment('production')` term below closes that gap:
+     * it is an orthogonal, independently-failing condition, so
+     * TestProvider is now inert in production regardless of the flag's
+     * value. This is a pure AND-narrowing change — every case that was
+     * previously disabled remains disabled; the only behavior removed
+     * is "flag true in an environment named production," which must
+     * never have been enabled in the first place.
      */
     private function isEnabledByEnvironment(): bool
     {
-        return filter_var(env('INTEGRATIONS_TEST_PROVIDER_ENABLED', false), FILTER_VALIDATE_BOOLEAN);
+        return filter_var(env('INTEGRATIONS_TEST_PROVIDER_ENABLED', false), FILTER_VALIDATE_BOOLEAN)
+            && ! app()->environment('production');
     }
 }

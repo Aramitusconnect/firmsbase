@@ -32,11 +32,14 @@ return [
         // The only provider implemented in this mission
         // (checkpoint-00-final-specification.md §18). Never
         // registered unless INTEGRATIONS_TEST_PROVIDER_ENABLED is
-        // explicitly true — default OFF, so it is absent from the
-        // registry entirely in any environment that does not set this
-        // flag (defense in depth alongside TestProvider::isConfigured()
-        // independently re-checking the same flag).
-        ProviderKey::Test->value => env('INTEGRATIONS_TEST_PROVIDER_ENABLED', false)
+        // explicitly true AND the running environment is not
+        // `production` — both conditions are required, so the flag
+        // alone can never register this class in production even if
+        // misconfigured. Absent from the registry entirely whenever
+        // either condition fails (defense in depth alongside
+        // TestProvider::isConfigured() independently re-checking the
+        // same two conditions).
+        ProviderKey::Test->value => env('INTEGRATIONS_TEST_PROVIDER_ENABLED', false) && ! app()->environment('production')
             ? TestProvider::class
             : null,
 

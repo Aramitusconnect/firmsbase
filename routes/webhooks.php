@@ -30,27 +30,17 @@ use Illuminate\Support\Facades\Route;
 | routing parameter), keeps it free of any implicit group middleware:
 | only the two middleware explicitly attached below ever run.
 |
-| ***WIRING GAP — DISCLOSED, NOT SILENTLY WORKED AROUND***
-| This file is created by this checkpoint but is NOT YET required by
-| bootstrap/app.php. This application's routing (see bootstrap/app.php's
-| `->withRouting(web: ..., commands: ..., health: ..., then: ...)` call)
-| currently loads ONLY routes/web.php and routes/console.php — there is
-| no `api:` parameter, no RouteServiceProvider, and no existing
-| mechanism that auto-discovers additional route files. Actually
-| loading this file requires ONE additional line inside bootstrap/
-| app.php's existing `then: function (): void { ... }` closure (the
-| same closure that already registers the `/readyz` route), e.g.:
+| ***WIRED AND REACHABLE SINCE CHECKPOINT 7***
+| This file is required directly from bootstrap/app.php's existing
+| `then: function (): void { ... }` closure (the same closure that
+| registers the `/readyz` route), via:
 |
 |     require __DIR__.'/../routes/webhooks.php';
 |
-| bootstrap/app.php is OUTSIDE this checkpoint's strict production-file
-| allowlist (reviews/checkpoint-07/frozen-design-post-security-review.md
-| §17) — modifying it was not authorized for this implementation pass.
-| This route is therefore fully implemented and independently correct,
-| but NOT YET REACHABLE by real traffic until that one-line addition is
-| made by a change explicitly authorized to touch bootstrap/app.php.
-| This is flagged in the implementation report as a required follow-up,
-| not silently left unmentioned.
+| That require line was added in this file's own creation commit
+| (`01605b6`, Checkpoint 7) — this route has therefore been reachable by
+| real traffic since Checkpoint 7, not merely "implemented but not yet
+| wired." See bootstrap/app.php for the require call.
 |
 */
 
