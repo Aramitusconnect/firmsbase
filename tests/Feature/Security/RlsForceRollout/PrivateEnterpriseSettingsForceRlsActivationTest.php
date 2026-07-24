@@ -574,9 +574,6 @@ class PrivateEnterpriseSettingsForceRlsActivationTest extends TestCase
 
             $this->assertEmpty($changed, "This checkpoint must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
         }
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     public function test_only_this_checkpoints_expected_files_were_changed(): void

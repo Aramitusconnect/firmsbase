@@ -111,9 +111,6 @@ class SeedDataAuditFirewallTest extends TestCase
 
             $this->assertEmpty($changed, "Section 39E must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
         }
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     public function test_no_protected_domain_behavior_files_were_modified(): void

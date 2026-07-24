@@ -613,9 +613,6 @@ class ConflictCheckRunsForceRlsActivationTest extends TestCase
 
             $this->assertEmpty($changed, "This batch must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
         }
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     /**

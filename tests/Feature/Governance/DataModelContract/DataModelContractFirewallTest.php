@@ -115,9 +115,6 @@ class DataModelContractFirewallTest extends TestCase
                 }
             }
         }
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     public function test_protected_files_were_not_modified(): void

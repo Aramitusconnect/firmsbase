@@ -107,8 +107,6 @@ class FirmRoleBoundaryServiceTest extends TestCase
         // non-default Blade). These assertions call the policy
         // services directly, proving the boundary is enforced at the
         // backend layer, not by hiding a button.
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
 
         $firmUser = FirmUser::factory()->role(FirmUserRole::Receptionist)->create();
         $this->assertFalse(app(TrustAccessPolicyService::class)->canApprove($firmUser->role));

@@ -49,9 +49,6 @@ class LegalSpecialistConsistencyMappingServiceTest extends TestCase
     {
         $this->assertSame(GovernanceMappingStatus::NotApplicableYet, $this->service->bySurface('dashboards')->status);
         $this->assertSame(GovernanceMappingStatus::NotApplicableYet, $this->service->bySurface('portal')->status);
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     public function test_emails_invoices_exports_notifications_are_not_found(): void

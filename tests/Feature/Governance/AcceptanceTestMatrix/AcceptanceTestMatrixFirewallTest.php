@@ -205,9 +205,6 @@ class AcceptanceTestMatrixFirewallTest extends TestCase
 
             $this->assertEmpty($changed, "Section 36 must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
         }
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     public function test_no_browser_or_mobile_test_harness_was_introduced(): void

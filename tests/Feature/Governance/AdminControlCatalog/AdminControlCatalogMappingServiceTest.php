@@ -126,7 +126,6 @@ class AdminControlCatalogMappingServiceTest extends TestCase
         // empty Laravel/Filament AdminPanelProvider scaffold, which
         // discovers zero resources/pages) — no control has real UI.
         $this->assertEmpty($this->service->uiBacked());
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
     }
 
     public function test_dangerous_before_hardening_includes_emergency_support_access_while_the_gap_remains(): void

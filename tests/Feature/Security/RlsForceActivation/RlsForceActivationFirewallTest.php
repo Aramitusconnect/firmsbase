@@ -241,9 +241,6 @@ class RlsForceActivationFirewallTest extends TestCase
 
             $this->assertEmpty($changed, "Section 39A-3A must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
         }
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     public function test_compliance_gap_registry_service_was_not_deleted_or_rewritten(): void

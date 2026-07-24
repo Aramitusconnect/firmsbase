@@ -166,9 +166,6 @@ class LoginPolicyFirewallTest extends TestCase
                 && $path !== 'app/Http/Middleware/EstablishFirmTenantContext.php',
         ));
         $this->assertEmpty($middlewareChanges, 'Section 39D must introduce no middleware surface, but found changes under app/Http/Middleware: '.implode(', ', $middlewareChanges));
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     public function test_no_fortify_or_breeze_was_installed(): void

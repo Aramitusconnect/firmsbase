@@ -120,9 +120,6 @@ class PermissionBoundaryFirewallTest extends TestCase
                 }
             }
         }
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     public function test_protected_role_and_access_policy_files_were_not_modified(): void

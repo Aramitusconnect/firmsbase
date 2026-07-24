@@ -345,9 +345,6 @@ class RlsEnforcementFirewallTest extends TestCase
 
             $this->assertEmpty($changed, "Section 39A must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
         }
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     public function test_new_middleware_is_not_registered_in_bootstrap_or_any_route(): void

@@ -243,9 +243,6 @@ class AdminControlFirewallTest extends TestCase
 
             $this->assertEmpty($changed, "Section 34 must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
         }
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     public function test_no_permission_policy_or_domain_behavior_services_were_modified(): void

@@ -387,9 +387,6 @@ class TrustLedgersForceRlsActivationTest extends TestCase
         foreach (['routes', 'app/Http/Controllers', 'app/Filament', 'resources/views', 'app/Livewire'] as $relativeDir) {
             $this->assertEmpty($this->changedOrUntrackedPaths($relativeDir));
         }
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     private function createAccountForFirm(Firm $firm): TrustAccount

@@ -110,9 +110,6 @@ class DeploymentEnvironmentFirewallTest extends TestCase
                 }
             }
         }
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     public function test_no_github_workflows_or_ci_files_were_added(): void

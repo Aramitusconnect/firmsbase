@@ -371,9 +371,6 @@ class MigrationProjectsForceRlsActivationTest extends TestCase
 
             $this->assertEmpty($changed, "This checkpoint must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
         }
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     private function createProjectForFirm(Firm $firm): MigrationProject

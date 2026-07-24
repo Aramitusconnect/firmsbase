@@ -100,9 +100,6 @@ class WorkflowTransitionEnforcementSearchTest extends TestCase
         $controllerFiles = glob(base_path('app/Http/Controllers/*.php')) ?: [];
         $this->assertSame(['Controller.php', 'ReadinessController.php'], array_map('basename', $controllerFiles), 'No real controller should exist beyond the empty Laravel scaffold and the reviewed ECS readiness probe.');
 
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
-
         $bladeFiles = glob(resource_path('views/**/*.blade.php')) ?: [];
         $this->assertEmpty($bladeFiles, 'No Blade views should exist that could write workflow status directly.');
     }

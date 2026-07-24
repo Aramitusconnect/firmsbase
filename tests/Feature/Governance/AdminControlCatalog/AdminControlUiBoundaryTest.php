@@ -25,8 +25,6 @@ class AdminControlUiBoundaryTest extends TestCase
 
     public function test_no_admin_resources_or_pages_were_generated(): void
     {
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-
         // ReadinessController.php (ECS readiness foundation) is a reviewed,
         // narrow exception: a pure infra health-check endpoint with no
         // model access, no admin UI, and no Filament/Livewire involvement

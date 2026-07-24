@@ -17,9 +17,6 @@ class AcceptanceUiDependencyTest extends TestCase
 
     public function test_accessibility_mobile_group_is_not_applicable_yet_because_no_real_ui_surface_exists(): void
     {
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
-
         $notApplicableKeys = array_keys($this->service->notApplicableYet());
 
         foreach ($this->service->group('accessibility_mobile') as $key => $item) {

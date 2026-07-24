@@ -34,7 +34,6 @@ class ProfessionalReviewSecurityPaymentTrustConsentTest extends TestCase
         // The gate must cite a real backend enforcement class, not a
         // route/navigation absence, as its owning evidence.
         $this->assertSame(\App\Services\PlatformStaffAccessPolicyService::class, $item->owning_class);
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
     }
 
     public function test_payment_classification_and_ledger_gate_is_evaluated(): void

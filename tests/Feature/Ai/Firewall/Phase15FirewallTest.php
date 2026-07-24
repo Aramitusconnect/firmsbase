@@ -83,8 +83,6 @@ class Phase15FirewallTest extends TestCase
     public function test_no_new_routes_controllers_or_ui_files_exist_anywhere(): void
     {
         $this->assertDirectoryDoesNotExist(base_path('app/Http/Controllers/Ai'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
 
         $bladeFiles = [];
         $iterator = new \RecursiveIteratorIterator(

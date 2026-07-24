@@ -169,9 +169,6 @@ class FinalExecutiveRecommendationFirewallTest extends TestCase
 
             $this->assertEmpty($changed, "Section 31 must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
         }
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     public function test_no_github_workflows_or_ci_files_were_added(): void

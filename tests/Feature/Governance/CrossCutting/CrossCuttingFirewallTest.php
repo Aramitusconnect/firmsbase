@@ -95,9 +95,6 @@ class CrossCuttingFirewallTest extends TestCase
                 }
             }
         }
-
-        $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
-        $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
     }
 
     public function test_no_real_scanner_or_provider_call_in_any_new_mapping_service(): void
