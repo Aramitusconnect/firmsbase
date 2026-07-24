@@ -113,6 +113,18 @@ final class IntegrationWebhookRoutingIndexNoRlsAndNoSecretColumnTest extends Tes
             // no-RLS classification and disclaimer note; never queries
             // or writes the table itself.
             'RowLevelSecurityCoverageMappingService.php',
+            // Checkpoint 11 additions — both reference the table for an
+            // ->exists()-only existence check
+            // (App\Services\IntegrationPlatformOversightReadService::
+            // toConnectionSummary() queries
+            // DB::table('integration_webhook_routing_index')->where(...)
+            // ->exists()), deriving a plain `webhookRoutingConfigured`
+            // boolean on the SuperAdmin oversight read model. Neither
+            // file ever selects/exposes webhook_routing_token_hash or
+            // any other column from this table — good data-exposure
+            // discipline, not a boundary violation.
+            'IntegrationPlatformOversightReadService.php',
+            'PlatformIntegrationConnectionSummary.php',
         ];
 
         $violations = [];

@@ -97,13 +97,21 @@ class SecretPatternScanTest extends TestCase
         // dispatch, retention sweep, and retry poll); each only
         // dispatches jobs that process/sweep existing integration data
         // (or, for the sweep command, deletes expired rows directly) —
-        // none creates demo/seed data of any kind.
+        // none creates demo/seed data of any kind. Checkpoint 11 added
+        // RefreshIntegrationPlatformOverviewSummariesCommand, which only
+        // dispatches one RefreshIntegrationPlatformOverviewSummaryJob
+        // per activated firm; that job upserts sanitized aggregate
+        // counts (connection counts, health state, sync/conflict
+        // counts) derived from the firm's own real tenant data into
+        // integration_platform_overview_summaries — never demo/seed
+        // data, and never raw production content.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
             'DispatchOutboxEventsCommand.php',
             'SweepIntegrationRetentionCommand.php',
             'SyncRetryPollCommand.php',
+            'RefreshIntegrationPlatformOverviewSummariesCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

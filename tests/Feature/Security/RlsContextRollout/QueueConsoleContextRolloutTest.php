@@ -48,15 +48,24 @@ class QueueConsoleContextRolloutTest extends TestCase
         // iterate tenant-owned data — all three do so via the
         // TenantAwareJobContext::runInFirmContext() pattern this test
         // documents, scoping every pass to an explicit firm rather than
-        // reading across firms unscoped. Any OTHER command appearing
-        // here has not been reviewed for the silent-bypass risk this
-        // test exists to catch.
+        // reading across firms unscoped. Checkpoint 11 added
+        // RefreshIntegrationPlatformOverviewSummariesCommand, a plain,
+        // non-tenant scheduled command that only enumerates the
+        // non-FORCE-RLS `firms` table and dispatches one
+        // RefreshIntegrationPlatformOverviewSummaryJob per activated
+        // firm; the job itself scopes its per-firm read via
+        // TenantContextService::runWithFirmContext() before upserting
+        // sanitized aggregate counts into the no-RLS
+        // integration_platform_overview_summaries table — no RLS bypass.
+        // Any OTHER command appearing here has not been reviewed for
+        // the silent-bypass risk this test exists to catch.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
             'DispatchOutboxEventsCommand.php',
             'SweepIntegrationRetentionCommand.php',
             'SyncRetryPollCommand.php',
+            'RefreshIntegrationPlatformOverviewSummariesCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);
