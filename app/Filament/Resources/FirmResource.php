@@ -28,9 +28,9 @@ use Filament\Tables\Table;
  * guard) rather than the firm panel.
  *
  * `firms` carries no BelongsToTenant / RLS (it is the tenancy ROOT, not
- * a tenant-owned table — RowLevelSecurityCoverageMappingService's own
- * FULL_TABLE_INVENTORY_EXTRA entry for `firms` confirms no RLS policy
- * exists for it yet), so — unlike FirmUserResource, whose sibling
+ * a tenant-owned table — the RLS coverage registry's own full table
+ * inventory confirms no RLS policy exists for it yet), so — unlike
+ * FirmUserResource, whose sibling
  * service PlatformFirmUserDirectoryService has an extensive docblock
  * explaining why a per-firm loop is required — this Resource can use a
  * completely ordinary Eloquent-backed `->query()` table with no special
