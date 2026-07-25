@@ -15,7 +15,6 @@ use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -54,12 +53,24 @@ use Illuminate\Support\Str;
  * security_events row on every successful login), so rather than
  * fabricating the column or omitting the signal entirely, this
  * Resource derives it with exactly ONE extra batched query (never
- * per-row — see getLastLoginAtByAdminId()) run under
+ * per-row — see lastLoginAtByAdminId()) run under
  * TenantContextService::runWithoutFirmContext() (security_events'
  * null-firm_id rows, which is what these are, are only readable with
  * no tenant context active — see PlatformAdminAuditEventRecorder::
  * recordPlatformEvent()'s own docblock for the same constraint on the
  * write side).
+ *
+ * Phase 1 correction: lastLoginAtByAdminId() is bounded to exactly the
+ * admin IDs given to it — it no longer aggregates across the whole
+ * security_events table for every platform_admins row regardless of
+ * how many are actually rendered. The table() method below no longer
+ * calls it eagerly for every admin; ListPlatformAdministrators::
+ * paginateTableQuery() calls it AFTER Filament's own pagination has
+ * been applied, passing only the current page's admin IDs — see that
+ * page class's own docblock for the full mechanism. The "last_login_at"
+ * column reads the resulting map off the Livewire page instance
+ * ($livewire->lastLoginAtByAdminId) instead of a pre-fetched
+ * whole-table map.
  */
 class PlatformAdministratorResource extends Resource
 {
@@ -84,8 +95,6 @@ class PlatformAdministratorResource extends Resource
 
     public static function table(Table $table): Table
     {
-        $lastLoginAtByAdminId = static::lastLoginAtByAdminId();
-
         return $table
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['roles' => fn ($q) => $q->whereNull('revoked_at')]))
             ->columns([
@@ -113,7 +122,7 @@ class PlatformAdministratorResource extends Resource
                     ->color(fn (?string $state): string => filled($state) ? 'success' : 'danger'),
                 TextColumn::make('last_login_at')
                     ->label('Last login')
-                    ->state(fn (PlatformAdmin $record) => $lastLoginAtByAdminId->get($record->id))
+                    ->state(fn (PlatformAdmin $record, $livewire) => $livewire->lastLoginAtByAdminId[$record->id] ?? null)
                     ->dateTime()
                     ->placeholder('Never'),
                 TextColumn::make('created_at')
@@ -133,21 +142,42 @@ class PlatformAdministratorResource extends Resource
     }
 
     /**
-     * One batched query for the whole table — never per-row — under
-     * TenantContextService::runWithoutFirmContext() (see this class's
-     * own docblock). Returns actor_id => latest created_at.
+     * ONE batched, BOUNDED query — never per-row, and never for the
+     * whole platform_admins table — under TenantContextService::
+     * runWithoutFirmContext() (see this class's own docblock). Scoped
+     * via ->whereIn('actor_id', $adminIds) to exactly the admin IDs the
+     * caller passes (ListPlatformAdministrators::paginateTableQuery()
+     * passes only the current rendered page's IDs), so the cost of this
+     * query is bounded by page size, not by the total size of
+     * security_events or platform_admins.
      *
-     * @return Collection<int, string>
+     * An admin ID with zero matching login events is simply absent from
+     * the returned array — this is intentional, not a bug: the
+     * "last_login_at" column's own `?? null` lookup already treats a
+     * missing key exactly like a null value ("Never"), so a
+     * newly-created admin who has never logged in still renders
+     * correctly without needing an explicit null entry here.
+     *
+     * @param  iterable<int, int>  $adminIds
+     * @return array<int, string>
      */
-    private static function lastLoginAtByAdminId(): Collection
+    public static function lastLoginAtByAdminId(iterable $adminIds): array
     {
+        $ids = collect($adminIds)->all();
+
+        if ($ids === []) {
+            return [];
+        }
+
         return app(TenantContextService::class)->runWithoutFirmContext(
-            fn (): Collection => DB::table('security_events')
+            fn (): array => DB::table('security_events')
                 ->where('actor_type', PlatformAdmin::class)
                 ->where('event_type', 'login_succeeded')
+                ->whereIn('actor_id', $ids)
                 ->selectRaw('actor_id, MAX(created_at) as last_login_at')
                 ->groupBy('actor_id')
                 ->pluck('last_login_at', 'actor_id')
+                ->all()
         );
     }
 }

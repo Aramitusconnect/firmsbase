@@ -8,6 +8,7 @@ use App\Models\Firm;
 use App\Models\PlatformAdmin;
 use App\Models\PlatformRole;
 use App\Models\SecurityEvent;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use RuntimeException;
@@ -53,6 +54,34 @@ use RuntimeException;
  * adminsWithoutConfirmedMfa()/recentRoleChanges() need no such
  * per-firm handling — platform_admins and platform_roles are both
  * cross-firm-by-design tables with no BelongsToTenant/RLS at all.
+ *
+ * Deterministic ordering (Phase 1 correction — every query below was
+ * audited for this): `security_events.created_at` is a
+ * `timestamp` column with the default (whole-second) precision — see
+ * that table's own migration — so two events landing in the same
+ * second is a real, not merely theoretical, tie. `id` is that table's
+ * plain auto-increment bigint primary key, globally unique and
+ * monotonic across every firm (confirmed by reading the migration
+ * directly), so it is the correct tie-breaker, not a second, unrelated
+ * ordering. Each per-firm query below orders by `created_at DESC, id
+ * DESC`; the cross-firm merge in recentSecurityEvents() then re-sorts
+ * the merged rows by the same (created_at, id) pair, so the final
+ * result is fully deterministic regardless of which order Firm::query()
+ * itself visits firms in (that query is still given an explicit
+ * ->orderBy('name'), matching PlatformFirmUserDirectoryService::listAll()'s
+ * own established convention, but it no longer needs to be for
+ * recentSecurityEvents()'s own output to be stable — it is read-order
+ * hygiene, not a correctness dependency, now that the id tie-break
+ * exists). `id` is carried on each row purely as an internal sort key
+ * and is stripped before returning — the return shape's own documented
+ * column set (below) is unchanged.
+ *
+ * adminsWithoutConfirmedMfa() orders by `name`, which is NOT unique
+ * (platform_admins has no unique constraint on it — only `email` is
+ * unique) — an `id` tie-break is added for the same reason.
+ * recentRoleChanges() orders by `updated_at DESC`, which collides for
+ * the same whole-second-precision reason as security_events above — an
+ * `id` tie-break is added there too.
  *
  * Redaction discipline: recentSecurityEvents() below deliberately never
  * selects/returns the raw `metadata` JSON column — only event_type,
@@ -100,7 +129,13 @@ class PlatformSecurityDashboardService
                 // TenantContextResolver::resolveForFirm() reads
                 // (organization_id, deployment_mode), not just the ones
                 // this method's own row shape uses.
-                $firms = Firm::query()->get();
+                //
+                // ->orderBy('name') mirrors listAll()'s own established
+                // convention — see this class's docblock for why firm
+                // iteration order no longer affects the final merged
+                // result's determinism (the id tie-break below already
+                // guarantees that), this is read-order hygiene only.
+                $firms = Firm::query()->orderBy('name')->get();
 
                 $rows = collect();
 
@@ -110,12 +145,17 @@ class PlatformSecurityDashboardService
                         fn () => SecurityEvent::query()
                             ->where('firm_id', $firm->id)
                             ->orderByDesc('created_at')
+                            ->orderByDesc('id')
                             ->limit($limit)
                             ->get(['id', 'firm_id', 'actor_type', 'actor_id', 'event_type', 'category', 'created_at'])
                     );
 
                     foreach ($firmRows as $event) {
                         $rows->push([
+                            // Internal sort key only — see this class's
+                            // docblock. Stripped below before returning,
+                            // so the returned row shape is unchanged.
+                            'id' => $event->id,
                             'firm_name' => $firm->name,
                             'actor_type' => class_basename($event->actor_type),
                             'actor_id' => $event->actor_id,
@@ -126,10 +166,16 @@ class PlatformSecurityDashboardService
                     }
                 }
 
+                // Two-key sort (created_at DESC, id DESC) — id is
+                // security_events' globally unique, monotonic primary
+                // key, so this is a total order: no two rows can ever
+                // compare equal, regardless of which firm produced them
+                // or what order they were pushed onto $rows in.
                 return $rows
-                    ->sortByDesc(fn (array $row) => $row['created_at'])
+                    ->sort(fn (array $a, array $b): int => [$b['created_at'], $b['id']] <=> [$a['created_at'], $a['id']])
                     ->take($limit)
-                    ->values();
+                    ->values()
+                    ->map(fn (array $row): array => Arr::except($row, ['id']));
             }
         );
     }
@@ -142,6 +188,7 @@ class PlatformSecurityDashboardService
         return PlatformAdmin::query()
             ->whereNull('two_factor_confirmed_at')
             ->orderBy('name')
+            ->orderBy('id')
             ->get(['id', 'uuid', 'name', 'email', 'is_active']);
     }
 
@@ -153,6 +200,7 @@ class PlatformSecurityDashboardService
         return PlatformRole::query()
             ->with(['platformAdmin:id,name,email', 'grantedBy:id,name,email'])
             ->orderByDesc('updated_at')
+            ->orderByDesc('id')
             ->limit($limit)
             ->get();
     }
