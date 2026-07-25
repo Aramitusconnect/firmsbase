@@ -51,12 +51,26 @@ class IntegrationOutboxEventFactory extends Factory
 
     public function definition(): array
     {
-        $firm = Firm::factory()->create();
-        $firmIntegration = FirmIntegration::factory()->forFirm($firm)->create();
-
+        // Section 39A-3L test-isolation fix: firm_id/firm_integration_id
+        // used to be built via unconditional Firm::factory()->create() /
+        // FirmIntegration::factory()->forFirm($firm)->create() calls
+        // executed as plain PHP statements — real, committed side effects
+        // that ran even when forFirmIntegration() below immediately
+        // overrides both keys with a caller-supplied connection. Lazy
+        // factory-relationship values (like FirmIntegrationFactory's own
+        // 'firm_id' => Firm::factory()) are only resolved when the key
+        // survives to the final merged attribute array, i.e. never when a
+        // later state() overrides it — the fix here mirrors that
+        // established, correct pattern instead of eagerly wasting a real
+        // Firm + FirmIntegration on every forFirmIntegration()-scoped
+        // create() (this factory's normal, intended usage everywhere in
+        // this codebase).
         return [
-            'firm_id' => $firm->id,
-            'firm_integration_id' => $firmIntegration->id,
+            'firm_id' => Firm::factory(),
+            'firm_integration_id' => fn (array $attributes) => FirmIntegration::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id']))
+                ->create()
+                ->id,
             'domain_event_id' => (string) Str::uuid(),
             'event_type' => 'token_refresh_retry',
             'resource_type' => null,

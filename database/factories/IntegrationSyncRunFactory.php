@@ -80,12 +80,34 @@ class IntegrationSyncRunFactory extends Factory
 
     public function definition(): array
     {
-        $firm = Firm::factory()->create();
-        $firmIntegration = FirmIntegration::factory()->forFirm($firm)->create();
-
+        // Section 39A-3L test-isolation fix: firm_id/firm_integration_id
+        // used to be built by unconditionally calling Firm::factory()->
+        // create() and FirmIntegration::factory()->forFirm($firm)->create()
+        // as plain PHP statements at the top of this method. Laravel only
+        // skips re-resolving a definition() value when a LATER state()
+        // (e.g. forFirmIntegration() below) overrides that same array key
+        // — it cannot "undo" a side effect that already ran while building
+        // the array. Every forFirmIntegration()-scoped create() (the
+        // normal, intended way this factory is used everywhere in this
+        // codebase) was therefore silently creating and discarding one
+        // real, fully-committed, orphaned Firm + FirmIntegration (+ its
+        // connecting FirmUser, via FirmIntegrationFactory::forFirm()) per
+        // call — invisible in ordinary RefreshDatabase-wrapped tests
+        // (rolled back with everything else) but a genuine, permanently
+        // committed leak in the handful of deliberately-non-RefreshDatabase
+        // tests that need two real physical DB connections (see e.g.
+        // SyncRetryPollJobTest's own docblock). 'firm_id' => Firm::factory()
+        // is Laravel's own documented lazy-relationship form (identical to
+        // FirmIntegrationFactory::definition()'s 'firm_id' => Firm::factory()
+        // immediately below in this same file family) — it is only ever
+        // resolved (creating a real Firm) when NOT overridden by a later
+        // state(), exactly the semantics this definition() needs.
         return [
-            'firm_id' => $firm->id,
-            'firm_integration_id' => $firmIntegration->id,
+            'firm_id' => Firm::factory(),
+            'firm_integration_id' => fn (array $attributes) => FirmIntegration::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id']))
+                ->create()
+                ->id,
             'resource_type' => 'contact',
             'sync_direction' => SyncDirection::Inbound->value,
             'run_type' => SyncRunType::Initial->value,

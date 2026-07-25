@@ -51,12 +51,22 @@ class IntegrationExternalMappingFactory extends Factory
 
     public function definition(): array
     {
-        $firm = Firm::factory()->create();
-        $firmIntegration = FirmIntegration::factory()->forFirm($firm)->create();
-
+        // Section 39A-3L test-isolation fix: see IntegrationOutboxEventFactory::
+        // definition()'s identical fix for the full explanation — firm_id/
+        // firm_integration_id used to be built via unconditional ->create()
+        // calls that wastefully created and permanently committed a real,
+        // orphaned Firm + FirmIntegration on every forFirmIntegration()-scoped
+        // create() (this factory's normal usage everywhere in this
+        // codebase), invisible under RefreshDatabase but a genuine leak
+        // under the small number of deliberately-non-RefreshDatabase
+        // dual-connection tests. Lazy factory-relationship values are only
+        // resolved when not overridden by a later state().
         return [
-            'firm_id' => $firm->id,
-            'firm_integration_id' => $firmIntegration->id,
+            'firm_id' => Firm::factory(),
+            'firm_integration_id' => fn (array $attributes) => FirmIntegration::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id']))
+                ->create()
+                ->id,
             'resource_type' => 'contact',
             'local_type' => 'App\\Models\\Contact',
             'local_id' => fake()->numberBetween(1, 100000),

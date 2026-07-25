@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Factories;
 
+use App\Enums\TenantEncryptionKeyStatus;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationOAuthState;
 use App\Models\Firm;
@@ -54,6 +55,20 @@ class IntegrationOAuthStateFactory extends Factory
 {
     protected $model = IntegrationOAuthState::class;
 
+    /**
+     * Section 39A-3L test-isolation fix support — memoizes the single
+     * FirmUser definition()'s initiating_user_id/initiating_firm_user_id
+     * closures below must both derive from (never two independently
+     * created FirmUsers), and the single encryption result its
+     * verifier_ciphertext/encryption_key_id closures must both derive
+     * from. Reset at the top of definition() itself so a bulk
+     * ->count(N)->create() never leaks row 1's memoized values into row
+     * 2+ (definition() is invoked once per row).
+     */
+    private ?FirmUser $lazyInitiatingFirmUser = null;
+
+    private ?EmailBodyEncryptionResult $lazyEncryptionResult = null;
+
     public function create($attributes = [], ?Model $parent = null)
     {
         if (! empty($attributes)) {
@@ -78,23 +93,63 @@ class IntegrationOAuthStateFactory extends Factory
 
     public function definition(): array
     {
-        $firm = Firm::factory()->create();
-
-        $firmIntegration = FirmIntegration::factory()->forFirm($firm)->create();
-
-        $firmUser = FirmUser::factory()->create(['firm_id' => $firm->id]);
-
-        $encryptionResult = $this->encryptFixtureVerifier($firm);
+        // Section 39A-3L test-isolation fix: firm_id/firm_integration_id/
+        // initiating_user_id/initiating_firm_user_id/verifier_ciphertext/
+        // encryption_key_id used to be built by unconditionally calling
+        // Firm::factory()->create(), FirmIntegration::factory()->forFirm()
+        // ->create(), FirmUser::factory()->create(), and
+        // encryptFixtureVerifier() (itself a real
+        // TenantEncryptionKey::factory()->forFirm()->create() call) as
+        // plain PHP statements at the top of this method — real,
+        // committed side effects that ran even when forFirmIntegration()
+        // below immediately overrides firm_id/firm_integration_id/
+        // initiating_user_id/initiating_firm_user_id with a
+        // caller-supplied connection. That also meant verifier_ciphertext/
+        // encryption_key_id were silently encrypted against the WRONG
+        // (wasted, about-to-be-discarded) firm whenever forFirmIntegration()
+        // was used — a real, separate correctness gap this fix also
+        // closes, not just the leak. Every field below is now a lazy
+        // closure/factory-relationship: Laravel only resolves a
+        // definition() value when it survives, unoverridden, to the final
+        // merged attribute array (mirrors FirmIntegrationFactory's own
+        // 'firm_id' => Firm::factory() pattern), so nothing here is
+        // created unless it is actually going to be used. The two
+        // memoized private properties above guarantee the
+        // initiating_user_id/initiating_firm_user_id pair always comes
+        // from the SAME FirmUser, and verifier_ciphertext/encryption_key_id
+        // always come from the SAME encryption call, exactly as before —
+        // never two independently created rows.
+        $this->lazyInitiatingFirmUser = null;
+        $this->lazyEncryptionResult = null;
 
         return [
-            'firm_id' => $firm->id,
-            'firm_integration_id' => $firmIntegration->id,
-            'initiating_user_id' => $firmUser->user_id,
-            'initiating_firm_user_id' => $firmUser->id,
+            'firm_id' => Firm::factory(),
+            'firm_integration_id' => fn (array $attributes) => FirmIntegration::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id']))
+                ->create()
+                ->id,
+            'initiating_user_id' => function (array $attributes) {
+                $this->lazyInitiatingFirmUser ??= FirmUser::factory()->create(['firm_id' => $attributes['firm_id']]);
+
+                return $this->lazyInitiatingFirmUser->user_id;
+            },
+            'initiating_firm_user_id' => function (array $attributes) {
+                $this->lazyInitiatingFirmUser ??= FirmUser::factory()->create(['firm_id' => $attributes['firm_id']]);
+
+                return $this->lazyInitiatingFirmUser->id;
+            },
             'opaque_token_hash' => hash('sha256', Str::random(43)),
             'redirect_uri' => 'https://app.firmsbase.test/integrations/oauth/callback',
-            'verifier_ciphertext' => $encryptionResult->ciphertext,
-            'encryption_key_id' => $encryptionResult->encryptionKeyId,
+            'verifier_ciphertext' => function (array $attributes) {
+                $this->lazyEncryptionResult ??= $this->encryptFixtureVerifier(Firm::query()->findOrFail($attributes['firm_id']));
+
+                return $this->lazyEncryptionResult->ciphertext;
+            },
+            'encryption_key_id' => function (array $attributes) {
+                $this->lazyEncryptionResult ??= $this->encryptFixtureVerifier(Firm::query()->findOrFail($attributes['firm_id']));
+
+                return $this->lazyEncryptionResult->encryptionKeyId;
+            },
             'expires_at' => now()->addMinutes(10),
             'consumed_at' => null,
         ];
@@ -159,10 +214,33 @@ class IntegrationOAuthStateFactory extends Factory
      * real EncryptionKeyService/EmailBodyEncryptionService chain —
      * never fabricates a ciphertext-shaped string by hand. Mirrors
      * IntegrationCredentialFactory::encryptFixtureSecret() exactly.
+     *
+     * Section 39A-3L test-isolation fix: only provisions a key when
+     * $firm does not already have one. Before this factory's own leak
+     * fix, this method was always called against a wasted, freshly
+     * created, guaranteed-key-less Firm, so an unconditional create()
+     * here never collided. Now that $firm is the row's real, final firm
+     * (which several existing tests — e.g.
+     * IntegrationOauthStatesForceRlsActivationTest::stateForFirm(),
+     * called repeatedly for the SAME firm to create multiple oauth
+     * states — deliberately reuse across multiple factory calls), an
+     * unconditional create() would violate
+     * tenant_encryption_keys_firm_id_key_version_unique the second time
+     * around. EncryptionKeyService::provision() itself enforces "at
+     * most one active key per firm" in production (throws if one
+     * already exists) — this mirrors that exact invariant instead of
+     * fighting it.
      */
     private function encryptFixtureVerifier(Firm $firm): EmailBodyEncryptionResult
     {
-        TenantEncryptionKey::factory()->forFirm($firm)->create();
+        $hasActiveKey = TenantEncryptionKey::query()
+            ->where('firm_id', $firm->id)
+            ->where('status', TenantEncryptionKeyStatus::Active)
+            ->exists();
+
+        if (! $hasActiveKey) {
+            TenantEncryptionKey::factory()->forFirm($firm)->create();
+        }
 
         $result = (new EmailBodyEncryptionService(new EncryptionKeyService()))
             ->encrypt($firm, 'fixture-pkce-verifier-'.Str::random(43));

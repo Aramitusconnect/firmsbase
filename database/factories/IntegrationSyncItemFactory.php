@@ -74,12 +74,31 @@ class IntegrationSyncItemFactory extends Factory
 
     public function definition(): array
     {
-        $syncRun = IntegrationSyncRun::factory()->create();
-
+        // Section 39A-3L test-isolation fix: this used to eagerly call
+        // IntegrationSyncRun::factory()->create() as a plain PHP statement
+        // before the return — a real, committed row every single time,
+        // even when forSyncRun() below immediately overrides firm_id/
+        // sync_run_id/resource_type with a caller-supplied run. Laravel
+        // cannot skip a side effect that already happened while building
+        // the array; it can only skip re-resolving a definition() value
+        // that is still an unresolved Factory/Closure by the time a later
+        // state() overrides that key. Every forSyncRun()-scoped create()
+        // (the normal, intended way this factory is used everywhere in
+        // this codebase) was therefore silently wasting one real,
+        // fully-committed IntegrationSyncRun — which itself wastes a real
+        // Firm + FirmIntegration via IntegrationSyncRunFactory's OWN
+        // definition() — per call. Invisible under RefreshDatabase (rolled
+        // back with everything else); a genuine, permanently committed
+        // leak under the small number of deliberately-non-RefreshDatabase
+        // dual-connection tests (see e.g. SyncRetryPollJobTest's own
+        // docblock). 'sync_run_id' => IntegrationSyncRun::factory() is
+        // Laravel's own lazy-relationship form — only resolved (creating a
+        // real run) when NOT overridden by a later state(), matching
+        // IntegrationSyncRunFactory::definition()'s identical fix.
         return [
-            'firm_id' => $syncRun->firm_id,
-            'sync_run_id' => $syncRun->id,
-            'resource_type' => $syncRun->resource_type,
+            'sync_run_id' => IntegrationSyncRun::factory(),
+            'firm_id' => fn (array $attributes) => IntegrationSyncRun::query()->findOrFail($attributes['sync_run_id'])->firm_id,
+            'resource_type' => fn (array $attributes) => IntegrationSyncRun::query()->findOrFail($attributes['sync_run_id'])->resource_type,
             'local_type' => 'App\\Models\\Contact',
             'local_id' => fake()->numberBetween(1, 100000),
             'external_id' => (string) Str::uuid(),
