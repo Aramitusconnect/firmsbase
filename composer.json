@@ -9,7 +9,9 @@
         "php": "^8.3",
         "filament/filament": "^4.0",
         "laravel/framework": "^13.8",
-        "laravel/tinker": "^3.0"
+        "laravel/tinker": "^3.0",
+        "pragmarx/google2fa": "^9.0",
+        "pragmarx/google2fa-qrcode": "^4.0"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

@@ -68,6 +68,22 @@ class AppServiceProvider extends ServiceProvider
     private function registerAuthenticationAuditLogging(): void
     {
         Event::listen(Login::class, function (Login $event): void {
+            // FirmsVault Admin Control Center MFA design proposal §5
+            // (EnsurePlatformAdminMfaIsEnrolledAndVerified's step 5,
+            // "reset-stamp check"): stamps the exact moment this
+            // platform_admin session was authenticated, entirely
+            // independent of the security_events write below (this must
+            // still happen even if that write is ever skipped/fails) —
+            // there is no other reliable "when did this session log in"
+            // signal available to that middleware, since Laravel's own
+            // SessionGuard does not track one. Deliberately session-only
+            // (not persisted anywhere else): a value that vanishes with
+            // the session is exactly the fail-closed behavior that
+            // middleware step wants when it cannot find one.
+            if ($event->guard === 'platform_admin' && request()->hasSession()) {
+                request()->session()->put('platform_admin_mfa_session_authenticated_at', now()->toISOString());
+            }
+
             // Fix #0 (Section 39A-3L Phase B6): activeFirmUser() correctly
             // bootstraps via app.current_user_id, unlike a raw firmUsers()
             // query, which returns NULL under firm_users' own FORCE RLS
@@ -76,7 +92,7 @@ class AppServiceProvider extends ServiceProvider
                 ? $event->user->activeFirmUser()?->firm_id
                 : null;
 
-            $context = new TenantContextService();
+            $context = new TenantContextService;
 
             if ($firmId !== null) {
                 $context->setDatabaseTenantContextForFirmId($firmId);
@@ -101,7 +117,7 @@ class AppServiceProvider extends ServiceProvider
         });
 
         Event::listen(Failed::class, function (Failed $event): void {
-            $context = new TenantContextService();
+            $context = new TenantContextService;
             $context->clearDatabaseTenantContext();
 
             try {

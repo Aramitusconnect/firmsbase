@@ -14,12 +14,13 @@ class PlatformStaffAccessPolicyServiceTest extends TestCase
     use RefreshDatabase;
 
     private PlatformStaffAccessPolicyService $service;
+
     private PlatformRoleService $roleService;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->roleService = new PlatformRoleService();
+        $this->roleService = new PlatformRoleService;
         $this->service = new PlatformStaffAccessPolicyService($this->roleService);
     }
 
@@ -71,5 +72,63 @@ class PlatformStaffAccessPolicyServiceTest extends TestCase
         $this->assertTrue($this->service->canAccessPlatformBilling($admin)->allowed);
         $this->assertTrue($this->service->canAccessSecurityLogs($admin)->allowed);
         $this->assertTrue($this->service->canMutate($admin)->allowed);
+        $this->assertTrue($this->service->canAccessPlatformAdministration($admin)->allowed);
+        $this->assertTrue($this->service->canManageFirms($admin)->allowed);
+        $this->assertTrue($this->service->canManagePlatformAdministrators($admin)->allowed);
+        $this->assertTrue($this->service->canManageRoles($admin)->allowed);
+    }
+
+    // ------------------------------------------------------------
+    // Phase 1 FirmsVault Admin Control Center additions
+    // ------------------------------------------------------------
+
+    public function test_support_agent_and_billing_admin_can_view_platform_administration_but_not_manage_firms(): void
+    {
+        $supportAgent = PlatformAdmin::factory()->create();
+        $this->roleService->grant($supportAgent, PlatformRoleCode::SupportAgent);
+
+        $billingAdmin = PlatformAdmin::factory()->create();
+        $this->roleService->grant($billingAdmin, PlatformRoleCode::BillingAdmin);
+
+        foreach ([$supportAgent, $billingAdmin] as $admin) {
+            $this->assertTrue($this->service->canAccessPlatformAdministration($admin)->allowed);
+            $this->assertFalse($this->service->canManageFirms($admin)->allowed);
+            $this->assertFalse($this->service->canManagePlatformAdministrators($admin)->allowed);
+            $this->assertFalse($this->service->canManageRoles($admin)->allowed);
+        }
+    }
+
+    public function test_sales_roles_cannot_view_platform_administration(): void
+    {
+        $salesManager = PlatformAdmin::factory()->create();
+        $this->roleService->grant($salesManager, PlatformRoleCode::SalesManager);
+
+        $salesRep = PlatformAdmin::factory()->create();
+        $this->roleService->grant($salesRep, PlatformRoleCode::SalesRep);
+
+        $this->assertFalse($this->service->canAccessPlatformAdministration($salesManager)->allowed);
+        $this->assertFalse($this->service->canAccessPlatformAdministration($salesRep)->allowed);
+    }
+
+    public function test_platform_admin_role_can_manage_firms_but_not_platform_administrators_or_roles(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $this->roleService->grant($admin, PlatformRoleCode::PlatformAdmin);
+
+        $this->assertTrue($this->service->canAccessPlatformAdministration($admin)->allowed);
+        $this->assertTrue($this->service->canManageFirms($admin)->allowed);
+        $this->assertFalse(
+            $this->service->canManagePlatformAdministrators($admin)->allowed,
+            'Only SuperAdmin may manage other PlatformAdmins — even the platform_admin role itself must not.'
+        );
+        $this->assertFalse($this->service->canManageRoles($admin)->allowed);
+    }
+
+    public function test_a_platform_admin_with_no_role_is_denied_platform_administration(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+
+        $this->assertFalse($this->service->canAccessPlatformAdministration($admin)->allowed);
+        $this->assertNotNull($this->service->canAccessPlatformAdministration($admin)->reason);
     }
 }

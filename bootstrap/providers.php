@@ -1,8 +1,15 @@
 <?php
 
+use App\Providers\AppServiceProvider;
+use App\Providers\Filament\AdminPanelProvider;
+use App\Providers\Filament\FirmPanelProvider;
+use App\Providers\IntegrationServiceProvider;
+use App\Providers\PlatformAdminPolicyServiceProvider;
+
 return [
-    App\Providers\AppServiceProvider::class,
-    App\Providers\Filament\AdminPanelProvider::class,
-    App\Providers\Filament\FirmPanelProvider::class,
-    App\Providers\IntegrationServiceProvider::class,
+    AppServiceProvider::class,
+    AdminPanelProvider::class,
+    FirmPanelProvider::class,
+    IntegrationServiceProvider::class,
+    PlatformAdminPolicyServiceProvider::class,
 ];

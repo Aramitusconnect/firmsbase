@@ -105,6 +105,12 @@ class SecretPatternScanTest extends TestCase
         // counts) derived from the firm's own real tenant data into
         // integration_platform_overview_summaries — never demo/seed
         // data, and never raw production content.
+        // FirmsVault Admin Control Center added
+        // PlatformAdminEmergencyMfaResetCommand — reviewed and safe: it
+        // creates zero new rows. It requires a target PlatformAdmin
+        // record to already exist (errors out otherwise), and only
+        // nulls two existing columns plus writes one audit row — the
+        // opposite of a seeding command.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
@@ -112,6 +118,7 @@ class SecretPatternScanTest extends TestCase
             'SweepIntegrationRetentionCommand.php',
             'SyncRetryPollCommand.php',
             'RefreshIntegrationPlatformOverviewSummariesCommand.php',
+            'PlatformAdminEmergencyMfaResetCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);
@@ -162,8 +169,8 @@ class SecretPatternScanTest extends TestCase
 
     /**
      * @return string[] absolute paths, matching the frozen design's
-     *                   §14 production-file allowlist exactly (14 new
-     *                   + 11 modified).
+     *                  §14 production-file allowlist exactly (14 new
+     *                  + 11 modified).
      */
     private function checkpoint9ChangedFiles(): array
     {

@@ -53,6 +53,49 @@ use Tests\TestCase;
  * narrows what counts as "authorized" from "nothing" to "exactly
  * Checkpoint 11's own reviewed allowlist," mirroring Checkpoint 10's own
  * 97-file cascade-update precedent for expected, reviewed breakage.
+ *
+ * POST-PHASE-1-ADMIN-CONTROL-CENTER UPDATE (FirmsVault Admin Control
+ * Center mission, Phase 1 foundational build): this checkpoint adds a
+ * THIRD, entirely separate, non-Integration-domain surface to the admin
+ * panel — `app/Filament/Resources/FirmResource.php` +
+ * `FirmUserResource.php` (plus their List/View Pages subdirectories) and
+ * two more `app/Filament/Pages/Platform*.php` classes
+ * (PlatformSecurityDashboardPage, PlatformTenantIsolationPage). None of
+ * these 8 new files reference the Integration domain in any way (zero
+ * `App\Integrations\` usage, zero `FirmIntegrationResource` reference —
+ * this file's OWN `assertNoIntegrationDomainReferenceUnder()` sweep,
+ * run against `app/Filament/Resources` and `app/Filament/Pages`
+ * unconditionally, independently re-confirms this on every test run,
+ * not merely by construction here); they gate cross-firm Firm/FirmUser
+ * oversight and security/RLS reporting instead, an unrelated concern
+ * this checkpoint's own architecture investigation scoped explicitly.
+ * Cascading the allowlist below forward to include them follows this
+ * file's own already-twice-established "cascade update" precedent
+ * (Checkpoint 10's 97-file update, then this file's own Checkpoint 11
+ * update) — it does not touch the two Integration-domain sweeps above,
+ * which continue to run unconditionally against every file in these
+ * directories (including these 8 new ones) and would independently
+ * fail if any of them ever referenced the Integration domain.
+ *
+ * POST-PHASE-1-MFA-AND-PLATFORM-ADMINISTRATORS UPDATE (same mission,
+ * later checkpoint): a fourth cascade, same reasoning again — the MFA
+ * system (login page, audited MFA provider subclass, middleware lives
+ * under app/Http/Middleware so it is out of this sweep's scope
+ * entirely) and the new Platform Administrators resource + Roles/
+ * Permissions page. See $mfaAndPlatformAdministratorAllowedRelativeFiles
+ * below.
+ *
+ * POST-PHASE-1-EXECUTIVE-DASHBOARD UPDATE (same mission, final Phase 1
+ * scope item): a fifth cascade — the Executive Dashboard
+ * (App\Filament\Pages\Dashboard, replacing Filament's stock dashboard)
+ * and its 7 Widget classes, the first files ever created under
+ * app/Filament/Widgets/. One of the 7, PlatformIntegrationsHealthWidget,
+ * legitimately references the Integration domain (aggregates the
+ * existing, already-reviewed integration_platform_overview_summaries
+ * table) — narrowly allowlisted in
+ * test_app_filament_widgets_directory_contains_no_integration_domain_class()
+ * itself, not merely in the broader non-Firm-file sweep below. See
+ * $executiveDashboardAllowedRelativeFiles below.
  */
 final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
 {
@@ -109,7 +152,24 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             return;
         }
 
-        $this->assertNoIntegrationDomainReferenceUnder($dir);
+        // POST-PHASE-1-EXECUTIVE-DASHBOARD UPDATE: app/Filament/Widgets
+        // did not exist at all before this checkpoint — the Executive
+        // Dashboard is the first thing to populate it. Exactly one of
+        // its 7 widgets, PlatformIntegrationsHealthWidget, legitimately
+        // references the Integration domain (it aggregates
+        // integration_platform_overview_summaries via
+        // IntegrationPlatformOversightReadService — the same no-RLS,
+        // already-5-minute-refreshed summary table
+        // PlatformIntegrationOverviewPage already reads, never a new
+        // live query) — the same class of reviewed exception Checkpoint
+        // 11's own PlatformIntegrationOverviewPage/
+        // PlatformFirmIntegrationsPage/PlatformFirmIntegrationDetailPage
+        // already carry above. The other 6 widgets carry no Integration
+        // reference at all and remain covered by the unconditional
+        // sweep.
+        $this->assertNoIntegrationDomainReferenceUnder($dir, allowedBasenames: [
+            'PlatformIntegrationsHealthWidget.php',
+        ]);
     }
 
     public function test_no_platform_integration_health_access_policy_service_shaped_class_exists_anywhere(): void
@@ -168,6 +228,69 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RevokeSupportAccessSessionAction.php',
         ];
 
+        // Phase 1 FirmsVault Admin Control Center's own new, reviewed,
+        // non-Integration-domain admin-panel surface — see this file's
+        // class docblock's "POST-PHASE-1-ADMIN-CONTROL-CENTER UPDATE"
+        // note for why this cascade is safe (the Integration-domain
+        // sweeps above run unconditionally against every one of these
+        // files too).
+        $phase1AdminControlCenterAllowedRelativeFiles = [
+            'Resources'.DIRECTORY_SEPARATOR.'FirmResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'FirmResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListFirms.php',
+            'Resources'.DIRECTORY_SEPARATOR.'FirmResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewFirm.php',
+            'Resources'.DIRECTORY_SEPARATOR.'FirmUserResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'FirmUserResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListFirmUsers.php',
+            'Resources'.DIRECTORY_SEPARATOR.'FirmUserResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewFirmUser.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformSecurityDashboardPage.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformTenantIsolationPage.php',
+        ];
+
+        // FirmsVault Admin Control Center MFA system + Platform
+        // Administrators resource + Roles/Permissions page (same
+        // mission as the Phase 1 block above, later checkpoint) —
+        // another entirely new, non-Integration-domain admin-panel
+        // surface (MFA enrollment/enforcement, platform-administrator
+        // management, role catalog). Same cascade-safety reasoning: the
+        // Integration-domain sweeps above run unconditionally against
+        // every one of these files too and would independently fail if
+        // any of them referenced the Integration domain.
+        $mfaAndPlatformAdministratorAllowedRelativeFiles = [
+            'Auth'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'PlatformAdminLogin.php',
+            'MultiFactor'.DIRECTORY_SEPARATOR.'AuditedAppAuthentication.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformRolesAndPermissionsPage.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformAdministratorResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformAdministratorResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListPlatformAdministrators.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformAdministratorResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewPlatformAdministrator.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ResetPlatformAdminMfaAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'TogglePlatformAdminActiveStatusAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'AssignPlatformAdminRoleAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RevokePlatformAdminRoleAction.php',
+        ];
+
+        // Phase 1 FirmsVault Admin Control Center, final scope item —
+        // the Executive Dashboard: App\Filament\Pages\Dashboard
+        // (overrides/replaces Filament's stock dashboard, see
+        // AdminPanelProvider's own docblock) plus its 7 Widget classes
+        // under the newly-created app/Filament/Widgets/ directory. Same
+        // cascade-safety reasoning as every block above — the
+        // Integration-domain sweeps run unconditionally against every
+        // one of these files too (see
+        // test_app_filament_widgets_directory_contains_no_integration_domain_class's
+        // own narrower, single-file allowlist for the one legitimate
+        // exception among these 7).
+        $executiveDashboardAllowedRelativeFiles = [
+            'Pages'.DIRECTORY_SEPARATOR.'Dashboard.php',
+            'Widgets'.DIRECTORY_SEPARATOR.'PlatformEnvironmentBadgeWidget.php',
+            'Widgets'.DIRECTORY_SEPARATOR.'PlatformFirmsOverviewWidget.php',
+            'Widgets'.DIRECTORY_SEPARATOR.'PlatformAdministratorsOverviewWidget.php',
+            'Widgets'.DIRECTORY_SEPARATOR.'PlatformIntegrationsHealthWidget.php',
+            'Widgets'.DIRECTORY_SEPARATOR.'PlatformSecurityOverviewWidget.php',
+            'Widgets'.DIRECTORY_SEPARATOR.'PlatformSystemHealthWidget.php',
+            'Widgets'.DIRECTORY_SEPARATOR.'PlatformRecentPrivilegedActivityWidget.php',
+        ];
+
+        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles);
+
         $unauthorizedNonFirmFilamentFiles = [];
 
         foreach ($this->phpFilesUnder($filamentDir) as $file) {
@@ -177,7 +300,7 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
                 continue;
             }
 
-            if (in_array($relative, $checkpoint11AllowedRelativeFiles, true)) {
+            if (in_array($relative, $allowedRelativeFiles, true)) {
                 continue;
             }
 

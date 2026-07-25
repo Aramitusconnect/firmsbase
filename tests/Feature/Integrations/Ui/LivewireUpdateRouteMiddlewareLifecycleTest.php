@@ -7,7 +7,9 @@ namespace Tests\Feature\Integrations\Ui;
 use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
 use App\Enums\PlatformRoleCode;
+use App\Filament\Pages\Dashboard;
 use App\Filament\Pages\PlatformIntegrationOverviewPage;
+use App\Filament\Widgets\PlatformEnvironmentBadgeWidget;
 use App\Http\Middleware\EstablishFirmTenantContextForLivewireUpdate;
 use App\Integrations\Models\FirmIntegration;
 use App\Models\Firm;
@@ -20,8 +22,6 @@ use App\Services\PlatformRoleService;
 use App\Services\TenantContextService;
 use Closure;
 use Filament\Facades\Filament;
-use Filament\Pages\Dashboard;
-use Filament\Widgets\AccountWidget;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
@@ -270,14 +270,22 @@ final class LivewireUpdateRouteMiddlewareLifecycleTest extends TestCase
 
         $this->assertNoDatabaseTenantContext('clean slate');
 
-        // Admin Dashboard.
+        // Admin Dashboard — App\Filament\Pages\Dashboard, the Executive
+        // Dashboard that now REPLACES the stock Filament\Pages\Dashboard
+        // in AdminPanelProvider (Phase 1 FirmsVault Admin Control
+        // Center, final scope item). This is the real, currently
+        // registered dashboard component, not the stock vendor class.
         Livewire::test(Dashboard::class)->assertOk();
         $this->assertFalse(app(TenantContextService::class)->hasFirmContext(), 'The admin Dashboard must never establish firm context.');
         $this->assertNoDatabaseTenantContext();
 
-        // AccountWidget (a real admin panel Livewire widget).
-        Livewire::test(AccountWidget::class)->assertOk();
-        $this->assertFalse(app(TenantContextService::class)->hasFirmContext(), 'AccountWidget must never establish firm context.');
+        // PlatformEnvironmentBadgeWidget (a real admin panel Livewire
+        // widget, mounted on the Executive Dashboard above — the stock
+        // AccountWidget this test used to exercise here is no longer
+        // registered on this panel at all, see AdminPanelProvider's own
+        // docblock).
+        Livewire::test(PlatformEnvironmentBadgeWidget::class)->assertOk();
+        $this->assertFalse(app(TenantContextService::class)->hasFirmContext(), 'PlatformEnvironmentBadgeWidget must never establish firm context.');
         $this->assertNoDatabaseTenantContext();
 
         // An admin Resource-style page WITH a table (the integration

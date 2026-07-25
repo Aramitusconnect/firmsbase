@@ -57,6 +57,14 @@ class QueueConsoleContextRolloutTest extends TestCase
         // TenantContextService::runWithFirmContext() before upserting
         // sanitized aggregate counts into the no-RLS
         // integration_platform_overview_summaries table — no RLS bypass.
+        // FirmsVault Admin Control Center added
+        // PlatformAdminEmergencyMfaResetCommand — reviewed and safe:
+        // it touches only the non-tenant `platform_admins` table (no
+        // firm_id, not RLS-scoped) plus one security_events write via
+        // the already-reviewed PlatformAdminAuditEventRecorder::
+        // recordConsoleEvent() path; no raw SQL, no BYPASSRLS, no
+        // superuser role, no set_config manipulation of any RLS-relevant
+        // session variable.
         // Any OTHER command appearing here has not been reviewed for
         // the silent-bypass risk this test exists to catch.
         $allowlist = [
@@ -66,6 +74,7 @@ class QueueConsoleContextRolloutTest extends TestCase
             'SweepIntegrationRetentionCommand.php',
             'SyncRetryPollCommand.php',
             'RefreshIntegrationPlatformOverviewSummariesCommand.php',
+            'PlatformAdminEmergencyMfaResetCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);
