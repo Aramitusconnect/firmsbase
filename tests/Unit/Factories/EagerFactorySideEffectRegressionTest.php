@@ -93,6 +93,26 @@ use Tests\TestCase;
  * protected. Run against the pre-fix code (git stash the factory
  * changes), every test below fails with a nonzero Firm::count() delta;
  * against the fixed code, every test passes with a zero delta.
+ *
+ * Second pass (audit/eager-factory-side-effects-f85b742): a full
+ * re-sweep of every factory under database/factories (215 files; no
+ * factories exist outside that directory) found the anti-pattern was
+ * not fully eliminated by the fixes above. Three factories
+ * (AccountingExportLineFactory, AiApprovalEventFactory,
+ * SignatureCertificateFactory) had been "fixed" by memoizing a
+ * firm+child chain behind a private lazy property that firm_id ITSELF
+ * derived from, rather than making firm_id the source of truth. That
+ * shape hides a second bug: a caller overriding ONLY firm_id (a bare
+ * ->create(['firm_id' => $firm->id]) call, never routed through the
+ * factory's own forXxx() helper — exactly the pattern
+ * AiApprovalEventAppendOnlyTest, AccountingExportLinesForceRlsActivationTest,
+ * and SignatureAndPdfTenantIsolationTest all use) leaves the sibling
+ * FK's closure completely unaware of the override, so it still creates
+ * a real, wasted, UNRELATED parent chain — and worse, leaves the row's
+ * own firm_id disagreeing with its sibling FK's real owning firm (a
+ * data-integrity bug, not just a leak). The three tests below prove
+ * this exact bare-firm_id-override call shape (not the already-covered
+ * forXxx() shape) leaks no wasted Firm and produces no such mismatch.
  */
 class EagerFactorySideEffectRegressionTest extends TestCase
 {
@@ -124,6 +144,40 @@ class EagerFactorySideEffectRegressionTest extends TestCase
         $this->assertSame($batchCountBefore, AccountingExportBatch::count());
     }
 
+    /**
+     * Second-pass regression: AccountingExportLinesForceRlsActivationTest
+     * calls AccountingExportLine::factory()->create(['firm_id' =>
+     * $firmA->id]) repeatedly — a BARE firm_id override, never routed
+     * through forExpense()/forInvoice()/forPayment(). Before the second
+     * fix, the pre-fix code's accounting_export_batch_id/expense_id
+     * closures were unaware of this override and always ran
+     * resolveLazyFirmAndBatch(), eagerly creating a wasted, unrelated
+     * Firm + AccountingExportBatch + Expense — leaving the row's own
+     * firm_id (the real, caller-supplied firm) disagreeing with its
+     * accounting_export_batch_id/expense_id's real owning firm.
+     */
+    public function test_accounting_export_line_factory_bare_firm_id_override_does_not_leak_or_mismatch(): void
+    {
+        $firmA = Firm::factory()->create();
+
+        $countBefore = Firm::count();
+
+        $line = AccountingExportLine::factory()->create(['firm_id' => $firmA->id]);
+
+        $this->assertSame($countBefore, Firm::count());
+        $this->assertSame($firmA->id, $line->firm_id);
+        $this->assertSame(
+            $firmA->id,
+            AccountingExportBatch::query()->findOrFail($line->accounting_export_batch_id)->firm_id,
+            'accounting_export_batch_id must belong to the SAME firm as firm_id.'
+        );
+        $this->assertSame(
+            $firmA->id,
+            Expense::query()->findOrFail($line->expense_id)->firm_id,
+            'expense_id must belong to the SAME firm as firm_id.'
+        );
+    }
+
     public function test_ai_approval_event_factory_for_request_does_not_leak_a_wasted_request(): void
     {
         $firm = Firm::factory()->create();
@@ -136,6 +190,35 @@ class EagerFactorySideEffectRegressionTest extends TestCase
 
         $this->assertSame($countBefore, Firm::count());
         $this->assertSame($requestCountBefore, AiApprovalRequest::count());
+    }
+
+    /**
+     * Second-pass regression: AiApprovalEventAppendOnlyTest calls
+     * AiApprovalEvent::factory()->create(['firm_id' => $firm->id]) — a
+     * BARE firm_id override, never routed through forRequest(). Before
+     * the second fix, the pre-fix code's ai_approval_request_id closure
+     * was unaware of this override and always ran
+     * AiApprovalRequest::factory()->create() with no override of its
+     * own, eagerly creating a wasted, unrelated AiApprovalRequest (+ its
+     * own nested Firm/AiUsageEvent/TenantEncryptionKey) — leaving the
+     * row's own firm_id (the real, caller-supplied firm) disagreeing
+     * with its ai_approval_request_id's real owning firm.
+     */
+    public function test_ai_approval_event_factory_bare_firm_id_override_does_not_leak_or_mismatch(): void
+    {
+        $firm = Firm::factory()->create();
+
+        $countBefore = Firm::count();
+
+        $event = AiApprovalEvent::factory()->create(['firm_id' => $firm->id]);
+
+        $this->assertSame($countBefore, Firm::count());
+        $this->assertSame($firm->id, $event->firm_id);
+        $this->assertSame(
+            $firm->id,
+            AiApprovalRequest::query()->findOrFail($event->ai_approval_request_id)->firm_id,
+            'ai_approval_request_id must belong to the SAME firm as firm_id.'
+        );
     }
 
     public function test_ai_approval_request_factory_for_firm_does_not_leak_a_wasted_firm(): void
@@ -672,6 +755,42 @@ class EagerFactorySideEffectRegressionTest extends TestCase
         $this->assertSame($countBefore, Firm::count());
         $this->assertSame($requestCountBefore, SignatureRequest::count());
         $this->assertSame($hashCountBefore, DocumentHash::count());
+    }
+
+    /**
+     * Second-pass regression: SignatureAndPdfTenantIsolationTest calls
+     * SignatureCertificate::factory()->create(['firm_id' => $firmA->id])
+     * — a BARE firm_id override, never routed through forRequest().
+     * Before the second fix, the pre-fix code's signature_request_id
+     * closure was unaware of this override and always ran
+     * SignatureRequest::factory()->create() with no override of its
+     * own, eagerly creating a wasted, unrelated SignatureRequest (+ its
+     * own nested Firm/Document/FirmUser) — leaving the row's own
+     * firm_id (the real, caller-supplied firm) disagreeing with its
+     * signature_request_id's real owning firm. document_hash_id was
+     * already correctly derived from $attributes['firm_id'] before this
+     * fix, so it is asserted here too, purely as a consistency check.
+     */
+    public function test_signature_certificate_factory_bare_firm_id_override_does_not_leak_or_mismatch(): void
+    {
+        $firmA = Firm::factory()->create();
+
+        $countBefore = Firm::count();
+
+        $certificate = SignatureCertificate::factory()->create(['firm_id' => $firmA->id]);
+
+        $this->assertSame($countBefore, Firm::count());
+        $this->assertSame($firmA->id, $certificate->firm_id);
+        $this->assertSame(
+            $firmA->id,
+            SignatureRequest::query()->findOrFail($certificate->signature_request_id)->firm_id,
+            'signature_request_id must belong to the SAME firm as firm_id.'
+        );
+        $this->assertSame(
+            $firmA->id,
+            DocumentHash::query()->findOrFail($certificate->document_hash_id)->firm_id,
+            'document_hash_id must belong to the SAME firm as firm_id.'
+        );
     }
 
     public function test_signature_event_factory_for_request_does_not_leak_wasted_records(): void

@@ -58,60 +58,47 @@ class AccountingExportLineFactory extends Factory
     }
 
     /**
-     * Audit fix (eager-factory-side-effects audit): definition() used to
-     * call Firm::factory()->create() and
-     * AccountingExportBatch::factory()->forFirm($firm)->create() as
-     * plain PHP statements at the top of this method — a real,
-     * committed Firm AND AccountingExportBatch every single time, even
-     * when forExpense()/forInvoice()/forPayment() below immediately
-     * override accounting_export_batch_id/firm_id/expense_id with a
-     * caller-supplied batch. Laravel cannot skip a side effect that
-     * already happened while building the array. Fixed by memoizing the
-     * firm/batch pair behind lazy closures (mirrors
-     * IntegrationOAuthStateFactory's memoized-lazy-value convention):
-     * nothing is created unless at least one of the derived keys
-     * survives, unoverridden, to the final row, and when it does, all
-     * derived keys share the SAME firm/batch pair rather than each
-     * resolving its own independent one.
+     * Audit fix (eager-factory-side-effects audit, second pass): the
+     * previous version of this fix (see the AccountingExportLine
+     * regression tests using forExpense()) memoized firm/batch behind
+     * private $lazyFirm/$lazyBatch properties that BOTH
+     * accounting_export_batch_id/expense_id AND firm_id itself derived
+     * from — but firm_id was one of the derived keys, not the source of
+     * truth. That meant a caller overriding ONLY firm_id (e.g. the
+     * common ->create(['firm_id' => $firm->id]) pattern used throughout
+     * AccountingExportLinesForceRlsActivationTest, never routed through
+     * forExpense()/forInvoice()/forPayment()) left the
+     * accounting_export_batch_id/expense_id closures completely unaware
+     * of the override: they still ran resolveLazyFirmAndBatch(),
+     * eagerly creating a real, wasted, UNRELATED Firm + its own
+     * AccountingExportBatch + Expense, and left the row referencing
+     * that wrong firm's batch/expense instead of the caller's real one
+     * — a leak AND a firm_id/accounting_export_batch_id ownership
+     * mismatch the DB has no composite FK to catch. Fixed by making
+     * firm_id Laravel's own lazy factory-relationship form (the single
+     * source of truth, resolved first) and deriving
+     * accounting_export_batch_id/expense_id from the already-resolved
+     * $attributes['firm_id'] via lazy closures — mirrors
+     * ExpenseFactory/MatterExpenseFactory/AccountingExportBatchFactory's
+     * identical $attributes-derivation convention, so ANY override of
+     * firm_id (bare or via forFirm()-style helpers) is automatically
+     * observed by every key derived from it.
      */
-    private ?Firm $lazyFirm = null;
-
-    private ?AccountingExportBatch $lazyBatch = null;
-
     public function definition(): array
     {
-        $this->lazyFirm = null;
-        $this->lazyBatch = null;
-
         return [
-            'accounting_export_batch_id' => function () {
-                $this->resolveLazyFirmAndBatch();
-
-                return $this->lazyBatch->id;
-            },
-            'firm_id' => function () {
-                $this->resolveLazyFirmAndBatch();
-
-                return $this->lazyFirm->id;
-            },
+            'firm_id' => Firm::factory(),
+            'accounting_export_batch_id' => fn (array $attributes) => AccountingExportBatch::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id'])),
             'source_record_type' => AccountingExportSourceRecordType::Expense,
             'invoice_id' => null,
             'payment_id' => null,
-            'expense_id' => function () {
-                $this->resolveLazyFirmAndBatch();
-
-                return Expense::factory()->forFirm($this->lazyFirm)->create()->id;
-            },
+            'expense_id' => fn (array $attributes) => Expense::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id'])),
             'chart_of_accounts_id' => null,
             'mapped_amount_cents' => $this->faker->numberBetween(500, 50000),
             'status' => AccountingExportLineStatus::Pending,
         ];
-    }
-
-    private function resolveLazyFirmAndBatch(): void
-    {
-        $this->lazyFirm ??= Firm::factory()->create();
-        $this->lazyBatch ??= AccountingExportBatch::factory()->forFirm($this->lazyFirm)->create();
     }
 
     public function forExpense(AccountingExportBatch $batch, Expense $expense): static

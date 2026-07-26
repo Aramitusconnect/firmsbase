@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Enums\SignatureCertificateStatus;
 use App\Models\DocumentHash;
+use App\Models\Firm;
 use App\Models\SignatureCertificate;
 use App\Models\SignatureRequest;
 use App\Services\TenantContextService;
@@ -57,36 +58,36 @@ class SignatureCertificateFactory extends Factory
      * call self-handles its own context via DocumentHashFactory's own
      * pre-existing context-hold create() override.
      *
-     * Audit fix (eager-factory-side-effects audit): this used to call
-     * SignatureRequest::factory()->create() as a plain PHP statement at
-     * the top of definition(), and DocumentHash::factory()->create(...)
-     * directly as an array value (also eager, since it is invoked
-     * immediately rather than deferred behind a closure/lazy Factory
-     * value) — real, committed rows every single time, even when
-     * forRequest() below immediately overrides ALL THREE of
-     * signature_request_id/firm_id/document_hash_id with caller-supplied
-     * values. Fixed by memoizing the request behind lazy closures, and
-     * making document_hash_id itself a lazy closure keyed off the
-     * already-resolved firm_id, so nothing is created unless it
-     * survives, unoverridden, to the final row.
+     * Audit fix (eager-factory-side-effects audit, second pass): the
+     * previous fix here (see this file's git history) memoized the
+     * request behind a private $lazyRequest property that BOTH
+     * signature_request_id AND firm_id derived from — but firm_id was
+     * one of the derived keys, not the source of truth. A caller
+     * overriding ONLY firm_id (e.g.
+     * SignatureCertificate::factory()->create(['firm_id' => $firmA->id]),
+     * the exact pattern SignatureAndPdfTenantIsolationTest uses, never
+     * routed through forRequest()) left the signature_request_id closure
+     * completely unaware of the override: it still ran
+     * SignatureRequest::factory()->create() with no override of its own,
+     * eagerly creating a real, wasted, UNRELATED SignatureRequest (+ its
+     * own nested Firm/Document/FirmUser) and left the row referencing
+     * that wrong request instead of the caller's real firm — a leak AND
+     * a firm_id/signature_request_id ownership mismatch. document_hash_id
+     * already derived from $attributes['firm_id'] correctly (so it was
+     * NOT part of this bug); signature_request_id now mirrors that same,
+     * already-correct convention. Fixed by making firm_id Laravel's own
+     * lazy factory-relationship form (the single source of truth,
+     * resolved first) and deriving signature_request_id from the
+     * already-resolved $attributes['firm_id'] the same way
+     * document_hash_id already did.
      */
-    private ?SignatureRequest $lazyRequest = null;
-
     public function definition(): array
     {
-        $this->lazyRequest = null;
-
         return [
-            'signature_request_id' => function () {
-                $this->lazyRequest ??= SignatureRequest::factory()->create();
-
-                return $this->lazyRequest->id;
-            },
-            'firm_id' => function () {
-                $this->lazyRequest ??= SignatureRequest::factory()->create();
-
-                return $this->lazyRequest->firm_id;
-            },
+            'firm_id' => Firm::factory(),
+            'signature_request_id' => fn (array $attributes) => SignatureRequest::factory()
+                ->create(['firm_id' => $attributes['firm_id']])
+                ->id,
             'status' => SignatureCertificateStatus::Generated->value,
             'certificate_data_json' => ['fixture' => true],
             'document_hash_id' => fn (array $attributes) => DocumentHash::factory()

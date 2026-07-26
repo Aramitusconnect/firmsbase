@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Enums\AiApprovalEventType;
 use App\Models\AiApprovalEvent;
 use App\Models\AiApprovalRequest;
+use App\Models\Firm;
 use App\Models\User;
 use App\Services\TenantContextService;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -52,42 +53,38 @@ class AiApprovalEventFactory extends Factory
 
     /**
      * The ai_approval_events row is always tied to the SAME firm as its
-     * OWN parent ai_approval_request. Audit fix (eager-factory-
-     * side-effects audit): the previous version of this method called
-     * AiApprovalRequest::factory()->create() as a plain PHP statement at
-     * the top of definition() — a real, committed AiApprovalRequest (+
-     * its own nested Firm/AiUsageEvent) every single time, even when
-     * forRequest() below immediately overrides ai_approval_request_id/
-     * firm_id with a caller-supplied request. Laravel cannot skip a
-     * side effect that already happened while building the array; it
-     * can only skip re-resolving a definition() value that is still an
-     * unresolved Factory/Closure by the time a later state() overrides
-     * that key. Every forRequest()-scoped create() (the normal,
-     * intended way this factory is used) was therefore silently wasting
-     * one real, fully-committed AiApprovalRequest per call. Fixed by
-     * memoizing the request behind lazy closures (mirrors
-     * IntegrationOAuthStateFactory's memoized-lazy-value convention):
-     * nothing is created unless ai_approval_request_id or firm_id
-     * survives, unoverridden, to the final row, and when it does, both
-     * derive from the SAME request rather than two independent chains.
+     * OWN parent ai_approval_request.
+     *
+     * Audit fix (eager-factory-side-effects audit, second pass): the
+     * previous fix here (see this file's git history) memoized the
+     * request behind a private $lazyRequest property that BOTH
+     * ai_approval_request_id AND firm_id derived from — but firm_id was
+     * one of the derived keys, not the source of truth. A caller
+     * overriding ONLY firm_id (e.g.
+     * AiApprovalEvent::factory()->create(['firm_id' => $firm->id]), the
+     * exact pattern AiApprovalEventAppendOnlyTest uses, never routed
+     * through forRequest()) left the ai_approval_request_id closure
+     * completely unaware of the override: it still ran
+     * AiApprovalRequest::factory()->create() with no override of its
+     * own, eagerly creating a real, wasted, UNRELATED AiApprovalRequest
+     * (+ its own nested Firm/AiUsageEvent/TenantEncryptionKey cascade —
+     * see AiApprovalRequestFactory's own definition()) and left the row
+     * referencing that wrong request instead of the caller's real firm
+     * — a leak AND a firm_id/ai_approval_request_id ownership mismatch.
+     * Fixed by making firm_id Laravel's own lazy factory-relationship
+     * form (the single source of truth, resolved first) and deriving
+     * ai_approval_request_id from the already-resolved
+     * $attributes['firm_id'] via a lazy closure — mirrors
+     * PaymentPlanEventFactory's identical $attributes-derivation
+     * convention, so ANY override of firm_id (bare or via forRequest())
+     * is automatically observed.
      */
-    private ?AiApprovalRequest $lazyRequest = null;
-
     public function definition(): array
     {
-        $this->lazyRequest = null;
-
         return [
-            'ai_approval_request_id' => function () {
-                $this->lazyRequest ??= AiApprovalRequest::factory()->create();
-
-                return $this->lazyRequest->id;
-            },
-            'firm_id' => function () {
-                $this->lazyRequest ??= AiApprovalRequest::factory()->create();
-
-                return $this->lazyRequest->firm_id;
-            },
+            'firm_id' => Firm::factory(),
+            'ai_approval_request_id' => fn (array $attributes) => AiApprovalRequest::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id'])),
             'event_type' => AiApprovalEventType::Submitted,
             'actor_id' => User::factory(),
         ];
