@@ -39,7 +39,7 @@ class SupportAccessSessionFactory extends Factory
 
         $results = $this->make($attributes, $parent);
         $models = $results instanceof Model ? new Collection([$results]) : $results;
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -53,28 +53,39 @@ class SupportAccessSessionFactory extends Factory
 
     /**
      * The session and its own parent support_access_request are always
-     * tied to the SAME firm — genuine bug fix, not just the create()
-     * override above: this previously generated 'firm_id' =>
-     * Firm::factory() AND 'support_access_request_id' =>
-     * SupportAccessRequest::factory() as two fully INDEPENDENT
-     * factories, which could (and, at low but real probability, would)
-     * produce a session whose firm_id disagrees with its own parent
-     * request's firm_id — exactly the masked-blast-radius risk
-     * MatterFactory.php's own docblock warns about, and exactly the
-     * class of gap support_access_sessions' composite foreign key
-     * (firm_id, support_access_request_id) REFERENCES
-     * support_access_requests(firm_id, id), added in this same batch's
-     * 2026_08_28_960005 migration, would now reject outright as an
-     * invalid insert. One authoritative SupportAccessRequest is created
-     * up front and firm_id is derived directly from it instead.
+     * tied to the SAME firm.
+     *
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * SupportAccessRequest::factory()->create() as a plain PHP
+     * statement at the top of definition() — a real, committed
+     * SupportAccessRequest (+ its own nested Firm) every single time,
+     * even when a real caller overrides support_access_request_id/
+     * firm_id together via SupportAccessSession::factory()->create([...])
+     * (this factory's own create() override routes attribute overrides
+     * through $this->state($attributes)) — the pattern used by at least
+     * six real test files, e.g.
+     * SupportAccessSessionsForceRlsActivationTest::createSessionForFirm(),
+     * SupportAccessSessionServiceTest, PlatformIntegrationAdminUiSecretSafetyTest.
+     * Fixed by memoizing the request behind lazy closures so nothing is
+     * created unless it survives, unoverridden, to the final row.
      */
+    private ?SupportAccessRequest $lazyRequest = null;
+
     public function definition(): array
     {
-        $request = SupportAccessRequest::factory()->create();
+        $this->lazyRequest = null;
 
         return [
-            'support_access_request_id' => $request->id,
-            'firm_id' => $request->firm_id,
+            'support_access_request_id' => function () {
+                $this->lazyRequest ??= SupportAccessRequest::factory()->create();
+
+                return $this->lazyRequest->id;
+            },
+            'firm_id' => function () {
+                $this->lazyRequest ??= SupportAccessRequest::factory()->create();
+
+                return $this->lazyRequest->firm_id;
+            },
             'platform_admin_id' => PlatformAdmin::factory(),
             'status' => SupportAccessSessionStatus::Active->value,
             'started_at' => now(),

@@ -34,7 +34,7 @@ class IntakeSubmissionFactory extends Factory
 
         $results = $this->make($attributes, $parent);
         $models = $results instanceof Model ? new Collection([$results]) : $results;
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -47,21 +47,34 @@ class IntakeSubmissionFactory extends Factory
     }
 
     /**
-     * firm_id and client_id used to be two independent random Factory
-     * chains (the same bug class as Checkpoints 5/7/8/10/12): a bare
-     * IntakeSubmission::factory()->create() could resolve a client
-     * belonging to a DIFFERENT firm than the one written to firm_id.
-     * Fixed here by creating one authoritative Client up front and
-     * deriving both firm_id and client_id from it — mirrors
-     * forClient()'s already-correct pattern below.
+     * firm_id and client_id are derived from ONE authoritative Client —
+     * mirrors forClient()'s pattern below.
+     *
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * Client::factory()->create() as a plain PHP statement at the top
+     * of definition() — a real, committed Client every single time,
+     * even when forClient() below immediately overrides both keys with
+     * a caller-supplied client. Fixed by memoizing the client behind
+     * lazy closures so nothing is created unless it survives,
+     * unoverridden, to the final row.
      */
+    private ?Client $lazyClient = null;
+
     public function definition(): array
     {
-        $client = Client::factory()->create();
+        $this->lazyClient = null;
 
         return [
-            'firm_id' => $client->firm_id,
-            'client_id' => $client->id,
+            'firm_id' => function () {
+                $this->lazyClient ??= Client::factory()->create();
+
+                return $this->lazyClient->firm_id;
+            },
+            'client_id' => function () {
+                $this->lazyClient ??= Client::factory()->create();
+
+                return $this->lazyClient->id;
+            },
             'matter_id' => null,
             'intake_template_id' => IntakeTemplate::factory(),
             'status' => IntakeSubmissionStatus::Draft,

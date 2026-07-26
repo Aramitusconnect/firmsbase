@@ -42,7 +42,7 @@ class FirmEntitlementEventFactory extends Factory
 
         $results = $this->make($attributes, $parent);
         $models = $results instanceof Model ? new Collection([$results]) : $results;
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -56,26 +56,47 @@ class FirmEntitlementEventFactory extends Factory
 
     /**
      * The event and its firm_entitlement are always tied to the SAME
-     * firm — generating one FirmEntitlement here up front (rather than
-     * letting firm_entitlement_id and firm_id resolve as two
-     * independent FirmEntitlement::factory()/Firm::factory() chains) is
-     * deliberate: a bare FirmEntitlementEvent::factory()->create() with
-     * no state must never produce an event whose firm_id disagrees with
-     * its own firm_entitlement's firm_id — that exact mismatch was
-     * empirically confirmed (event.firm_id != firmEntitlement.firm_id)
-     * before this fix.
+     * firm.
+     *
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * FirmEntitlement::factory()->create() as a plain PHP statement at
+     * the top of definition() — a real, committed FirmEntitlement (+ its
+     * own nested Firm) every single time, even when forEntitlement()
+     * below immediately overrides ALL FOUR of firm_entitlement_id/
+     * firm_id/module_code/source with a caller-supplied entitlement.
+     * Fixed by memoizing the entitlement behind lazy closures so nothing
+     * is created unless at least one of those keys survives,
+     * unoverridden, to the final row.
      */
+    private ?FirmEntitlement $lazyEntitlement = null;
+
     public function definition(): array
     {
-        $entitlement = FirmEntitlement::factory()->create();
+        $this->lazyEntitlement = null;
 
         return [
-            'firm_entitlement_id' => $entitlement->id,
-            'firm_id' => $entitlement->firm_id,
-            'module_code' => $entitlement->module_code,
-            'source' => $entitlement->source instanceof \BackedEnum
-                ? $entitlement->source->value
-                : $entitlement->source,
+            'firm_entitlement_id' => function () {
+                $this->lazyEntitlement ??= FirmEntitlement::factory()->create();
+
+                return $this->lazyEntitlement->id;
+            },
+            'firm_id' => function () {
+                $this->lazyEntitlement ??= FirmEntitlement::factory()->create();
+
+                return $this->lazyEntitlement->firm_id;
+            },
+            'module_code' => function () {
+                $this->lazyEntitlement ??= FirmEntitlement::factory()->create();
+
+                return $this->lazyEntitlement->module_code;
+            },
+            'source' => function () {
+                $this->lazyEntitlement ??= FirmEntitlement::factory()->create();
+
+                return $this->lazyEntitlement->source instanceof \BackedEnum
+                    ? $this->lazyEntitlement->source->value
+                    : $this->lazyEntitlement->source;
+            },
             'action' => 'granted',
             'reason' => null,
             'actor_type' => 'System',

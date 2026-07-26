@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\Client;
+use App\Models\DocumentChaseEvent;
 use App\Models\DocumentChaseRule;
 use App\Models\DocumentRequest;
 use App\Models\DocumentRequestItem;
@@ -13,11 +14,11 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 
 /**
- * @extends Factory<\App\Models\DocumentChaseEvent>
+ * @extends Factory<DocumentChaseEvent>
  */
 class DocumentChaseEventFactory extends Factory
 {
-    protected $model = \App\Models\DocumentChaseEvent::class;
+    protected $model = DocumentChaseEvent::class;
 
     /**
      * Section 39A-3L, Checkpoint 17 — context-hold pattern (matching
@@ -35,7 +36,7 @@ class DocumentChaseEventFactory extends Factory
 
         $results = $this->make($attributes, $parent);
         $models = $results instanceof Model ? new Collection([$results]) : $results;
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -49,36 +50,73 @@ class DocumentChaseEventFactory extends Factory
 
     /**
      * firm_id and document_request_item_id used to be two independent
-     * random Factory chains (the same bug class as Checkpoints
-     * 5/7/8/10/12/13/14/15): a bare DocumentChaseEvent::factory()->
+     * random Factory chains: a bare DocumentChaseEvent::factory()->
      * create() could resolve a document_request_item belonging to a
-     * DIFFERENT firm than the one written to firm_id. Fixed here by
-     * building the whole chain explicitly top-down (Client ->
-     * DocumentRequest -> DocumentRequestItem), keeping each created
-     * object in PHP memory rather than reading it back — deliberately
-     * NOT "create a bare DocumentRequestItem, then read
-     * ->documentRequest->firm_id off it", since that lazy relation load
-     * is itself a fresh query against the already-FORCE-protected
-     * document_requests table (Checkpoint 10) with no context
-     * necessarily active at that point (definition() always runs, even
-     * when a state() override like forItem() below will replace its
-     * output entirely — Laravel does not skip it). Building top-down
-     * avoids that read-after-context-cleared trap entirely.
+     * DIFFERENT firm than the one written to firm_id. Fixed by building
+     * the whole chain explicitly top-down (Client -> DocumentRequest ->
+     * DocumentRequestItem), keeping each created object in PHP memory
+     * rather than reading it back — deliberately NOT "create a bare
+     * DocumentRequestItem, then read ->documentRequest->firm_id off
+     * it", since that lazy relation load would be a fresh query against
+     * the already-FORCE-protected document_requests table with no
+     * context necessarily active at that point.
+     *
+     * Audit fix (eager-factory-side-effects audit): the chain above
+     * used to be built as plain PHP statements at the top of
+     * definition() — real, committed Client/DocumentRequest/
+     * DocumentRequestItem rows every single time, even when forItem()
+     * below immediately overrides both firm_id and
+     * document_request_item_id with a caller-supplied item. Laravel
+     * cannot skip a side effect that already happened while building
+     * the array. Fixed by memoizing the whole chain behind lazy
+     * closures attached to firm_id/document_request_item_id: nothing is
+     * created unless at least one of those keys survives, unoverridden,
+     * to the final row, which still avoids the read-after-context-
+     * cleared trap the original top-down-build comment above warns
+     * about (no relation load, no query — the in-memory $lazyRequest
+     * object is reused directly).
      */
+    private ?DocumentRequest $lazyRequest = null;
+
+    private ?DocumentRequestItem $lazyItem = null;
+
     public function definition(): array
     {
-        $client = Client::factory()->create();
-        $request = DocumentRequest::factory()->create(['firm_id' => $client->firm_id, 'client_id' => $client->id]);
-        $item = DocumentRequestItem::factory()->create(['document_request_id' => $request->id]);
+        $this->lazyRequest = null;
+        $this->lazyItem = null;
 
         return [
-            'firm_id' => $request->firm_id,
-            'document_request_item_id' => $item->id,
+            'firm_id' => function () {
+                $this->resolveLazyChain();
+
+                return $this->lazyRequest->firm_id;
+            },
+            'document_request_item_id' => function () {
+                $this->resolveLazyChain();
+
+                return $this->lazyItem->id;
+            },
             'document_chase_rule_id' => null,
             'event_type' => 'reminder_queued',
             'metadata_json' => [],
             'actor_user_id' => null,
         ];
+    }
+
+    private function resolveLazyChain(): void
+    {
+        if ($this->lazyItem !== null) {
+            return;
+        }
+
+        $client = Client::factory()->create();
+        $this->lazyRequest = DocumentRequest::factory()->create([
+            'firm_id' => $client->firm_id,
+            'client_id' => $client->id,
+        ]);
+        $this->lazyItem = DocumentRequestItem::factory()->create([
+            'document_request_id' => $this->lazyRequest->id,
+        ]);
     }
 
     /**

@@ -78,15 +78,27 @@ class FirmAiProviderKeyFactory extends Factory
 {
     protected $model = FirmAiProviderKey::class;
 
+    /**
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * Firm::factory()->create() as a plain PHP statement at the top of
+     * definition() — a real, committed Firm every single time, even
+     * when forFirm() below immediately overrides both firm_id and
+     * encryption_key_id with a caller-supplied firm. Fixed by making
+     * firm_id Laravel's own lazy factory-relationship form;
+     * encryption_key_id remains a lazy, uncreated Factory instance
+     * derived from it. This also closes the cross-firm risk the docblock
+     * above flags: bare create() only ever provisions a TenantEncryptionKey
+     * for firm_id's OWN final resolved firm now, never a wasted,
+     * about-to-be-discarded one.
+     */
     public function definition(): array
     {
-        $firm = Firm::factory()->create();
-
         return [
-            'firm_id' => $firm->id,
+            'firm_id' => Firm::factory(),
             'provider' => AiProvider::OpenAi,
             'encrypted_key_ciphertext' => 'placeholder-ciphertext-not-real',
-            'encryption_key_id' => TenantEncryptionKey::factory()->forFirm($firm),
+            'encryption_key_id' => fn (array $attributes) => TenantEncryptionKey::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id'])),
             'status' => AiProviderKeyStatus::Active,
         ];
     }

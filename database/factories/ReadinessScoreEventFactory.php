@@ -32,7 +32,7 @@ class ReadinessScoreEventFactory extends Factory
 
         $results = $this->make($attributes, $parent);
         $models = $results instanceof Model ? new Collection([$results]) : $results;
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -45,21 +45,34 @@ class ReadinessScoreEventFactory extends Factory
     }
 
     /**
-     * firm_id and matter_id used to be two independent random Factory
-     * chains (the same bug class as Checkpoints 5/7/8/10/12/13/14): a
-     * bare ReadinessScoreEvent::factory()->create() could resolve a
-     * matter belonging to a DIFFERENT firm than the one written to
-     * firm_id. Fixed here by creating one authoritative Matter up front
-     * and deriving both firm_id and matter_id from it — mirrors
-     * forMatter()'s already-correct pattern below.
+     * firm_id and matter_id are derived from ONE authoritative Matter —
+     * mirrors forMatter()'s pattern below.
+     *
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * Matter::factory()->create() as a plain PHP statement at the top
+     * of definition() — a real, committed Matter every single time,
+     * even when forMatter() below immediately overrides both keys with
+     * a caller-supplied matter. Fixed by memoizing the matter behind
+     * lazy closures so nothing is created unless it survives,
+     * unoverridden, to the final row.
      */
+    private ?Matter $lazyMatter = null;
+
     public function definition(): array
     {
-        $matter = Matter::factory()->create();
+        $this->lazyMatter = null;
 
         return [
-            'firm_id' => $matter->firm_id,
-            'matter_id' => $matter->id,
+            'firm_id' => function () {
+                $this->lazyMatter ??= Matter::factory()->create();
+
+                return $this->lazyMatter->firm_id;
+            },
+            'matter_id' => function () {
+                $this->lazyMatter ??= Matter::factory()->create();
+
+                return $this->lazyMatter->id;
+            },
             'event_type' => 'recomputed',
             'previous_status' => null,
             'new_status' => 'not_ready',

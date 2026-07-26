@@ -33,7 +33,7 @@ class PaymentPlanEventFactory extends Factory
 
         $results = $this->make($attributes, $parent);
         $models = $results instanceof Model ? new Collection([$results]) : $results;
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -47,23 +47,24 @@ class PaymentPlanEventFactory extends Factory
 
     /**
      * The event and its nested payment plan are always tied to the SAME
-     * firm — generating one firm here up front (rather than letting
-     * firm_id and payment_plan_id resolve as two independent
-     * Firm::factory()/PaymentPlan::factory() calls) is deliberate: a
-     * bare PaymentPlanEvent::factory()->create() with no state must
-     * never produce an event whose payment_plan belongs to an unrelated
-     * firm. payment_plan_id is NOT NULL on this table, so this fix
-     * matters even for the bare default path. Matches the same
-     * root-cause fix already applied to PaymentPlanFactory (Checkpoint
-     * 22).
+     * firm. payment_plan_id is NOT NULL on this table, so this matters
+     * even for the bare default path.
+     *
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * Firm::factory()->create() as a plain PHP statement at the top of
+     * definition() — a real, committed Firm every single time, even
+     * when forPlan() below immediately overrides both firm_id and
+     * payment_plan_id with a caller-supplied plan. Fixed by making
+     * firm_id Laravel's own lazy factory-relationship form;
+     * payment_plan_id remains a lazy, uncreated Factory instance
+     * derived from it.
      */
     public function definition(): array
     {
-        $firm = Firm::factory()->create();
-
         return [
-            'firm_id' => $firm->id,
-            'payment_plan_id' => PaymentPlan::factory()->forFirm($firm),
+            'firm_id' => Firm::factory(),
+            'payment_plan_id' => fn (array $attributes) => PaymentPlan::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id'])),
             'event_type' => 'created',
             'metadata_json' => [],
             'actor_user_id' => null,

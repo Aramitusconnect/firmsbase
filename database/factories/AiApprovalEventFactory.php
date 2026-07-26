@@ -38,7 +38,7 @@ class AiApprovalEventFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -52,27 +52,42 @@ class AiApprovalEventFactory extends Factory
 
     /**
      * The ai_approval_events row is always tied to the SAME firm as its
-     * OWN parent ai_approval_request — one authoritative request is
-     * created up front (rather than letting ai_approval_request_id and
-     * firm_id resolve as two independent AiApprovalRequest::factory()/
-     * Firm::factory() calls, which is exactly what the previous version
-     * of this method did) and firm_id is derived directly from it,
-     * matching forRequest()'s own already-correct logic below. A bare
-     * ai_approval_events row whose firm_id disagrees with its own
-     * ai_approval_request_id's parent firm is exactly the transitive
-     * cross-firm mismatch documented as a known, deliberately-deferred
-     * gap in this table's FORCE migration (no composite FK/trigger
-     * enforces it at the database layer) — the factory must not
-     * manufacture that invalid shape by default just because RLS itself
-     * cannot catch it.
+     * OWN parent ai_approval_request. Audit fix (eager-factory-
+     * side-effects audit): the previous version of this method called
+     * AiApprovalRequest::factory()->create() as a plain PHP statement at
+     * the top of definition() — a real, committed AiApprovalRequest (+
+     * its own nested Firm/AiUsageEvent) every single time, even when
+     * forRequest() below immediately overrides ai_approval_request_id/
+     * firm_id with a caller-supplied request. Laravel cannot skip a
+     * side effect that already happened while building the array; it
+     * can only skip re-resolving a definition() value that is still an
+     * unresolved Factory/Closure by the time a later state() overrides
+     * that key. Every forRequest()-scoped create() (the normal,
+     * intended way this factory is used) was therefore silently wasting
+     * one real, fully-committed AiApprovalRequest per call. Fixed by
+     * memoizing the request behind lazy closures (mirrors
+     * IntegrationOAuthStateFactory's memoized-lazy-value convention):
+     * nothing is created unless ai_approval_request_id or firm_id
+     * survives, unoverridden, to the final row, and when it does, both
+     * derive from the SAME request rather than two independent chains.
      */
+    private ?AiApprovalRequest $lazyRequest = null;
+
     public function definition(): array
     {
-        $request = AiApprovalRequest::factory()->create();
+        $this->lazyRequest = null;
 
         return [
-            'ai_approval_request_id' => $request->id,
-            'firm_id' => $request->firm_id,
+            'ai_approval_request_id' => function () {
+                $this->lazyRequest ??= AiApprovalRequest::factory()->create();
+
+                return $this->lazyRequest->id;
+            },
+            'firm_id' => function () {
+                $this->lazyRequest ??= AiApprovalRequest::factory()->create();
+
+                return $this->lazyRequest->firm_id;
+            },
             'event_type' => AiApprovalEventType::Submitted,
             'actor_id' => User::factory(),
         ];

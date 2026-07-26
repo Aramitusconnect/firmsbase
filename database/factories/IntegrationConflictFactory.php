@@ -44,7 +44,7 @@ class IntegrationConflictFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -56,14 +56,34 @@ class IntegrationConflictFactory extends Factory
         return $results;
     }
 
+    /**
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * Firm::factory()->create() and
+     * FirmIntegration::factory()->forFirm($firm)->create() as plain PHP
+     * statements at the top of definition() — real, committed rows
+     * every single time, even when forFirmIntegration() below
+     * immediately overrides both firm_id and firm_integration_id with a
+     * caller-supplied connection. Fixed by memoizing the pair behind
+     * lazy closures so nothing is created unless at least one of those
+     * keys survives, unoverridden, to the final row.
+     */
+    private ?FirmIntegration $lazyFirmIntegration = null;
+
     public function definition(): array
     {
-        $firm = Firm::factory()->create();
-        $firmIntegration = FirmIntegration::factory()->forFirm($firm)->create();
+        $this->lazyFirmIntegration = null;
 
         return [
-            'firm_id' => $firm->id,
-            'firm_integration_id' => $firmIntegration->id,
+            'firm_id' => function () {
+                $this->lazyFirmIntegration ??= FirmIntegration::factory()->create();
+
+                return $this->lazyFirmIntegration->firm_id;
+            },
+            'firm_integration_id' => function () {
+                $this->lazyFirmIntegration ??= FirmIntegration::factory()->create();
+
+                return $this->lazyFirmIntegration->id;
+            },
             'sync_item_id' => null,
             'external_mapping_id' => null,
             'resource_type' => 'contact',

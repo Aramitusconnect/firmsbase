@@ -6,6 +6,8 @@ use App\Enums\DeploymentMode;
 use App\Models\Firm;
 use App\Models\FirmLicense;
 use App\Models\LicenseFile;
+use App\Models\Organization;
+use App\Models\OrgLicense;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -26,18 +28,49 @@ class LicenseFileFactory extends Factory
 {
     protected $model = LicenseFile::class;
 
+    /**
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * Firm::factory()->create() and
+     * FirmLicense::factory()->forFirm($firm)->create() as plain PHP
+     * statements at the top of definition() — real, committed rows
+     * every single time, even when forFirm()/organizationLevel() below
+     * immediately override every key derived from them with
+     * caller-supplied values. Fixed by memoizing the pair behind lazy
+     * closures so nothing is created unless at least one of the derived
+     * keys survives, unoverridden, to the final row.
+     */
+    private ?Firm $lazyFirm = null;
+
+    private ?FirmLicense $lazyFirmLicense = null;
+
     public function definition(): array
     {
-        $firm = Firm::factory()->create();
-        $firmLicense = FirmLicense::factory()->forFirm($firm)->create();
+        $this->lazyFirm = null;
+        $this->lazyFirmLicense = null;
 
         return [
-            'firm_id' => $firm->id,
+            'firm_id' => function () {
+                $this->resolveLazyFirmAndLicense();
+
+                return $this->lazyFirm->id;
+            },
             'organization_id' => null,
-            'firm_license_id' => $firmLicense->id,
+            'firm_license_id' => function () {
+                $this->resolveLazyFirmAndLicense();
+
+                return $this->lazyFirmLicense->id;
+            },
             'org_license_id' => null,
-            'licensed_to' => $firm->name,
-            'license_key' => $firmLicense->license_key,
+            'licensed_to' => function () {
+                $this->resolveLazyFirmAndLicense();
+
+                return $this->lazyFirm->name;
+            },
+            'license_key' => function () {
+                $this->resolveLazyFirmAndLicense();
+
+                return $this->lazyFirmLicense->license_key;
+            },
             'signed_payload' => 'placeholder-payload-not-real',
             'signature' => 'placeholder-signature-not-real',
             'signature_algorithm' => 'ed25519',
@@ -48,6 +81,12 @@ class LicenseFileFactory extends Factory
             'issued_by' => User::factory(),
             'revoked_at' => null,
         ];
+    }
+
+    private function resolveLazyFirmAndLicense(): void
+    {
+        $this->lazyFirm ??= Firm::factory()->create();
+        $this->lazyFirmLicense ??= FirmLicense::factory()->forFirm($this->lazyFirm)->create();
     }
 
     public function forFirm(Firm $firm, FirmLicense $firmLicense): static
@@ -62,7 +101,7 @@ class LicenseFileFactory extends Factory
         ]);
     }
 
-    public function organizationLevel(\App\Models\Organization $organization, \App\Models\OrgLicense $orgLicense): static
+    public function organizationLevel(Organization $organization, OrgLicense $orgLicense): static
     {
         return $this->state(fn () => [
             'firm_id' => null,

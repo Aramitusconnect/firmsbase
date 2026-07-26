@@ -8,6 +8,7 @@ use App\Models\Firm;
 use App\Models\Payment;
 use App\Models\PaymentClassificationEvent;
 use App\Services\PaymentClassificationService;
+use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -34,27 +35,33 @@ use Tests\TestCase;
  * still targets firm_id reassignment directly via the query builder to
  * prove the RLS policy itself (not application code) is what blocks it.
  *
- * IMPORTANT factory/RLS interaction, proven explicitly below (see
- * test_forpayment_factory_state_create_is_clobbered_by_definitions_own_side_effect):
- * PaymentClassificationEventFactory::definition() eagerly calls
- * Payment::factory()->create() to derive its own internally-consistent
- * firm_id/payment_id pair. That nested call invokes PaymentFactory's
+ * RESOLVED factory/RLS interaction (was proven explicitly below in
+ * test_forpayment_factory_state_create_is_clobbered_by_definitions_own_side_effect,
+ * now renamed test_forpayment_factory_state_create_no_longer_clobbers_context_after_the_eager_factory_side_effects_audit_fix):
+ * PaymentClassificationEventFactory::definition() used to call
+ * Payment::factory()->create() as a plain, EAGER PHP statement, even
+ * though forPayment() below always overrode both firm_id and
+ * payment_id it derived from. That nested call invoked PaymentFactory's
  * own context-setting create() override
- * (setDatabaseTenantContextForFirmId()), which resets the PostgreSQL
- * session's app.current_firm_id to THAT throwaway payment's own
- * unrelated random firm. forPayment()'s state() override then swaps
+ * (setDatabaseTenantContextForFirmId()), which reset the PostgreSQL
+ * session's app.current_firm_id to THAT wasted payment's own unrelated
+ * random firm. forPayment()'s state() override then swapped
  * firm_id/payment_id back to the caller's intended payment AFTER that
- * side effect already ran — so by the time the actual INSERT happens,
- * the session context no longer matches the row being written, and
+ * side effect already ran — so by the time the actual INSERT happened,
+ * the session context no longer matched the row being written, and
  * PaymentClassificationEvent::factory()->forPayment($payment)->create()
- * fails with a row-level security violation even under a correct outer
- * runWithFirmContext() wrap. This is a genuine, load-bearing finding —
- * not something this test file may fix (the factory itself is Table
- * Phase B's finalized, exclusive file) — so every fixture-creation call
- * in this file goes through the model's own create() directly instead
- * (mirroring PaymentClassificationService::recordDecision()'s exact
- * real production call shape), via the private createEventForPayment()
- * helper below.
+ * failed with a row-level security violation even under a correct outer
+ * runWithFirmContext() wrap. Fixed by the eager-factory-side-effects
+ * audit (see database/factories/PaymentClassificationEventFactory.php):
+ * firm_id/payment_id are now lazy closures memoizing a single Payment,
+ * so nothing is eagerly created (and no context is silently reset) when
+ * forPayment() overrides both keys. Every fixture-creation call in this
+ * file still goes through the model's own create() directly via the
+ * private createEventForPayment() helper below (mirroring
+ * PaymentClassificationService::recordDecision()'s exact real
+ * production call shape) — that convention remains valid and was left
+ * unchanged; only the specific proof test needed to flip from
+ * "this call fails" to "this call now succeeds."
  */
 class PaymentClassificationEventsForceRlsActivationTest extends TestCase
 {
@@ -192,7 +199,7 @@ class PaymentClassificationEventsForceRlsActivationTest extends TestCase
      */
     public function test_exactly_nineteen_prepared_tables_are_force_row_level_security_enabled(): void
     {
-        $coverage = new \App\Services\RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 9, Table
         // Phase C (seat_allocations) for the same reason — additive
@@ -311,10 +318,10 @@ class PaymentClassificationEventsForceRlsActivationTest extends TestCase
 
         // Provably no context: explicitly cleared, not merely "never
         // set" (which could still be masked by an earlier leak).
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
-        $service = new PaymentClassificationService();
+        $service = new PaymentClassificationService;
         $result = $service->classify($firm, PaymentClassification::OperatingPayment);
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
@@ -330,7 +337,7 @@ class PaymentClassificationEventsForceRlsActivationTest extends TestCase
             $this->createEventForPayment($payment);
         });
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(0, PaymentClassificationEvent::withoutGlobalScopes()->count());
     }
@@ -340,7 +347,7 @@ class PaymentClassificationEventsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $paymentId = $this->runWithFirmContext($firm, fn () => Payment::factory()->forFirm($firm)->create())->id;
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
 
@@ -577,29 +584,37 @@ class PaymentClassificationEventsForceRlsActivationTest extends TestCase
     }
 
     /**
-     * Explicit, load-bearing proof of the factory/RLS interaction
-     * documented in this file's class docblock: calling
-     * ->forPayment($payment)->create() for an EXISTING payment, even
-     * from inside a correct runWithFirmContext($payment->firm, ...)
-     * wrap, fails with a row-level security violation — because
-     * definition()'s own eager Payment::factory()->create() side
-     * effect silently resets the session's app.current_firm_id to an
-     * unrelated random firm before the real INSERT happens. This is
-     * exactly why every other test in this file uses
-     * createEventForPayment() instead of the factory's forPayment()
-     * state for any persisted fixture. Documented as a residual
-     * factory/RLS interaction gap for Table Phase D review — not
-     * something this test file may fix (the factory is Table Phase B's
-     * exclusive, finalized file).
+     * Explicit, load-bearing proof that the factory/RLS interaction
+     * documented in this file's class docblock is now RESOLVED: calling
+     * ->forPayment($payment)->create() for an EXISTING payment, from
+     * inside a correct runWithFirmContext($payment->firm, ...) wrap, now
+     * succeeds and produces a row whose firm_id/payment_id agree exactly
+     * with the caller-supplied payment — because
+     * PaymentClassificationEventFactory::definition() no longer calls
+     * Payment::factory()->create() as an eager PHP statement (fixed by
+     * the eager-factory-side-effects audit; see
+     * database/factories/PaymentClassificationEventFactory.php), so
+     * there is no wasted nested Payment silently resetting the
+     * session's app.current_firm_id to an unrelated random firm before
+     * the real INSERT happens. Formerly named
+     * test_forpayment_factory_state_create_is_clobbered_by_definitions_own_side_effect
+     * and asserted the opposite (that this exact call threw a row-level
+     * security violation) — that was accurate against the pre-fix
+     * factory and is now the regression this test protects against.
+     * Every other test in this file still uses createEventForPayment()
+     * for persisted fixtures (that convention remains valid and was
+     * left unchanged), but forPayment()->create() is no longer a
+     * documented gap.
      */
-    public function test_forpayment_factory_state_create_is_clobbered_by_definitions_own_side_effect(): void
+    public function test_forpayment_factory_state_create_no_longer_clobbers_context_after_the_eager_factory_side_effects_audit_fix(): void
     {
         $firm = Firm::factory()->create();
         $payment = $this->runWithFirmContext($firm, fn () => Payment::factory()->forFirm($firm)->create());
 
-        $this->expectExceptionMessageMatches('/row-level security policy/');
+        $event = $this->runWithFirmContext($firm, fn () => PaymentClassificationEvent::factory()->forPayment($payment)->create());
 
-        $this->runWithFirmContext($firm, fn () => PaymentClassificationEvent::factory()->forPayment($payment)->create());
+        $this->assertSame($firm->id, $event->firm_id);
+        $this->assertSame($payment->id, $event->payment_id);
     }
 
     public function test_tenant_context_clears_after_success(): void

@@ -39,7 +39,7 @@ class GeneratedDocumentEventFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -66,13 +66,34 @@ class GeneratedDocumentEventFactory extends Factory
      * database layer) — the factory must not manufacture that invalid
      * shape by default just because RLS itself cannot catch it.
      */
+    /**
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * GeneratedDocument::factory()->create() as a plain PHP statement at
+     * the top of definition() — a real, committed GeneratedDocument
+     * every single time, even when forDocument() below immediately
+     * overrides generated_document_id/firm_id/actor_firm_user_id with a
+     * caller-supplied document. Fixed by memoizing the document behind
+     * lazy closures so nothing is created unless it survives,
+     * unoverridden, to the final row. actor_firm_user_id already used
+     * the correct lazy-closure form and is unchanged apart from that.
+     */
+    private ?GeneratedDocument $lazyDocument = null;
+
     public function definition(): array
     {
-        $document = GeneratedDocument::factory()->create();
+        $this->lazyDocument = null;
 
         return [
-            'generated_document_id' => $document->id,
-            'firm_id' => $document->firm_id,
+            'generated_document_id' => function () {
+                $this->lazyDocument ??= GeneratedDocument::factory()->create();
+
+                return $this->lazyDocument->id;
+            },
+            'firm_id' => function () {
+                $this->lazyDocument ??= GeneratedDocument::factory()->create();
+
+                return $this->lazyDocument->firm_id;
+            },
             'event_type' => GeneratedDocumentEventType::MarkedReadyForReview->value,
             'actor_firm_user_id' => fn (array $attributes) => FirmUser::factory()->create(['firm_id' => $attributes['firm_id']])->id,
             'created_at' => now(),

@@ -38,7 +38,7 @@ class FormReviewEventFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -65,13 +65,35 @@ class FormReviewEventFactory extends Factory
      * factory must not manufacture that invalid shape by default just
      * because RLS itself cannot catch it.
      */
+    /**
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * FormDraft::factory()->create() as a plain PHP statement at the
+     * top of definition() — a real, committed FormDraft every single
+     * time, even when forDraft() below immediately overrides
+     * form_draft_id/firm_id/actor_firm_user_id with a caller-supplied
+     * draft. Fixed by memoizing the draft behind lazy closures so
+     * nothing is created unless it survives, unoverridden, to the final
+     * row. actor_firm_user_id already used the correct lazy-closure
+     * form (reading firm_id from $attributes rather than the eager
+     * $draft directly) and is unchanged apart from that.
+     */
+    private ?FormDraft $lazyDraft = null;
+
     public function definition(): array
     {
-        $draft = FormDraft::factory()->create();
+        $this->lazyDraft = null;
 
         return [
-            'form_draft_id' => $draft->id,
-            'firm_id' => $draft->firm_id,
+            'form_draft_id' => function () {
+                $this->lazyDraft ??= FormDraft::factory()->create();
+
+                return $this->lazyDraft->id;
+            },
+            'firm_id' => function () {
+                $this->lazyDraft ??= FormDraft::factory()->create();
+
+                return $this->lazyDraft->firm_id;
+            },
             'event_type' => FormReviewEventType::MarkedReadyForReview->value,
             'actor_firm_user_id' => fn (array $attributes) => FirmUser::factory()->create(['firm_id' => $attributes['firm_id']])->id,
             'created_at' => now(),

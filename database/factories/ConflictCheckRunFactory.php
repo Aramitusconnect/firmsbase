@@ -36,7 +36,7 @@ class ConflictCheckRunFactory extends Factory
 
         $results = $this->make($attributes, $parent);
         $models = $results instanceof Model ? new Collection([$results]) : $results;
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -48,20 +48,34 @@ class ConflictCheckRunFactory extends Factory
         return $results;
     }
 
+    /**
+     * firm_id derives from the SAME matter as matter_id.
+     *
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * Matter::factory()->create() as a plain PHP statement at the top
+     * of definition() — a real, committed Matter (+ its own nested
+     * Firm) every single time, even when forMatter()/forFirm() below
+     * immediately override both keys with a caller-supplied matter.
+     * Fixed by memoizing the matter behind lazy closures so nothing is
+     * created unless it survives, unoverridden, to the final row.
+     */
+    private ?Matter $lazyMatter = null;
+
     public function definition(): array
     {
-        // Root-cause fix (Section 39A-3I): generate ONE matter up front
-        // and derive firm_id from that same matter, so even a bare
-        // ConflictCheckRun::factory()->create() with no state override
-        // can never produce a run whose firm_id disagrees with its own
-        // matter_id's firm — Matter::factory() independently generates
-        // its own firm, so two separate Firm::factory()/Matter::factory()
-        // calls here would otherwise almost never match.
-        $matter = Matter::factory()->create();
+        $this->lazyMatter = null;
 
         return [
-            'firm_id' => $matter->firm_id,
-            'matter_id' => $matter->id,
+            'firm_id' => function () {
+                $this->lazyMatter ??= Matter::factory()->create();
+
+                return $this->lazyMatter->firm_id;
+            },
+            'matter_id' => function () {
+                $this->lazyMatter ??= Matter::factory()->create();
+
+                return $this->lazyMatter->id;
+            },
             'requested_by' => null,
             'status' => ConflictCheckRunStatus::Pending,
             'scope' => ConflictCheckScope::Firm,

@@ -34,7 +34,7 @@ class ConsultationFactory extends Factory
 
         $results = $this->make($attributes, $parent);
         $models = $results instanceof Model ? new Collection([$results]) : $results;
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -48,23 +48,33 @@ class ConsultationFactory extends Factory
 
     /**
      * The consultation and its nested firm_lead are always tied to
-     * the SAME firm — generating one firm_lead here up front (rather
-     * than letting firm_id and firm_lead_id resolve as two
-     * independent Firm::factory()/FirmLead::factory() calls) is
-     * deliberate: a bare Consultation::factory()->create() with no
-     * state must never produce a consultation whose firm_lead
-     * belongs to an unrelated firm, mirroring the already-correct
-     * forLead() state below and the root-cause fix already applied
-     * to MatterFactory/InvoiceFactory/ConflictCheckRunFactory in
-     * Sections 39A-3F/39A-3H/39A-3I.
+     * the SAME firm.
+     *
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * FirmLead::factory()->create() as a plain PHP statement at the top
+     * of definition() — a real, committed FirmLead (+ its own nested
+     * Firm) every single time, even when forFirm()/forLead() below
+     * immediately override both keys with a caller-supplied lead.
+     * Fixed by memoizing the lead behind lazy closures so nothing is
+     * created unless it survives, unoverridden, to the final row.
      */
+    private ?FirmLead $lazyLead = null;
+
     public function definition(): array
     {
-        $lead = FirmLead::factory()->create();
+        $this->lazyLead = null;
 
         return [
-            'firm_id' => $lead->firm_id,
-            'firm_lead_id' => $lead->id,
+            'firm_id' => function () {
+                $this->lazyLead ??= FirmLead::factory()->create();
+
+                return $this->lazyLead->firm_id;
+            },
+            'firm_lead_id' => function () {
+                $this->lazyLead ??= FirmLead::factory()->create();
+
+                return $this->lazyLead->id;
+            },
             'consultation_outcome_id' => null,
             'scheduled_at' => now()->addDay(),
             'held_at' => null,

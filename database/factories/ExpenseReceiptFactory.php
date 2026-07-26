@@ -35,7 +35,7 @@ class ExpenseReceiptFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -59,13 +59,21 @@ class ExpenseReceiptFactory extends Factory
      * own context-hold create() override exists (it does, as of this
      * same batch).
      */
+    /**
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * Firm::factory()->create() as a plain PHP statement at the top of
+     * definition() — a real, committed Firm every single time, even
+     * when forExpense() below immediately overrides both firm_id and
+     * expense_id with a caller-supplied expense. Fixed by making
+     * firm_id Laravel's own lazy factory-relationship form; expense_id
+     * remains a lazy, uncreated Factory instance derived from it.
+     */
     public function definition(): array
     {
-        $firm = Firm::factory()->create();
-
         return [
-            'firm_id' => $firm->id,
-            'expense_id' => Expense::factory()->forFirm($firm),
+            'firm_id' => Firm::factory(),
+            'expense_id' => fn (array $attributes) => Expense::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id'])),
             'storage_disk' => 'local',
             'storage_path' => 'expense-receipts/'.$this->faker->uuid().'.pdf',
             'original_filename' => $this->faker->word().'.pdf',

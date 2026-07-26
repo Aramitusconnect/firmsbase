@@ -47,7 +47,7 @@ class IntegrationInboundWebhookEventFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -59,21 +59,52 @@ class IntegrationInboundWebhookEventFactory extends Factory
         return $results;
     }
 
+    /**
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * FirmIntegration::factory()->create() and
+     * IntegrationWebhookReceipt::factory()->create() as plain PHP
+     * statements at the top of definition() — real, committed rows
+     * every single time, even when forFirmIntegration()/forReceipt()
+     * below immediately override the keys derived from them with
+     * caller-supplied values. Fixed by memoizing each behind its own
+     * lazy closures so nothing is created unless at least one of its
+     * derived keys survives, unoverridden, to the final row.
+     */
+    private ?FirmIntegration $lazyFirmIntegration = null;
+
+    private ?IntegrationWebhookReceipt $lazyReceipt = null;
+
     public function definition(): array
     {
-        $firmIntegration = FirmIntegration::factory()->create();
-        $receipt = IntegrationWebhookReceipt::factory()->create();
+        $this->lazyFirmIntegration = null;
+        $this->lazyReceipt = null;
 
         $now = now();
 
         return [
             'uuid' => (string) Str::uuid7(),
-            'firm_id' => $firmIntegration->firm_id,
-            'firm_integration_id' => $firmIntegration->id,
-            'receipt_id' => $receipt->id,
+            'firm_id' => function () {
+                $this->lazyFirmIntegration ??= FirmIntegration::factory()->create();
+
+                return $this->lazyFirmIntegration->firm_id;
+            },
+            'firm_integration_id' => function () {
+                $this->lazyFirmIntegration ??= FirmIntegration::factory()->create();
+
+                return $this->lazyFirmIntegration->id;
+            },
+            'receipt_id' => function () {
+                $this->lazyReceipt ??= IntegrationWebhookReceipt::factory()->create();
+
+                return $this->lazyReceipt->id;
+            },
             'provider_key' => 'test',
             'provider_event_id' => (string) Str::uuid(),
-            'receipt_body_hash' => $receipt->body_hash,
+            'receipt_body_hash' => function () {
+                $this->lazyReceipt ??= IntegrationWebhookReceipt::factory()->create();
+
+                return $this->lazyReceipt->body_hash;
+            },
             'event_type' => 'test.resource.created',
             'payload_reference_json' => [],
             'payload_hash' => null,

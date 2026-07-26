@@ -39,7 +39,7 @@ class SignatureRequestRecipientFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -53,26 +53,34 @@ class SignatureRequestRecipientFactory extends Factory
 
     /**
      * The signature_request_recipients row is always tied to the SAME
-     * firm as its OWN parent signature_request — one authoritative
-     * request is created up front (rather than resolving firm_id via a
-     * SignatureRequest::query()->find($id)->firm_id self-query, which
-     * would fail closed under FORCE RLS with no context yet active) and
-     * firm_id is derived directly from it, matching forRequest()'s own
-     * already-correct logic below. A bare signature_request_recipients
-     * row whose firm_id disagrees with its own signature_request_id's
-     * parent firm is exactly the transitive cross-firm mismatch
-     * documented as a known, deliberately-deferred gap in this table's
-     * FORCE migration (no composite FK/trigger enforces it at the
-     * database layer) — the factory must not manufacture that invalid
-     * shape by default just because RLS itself cannot catch it.
+     * firm as its OWN parent signature_request.
+     *
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * SignatureRequest::factory()->create() as a plain PHP statement at
+     * the top of definition() — a real, committed SignatureRequest
+     * every single time, even when forRequest() below immediately
+     * overrides both signature_request_id and firm_id with a
+     * caller-supplied request. Fixed by memoizing the request behind
+     * lazy closures so nothing is created unless it survives,
+     * unoverridden, to the final row.
      */
+    private ?SignatureRequest $lazyRequest = null;
+
     public function definition(): array
     {
-        $request = SignatureRequest::factory()->create();
+        $this->lazyRequest = null;
 
         return [
-            'signature_request_id' => $request->id,
-            'firm_id' => $request->firm_id,
+            'signature_request_id' => function () {
+                $this->lazyRequest ??= SignatureRequest::factory()->create();
+
+                return $this->lazyRequest->id;
+            },
+            'firm_id' => function () {
+                $this->lazyRequest ??= SignatureRequest::factory()->create();
+
+                return $this->lazyRequest->firm_id;
+            },
             'recipient_type' => SignatureRecipientType::External->value,
             'signer_name' => $this->faker->name(),
             'signer_email' => $this->faker->safeEmail(),

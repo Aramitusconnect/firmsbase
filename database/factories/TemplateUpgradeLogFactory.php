@@ -38,7 +38,7 @@ class TemplateUpgradeLogFactory extends Factory
 
         $results = $this->make($attributes, $parent);
         $models = $results instanceof Model ? new Collection([$results]) : $results;
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -51,20 +51,34 @@ class TemplateUpgradeLogFactory extends Factory
     }
 
     /**
-     * Section 39A-3L, Checkpoint 7 — installed_template_pack_id is now
-     * derived from the SAME InstalledTemplatePack that firm_id comes
-     * from (rather than two independent random factory chains), closing
-     * the cross-firm mismatch bug confirmed by Phase A audit: a bare
-     * TemplateUpgradeLog::factory()->create() previously resolved
-     * firm_id and installed_template_pack_id to two unrelated firms.
+     * installed_template_pack_id is derived from the SAME
+     * InstalledTemplatePack that firm_id comes from.
+     *
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * InstalledTemplatePack::factory()->create() as a plain PHP
+     * statement at the top of definition() — a real, committed
+     * InstalledTemplatePack every single time, even when forFirm()
+     * below immediately overrides both keys with a caller-supplied
+     * firm. Fixed by memoizing the pack behind lazy closures so nothing
+     * is created unless it survives, unoverridden, to the final row.
      */
+    private ?InstalledTemplatePack $lazyInstalledPack = null;
+
     public function definition(): array
     {
-        $installedPack = InstalledTemplatePack::factory()->create();
+        $this->lazyInstalledPack = null;
 
         return [
-            'firm_id' => $installedPack->firm_id,
-            'installed_template_pack_id' => $installedPack->id,
+            'firm_id' => function () {
+                $this->lazyInstalledPack ??= InstalledTemplatePack::factory()->create();
+
+                return $this->lazyInstalledPack->firm_id;
+            },
+            'installed_template_pack_id' => function () {
+                $this->lazyInstalledPack ??= InstalledTemplatePack::factory()->create();
+
+                return $this->lazyInstalledPack->id;
+            },
             'from_version_id' => TemplatePackVersion::factory(),
             'to_version_id' => TemplatePackVersion::factory(),
             'status' => TemplateUpgradeLogStatus::Applied,

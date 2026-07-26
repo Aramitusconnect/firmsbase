@@ -39,7 +39,7 @@ class ExpenseFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -65,14 +65,25 @@ class ExpenseFactory extends Factory
      * layer) — the factory must not manufacture that invalid shape by
      * default just because RLS itself cannot catch it.
      */
+    /**
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * Firm::factory()->create() as a plain PHP statement at the top of
+     * definition() — a real, committed Firm every single time, even
+     * when forFirm() below immediately overrides firm_id/
+     * expense_category_id/created_by_firm_user_id with a caller-supplied
+     * firm. Fixed by making firm_id Laravel's own lazy
+     * factory-relationship form; expense_category_id/
+     * created_by_firm_user_id remain lazy, uncreated Factory instances
+     * derived from it (never eagerly ->create()'d), matching Laravel's
+     * own lazy-relationship convention.
+     */
     public function definition(): array
     {
-        $firm = Firm::factory()->create();
-
         return [
-            'firm_id' => $firm->id,
+            'firm_id' => Firm::factory(),
             'matter_id' => null,
-            'expense_category_id' => ExpenseCategory::factory()->forFirm($firm),
+            'expense_category_id' => fn (array $attributes) => ExpenseCategory::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id'])),
             'vendor_name' => $this->faker->company(),
             'amount_cents' => $this->faker->numberBetween(500, 50000),
             'currency' => 'usd',
@@ -80,7 +91,8 @@ class ExpenseFactory extends Factory
             'status' => ExpenseStatus::Draft,
             'reimbursable' => false,
             'description' => $this->faker->sentence(),
-            'created_by_firm_user_id' => FirmUser::factory()->forFirm($firm),
+            'created_by_firm_user_id' => fn (array $attributes) => FirmUser::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id'])),
         ];
     }
 

@@ -43,7 +43,7 @@ class InstalledTemplatePackFactory extends Factory
 
         $results = $this->make($attributes, $parent);
         $models = $results instanceof Model ? new Collection([$results]) : $results;
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -55,14 +55,34 @@ class InstalledTemplatePackFactory extends Factory
         return $results;
     }
 
+    /**
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * TemplatePackVersion::factory()->create() as a plain PHP statement
+     * at the top of definition() — a real, committed TemplatePackVersion
+     * every single time, even when forVersion() below immediately
+     * overrides both template_pack_id and template_pack_version_id with
+     * a caller-supplied version. Fixed by memoizing the version behind
+     * lazy closures so nothing is created unless at least one of those
+     * keys survives, unoverridden, to the final row.
+     */
+    private ?TemplatePackVersion $lazyVersion = null;
+
     public function definition(): array
     {
-        $version = TemplatePackVersion::factory()->create();
+        $this->lazyVersion = null;
 
         return [
             'firm_id' => Firm::factory(),
-            'template_pack_id' => $version->template_pack_id,
-            'template_pack_version_id' => $version->id,
+            'template_pack_id' => function () {
+                $this->lazyVersion ??= TemplatePackVersion::factory()->create();
+
+                return $this->lazyVersion->template_pack_id;
+            },
+            'template_pack_version_id' => function () {
+                $this->lazyVersion ??= TemplatePackVersion::factory()->create();
+
+                return $this->lazyVersion->id;
+            },
             'status' => InstalledTemplatePackStatus::Active,
             'installed_at' => now(),
             'disabled_at' => null,

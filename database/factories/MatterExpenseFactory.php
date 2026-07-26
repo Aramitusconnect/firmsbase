@@ -38,7 +38,7 @@ class MatterExpenseFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -64,14 +64,24 @@ class MatterExpenseFactory extends Factory
      * database layer) — the factory must not manufacture that invalid
      * shape by default just because RLS itself cannot catch it.
      */
+    /**
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * Firm::factory()->create() as a plain PHP statement at the top of
+     * definition() — a real, committed Firm every single time, even
+     * when forExpenseAndMatter() below immediately overrides ALL of
+     * firm_id/matter_id/expense_id/reimbursable_snapshot with
+     * caller-supplied values. Fixed by making firm_id Laravel's own
+     * lazy factory-relationship form; matter_id/expense_id remain lazy,
+     * uncreated Factory instances derived from it.
+     */
     public function definition(): array
     {
-        $firm = Firm::factory()->create();
-
         return [
-            'firm_id' => $firm->id,
-            'matter_id' => Matter::factory()->forFirm($firm),
-            'expense_id' => Expense::factory()->forFirm($firm),
+            'firm_id' => Firm::factory(),
+            'matter_id' => fn (array $attributes) => Matter::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id'])),
+            'expense_id' => fn (array $attributes) => Expense::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id'])),
             'reimbursable_snapshot' => false,
         ];
     }

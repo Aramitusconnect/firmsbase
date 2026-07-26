@@ -30,7 +30,7 @@ class PaymentFactory extends Factory
 
         $results = $this->make($attributes, $parent);
         $models = $results instanceof Model ? new Collection([$results]) : $results;
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -44,21 +44,23 @@ class PaymentFactory extends Factory
 
     /**
      * The payment and its nested client are always tied to the SAME
-     * firm — generating one firm here up front (rather than letting
-     * firm_id and client_id resolve as two independent
-     * Firm::factory()/Client::factory() calls) is deliberate: a bare
-     * Payment::factory()->create() with no state must never produce a
-     * payment whose client belongs to an unrelated firm, matching the
-     * root-cause fix already applied to MatterFactory/InvoiceFactory in
-     * Sections 39A-3F/39A-3G.
+     * firm.
+     *
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * Firm::factory()->create() as a plain PHP statement at the top of
+     * definition() — a real, committed Firm every single time, even
+     * when forFirm()/forClient()/forMatter()/forInvoice() below
+     * immediately override firm_id/client_id with a caller-supplied
+     * firm. Fixed by making firm_id Laravel's own lazy
+     * factory-relationship form; client_id remains a lazy, uncreated
+     * Factory instance derived from it.
      */
     public function definition(): array
     {
-        $firm = Firm::factory()->create();
-
         return [
-            'firm_id' => $firm->id,
-            'client_id' => Client::factory()->forFirm($firm),
+            'firm_id' => Firm::factory(),
+            'client_id' => fn (array $attributes) => Client::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id'])),
             'matter_id' => null,
             'invoice_id' => null,
             'payment_plan_installment_id' => null,

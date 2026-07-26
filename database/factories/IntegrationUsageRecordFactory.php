@@ -41,7 +41,7 @@ class IntegrationUsageRecordFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -53,16 +53,36 @@ class IntegrationUsageRecordFactory extends Factory
         return $results;
     }
 
+    /**
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * FirmIntegration::factory()->create() as a plain PHP statement at
+     * the top of definition() — a real, committed FirmIntegration (+ its
+     * own nested Firm) every single time, even when forFirmIntegration()
+     * below immediately overrides both firm_id and firm_integration_id
+     * with a caller-supplied connection. Fixed by memoizing the
+     * connection behind lazy closures so nothing is created unless it
+     * survives, unoverridden, to the final row.
+     */
+    private ?FirmIntegration $lazyFirmIntegration = null;
+
     public function definition(): array
     {
-        $firmIntegration = FirmIntegration::factory()->create();
+        $this->lazyFirmIntegration = null;
 
         $now = now();
 
         return [
             'uuid' => (string) Str::uuid7(),
-            'firm_id' => $firmIntegration->firm_id,
-            'firm_integration_id' => $firmIntegration->id,
+            'firm_id' => function () {
+                $this->lazyFirmIntegration ??= FirmIntegration::factory()->create();
+
+                return $this->lazyFirmIntegration->firm_id;
+            },
+            'firm_integration_id' => function () {
+                $this->lazyFirmIntegration ??= FirmIntegration::factory()->create();
+
+                return $this->lazyFirmIntegration->id;
+            },
             'provider_key' => 'test',
             'capability' => 'sync',
             'operation_type' => UsageOperationType::PullSync->value,

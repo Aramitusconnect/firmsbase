@@ -28,7 +28,7 @@ class MatterFactory extends Factory
 
         $results = $this->make($attributes, $parent);
         $models = $results instanceof Model ? new Collection([$results]) : $results;
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -42,22 +42,29 @@ class MatterFactory extends Factory
 
     /**
      * The matter and its nested client are always tied to the SAME
-     * firm — generating one firm here up front (rather than letting
-     * firm_id and client_id resolve as two independent
-     * Firm::factory()/Client::factory() calls) is deliberate: a bare
-     * Matter::factory()->create() with no state must never produce a
-     * matter whose client belongs to an unrelated firm, since that
-     * mismatch is exactly the masked-blast-radius risk this table was
-     * deferred for in earlier RLS FORCE batches.
+     * firm.
+     *
+     * Audit fix (eager-factory-side-effects audit): firm_id used to be
+     * built by calling Firm::factory()->create() as a plain PHP
+     * statement at the top of definition() — a real, committed Firm
+     * every single time, even when forFirm()/forClient() below
+     * immediately override both firm_id and client_id with a
+     * caller-supplied firm. Fixed by making firm_id Laravel's own lazy
+     * factory-relationship form; client_id remains a lazy, uncreated
+     * Factory instance derived from it. $practiceArea is NOT part of
+     * this fix — no state in this factory ever overrides
+     * primary_practice_area_id/matter_type_id (verified against every
+     * consumer of Matter::factory() in the suite), so it is always
+     * genuinely needed and stays eager.
      */
     public function definition(): array
     {
-        $firm = Firm::factory()->create();
         $practiceArea = PracticeArea::factory()->create();
 
         return [
-            'firm_id' => $firm->id,
-            'client_id' => Client::factory()->forFirm($firm),
+            'firm_id' => Firm::factory(),
+            'client_id' => fn (array $attributes) => Client::factory()
+                ->forFirm(Firm::query()->findOrFail($attributes['firm_id'])),
             'primary_practice_area_id' => $practiceArea->id,
             'matter_type_id' => MatterType::factory()->forPracticeArea($practiceArea),
             'pinned_template_pack_version_id' => null,

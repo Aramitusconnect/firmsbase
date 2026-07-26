@@ -38,7 +38,7 @@ class AiToolActionFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -52,41 +52,39 @@ class AiToolActionFactory extends Factory
 
     /**
      * The ai_tool_actions row and its nested ai_usage_event are always
-     * tied to the SAME firm — one authoritative firm is generated up
-     * front (rather than letting firm_id and ai_usage_event_id resolve
-     * as two independent Firm::factory() calls), matching the
-     * root-cause fix already applied to MatterExpenseFactory/
-     * MatterFactory/InvoiceFactory/PaymentFactory. A bare ai_tool_actions
-     * row whose ai_usage_event belongs to an unrelated firm is exactly
-     * the transitive cross-firm mismatch documented as a known,
-     * deliberately-deferred gap in this table's FORCE migration (no
-     * composite FK/trigger enforces it at the database layer) — the
-     * factory must not manufacture that invalid shape by default just
-     * because RLS itself cannot catch it. matter_id is left null by
-     * default (nullable, unrelated to this fix); forFirm() below does
-     * not attempt to also tie an existing ai_usage_event_id to the new
-     * firm — callers needing that must supply a consistent
-     * ai_usage_event_id explicitly.
+     * tied to the SAME firm.
+     *
+     * Audit fix (eager-factory-side-effects audit): definition() used
+     * to call Firm::factory()->create() as a plain PHP statement at the
+     * top of this method, then unconditionally provision a real
+     * AiUsageEvent for it via runWithFirmContext() — real, committed
+     * side effects every single time, even when forFirm() below
+     * immediately overrides firm_id/ai_usage_event_id with a
+     * caller-supplied firm. Laravel cannot skip a side effect that
+     * already happened while building the array. Fixed by making
+     * firm_id Laravel's own lazy factory-relationship form and deriving
+     * ai_usage_event_id from the already-resolved firm_id via a lazy
+     * closure (mirrors IntegrationOAuthStateFactory's
+     * Firm::query()->findOrFail($attributes['firm_id']) convention) —
+     * nothing is created unless it survives, unoverridden, to the final
+     * row. ai_usage_event_id still requires the real Firm model (not
+     * just its id) to route through runWithFirmContext()/forFirm(),
+     * since ai_usage_events also has FORCE ROW LEVEL SECURITY with no
+     * context-hold create() override of its own.
      */
     public function definition(): array
     {
-        $firm = Firm::factory()->create();
-
         return [
-            'firm_id' => $firm->id,
+            'firm_id' => Firm::factory(),
             'matter_id' => null,
-            // Eagerly created and wrapped in its own tenant context
-            // (not passed as a lazy Factory instance) because
-            // ai_usage_events also has FORCE ROW LEVEL SECURITY with no
-            // context-hold create() override of its own (by design —
-            // see AiUsageEventFactory) — Laravel resolves a nested
-            // Factory value during make(), before this factory's own
-            // create() override establishes context below, so a lazy
-            // reference here would insert with no context active.
-            'ai_usage_event_id' => (new TenantContextService())->runWithFirmContext(
-                $firm,
-                fn () => AiUsageEvent::factory()->forFirm($firm)->create(),
-            )->id,
+            'ai_usage_event_id' => function (array $attributes) {
+                $firm = Firm::query()->findOrFail($attributes['firm_id']);
+
+                return (new TenantContextService)->runWithFirmContext(
+                    $firm,
+                    fn () => AiUsageEvent::factory()->forFirm($firm)->create(),
+                )->id;
+            },
             'tool_name' => 'draft_summary_tool',
             'input_snapshot_json' => ['note' => 'fixture input'],
             'output_snapshot_json' => ['note' => 'fixture output'],
@@ -107,7 +105,7 @@ class AiToolActionFactory extends Factory
             // Factory value during make(), before this factory's own
             // create() override establishes context below, so a lazy
             // reference here would insert with no context active.
-            'ai_usage_event_id' => (new TenantContextService())->runWithFirmContext(
+            'ai_usage_event_id' => (new TenantContextService)->runWithFirmContext(
                 $firm,
                 fn () => AiUsageEvent::factory()->forFirm($firm)->create(),
             )->id,

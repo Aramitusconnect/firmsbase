@@ -33,7 +33,7 @@ class CommunicationConsentEventFactory extends Factory
 
         $results = $this->make($attributes, $parent);
         $models = $results instanceof Model ? new Collection([$results]) : $results;
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -46,23 +46,34 @@ class CommunicationConsentEventFactory extends Factory
     }
 
     /**
-     * Section 39A-3L, Checkpoint 12 — communication_consent_id is now
-     * derived from the SAME CommunicationConsent that firm_id comes
-     * from (rather than two independent random factory chains), closing
-     * the cross-firm mismatch bug confirmed by Phase A audit: a bare
-     * CommunicationConsentEvent::factory()->create() previously
-     * resolved firm_id and communication_consent_id to two unrelated
-     * firms. Same bug class fixed in this mission's prior checkpoints
-     * (FirmEntitlementEventFactory, TemplateUpgradeLogFactory,
-     * TemplateUpgradePreviewFactory, DocumentRequestFactory).
+     * communication_consent_id is derived from the SAME
+     * CommunicationConsent that firm_id comes from.
+     *
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * CommunicationConsent::factory()->create() as a plain PHP statement
+     * at the top of definition() — a real, committed CommunicationConsent
+     * every single time, even when forConsent() below immediately
+     * overrides both keys with a caller-supplied consent. Fixed by
+     * memoizing the consent behind lazy closures so nothing is created
+     * unless it survives, unoverridden, to the final row.
      */
+    private ?CommunicationConsent $lazyConsent = null;
+
     public function definition(): array
     {
-        $consent = CommunicationConsent::factory()->create();
+        $this->lazyConsent = null;
 
         return [
-            'communication_consent_id' => $consent->id,
-            'firm_id' => $consent->firm_id,
+            'communication_consent_id' => function () {
+                $this->lazyConsent ??= CommunicationConsent::factory()->create();
+
+                return $this->lazyConsent->id;
+            },
+            'firm_id' => function () {
+                $this->lazyConsent ??= CommunicationConsent::factory()->create();
+
+                return $this->lazyConsent->firm_id;
+            },
             'action' => 'captured',
             'previous_status' => null,
             'new_status' => 'granted',

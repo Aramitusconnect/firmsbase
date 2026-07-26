@@ -31,14 +31,39 @@ class IntegrationWebhookRoutingIndexFactory extends Factory
 {
     protected $model = IntegrationWebhookRoutingIndex::class;
 
+    /**
+     * Audit fix (eager-factory-side-effects audit): this used to call
+     * FirmIntegration::factory()->create() as a plain PHP statement at
+     * the top of definition() — a real, committed FirmIntegration (+ its
+     * own nested Firm) every single time, even when forFirmIntegration()
+     * below immediately overrides firm_id/firm_integration_id/
+     * integration_provider_id with a caller-supplied connection. Fixed
+     * by memoizing the connection behind lazy closures so nothing is
+     * created unless at least one of those keys survives, unoverridden,
+     * to the final row.
+     */
+    private ?FirmIntegration $lazyFirmIntegration = null;
+
     public function definition(): array
     {
-        $firmIntegration = FirmIntegration::factory()->create();
+        $this->lazyFirmIntegration = null;
 
         return [
-            'firm_id' => $firmIntegration->firm_id,
-            'firm_integration_id' => $firmIntegration->id,
-            'integration_provider_id' => $firmIntegration->integration_provider_id,
+            'firm_id' => function () {
+                $this->lazyFirmIntegration ??= FirmIntegration::factory()->create();
+
+                return $this->lazyFirmIntegration->firm_id;
+            },
+            'firm_integration_id' => function () {
+                $this->lazyFirmIntegration ??= FirmIntegration::factory()->create();
+
+                return $this->lazyFirmIntegration->id;
+            },
+            'integration_provider_id' => function () {
+                $this->lazyFirmIntegration ??= FirmIntegration::factory()->create();
+
+                return $this->lazyFirmIntegration->integration_provider_id;
+            },
             'webhook_routing_token_hash' => hash('sha256', Str::random(43)),
         ];
     }
