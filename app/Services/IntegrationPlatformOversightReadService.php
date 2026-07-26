@@ -19,6 +19,7 @@ use App\Models\Firm;
 use App\Models\PlatformAdmin;
 use App\Models\SecurityEvent;
 use App\Models\TimelineEvent;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -101,8 +102,7 @@ final class IntegrationPlatformOversightReadService
         private readonly HealthStateService $healthState,
         private readonly IntegrationUsageSummaryService $usageSummary,
         private readonly PlatformStaffAccessPolicyService $staffAccess,
-    ) {
-    }
+    ) {}
 
     /**
      * The always-visible, aggregate/sanitized cross-firm overview — no
@@ -112,6 +112,27 @@ final class IntegrationPlatformOversightReadService
      * — never a live cross-firm query against any FORCE-RLS tenant
      * table.
      *
+     * Phase 2 query-hardening fix: an explicit `orderBy('id')`
+     * tie-breaker follows `orderBy('firm_uuid')` so two rows that could
+     * ever compare equal on firm_uuid (never true today — firm_uuid is
+     * unique per row — but the ordering is made structurally
+     * deterministic regardless of that incidental fact, matching every
+     * other tie-breaker fix in this class) always produce a stable,
+     * repeatable order across identical calls.
+     *
+     * KNOWN, DEFERRED GAP (Phase 2 investigation finding, not fixed
+     * here): this method still reads the entire table into a Collection
+     * with no LIMIT — PlatformIntegrationOverviewPage's `->records()`
+     * closure is backed by a raw Collection (not an Eloquent query), so
+     * genuine DB-level pagination requires a page-level rework (having
+     * the closure accept the injected `page`/`recordsPerPage` Filament
+     * parameters and returning a real paginator) in addition to a
+     * service-level change here. That page-level rework is left for the
+     * dedicated Phase 2 UI-building pass — this fix intentionally
+     * addresses ONLY the ordering non-determinism, not the missing
+     * bound, to avoid a half-fixed pagination contract landing without
+     * its matching UI change.
+     *
      * @return Collection<int, array<string, mixed>>
      */
     public function overviewSummaries(PlatformAdmin $admin): Collection
@@ -120,23 +141,38 @@ final class IntegrationPlatformOversightReadService
 
         return DB::table('integration_platform_overview_summaries')
             ->orderBy('firm_uuid')
+            ->orderBy('id')
             ->get()
             ->map(fn (object $row): array => (array) $row)
             ->values();
     }
 
     /**
-     * @return Collection<int, PlatformIntegrationConnectionSummary>
+     * Phase 2 query-hardening fix: `orderBy('created_at')` is followed
+     * by an explicit `orderBy('id')` tie-breaker, and the query is now
+     * genuinely bounded/paginated at the DB level (a real `LIMIT`/
+     * `OFFSET` via Eloquent's `paginate()`) rather than materializing
+     * every connection a firm has ever had and slicing in PHP
+     * afterward — PlatformFirmIntegrationsPage's `->records()` closure
+     * passes through the Filament-injected `page`/`recordsPerPage`
+     * values so the table's own pagination genuinely drives this query.
+     *
+     * @return LengthAwarePaginator<int, PlatformIntegrationConnectionSummary>
      */
-    public function connectionsForFirm(PlatformAdmin $admin, Firm $firm): Collection
+    public function connectionsForFirm(PlatformAdmin $admin, Firm $firm, int $page = 1, int $perPage = 25): LengthAwarePaginator
     {
-        return $this->boundedAccess->readWithinFirmAccess($admin, $firm, function () use ($firm): Collection {
-            return FirmIntegration::query()
+        return $this->boundedAccess->readWithinFirmAccess($admin, $firm, function () use ($firm, $page, $perPage): LengthAwarePaginator {
+            $paginator = FirmIntegration::query()
                 ->where('firm_id', $firm->id)
                 ->orderBy('created_at')
-                ->get(self::CONNECTION_COLUMNS)
-                ->map(fn (FirmIntegration $connection): PlatformIntegrationConnectionSummary => $this->toConnectionSummary($connection))
-                ->values();
+                ->orderBy('id')
+                ->paginate(perPage: $perPage, columns: self::CONNECTION_COLUMNS, page: $page);
+
+            return $paginator->setCollection(
+                $paginator->getCollection()
+                    ->map(fn (FirmIntegration $connection): PlatformIntegrationConnectionSummary => $this->toConnectionSummary($connection))
+                    ->values()
+            );
         });
     }
 
@@ -206,6 +242,10 @@ final class IntegrationPlatformOversightReadService
                 ->where('firm_id', $firm->id)
                 ->where('firm_integration_id', $connectionId)
                 ->orderByDesc('created_at')
+                // Phase 2 query-hardening fix: explicit tie-breaker so
+                // two runs sharing the same created_at always sort in a
+                // stable, repeatable order.
+                ->orderBy('id')
                 ->limit(self::SYNC_HISTORY_LIMIT)
                 ->get([
                     'id', 'resource_type', 'sync_direction', 'run_type', 'trigger_source', 'status',
@@ -247,6 +287,11 @@ final class IntegrationPlatformOversightReadService
                 ->where('firm_integration_id', $connectionId)
                 ->where('status', OutboxEventStatus::DeadLettered->value)
                 ->orderByDesc('dead_lettered_at')
+                // Phase 2 query-hardening fix: explicit tie-breaker,
+                // applied BEFORE the in-PHP merge-sort below, so two
+                // events sharing the same dead_lettered_at always sort
+                // in a stable, repeatable order.
+                ->orderBy('id')
                 ->limit(self::FAILED_ITEMS_LIMIT)
                 // Explicit column allowlist — `last_error` is never
                 // selected at the SQL level at all (frozen design §10
@@ -270,6 +315,11 @@ final class IntegrationPlatformOversightReadService
                 ->where('integration_sync_runs.firm_integration_id', $connectionId)
                 ->where('integration_sync_items.status', SyncItemStatus::FailedPermanent->value)
                 ->orderByDesc('integration_sync_items.terminal_at')
+                // Phase 2 query-hardening fix: explicit tie-breaker,
+                // applied BEFORE the in-PHP merge-sort below, so two
+                // items sharing the same terminal_at always sort in a
+                // stable, repeatable order.
+                ->orderBy('integration_sync_items.id')
                 ->limit(self::FAILED_ITEMS_LIMIT)
                 // Explicit column allowlist — `last_error` is never
                 // selected at the SQL level at all (frozen design §10
@@ -317,6 +367,10 @@ final class IntegrationPlatformOversightReadService
                 ->where('firm_id', $firm->id)
                 ->where('firm_integration_id', $connectionId)
                 ->orderByDesc('detected_at')
+                // Phase 2 query-hardening fix: explicit tie-breaker so
+                // two conflicts sharing the same detected_at always sort
+                // in a stable, repeatable order.
+                ->orderBy('id')
                 ->limit(self::CONFLICTS_LIMIT)
                 ->get([
                     'id', 'conflict_type', 'resource_type', 'status', 'requires_manual_review',
@@ -354,14 +408,23 @@ final class IntegrationPlatformOversightReadService
         return $this->boundedAccess->readWithinFirmAccess($admin, $firm, function () use ($admin, $firm): Collection {
             $this->assertCanAccessSecurityLogs($admin);
 
+            // Phase 2 query-hardening fix: both sources below now select
+            // `id` and add an explicit `orderBy('id')` tie-breaker
+            // (applied BEFORE the in-PHP merge-sort further down) so two
+            // rows sharing the same occurred_at/created_at always sort
+            // in a stable, repeatable order — `id` is also now included
+            // in each mapped row so the tie-break is genuinely visible
+            // in the output, not merely used internally.
             $timelineRows = TimelineEvent::query()
                 ->where('firm_id', $firm->id)
                 ->where('event_type', 'like', 'integration%')
                 ->orderByDesc('occurred_at')
+                ->orderBy('id')
                 ->limit(self::AUDIT_HISTORY_LIMIT)
-                ->get(['event_type', 'actor_type', 'occurred_at'])
+                ->get(['id', 'event_type', 'actor_type', 'occurred_at'])
                 ->map(fn (TimelineEvent $event): array => [
                     'source' => 'timeline',
+                    'id' => $event->id,
                     'event_type' => $event->event_type,
                     'actor_type' => $event->actor_type,
                     'occurred_at' => $event->occurred_at,
@@ -371,10 +434,12 @@ final class IntegrationPlatformOversightReadService
                 ->where('firm_id', $firm->id)
                 ->whereIn('category', ['support_access', 'platform_integration_oversight'])
                 ->orderByDesc('created_at')
+                ->orderBy('id')
                 ->limit(self::AUDIT_HISTORY_LIMIT)
-                ->get(['event_type', 'actor_type', 'created_at'])
+                ->get(['id', 'event_type', 'actor_type', 'created_at'])
                 ->map(fn (SecurityEvent $event): array => [
                     'source' => 'security',
+                    'id' => $event->id,
                     'event_type' => $event->event_type,
                     'actor_type' => $event->actor_type,
                     'occurred_at' => $event->created_at,

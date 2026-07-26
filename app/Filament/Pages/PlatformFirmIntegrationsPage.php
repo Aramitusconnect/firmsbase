@@ -27,6 +27,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Auth;
 use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -104,24 +105,39 @@ class PlatformFirmIntegrationsPage extends Page implements HasTable
     public function table(Table $table): Table
     {
         return $table
-            ->records(function (): \Illuminate\Support\Collection {
+            // Phase 2 query-hardening fix: this closure now accepts the
+            // Filament-injected `page`/`recordsPerPage` values and
+            // passes them straight through to
+            // IntegrationPlatformOversightReadService::connectionsForFirm(),
+            // which now performs a genuine DB-level LIMIT/OFFSET
+            // (Eloquent's paginate()) instead of materializing every
+            // connection this firm has ever had and slicing in PHP
+            // afterward. Returning a real LengthAwarePaginator here
+            // (rather than a Collection) is what lets Filament's own
+            // pagination controls (see ->paginated() below) genuinely
+            // drive the underlying query.
+            ->records(function (int|string $page, int|string $recordsPerPage): LengthAwarePaginator {
                 $admin = Auth::guard('platform_admin')->user();
 
+                $perPage = (int) $recordsPerPage;
+                $pageNumber = (int) $page;
+
                 if (! $admin instanceof PlatformAdmin) {
-                    return collect();
+                    return new LengthAwarePaginator(collect(), 0, $perPage, $pageNumber);
                 }
 
                 $firm = Firm::findByUuid($this->firmUuid);
 
                 try {
-                    $connections = app(IntegrationPlatformOversightReadService::class)->connectionsForFirm($admin, $firm);
+                    $connections = app(IntegrationPlatformOversightReadService::class)
+                        ->connectionsForFirm($admin, $firm, $pageNumber, $perPage);
                 } catch (RuntimeException $e) {
                     Notification::make()->title('Not permitted')->body($e->getMessage())->danger()->send();
 
-                    return collect();
+                    return new LengthAwarePaginator(collect(), 0, $perPage, $pageNumber);
                 }
 
-                return $connections->map(fn (PlatformIntegrationConnectionSummary $connection): array => [
+                return $connections->through(fn (PlatformIntegrationConnectionSummary $connection): array => [
                     'uuid' => $connection->uuid,
                     'display_label' => $connection->displayLabel,
                     'provider_display_name' => $connection->providerDisplayName,
@@ -160,7 +176,7 @@ class PlatformFirmIntegrationsPage extends Page implements HasTable
             ])
             ->emptyStateHeading('No connections')
             ->emptyStateDescription('This firm has not connected any integration yet.')
-            ->paginated(false);
+            ->paginated([25, 50, 100]);
     }
 
     protected function getHeaderActions(): array

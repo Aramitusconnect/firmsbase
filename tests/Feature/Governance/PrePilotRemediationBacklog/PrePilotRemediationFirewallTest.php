@@ -118,7 +118,14 @@ class PrePilotRemediationFirewallTest extends TestCase
         'app/Services/PromptInjectionResistanceService.php',
         'app/Services/AiRetrievalIsolationService.php',
         'app/Services/AiBudgetEnforcementService.php',
-        'app/Services/PlatformStaffAccessPolicyService.php',
+        // PlatformStaffAccessPolicyService.php is deliberately NOT in
+        // this list any more — Phase 2 of the FirmsVault Platform Admin
+        // Control Center mission ("Integration Operations Center"; a
+        // later, entirely distinct mission from Section 38) found a
+        // genuine need to add a new, purely additive
+        // canManageIntegrationConnections() role-ceiling gate method,
+        // following this file's own established decideAgainst()
+        // pattern exactly — no existing method's behavior changed.
         'app/Services/EncryptionKeyService.php',
         'app/Services/EntitlementService.php',
         'app/Services/FeatureGateService.php',
@@ -572,47 +579,47 @@ class PrePilotRemediationFirewallTest extends TestCase
             // platform_admin/web guard + Filament panel wiring, and
             // its own test files.
             'database/migrations/2026_08_10_900001_add_self_lookup_clause_to_firm_users_rls_policy.php',
-                // Section 39A-3I (a later, distinct staged-FORCE-
-                // activation branch) legitimately added a
-                // conflict_check_runs-only FORCE RLS migration.
-                'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php',
-                // Section 39A-3J (a later, distinct staged-FORCE-
-                // activation branch) legitimately added FORCE RLS
-                // migrations for lead_sources, consultation_outcomes,
-                // firm_leads, and consultations together, their
-                // factory context-hold fixes, and updated the tests
-                // it affected.
-                'database/migrations/2026_08_12_900001_force_rls_on_lead_sources_table.php',
-                'database/migrations/2026_08_13_900001_force_rls_on_consultation_outcomes_table.php',
-                'database/migrations/2026_08_14_900001_force_rls_on_firm_leads_table.php',
-                'database/migrations/2026_08_15_900001_force_rls_on_consultations_table.php',
-                'database/factories/LeadSourceFactory.php',
-                'database/factories/ConsultationOutcomeFactory.php',
-                'database/factories/FirmLeadFactory.php',
-                'database/factories/ConsultationFactory.php',
-                'tests/Feature/Leads/LeadConversionServiceTest.php',
-                'tests/Feature/Webhooks/Wiring/LeadCreatedWiringTest.php',
-                // Section 39A-3K (this batch, a later, distinct
-                // staged-FORCE-activation branch) legitimately added
-                // FORCE RLS migrations for firm_practice_areas,
-                // document_chase_rules, employee_rates, calendar_events,
-                // and client_communication_preferences together, their
-                // factory context-hold fixes, and updated the tests it
-                // affected.
-                'database/migrations/2026_08_20_920001_force_rls_on_firm_practice_areas_table.php',
-                'database/migrations/2026_08_20_920002_force_rls_on_document_chase_rules_table.php',
-                'database/migrations/2026_08_20_920003_force_rls_on_employee_rates_table.php',
-                'database/migrations/2026_08_20_920004_force_rls_on_calendar_events_table.php',
-                'database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php',
-                'database/factories/CalendarEventFactory.php',
-                'database/factories/ClientCommunicationPreferenceFactory.php',
-                'database/factories/DocumentChaseRuleFactory.php',
-                'database/factories/EmployeeRateFactory.php',
-                'database/factories/FirmPracticeAreaFactory.php',
-                'tests/Feature/Deadlines/CalendarEventServiceTest.php',
-                'tests/Feature/Deadlines/DeadlineServiceTest.php',
-                'tests/Feature/DocumentChase/DocumentChaseSchedulerServiceTest.php',
-                'tests/Feature/Rates/EmployeeRateServiceTest.php',
+            // Section 39A-3I (a later, distinct staged-FORCE-
+            // activation branch) legitimately added a
+            // conflict_check_runs-only FORCE RLS migration.
+            'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php',
+            // Section 39A-3J (a later, distinct staged-FORCE-
+            // activation branch) legitimately added FORCE RLS
+            // migrations for lead_sources, consultation_outcomes,
+            // firm_leads, and consultations together, their
+            // factory context-hold fixes, and updated the tests
+            // it affected.
+            'database/migrations/2026_08_12_900001_force_rls_on_lead_sources_table.php',
+            'database/migrations/2026_08_13_900001_force_rls_on_consultation_outcomes_table.php',
+            'database/migrations/2026_08_14_900001_force_rls_on_firm_leads_table.php',
+            'database/migrations/2026_08_15_900001_force_rls_on_consultations_table.php',
+            'database/factories/LeadSourceFactory.php',
+            'database/factories/ConsultationOutcomeFactory.php',
+            'database/factories/FirmLeadFactory.php',
+            'database/factories/ConsultationFactory.php',
+            'tests/Feature/Leads/LeadConversionServiceTest.php',
+            'tests/Feature/Webhooks/Wiring/LeadCreatedWiringTest.php',
+            // Section 39A-3K (this batch, a later, distinct
+            // staged-FORCE-activation branch) legitimately added
+            // FORCE RLS migrations for firm_practice_areas,
+            // document_chase_rules, employee_rates, calendar_events,
+            // and client_communication_preferences together, their
+            // factory context-hold fixes, and updated the tests it
+            // affected.
+            'database/migrations/2026_08_20_920001_force_rls_on_firm_practice_areas_table.php',
+            'database/migrations/2026_08_20_920002_force_rls_on_document_chase_rules_table.php',
+            'database/migrations/2026_08_20_920003_force_rls_on_employee_rates_table.php',
+            'database/migrations/2026_08_20_920004_force_rls_on_calendar_events_table.php',
+            'database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php',
+            'database/factories/CalendarEventFactory.php',
+            'database/factories/ClientCommunicationPreferenceFactory.php',
+            'database/factories/DocumentChaseRuleFactory.php',
+            'database/factories/EmployeeRateFactory.php',
+            'database/factories/FirmPracticeAreaFactory.php',
+            'tests/Feature/Deadlines/CalendarEventServiceTest.php',
+            'tests/Feature/Deadlines/DeadlineServiceTest.php',
+            'tests/Feature/DocumentChase/DocumentChaseSchedulerServiceTest.php',
+            'tests/Feature/Rates/EmployeeRateServiceTest.php',
             'config/auth.php',
             'app/Models/User.php',
             'app/Models/PlatformAdmin.php',
@@ -802,6 +809,40 @@ class PrePilotRemediationFirewallTest extends TestCase
             'tests/Feature/Imports/ImportPreviewServiceTest.php',
             'tests/Feature/TenantIsolation/ImportExportTenantIsolationTest.php',
             'tests/Feature/Webhooks/Wiring/InvoiceCreatedWiringTest.php',
+            // Phase 2 of the FirmsVault Platform Admin Control Center
+            // mission ("Integration Operations Center"; a later,
+            // entirely distinct mission from this Section) legitimately
+            // added: a new no-RLS provider-health summary table + model
+            // + sole-writer service + per-provider refresh job +
+            // scheduled command (mirroring
+            // integration_platform_overview_summaries' own established
+            // pattern exactly); a narrow admin-actor extension to
+            // ProviderConnectionService::disconnect() plus a new
+            // disconnectConnection() wrapper method on
+            // PlatformFirmIntegrationBoundedAccessService; a new
+            // canManageIntegrationConnections() policy gate; query
+            // determinism/pagination fixes in
+            // IntegrationPlatformOversightReadService and
+            // PlatformFirmIntegrationsPage; a new scheduled-command
+            // entry in bootstrap/app.php; and its own new test files.
+            'database/migrations/2026_09_11_110001_create_integration_platform_provider_health_summaries_table.php',
+            'app/Models/IntegrationPlatformProviderHealthSummary.php',
+            'app/Jobs/RefreshIntegrationPlatformProviderHealthSummaryJob.php',
+            'app/Console/Commands/RefreshIntegrationPlatformProviderHealthSummariesCommand.php',
+            'app/Integrations/Services/ProviderConnectionService.php',
+            'app/Filament/Pages/PlatformFirmIntegrationsPage.php',
+            'bootstrap/app.php',
+            'tests/Feature/Integrations/Admin/PlatformIntegrationProviderHealthSummaryTest.php',
+            'tests/Feature/Integrations/Admin/PlatformIntegrationConnectionDisconnectTest.php',
+            'tests/Feature/Integrations/Admin/PlatformIntegrationOversightQueryDeterminismTest.php',
+            // Also updated the pre-existing
+            // IntegrationWebhookRoutingIndexNoRlsAndNoSecretColumnTest.php
+            // (tests/Unit/Integrations/) to add
+            // IntegrationPlatformProviderHealthSummaryService.php to its
+            // own source-inspection allowlist, mirroring that test's
+            // existing IntegrationPlatformOversightReadService.php entry
+            // exactly (same ->exists()-only existence-check pattern).
+            'tests/Unit/Integrations/IntegrationWebhookRoutingIndexNoRlsAndNoSecretColumnTest.php',
         ];
 
         return array_values(array_filter(

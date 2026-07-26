@@ -111,6 +111,19 @@ class SecretPatternScanTest extends TestCase
         // record to already exist (errors out otherwise), and only
         // nulls two existing columns plus writes one audit row — the
         // opposite of a seeding command.
+        // Phase 2 (FirmsVault Platform Admin Control Center,
+        // "Integration Operations Center") added
+        // RefreshIntegrationPlatformProviderHealthSummariesCommand —
+        // reviewed and safe: the SAME shape as
+        // RefreshIntegrationPlatformOverviewSummariesCommand immediately
+        // above. It only dispatches one
+        // RefreshIntegrationPlatformProviderHealthSummaryJob per
+        // registered provider; that job upserts sanitized aggregate
+        // counts (connected/disconnected firm counts, oauth/webhook/
+        // rate-limit health signals, error-classification counts)
+        // derived from each activated firm's own real tenant data into
+        // integration_platform_provider_health_summaries — never demo/
+        // seed data, and never raw production content.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
@@ -119,6 +132,7 @@ class SecretPatternScanTest extends TestCase
             'SyncRetryPollCommand.php',
             'RefreshIntegrationPlatformOverviewSummariesCommand.php',
             'PlatformAdminEmergencyMfaResetCommand.php',
+            'RefreshIntegrationPlatformProviderHealthSummariesCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

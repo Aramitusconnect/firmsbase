@@ -211,7 +211,15 @@ class CrossCuttingFirewallTest extends TestCase
                 && $path !== 'database/migrations/2026_08_29_970003_prepare_row_level_security_and_force_rls_on_import_batches_table.php'
                 && $path !== 'database/migrations/2026_08_29_970004_prepare_row_level_security_and_force_rls_on_implementation_projects_table.php'
                 && $path !== 'database/migrations/2026_08_29_970005_prepare_row_level_security_and_force_rls_on_fleet_migration_instance_status_table.php'
-                && $path !== 'database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php',
+                && $path !== 'database/migrations/2026_08_29_970006_prepare_row_level_security_and_force_rls_on_offboarding_requests_table.php'
+                // Phase 2 of the FirmsVault Platform Admin Control
+                // Center mission ("Integration Operations Center"; a
+                // later, entirely distinct mission from this
+                // cross-cutting package) legitimately added a new
+                // no-RLS provider-health summary table, mirroring
+                // integration_platform_overview_summaries' own
+                // established pattern.
+                && $path !== 'database/migrations/2026_09_11_110001_create_integration_platform_provider_health_summaries_table.php',
         ));
     }
 

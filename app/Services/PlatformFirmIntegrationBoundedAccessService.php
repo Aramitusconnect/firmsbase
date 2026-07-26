@@ -8,9 +8,11 @@ use App\Enums\PlatformRoleCode;
 use App\Enums\SupportAccessSessionStatus;
 use App\Enums\SupportAccessType;
 use App\Integrations\Enums\RequeueIneligibilityReason;
+use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationOutboxEvent;
 use App\Integrations\Models\IntegrationSyncItem;
 use App\Integrations\Services\IntegrationOutboxEventService;
+use App\Integrations\Services\ProviderConnectionService;
 use App\Integrations\Services\SyncItemService;
 use App\Jobs\OutboxDispatchJob;
 use App\Jobs\RetentionSweepJob;
@@ -132,9 +134,9 @@ final class PlatformFirmIntegrationBoundedAccessService
         private readonly SupportAccessPolicyService $supportPolicy,
         private readonly IntegrationOutboxEventService $outboxEvents,
         private readonly SyncItemService $syncItems,
-        private readonly TenantContextService $tenantContext = new TenantContextService(),
-    ) {
-    }
+        private readonly ProviderConnectionService $providerConnections,
+        private readonly TenantContextService $tenantContext = new TenantContextService,
+    ) {}
 
     // ---------------------------------------------------------------
     // Access gating
@@ -476,6 +478,85 @@ final class PlatformFirmIntegrationBoundedAccessService
         });
 
         RetentionSweepJob::dispatch($firm->id, dryRun: true);
+    }
+
+    /**
+     * Phase 2 (FirmsVault Platform Admin Control Center, "Integration
+     * Operations Center") addition. Disconnects a firm's live provider
+     * connection from the platform-admin panel. Mirrors
+     * requeueOutboxEvent()'s exact shape: role-ceiling authorization
+     * check first, fresh connection lookup scoped to the given firm,
+     * call into ProviderConnectionService::disconnect() via its new
+     * admin-actor path (Phase 2 addition — see that method's own
+     * docblock), then an audit event via this class's own established
+     * writeOversightAuditEvent() mechanism — never a second, parallel
+     * audit-write path.
+     *
+     * Authorization is intentionally NARROWER than every other method
+     * in this class: this is the first method here to actually consult
+     * PlatformStaffAccessPolicyService::canMutate() (a real, pre-existing
+     * gap — canMutate() was never consulted anywhere in this class
+     * before this method), and it uses the narrow
+     * canManageIntegrationConnections() role ceiling
+     * (SuperAdmin/PlatformAdmin only) instead of the broad
+     * assertCanAccessFirm()/canAccessIntegrationOversight() gate every
+     * read/requeue/nudge method above uses — mutating a firm's live
+     * connection is a materially more sensitive action than reading
+     * oversight data or requeuing an already-failed item. Both
+     * SuperAdmin and PlatformAdmin are already unconditionally-trusted
+     * ceiling roles (see UNCONDITIONALLY_TRUSTED_ROLES/
+     * requiresSupportAccessSession()), so no separate governed
+     * SupportAccessSession check is layered on top here — the role
+     * ceiling itself already excludes every role that would otherwise
+     * need one.
+     *
+     * The PlatformAdmin-side authorization is enforced entirely HERE,
+     * in this chokepoint, before ProviderConnectionService::disconnect()
+     * is ever reached — that method's own authorization checks
+     * (assertCanDisconnect()) are for the FirmUser path only and are
+     * deliberately skipped on the admin-actor path; it never trusts an
+     * unauthenticated/unauthorized caller on its own.
+     */
+    public function disconnectConnection(PlatformAdmin $admin, Firm $firm, int $connectionId, string $reason): FirmIntegration
+    {
+        $this->assertCanManageIntegrationConnections($admin);
+
+        return $this->tenantContext->runWithFirmContext($firm, function () use ($admin, $firm, $connectionId, $reason): FirmIntegration {
+            $connection = FirmIntegration::query()
+                ->where('id', $connectionId)
+                ->where('firm_id', $firm->id)
+                ->firstOrFail();
+
+            $disconnected = $this->providerConnections->disconnect($connection, actorPlatformAdminId: $admin->id);
+
+            $this->writeOversightAuditEvent($firm, $admin, 'platform_integration_oversight.connection_disconnected', [
+                'firm_integration_id' => $connectionId,
+                'reason' => $reason,
+                'resulting_status' => $disconnected->status->value,
+            ]);
+
+            return $disconnected;
+        });
+    }
+
+    /**
+     * The narrow role-ceiling + canMutate() gate disconnectConnection()
+     * uses instead of assertCanAccessFirm()/assertCanAccessOversight() —
+     * see that method's own docblock.
+     */
+    private function assertCanManageIntegrationConnections(PlatformAdmin $admin): void
+    {
+        $decision = $this->accessPolicy->canManageIntegrationConnections($admin);
+
+        if (! $decision->allowed) {
+            throw new RuntimeException($decision->reason ?? 'Not permitted to manage integration connections.');
+        }
+
+        $mutateDecision = $this->accessPolicy->canMutate($admin);
+
+        if (! $mutateDecision->allowed) {
+            throw new RuntimeException($mutateDecision->reason ?? 'Not permitted to mutate data.');
+        }
     }
 
     // ---------------------------------------------------------------

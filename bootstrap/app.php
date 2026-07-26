@@ -67,6 +67,18 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('integrations:platform-overview:refresh')
             ->everyFiveMinutes()
             ->withoutOverlapping();
+
+        // Phase 2 — FirmsVault Platform Admin Control Center
+        // ("Integration Operations Center"). Same shape as the
+        // platform-overview refresh immediately above: a plain, cheap,
+        // non-tenant Artisan command that enumerates the non-RLS
+        // `integration_providers` table and dispatches one per-provider
+        // queued job each, refreshing the no-RLS
+        // `integration_platform_provider_health_summaries` snapshot
+        // table the platform-admin Provider Health view reads.
+        $schedule->command('integrations:platform-provider-health:refresh')
+            ->everyFiveMinutes()
+            ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware): void {
         // Trust the AWS ALB in front of this container for exactly the

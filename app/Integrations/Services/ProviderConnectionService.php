@@ -84,8 +84,7 @@ class ProviderConnectionService
         private readonly ProviderRedirectUrlValidator $redirectValidator,
         private readonly TimelineEventRecorder $events,
         private readonly IntegrationEntitlementPolicyService $entitlement,
-    ) {
-    }
+    ) {}
 
     /**
      * Checkpoint 10 addition (frozen-design-post-security-review.md §2;
@@ -109,7 +108,7 @@ class ProviderConnectionService
      */
     public function startConnection(int $firmId, int $integrationProviderId, int $currentUserId): FirmIntegration
     {
-        return (new TenantContextService())->runWithFirmContext(
+        return (new TenantContextService)->runWithFirmContext(
             $firmId,
             function () use ($firmId, $integrationProviderId, $currentUserId) {
                 $actor = $this->resolveActingFirmUser($currentUserId, $firmId);
@@ -169,7 +168,7 @@ class ProviderConnectionService
      */
     public function renameConnection(FirmIntegration $connection, int $currentUserId, string $displayLabel): FirmIntegration
     {
-        return (new TenantContextService())->runWithFirmContext(
+        return (new TenantContextService)->runWithFirmContext(
             $connection->firm_id,
             function () use ($connection, $currentUserId, $displayLabel) {
                 $actor = $this->resolveActingFirmUser($currentUserId, $connection->firm_id);
@@ -204,7 +203,7 @@ class ProviderConnectionService
      */
     public function initiateOAuthConnection(FirmIntegration $connection, int $currentUserId, string $redirectUri): OAuthInitiationResult
     {
-        return (new TenantContextService())->runWithFirmContext(
+        return (new TenantContextService)->runWithFirmContext(
             $connection->firm_id,
             function () use ($connection, $currentUserId, $redirectUri) {
                 $actor = $this->resolveActingFirmUser($currentUserId, $connection->firm_id);
@@ -259,7 +258,7 @@ class ProviderConnectionService
         // firm-context transaction has already closed.
         $consumed = $this->stateService->resolveAndConsume($rawState, $currentUserId);
 
-        return (new TenantContextService())->runWithFirmContext(
+        return (new TenantContextService)->runWithFirmContext(
             $consumed->firmId,
             fn () => $this->finishCallback($consumed, $authorizationCode, $currentUserId)
         );
@@ -299,7 +298,7 @@ class ProviderConnectionService
         $this->redirectValidator->assertSafe($consumed->redirectUri);
 
         if (! $this->redirectValidator->matchesExpected($expectedRedirectUri, $consumed->redirectUri)) {
-            throw new OAuthRedirectUriMismatchException();
+            throw new OAuthRedirectUriMismatchException;
         }
 
         $provider = $this->resolveProvider($connection);
@@ -323,7 +322,7 @@ class ProviderConnectionService
                 'firm_integration_id' => $connection->id,
             ]);
 
-            throw new OAuthAccountMismatchException();
+            throw new OAuthAccountMismatchException;
         }
 
         $grantedScopes = $this->parseScopes($tokenSet['scope'] ?? '');
@@ -501,7 +500,7 @@ class ProviderConnectionService
      */
     public function refreshConnectionToken(FirmIntegration $connection): OAuthCallbackResult
     {
-        return (new TenantContextService())->runWithFirmContext(
+        return (new TenantContextService)->runWithFirmContext(
             $connection->firm_id,
             function () use ($connection) {
                 try {
@@ -663,7 +662,7 @@ class ProviderConnectionService
      */
     public function markRefreshExhausted(FirmIntegration $connection, string $category): FirmIntegration
     {
-        return (new TenantContextService())->runWithFirmContext(
+        return (new TenantContextService)->runWithFirmContext(
             $connection->firm_id,
             function () use ($connection, $category) {
                 $fresh = FirmIntegration::query()
@@ -702,13 +701,66 @@ class ProviderConnectionService
      * IntegrationCredential::update()), clears webhook_routing_token,
      * and best-effort revokes at the provider (failure to reach the
      * simulated provider never blocks local teardown).
+     *
+     * Phase 2 (FirmsVault Platform Admin Control Center, "Integration
+     * Operations Center") addition: $actorPlatformAdminId — a narrow,
+     * additive admin-actor extension, mirroring the established
+     * `?int $actorFirmUserId = null` pattern already used by
+     * IntegrationOutboxEventService::requeue()/
+     * SyncItemService::requeueFromFailedPermanent() (accepted purely as
+     * evidence to record, never re-derived or re-authorized here).
+     * Exactly one of $currentUserId/$actorPlatformAdminId must be
+     * provided. When $actorPlatformAdminId is given, resolveActingFirmUser()
+     * is skipped entirely (a PlatformAdmin has no FirmUser membership to
+     * resolve) and so is $accessPolicy->assertCanDisconnect() — that
+     * firm-user-specific business-role check does not apply to a
+     * platform-admin actor. This does NOT weaken this method's own
+     * authorization: it was never this method's job to authorize a
+     * PlatformAdmin caller in the first place. Per this phase's
+     * architecture ruling, that authorization is enforced entirely by
+     * the CALLER — App\Services\PlatformFirmIntegrationBoundedAccessService::
+     * disconnectConnection(), which checks a role ceiling AND
+     * PlatformStaffAccessPolicyService::canMutate() BEFORE ever reaching
+     * this method — never by loosening this method to trust an
+     * unauthenticated/unauthorized caller. $entitlement->assertEnabled()
+     * still applies unconditionally on both paths: it is a firm-level
+     * state check, independent of which kind of actor is disconnecting.
+     * Every $events->record() call below is passed $actorUser (a real
+     * `?User`, resolved only on the FirmUser path — TimelineEventRecorder::record()
+     * has no PlatformAdmin-actor slot, mirroring this class's own
+     * existing null-actor calls elsewhere, e.g. refreshConnectionToken()'s
+     * `integration_oauth.refresh_succeeded` event); the acting
+     * PlatformAdmin's id is instead folded into each event's own
+     * $metadata as `actor_platform_admin_id`, so the evidence is still
+     * captured, exactly as $actorFirmUserId's own "evidence to record"
+     * convention does for requeue()/requeueFromFailedPermanent().
      */
-    public function disconnect(FirmIntegration $connection, int $currentUserId): FirmIntegration
+    public function disconnect(FirmIntegration $connection, ?int $currentUserId = null, ?int $actorPlatformAdminId = null): FirmIntegration
     {
-        return (new TenantContextService())->runWithFirmContext(
+        if ($currentUserId === null && $actorPlatformAdminId === null) {
+            throw new RuntimeException('disconnect() requires either a FirmUser $currentUserId or an admin $actorPlatformAdminId.');
+        }
+
+        if ($currentUserId !== null && $actorPlatformAdminId !== null) {
+            throw new RuntimeException('disconnect() cannot be called with both a FirmUser $currentUserId and an admin $actorPlatformAdminId.');
+        }
+
+        return (new TenantContextService)->runWithFirmContext(
             $connection->firm_id,
-            function () use ($connection, $currentUserId) {
-                $actor = $this->resolveActingFirmUser($currentUserId, $connection->firm_id);
+            function () use ($connection, $currentUserId, $actorPlatformAdminId) {
+                $actorUser = null;
+
+                if ($currentUserId !== null) {
+                    $actor = $this->resolveActingFirmUser($currentUserId, $connection->firm_id);
+
+                    $this->accessPolicy->assertCanDisconnect($actor);
+
+                    $actorUser = $actor->user;
+                }
+
+                $auditMetadataExtra = $actorPlatformAdminId !== null
+                    ? ['actor_platform_admin_id' => $actorPlatformAdminId]
+                    : [];
 
                 // Checkpoint 10 addition (frozen design §0 ruling 2 /
                 // §3.2 item 1): gating disconnect() on entitlement means
@@ -716,9 +768,10 @@ class ProviderConnectionService
                 // revoked cannot use this path to clean up active
                 // connections. Accepted, disclosed, precedented residual
                 // — matches WebhookSubscriptionService::disable()'s
-                // identical, already-shipped shape exactly.
+                // identical, already-shipped shape exactly. Applies on
+                // BOTH the FirmUser and admin-actor paths — this is a
+                // firm-level state check, not an actor-specific one.
                 $this->entitlement->assertEnabled($connection->firm);
-                $this->accessPolicy->assertCanDisconnect($actor);
 
                 $fresh = FirmIntegration::query()
                     ->where('id', $connection->id)
@@ -743,11 +796,11 @@ class ProviderConnectionService
                         // succeeded. Checkpoint 9 addition (frozen
                         // design §3): record the failure for audit
                         // visibility — never blocks the teardown below.
-                        $this->events->record($fresh->firm, 'integration_oauth.provider_revocation_failed', $fresh, $actor->user, [
+                        $this->events->record($fresh->firm, 'integration_oauth.provider_revocation_failed', $fresh, $actorUser, array_merge([
                             'firm_integration_id' => $fresh->id,
                             'category' => $e->category(),
                             'status_code' => $e->statusCode(),
-                        ]);
+                        ], $auditMetadataExtra));
                     }
                 }
 
@@ -760,11 +813,11 @@ class ProviderConnectionService
                     // Checkpoint 9 addition (frozen design §3): fires
                     // for EACH credential revoked inside this loop, not
                     // once per disconnect() call.
-                    $this->events->record($fresh->firm, 'integration_oauth.credential_revoked', $fresh, $actor->user, [
+                    $this->events->record($fresh->firm, 'integration_oauth.credential_revoked', $fresh, $actorUser, array_merge([
                         'firm_integration_id' => $fresh->id,
                         'integration_credential_id' => $credential->id,
                         'credential_type' => $credential->credential_type->value,
-                    ]);
+                    ], $auditMetadataExtra));
                 }
 
                 $fresh = $this->transitionStatus($fresh, ConnectionStatus::Disconnected, null, [
@@ -801,9 +854,9 @@ class ProviderConnectionService
                     ->where('firm_integration_id', $fresh->id)
                     ->delete();
 
-                $this->events->record($fresh->firm, 'integration_oauth.disconnect', $fresh, $actor->user, [
+                $this->events->record($fresh->firm, 'integration_oauth.disconnect', $fresh, $actorUser, array_merge([
                     'firm_integration_id' => $fresh->id,
-                ]);
+                ], $auditMetadataExtra));
 
                 return $fresh;
             }
@@ -843,7 +896,7 @@ class ProviderConnectionService
      */
     public function enableWebhookRouting(FirmIntegration $connection, int $currentUserId): string
     {
-        return (new TenantContextService())->runWithFirmContext(
+        return (new TenantContextService)->runWithFirmContext(
             $connection->firm_id,
             function () use ($connection, $currentUserId) {
                 $actor = $this->resolveActingFirmUser($currentUserId, $connection->firm_id);
@@ -888,7 +941,7 @@ class ProviderConnectionService
      */
     public function disableWebhookRouting(FirmIntegration $connection, int $currentUserId): void
     {
-        (new TenantContextService())->runWithFirmContext(
+        (new TenantContextService)->runWithFirmContext(
             $connection->firm_id,
             function () use ($connection, $currentUserId): void {
                 $actor = $this->resolveActingFirmUser($currentUserId, $connection->firm_id);
@@ -936,7 +989,7 @@ class ProviderConnectionService
      * fine, but every caller in this class routes through this method
      * anyway for consistency).
      *
-     * @param  array<string, mixed> $extraAttributes
+     * @param  array<string, mixed>  $extraAttributes
      */
     private function transitionStatus(
         FirmIntegration $connection,

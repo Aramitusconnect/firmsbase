@@ -125,6 +125,18 @@ final class IntegrationWebhookRoutingIndexNoRlsAndNoSecretColumnTest extends Tes
             // discipline, not a boundary violation.
             'IntegrationPlatformOversightReadService.php',
             'PlatformIntegrationConnectionSummary.php',
+            // Phase 2 (FirmsVault Platform Admin Control Center,
+            // "Integration Operations Center") addition — same
+            // ->exists()-only existence-check pattern as
+            // IntegrationPlatformOversightReadService above
+            // (DB::table('integration_webhook_routing_index')->where('firm_integration_id', ...)
+            // ->exists()), used inside refreshForProvider()'s per-firm
+            // aggregation loop to derive the sanitized
+            // webhook_health_signal column on
+            // integration_platform_provider_health_summaries. Never
+            // selects/exposes webhook_routing_token_hash or any other
+            // column from this table.
+            'IntegrationPlatformProviderHealthSummaryService.php',
         ];
 
         $violations = [];

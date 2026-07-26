@@ -65,6 +65,22 @@ class QueueConsoleContextRolloutTest extends TestCase
         // recordConsoleEvent() path; no raw SQL, no BYPASSRLS, no
         // superuser role, no set_config manipulation of any RLS-relevant
         // session variable.
+        // Phase 2 (FirmsVault Platform Admin Control Center,
+        // "Integration Operations Center") added
+        // RefreshIntegrationPlatformProviderHealthSummariesCommand —
+        // reviewed and safe: the SAME shape as
+        // RefreshIntegrationPlatformOverviewSummariesCommand immediately
+        // above. It only enumerates the non-FORCE-RLS `integration_providers`
+        // table (a small, static, seeded-only global reference catalog —
+        // see that table's own create migration) and dispatches one
+        // RefreshIntegrationPlatformProviderHealthSummaryJob per
+        // provider; the job itself scopes every per-firm read via
+        // TenantContextService::runWithFirmContext() (iterating each
+        // activated firm explicitly, one firm's tenant context at a
+        // time) before upserting sanitized aggregate counts into the
+        // no-RLS integration_platform_provider_health_summaries table —
+        // no RLS bypass, no raw SQL, no BYPASSRLS, no superuser role, no
+        // production data seeded or mutated (read-and-aggregate only).
         // Any OTHER command appearing here has not been reviewed for
         // the silent-bypass risk this test exists to catch.
         $allowlist = [
@@ -75,6 +91,7 @@ class QueueConsoleContextRolloutTest extends TestCase
             'SyncRetryPollCommand.php',
             'RefreshIntegrationPlatformOverviewSummariesCommand.php',
             'PlatformAdminEmergencyMfaResetCommand.php',
+            'RefreshIntegrationPlatformProviderHealthSummariesCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

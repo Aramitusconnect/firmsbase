@@ -103,6 +103,25 @@ class PlatformStaffAccessPolicyService
     ];
 
     /**
+     * Phase 2 (FirmsVault Platform Admin Control Center, "Integration
+     * Operations Center") addition. Gates
+     * PlatformFirmIntegrationBoundedAccessService::disconnectConnection()
+     * — mutating a firm's live provider connection is a materially more
+     * sensitive action than the broad, read-oriented
+     * canAccessIntegrationOversight() gate that method's sibling
+     * read/requeue/nudge methods use, so this is narrowed to the same
+     * unconditionally-trusted ceiling FIRM_MANAGEMENT_ROLES already
+     * uses (SuperAdmin/PlatformAdmin only), deliberately excluding
+     * SupportAgent/ImplementationSpecialist even though both pass the
+     * broader canAccessIntegrationOversight() gate — mirrors
+     * canManageFirms()'s exact shape and rationale.
+     */
+    private const INTEGRATION_CONNECTION_MANAGEMENT_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+    ];
+
+    /**
      * Phase 1 addition. Creating/deactivating/role-assigning other
      * PlatformAdmins is the single most sensitive administrative action
      * this service gates — per this checkpoint's explicit brief,
@@ -237,6 +256,21 @@ class PlatformStaffAccessPolicyService
     public function canManageRoles(PlatformAdmin $admin): PlatformStaffAccessDecision
     {
         return $this->decideAgainst($admin, self::ROLE_MANAGEMENT_ROLES, 'role management');
+    }
+
+    /**
+     * Phase 2 (FirmsVault Platform Admin Control Center, "Integration
+     * Operations Center") addition. See
+     * INTEGRATION_CONNECTION_MANAGEMENT_ROLES' own docblock. No Filament
+     * UI wires this yet in this phase (the Connections module's
+     * disconnect action is built in a later Phase 2 UI pass) — this
+     * gate exists ready for that future, separately-authorized build,
+     * and is exercised now by
+     * PlatformFirmIntegrationBoundedAccessService::disconnectConnection().
+     */
+    public function canManageIntegrationConnections(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::INTEGRATION_CONNECTION_MANAGEMENT_ROLES, 'integration connection management');
     }
 
     /**

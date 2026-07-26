@@ -581,6 +581,19 @@ class RowLevelSecurityCoverageMappingService
      * writers. The 26 entries above are untouched — this addition only
      * appends.
      *
+     * Phase 2 (FirmsVault Platform Admin Control Center, "Integration
+     * Operations Center") appended one further exemption at the end of
+     * this array: integration_platform_provider_health_summaries. UNLIKE
+     * integration_platform_overview_summaries/integration_webhook_routing_index,
+     * this IS an ordinary "no firm_id" exemption — direct inspection of
+     * database/migrations/2026_09_11_110001_create_integration_platform_provider_health_summaries_table.php
+     * confirms it carries no firm_id column at all (a per-provider
+     * cross-firm rollup, not a per-firm row) — structurally identical in
+     * shape to `integration_providers` (the table it foreign-keys to).
+     * See EXEMPT_TABLE_METADATA below for the full reason/readers/
+     * writers. The 27 entries above are untouched — this addition only
+     * appends.
+     *
      * @var array<int, string>
      */
     private const EXEMPT_TABLES = [
@@ -609,6 +622,10 @@ class RowLevelSecurityCoverageMappingService
         // independently-reviewed reason instead — see
         // EXEMPT_TABLE_METADATA below.
         'integration_platform_overview_summaries',
+        // Phase 2 (FirmsVault Platform Admin Control Center) addition —
+        // see docblock above. An ordinary "no firm_id" exemption, unlike
+        // the two entries immediately above.
+        'integration_platform_provider_health_summaries',
     ];
 
     /**
@@ -1171,6 +1188,26 @@ class RowLevelSecurityCoverageMappingService
                 .'database/migrations/2026_09_09_090001_create_integration_platform_overview_summaries_table.php '
                 .'for the full "WHY THIS TABLE HAS NO RLS AND NO FORCE RLS" reasoning. See EXEMPT_TABLE_METADATA.',
         ],
+        // Phase 2 (FirmsVault Platform Admin Control Center, "Integration
+        // Operations Center") addition. Unlike
+        // integration_platform_overview_summaries immediately above, this
+        // IS an ordinary "no firm_id" Global exemption — no firm_id
+        // column exists on this table at all (confirmed via the create
+        // migration), structurally identical in shape to
+        // `integration_providers`.
+        'integration_platform_provider_health_summaries' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Global, no RLS, no firm_id column at all — a per-PROVIDER cross-firm rollup (one row per '
+                .'provider), not a per-firm row. Every column is a sanitized count/status/timestamp snapshot, never '
+                .'raw resource content, a secret, or credential material. Written only by '
+                .'App\\Services\\IntegrationPlatformProviderHealthSummaryService::refreshForProvider() (an '
+                .'upsert-only sole writer that iterates every activated firm\'s OWN tenant context via '
+                .'TenantContextService::runWithFirmContext() to build the aggregate — never a live cross-firm '
+                .'query). See '
+                .'database/migrations/2026_09_11_110001_create_integration_platform_provider_health_summaries_table.php '
+                .'for the full "WHY THIS TABLE HAS NO RLS AND NO FORCE RLS" reasoning.',
+        ],
         'integration_webhook_receipts' => [
             'classification' => TenantOwnershipClassification::Global,
             'ownership_path' => null,
@@ -1458,6 +1495,28 @@ class RowLevelSecurityCoverageMappingService
             ],
             'authorized_writers' => [
                 'App\\Services\\IntegrationPlatformOverviewSummaryService::refreshForFirm() — invoked exclusively by App\\Jobs\\RefreshIntegrationPlatformOverviewSummaryJob, one job per activated firm, dispatched by the integrations:platform-overview:refresh scheduled command',
+            ],
+        ],
+        'integration_platform_provider_health_summaries' => [
+            'reason' => 'Phase 2 (FirmsVault Platform Admin Control Center, "Integration Operations Center"): unlike '
+                .'integration_platform_overview_summaries/integration_webhook_routing_index, this table carries NO '
+                .'firm_id column at all — an ordinary "no firm_id" Global exemption, structurally identical in shape '
+                .'to integration_providers (the table it foreign-keys to). It is a per-PROVIDER cross-firm rollup '
+                .'(one row per provider), never a per-firm row. Every column is a sanitized count/status/timestamp '
+                .'snapshot only — connection counts, a derived oauth/webhook/rate-limit health signal, a '
+                .'recent-error-classification count summary, and a computed_at staleness marker — never raw '
+                .'resource content, a secret, or credential material of any kind. There is exactly one writer, an '
+                .'upsert-only scheduled per-provider refresh job, which itself iterates every activated firm\'s OWN '
+                .'tenant context via TenantContextService::runWithFirmContext() to build the aggregate (structurally '
+                .'required, not optional: integration_connection_health is FORCE-RLS\'d per firm, so a live '
+                .'cross-firm query against it is not possible at all) — never a live, unscoped cross-firm query. See '
+                .'database/migrations/2026_09_11_110001_create_integration_platform_provider_health_summaries_table.php '
+                .'for the full "WHY THIS TABLE HAS NO RLS AND NO FORCE RLS" reasoning.',
+            'expected_readers' => [
+                'App\\Filament\\Pages\\PlatformIntegrationProviderHealthPage (the always-visible, cross-firm SuperAdmin Provider Health view, built in a later Phase 2 UI pass) via a future read service',
+            ],
+            'authorized_writers' => [
+                'App\\Services\\IntegrationPlatformProviderHealthSummaryService::refreshForProvider() — invoked exclusively by App\\Jobs\\RefreshIntegrationPlatformProviderHealthSummaryJob, one job per registered provider, dispatched by the integrations:platform-provider-health:refresh scheduled command',
             ],
         ],
     ];
