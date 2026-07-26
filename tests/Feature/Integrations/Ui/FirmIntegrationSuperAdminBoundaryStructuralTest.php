@@ -390,7 +390,59 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RequeueDeadLetterQueueEventAction.php',
         ];
 
-        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles);
+        // Phase 3 FirmsVault Admin Control Center ("Billing and
+        // Commercial Administration") — same cascade-widening pattern
+        // as every prior phase. Unlike Phase 1/2, none of these files
+        // reference the Integration domain at all (platform billing is
+        // its own separate domain), but they still live outside
+        // app/Filament/Firm and so still need an explicit allowlist
+        // entry against this file's broader "which non-Firm files are
+        // allowed to exist" sweep. Two concurrent, independently-scoped
+        // passes landed in this same shared worktree; both sets of new
+        // files are listed here.
+        $phase3BillingAndCommercialAdministrationAllowedRelativeFiles = [
+            // Subscriptions/Plans/Add-ons/Trials pass.
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformSubscriptionResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformSubscriptionResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListPlatformSubscriptions.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformSubscriptionResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewPlatformSubscription.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlanResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlanResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListPlans.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlanResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewPlan.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlanAddOnResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlanAddOnResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListPlanAddOns.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlanAddOnResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewPlanAddOn.php',
+            'Resources'.DIRECTORY_SEPARATOR.'TrialRequestResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'TrialRequestResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListTrialRequests.php',
+            'Resources'.DIRECTORY_SEPARATOR.'TrialRequestResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewTrialRequest.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'CancelSubscriptionAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ActivatePlanAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ArchivePlanAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'SetPlanModuleEnabledAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RetirePlanModuleAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ProvisionTrialRequestAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ActivateTrialRequestAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ExpireTrialRequestAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ConvertTrialRequestAction.php',
+            // Invoices/Failed Payments/Usage Charges/Credits and
+            // Refunds/Resellers pass, landed concurrently in this same
+            // worktree.
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformInvoiceResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformInvoiceResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListPlatformInvoices.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformInvoiceResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewPlatformInvoice.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformInvoiceResource'.DIRECTORY_SEPARATOR.'RelationManagers'.DIRECTORY_SEPARATOR.'InvoiceLinesRelationManager.php',
+            'Resources'.DIRECTORY_SEPARATOR.'FailedPaymentResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'FailedPaymentResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListFailedPayments.php',
+            'Resources'.DIRECTORY_SEPARATOR.'FailedPaymentResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewFailedPayment.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformRefundResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformRefundResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListPlatformRefunds.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformRefundResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewPlatformRefund.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformUsageChargesPage.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformResellersPage.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'FinalizePlatformInvoiceAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'VoidPlatformInvoiceAction.php',
+        ];
+
+        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles);
 
         $unauthorizedNonFirmFilamentFiles = [];
 
