@@ -76,6 +76,7 @@ class PlatformStaffAccessPolicyServiceTest extends TestCase
         $this->assertTrue($this->service->canManageFirms($admin)->allowed);
         $this->assertTrue($this->service->canManagePlatformAdministrators($admin)->allowed);
         $this->assertTrue($this->service->canManageRoles($admin)->allowed);
+        $this->assertTrue($this->service->canManagePlatformBilling($admin)->allowed);
     }
 
     // ------------------------------------------------------------
@@ -130,5 +131,60 @@ class PlatformStaffAccessPolicyServiceTest extends TestCase
 
         $this->assertFalse($this->service->canAccessPlatformAdministration($admin)->allowed);
         $this->assertNotNull($this->service->canAccessPlatformAdministration($admin)->reason);
+    }
+
+    // ------------------------------------------------------------
+    // Phase 3 FirmsVault Admin Control Center additions
+    // ("Billing and Commercial Administration")
+    // ------------------------------------------------------------
+
+    public function test_super_admin_and_platform_admin_can_manage_platform_billing(): void
+    {
+        $superAdmin = PlatformAdmin::factory()->create();
+        $this->roleService->grant($superAdmin, PlatformRoleCode::SuperAdmin);
+
+        $platformAdmin = PlatformAdmin::factory()->create();
+        $this->roleService->grant($platformAdmin, PlatformRoleCode::PlatformAdmin);
+
+        foreach ([$superAdmin, $platformAdmin] as $admin) {
+            $this->assertTrue($this->service->canManagePlatformBilling($admin)->allowed);
+        }
+    }
+
+    public function test_billing_admin_can_read_platform_billing_but_not_manage_it(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $this->roleService->grant($admin, PlatformRoleCode::BillingAdmin);
+
+        $this->assertTrue(
+            $this->service->canAccessPlatformBilling($admin)->allowed,
+            'canAccessPlatformBilling() (read) must stay unweakened by the new manage gate.'
+        );
+        $this->assertFalse(
+            $this->service->canManagePlatformBilling($admin)->allowed,
+            'BillingAdmin may view platform billing but must not be able to mutate it — narrowed to the same SuperAdmin/PlatformAdmin ceiling every other manage gate in this class uses.'
+        );
+    }
+
+    public function test_other_roles_cannot_manage_or_read_platform_billing(): void
+    {
+        $supportAgent = PlatformAdmin::factory()->create();
+        $this->roleService->grant($supportAgent, PlatformRoleCode::SupportAgent);
+
+        $salesRep = PlatformAdmin::factory()->create();
+        $this->roleService->grant($salesRep, PlatformRoleCode::SalesRep);
+
+        foreach ([$supportAgent, $salesRep] as $admin) {
+            $this->assertFalse($this->service->canAccessPlatformBilling($admin)->allowed);
+            $this->assertFalse($this->service->canManagePlatformBilling($admin)->allowed);
+        }
+    }
+
+    public function test_a_platform_admin_with_no_role_is_denied_platform_billing_management(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+
+        $this->assertFalse($this->service->canManagePlatformBilling($admin)->allowed);
+        $this->assertNotNull($this->service->canManagePlatformBilling($admin)->reason);
     }
 }

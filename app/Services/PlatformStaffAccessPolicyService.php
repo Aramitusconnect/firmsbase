@@ -122,6 +122,40 @@ class PlatformStaffAccessPolicyService
     ];
 
     /**
+     * Phase 3 (FirmsVault Platform Admin Control Center, "Billing and
+     * Commercial Administration") addition. Gates mutation of platform
+     * billing state (cancelling a subscription, activating/archiving a
+     * Plan, enabling/retiring a PlanModule, transitioning a
+     * TrialRequest, finalizing/voiding a PlatformInvoice) — narrower
+     * than the existing canAccessPlatformBilling() read gate (which
+     * stays unchanged and keeps its broader PLATFORM_BILLING_ROLES set,
+     * including BillingAdmin).
+     *
+     * Deliberately narrowed all the way to SuperAdmin/PlatformAdmin,
+     * excluding BillingAdmin even though BillingAdmin passes
+     * canAccessPlatformBilling() — this mirrors the exact shape and
+     * reasoning canManageFirms() and canManageIntegrationConnections()
+     * already established in this file: every "manage" gate added so
+     * far narrows its corresponding broader read gate down to the same
+     * unconditionally-trusted ceiling (SuperAdmin/PlatformAdmin only),
+     * never to a wider role set, regardless of which roles legitimately
+     * read that domain's data. Platform billing mutations carry real
+     * commercial/financial consequence (an admin cancelling a paying
+     * account's subscription, voiding an issued invoice, or archiving a
+     * live plan) — materially more sensitive than BillingAdmin's
+     * intended scope of viewing/reconciling billing data, and there is
+     * no existing precedent anywhere in this file for a "manage" gate
+     * that is wider than SuperAdmin+PlatformAdmin. A future, separately
+     * -authorized change could widen this to include BillingAdmin if a
+     * concrete workflow need for it is identified — this gate is not
+     * meant to foreclose that, just to not assume it without one.
+     */
+    private const PLATFORM_BILLING_MANAGEMENT_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+    ];
+
+    /**
      * Phase 1 addition. Creating/deactivating/role-assigning other
      * PlatformAdmins is the single most sensitive administrative action
      * this service gates — per this checkpoint's explicit brief,
@@ -271,6 +305,20 @@ class PlatformStaffAccessPolicyService
     public function canManageIntegrationConnections(PlatformAdmin $admin): PlatformStaffAccessDecision
     {
         return $this->decideAgainst($admin, self::INTEGRATION_CONNECTION_MANAGEMENT_ROLES, 'integration connection management');
+    }
+
+    /**
+     * Phase 3 (FirmsVault Platform Admin Control Center, "Billing and
+     * Commercial Administration") addition. See
+     * PLATFORM_BILLING_MANAGEMENT_ROLES' own docblock for the role-set
+     * reasoning. Gates the actor-parameterized mutating methods on
+     * PlatformSubscriptionService, PlanService, PlanModuleService,
+     * TrialRequestService, and PlatformInvoiceService added in this
+     * same phase.
+     */
+    public function canManagePlatformBilling(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::PLATFORM_BILLING_MANAGEMENT_ROLES, 'platform billing management');
     }
 
     /**

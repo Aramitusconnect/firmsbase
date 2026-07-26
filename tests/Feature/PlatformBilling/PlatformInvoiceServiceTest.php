@@ -6,8 +6,11 @@ use App\Enums\PlatformInvoiceStatus;
 use App\Models\BillingAccount;
 use App\Models\Firm;
 use App\Models\Organization;
+use App\Models\PlatformAdmin;
 use App\Services\PlatformInvoiceService;
+use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class PlatformInvoiceServiceTest extends TestCase
@@ -19,7 +22,7 @@ class PlatformInvoiceServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new PlatformInvoiceService();
+        $this->service = new PlatformInvoiceService;
     }
 
     public function test_create_draft_invoice(): void
@@ -70,5 +73,77 @@ class PlatformInvoiceServiceTest extends TestCase
 
         $secondInvoice = $this->service->createDraftInvoice($account, now()->startOfMonth(), now()->endOfMonth());
         $this->assertSame(PlatformInvoiceStatus::Void, $this->service->void($secondInvoice)->status);
+    }
+
+    // ------------------------------------------------------------
+    // Phase 3 FirmsVault Admin Control Center additions — actor +
+    // audit plumbing on finalize()/void(). markPaid() is deliberately
+    // untouched (see that method's own docblock) — no test added here.
+    // ------------------------------------------------------------
+
+    public function test_finalize_and_void_without_an_actor_write_no_audit_events(): void
+    {
+        $account = BillingAccount::factory()->create();
+        $invoice = $this->service->createDraftInvoice($account, now()->startOfMonth(), now()->endOfMonth());
+        $secondInvoice = $this->service->createDraftInvoice($account, now()->startOfMonth(), now()->endOfMonth());
+
+        $this->service->finalize($invoice);
+        $this->service->void($secondInvoice);
+
+        $count = app(TenantContextService::class)->runWithoutFirmContext(
+            fn () => DB::table('security_events')
+                ->whereIn('event_type', ['invoice_finalized', 'invoice_voided'])
+                ->count()
+        );
+        $this->assertSame(0, $count, 'No actor supplied means no audit event and no behavior change from before this addition.');
+    }
+
+    public function test_finalize_with_an_actor_writes_a_correctly_attributed_audit_event(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $account = BillingAccount::factory()->create();
+        $invoice = $this->service->createDraftInvoice($account, now()->startOfMonth(), now()->endOfMonth());
+
+        $finalized = $this->service->finalize($invoice, actor: $admin);
+
+        $row = app(TenantContextService::class)->runWithoutFirmContext(
+            fn () => DB::table('security_events')->where('event_type', 'invoice_finalized')->first()
+        );
+
+        $this->assertNotNull($row);
+        $this->assertNull($row->firm_id);
+        $this->assertSame(PlatformAdmin::class, $row->actor_type);
+        $this->assertSame($admin->id, $row->actor_id);
+        $this->assertSame('platform_billing', $row->category);
+
+        $metadata = json_decode($row->metadata, true);
+        $this->assertSame($finalized->id, $metadata['platform_invoice_id']);
+        $this->assertSame($account->id, $metadata['billing_account_id']);
+        $this->assertSame('open', $metadata['resulting_status']);
+        $this->assertEqualsCanonicalizing(
+            ['platform_invoice_id', 'billing_account_id', 'resulting_status'],
+            array_keys($metadata)
+        );
+    }
+
+    public function test_void_with_an_actor_writes_a_correctly_attributed_audit_event(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $account = BillingAccount::factory()->create();
+        $invoice = $this->service->createDraftInvoice($account, now()->startOfMonth(), now()->endOfMonth());
+
+        $voided = $this->service->void($invoice, actor: $admin);
+
+        $row = app(TenantContextService::class)->runWithoutFirmContext(
+            fn () => DB::table('security_events')->where('event_type', 'invoice_voided')->first()
+        );
+
+        $this->assertNotNull($row);
+        $this->assertSame($admin->id, $row->actor_id);
+
+        $metadata = json_decode($row->metadata, true);
+        $this->assertSame($voided->id, $metadata['platform_invoice_id']);
+        $this->assertSame($account->id, $metadata['billing_account_id']);
+        $this->assertSame('void', $metadata['resulting_status']);
     }
 }

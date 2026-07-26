@@ -2,10 +2,14 @@
 
 namespace Tests\Feature\Plans;
 
+use App\Enums\PlanModuleStatus;
 use App\Models\ModuleCatalog;
 use App\Models\Plan;
+use App\Models\PlatformAdmin;
 use App\Services\PlanModuleService;
+use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class PlanModuleServiceTest extends TestCase
@@ -17,7 +21,7 @@ class PlanModuleServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new PlanModuleService();
+        $this->service = new PlanModuleService;
     }
 
     public function test_add_module_creates_a_row(): void
@@ -74,7 +78,109 @@ class PlanModuleServiceTest extends TestCase
         $retired = $this->service->retire($planModule);
 
         $this->assertFalse($retired->enabled);
-        $this->assertSame(\App\Enums\PlanModuleStatus::Retired, $retired->status);
+        $this->assertSame(PlanModuleStatus::Retired, $retired->status);
+    }
+
+    // ------------------------------------------------------------
+    // Phase 3 FirmsVault Admin Control Center additions — actor +
+    // audit plumbing on setEnabled()/retire().
+    // ------------------------------------------------------------
+
+    public function test_set_enabled_without_an_actor_writes_no_audit_event(): void
+    {
+        $plan = Plan::factory()->create();
+        $module = ModuleCatalog::factory()->create();
+        $planModule = $this->service->addModule($plan, $module->module_code);
+
+        $this->service->setEnabled($planModule, false);
+
+        $count = app(TenantContextService::class)->runWithoutFirmContext(
+            fn () => DB::table('security_events')
+                ->whereIn('event_type', ['plan_module_enabled', 'plan_module_disabled'])
+                ->count()
+        );
+        $this->assertSame(0, $count);
+    }
+
+    public function test_set_enabled_false_with_an_actor_writes_a_plan_module_disabled_event(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $plan = Plan::factory()->create();
+        $module = ModuleCatalog::factory()->create();
+        $planModule = $this->service->addModule($plan, $module->module_code, enabled: true);
+
+        $disabled = $this->service->setEnabled($planModule, false, actor: $admin);
+
+        $row = app(TenantContextService::class)->runWithoutFirmContext(
+            fn () => DB::table('security_events')->where('event_type', 'plan_module_disabled')->first()
+        );
+
+        $this->assertNotNull($row);
+        $this->assertNull($row->firm_id);
+        $this->assertSame(PlatformAdmin::class, $row->actor_type);
+        $this->assertSame($admin->id, $row->actor_id);
+        $this->assertSame('platform_billing', $row->category);
+
+        $metadata = json_decode($row->metadata, true);
+        $this->assertSame($disabled->id, $metadata['plan_module_id']);
+        $this->assertSame($plan->id, $metadata['plan_id']);
+        $this->assertSame($module->module_code, $metadata['module_code']);
+        $this->assertFalse($metadata['enabled']);
+    }
+
+    public function test_set_enabled_true_with_an_actor_writes_a_plan_module_enabled_event(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $plan = Plan::factory()->create();
+        $module = ModuleCatalog::factory()->create();
+        $planModule = $this->service->addModule($plan, $module->module_code, enabled: false);
+
+        $this->service->setEnabled($planModule, true, actor: $admin);
+
+        $row = app(TenantContextService::class)->runWithoutFirmContext(
+            fn () => DB::table('security_events')->where('event_type', 'plan_module_enabled')->first()
+        );
+
+        $this->assertNotNull($row);
+        $metadata = json_decode($row->metadata, true);
+        $this->assertTrue($metadata['enabled']);
+    }
+
+    public function test_retire_without_an_actor_writes_no_audit_event(): void
+    {
+        $plan = Plan::factory()->create();
+        $module = ModuleCatalog::factory()->create();
+        $planModule = $this->service->addModule($plan, $module->module_code);
+
+        $this->service->retire($planModule);
+
+        $count = app(TenantContextService::class)->runWithoutFirmContext(
+            fn () => DB::table('security_events')->where('event_type', 'plan_module_retired')->count()
+        );
+        $this->assertSame(0, $count);
+    }
+
+    public function test_retire_with_an_actor_writes_a_correctly_attributed_audit_event(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $plan = Plan::factory()->create();
+        $module = ModuleCatalog::factory()->create();
+        $planModule = $this->service->addModule($plan, $module->module_code);
+
+        $retired = $this->service->retire($planModule, actor: $admin);
+
+        $row = app(TenantContextService::class)->runWithoutFirmContext(
+            fn () => DB::table('security_events')->where('event_type', 'plan_module_retired')->first()
+        );
+
+        $this->assertNotNull($row);
+        $this->assertSame($admin->id, $row->actor_id);
+
+        $metadata = json_decode($row->metadata, true);
+        $this->assertSame($retired->id, $metadata['plan_module_id']);
+        $this->assertSame($plan->id, $metadata['plan_id']);
+        $this->assertSame($module->module_code, $metadata['module_code']);
+        $this->assertEqualsCanonicalizing(['plan_module_id', 'plan_id', 'module_code'], array_keys($metadata));
     }
 
     /**

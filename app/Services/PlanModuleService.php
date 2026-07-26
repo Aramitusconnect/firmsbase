@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\PlanModuleStatus;
 use App\Models\Plan;
 use App\Models\PlanModule;
+use App\Models\PlatformAdmin;
 
 /**
  * PlanModuleService — enable/disable module_catalog modules for a
@@ -13,9 +14,24 @@ use App\Models\PlanModule;
  * PLAN'S module rows — it never writes firm_entitlements directly;
  * EntitlementPlanSyncService reads plan_modules and writes
  * firm_entitlements when a firm's license is assigned this plan.
+ *
+ * Phase 3 (FirmsVault Platform Admin Control Center, "Billing and
+ * Commercial Administration") addition: setEnabled()/retire() now
+ * accept an optional PlatformAdmin $actor and, when one is supplied,
+ * record a PlatformAdminAuditEventRecorder::recordPlatformEvent() row
+ * (the firm-less variant — a PlanModule is not tied to one firm). When
+ * $actor is null (every existing caller — no app-level call site
+ * currently passes one; only tests call these methods directly today)
+ * behavior is byte-for-byte unchanged from before this addition.
  */
 class PlanModuleService
 {
+    private const AUDIT_CATEGORY = 'platform_billing';
+
+    public function __construct(
+        private readonly PlatformAdminAuditEventRecorder $auditRecorder = new PlatformAdminAuditEventRecorder,
+    ) {}
+
     public function addModule(Plan $plan, string $moduleCode, bool $enabled = true, bool $isAddon = false): PlanModule
     {
         return PlanModule::query()->updateOrCreate(
@@ -24,13 +40,44 @@ class PlanModuleService
         );
     }
 
-    public function setEnabled(PlanModule $planModule, bool $enabled): PlanModule
+    public function setEnabled(PlanModule $planModule, bool $enabled, ?PlatformAdmin $actor = null): PlanModule
     {
-        return tap($planModule)->update(['enabled' => $enabled])->fresh();
+        $updated = tap($planModule)->update(['enabled' => $enabled])->fresh();
+
+        if ($actor !== null) {
+            $this->auditRecorder->recordPlatformEvent(
+                $actor,
+                $enabled ? 'plan_module_enabled' : 'plan_module_disabled',
+                self::AUDIT_CATEGORY,
+                [
+                    'plan_module_id' => $updated->id,
+                    'plan_id' => $updated->plan_id,
+                    'module_code' => $updated->module_code,
+                    'enabled' => $updated->enabled,
+                ],
+            );
+        }
+
+        return $updated;
     }
 
-    public function retire(PlanModule $planModule): PlanModule
+    public function retire(PlanModule $planModule, ?PlatformAdmin $actor = null): PlanModule
     {
-        return tap($planModule)->update(['status' => PlanModuleStatus::Retired, 'enabled' => false])->fresh();
+        $retired = tap($planModule)->update(['status' => PlanModuleStatus::Retired, 'enabled' => false])->fresh();
+
+        if ($actor !== null) {
+            $this->auditRecorder->recordPlatformEvent(
+                $actor,
+                'plan_module_retired',
+                self::AUDIT_CATEGORY,
+                [
+                    'plan_module_id' => $retired->id,
+                    'plan_id' => $retired->plan_id,
+                    'module_code' => $retired->module_code,
+                ],
+            );
+        }
+
+        return $retired;
     }
 }
