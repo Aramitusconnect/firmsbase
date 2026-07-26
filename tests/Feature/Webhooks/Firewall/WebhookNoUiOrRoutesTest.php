@@ -13,10 +13,10 @@ use Tests\TestCase;
 class WebhookNoUiOrRoutesTest extends TestCase
 {
     private const FORBIDDEN_PATH_FRAGMENTS = [
-        'routes' . DIRECTORY_SEPARATOR,
-        'Http' . DIRECTORY_SEPARATOR . 'Controllers',
-        'Filament' . DIRECTORY_SEPARATOR,
-        'Livewire' . DIRECTORY_SEPARATOR,
+        'routes'.DIRECTORY_SEPARATOR,
+        'Http'.DIRECTORY_SEPARATOR.'Controllers',
+        'Filament'.DIRECTORY_SEPARATOR,
+        'Livewire'.DIRECTORY_SEPARATOR,
     ];
 
     public function test_no_blade_files_exist_anywhere_in_the_phase_14_package(): void
@@ -25,7 +25,7 @@ class WebhookNoUiOrRoutesTest extends TestCase
         $bladeFiles = $this->filesMatching($root, '/\.blade\.php$/');
         $webhookRelated = array_filter($bladeFiles, fn ($f) => str_contains($f, 'Webhook') || str_contains($f, 'webhook'));
 
-        $this->assertEmpty($webhookRelated, 'Found unexpected webhook-related Blade files: ' . implode(', ', $webhookRelated));
+        $this->assertEmpty($webhookRelated, 'Found unexpected webhook-related Blade files: '.implode(', ', $webhookRelated));
     }
 
     public function test_no_routes_files_reference_webhook_management_endpoints(): void
@@ -48,7 +48,7 @@ class WebhookNoUiOrRoutesTest extends TestCase
             }
         }
 
-        $this->assertEmpty($violations, 'Found webhook subscription routes: ' . implode(', ', $violations));
+        $this->assertEmpty($violations, 'Found webhook subscription routes: '.implode(', ', $violations));
     }
 
     public function test_no_controller_files_exist_for_webhooks(): void
@@ -66,8 +66,37 @@ class WebhookNoUiOrRoutesTest extends TestCase
             fn ($f) => str_contains($f, 'Webhook')
         );
 
-        $this->assertEmpty($violations, 'Found webhook controller files: ' . implode(', ', $violations));
+        $this->assertEmpty($violations, 'Found webhook controller files: '.implode(', ', $violations));
     }
+
+    /**
+     * POST-PHASE-2-INTEGRATION-OPERATIONS-CENTER UPDATE (FirmsVault
+     * Platform Admin Control Center mission, Phase 2 — "Integration
+     * Operations Center"): this boundary originally protected against
+     * building UI for the Phase 14 webhook DELIVERY/SUBSCRIPTION system
+     * this file's own class docblock describes (`webhook_events`/
+     * `WebhookSubscription`/`WebhookDelivery` — an entirely different,
+     * unrelated feature: outbound webhook fan-out to subscriber URLs).
+     * `App\Filament\Resources\WebhookEventResource` (+ its List/View
+     * Pages) is a DIFFERENT, later-authorized surface entirely: a
+     * read-only, cross-firm platform-admin oversight view over
+     * `integration_inbound_webhook_events` — persisted, already-verified
+     * INBOUND webhook receipts belonging to the separate Integration
+     * domain (checkpoint-06/07), never the Phase 14 outbound
+     * delivery/subscription system this test protects. Mirrors
+     * FirmIntegrationSuperAdminBoundaryStructuralTest's own
+     * already-established "cascade update" pattern for exactly this
+     * situation (a later, legitimately-authorized phase's file name
+     * happens to collide with an earlier phase's blanket keyword sweep)
+     * — narrowly allowlisted by exact basename, not a weakening of the
+     * underlying Phase 14 invariant, which continues to reject every
+     * OTHER webhook-named Filament file unconditionally.
+     */
+    private const PHASE_2_INTEGRATION_OPERATIONS_CENTER_ALLOWED_BASENAMES = [
+        'WebhookEventResource.php',
+        'ListWebhookEvents.php',
+        'ViewWebhookEvent.php',
+    ];
 
     public function test_no_filament_resource_files_exist_for_webhooks(): void
     {
@@ -81,10 +110,10 @@ class WebhookNoUiOrRoutesTest extends TestCase
 
         $violations = array_filter(
             $this->filesMatching($filamentDir, '/\.php$/'),
-            fn ($f) => str_contains($f, 'Webhook')
+            fn ($f) => str_contains($f, 'Webhook') && ! in_array(basename($f), self::PHASE_2_INTEGRATION_OPERATIONS_CENTER_ALLOWED_BASENAMES, true)
         );
 
-        $this->assertEmpty($violations, 'Found Filament webhook resource files: ' . implode(', ', $violations));
+        $this->assertEmpty($violations, 'Found Filament webhook resource files: '.implode(', ', $violations));
     }
 
     public function test_no_livewire_component_files_exist_for_webhooks(): void
@@ -102,7 +131,7 @@ class WebhookNoUiOrRoutesTest extends TestCase
             fn ($f) => str_contains($f, 'Webhook')
         );
 
-        $this->assertEmpty($violations, 'Found Livewire webhook component files: ' . implode(', ', $violations));
+        $this->assertEmpty($violations, 'Found Livewire webhook component files: '.implode(', ', $violations));
     }
 
     public function test_no_phase_14_service_or_model_class_extends_a_controller_or_livewire_component(): void
@@ -130,7 +159,7 @@ class WebhookNoUiOrRoutesTest extends TestCase
             }
         }
 
-        $this->assertEmpty($violations, 'Found webhook classes extending Controller/Livewire Component: ' . implode(', ', $violations));
+        $this->assertEmpty($violations, 'Found webhook classes extending Controller/Livewire Component: '.implode(', ', $violations));
     }
 
     /**

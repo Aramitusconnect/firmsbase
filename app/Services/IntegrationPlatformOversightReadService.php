@@ -148,6 +148,136 @@ final class IntegrationPlatformOversightReadService
     }
 
     /**
+     * Phase 2 UI-building pass. The fix for overviewSummaries()'s own
+     * "KNOWN, DEFERRED GAP" docblock above — but added as a NEW,
+     * separate, additive method rather than a change to
+     * overviewSummaries() itself, because that method's unbounded,
+     * full-table read is still correctly relied on by
+     * PlatformExecutiveDashboardService::integrationsSection() (a
+     * genuine cross-firm SUM/attention-count over every firm's row,
+     * which cannot be correctly computed from one page of results) and
+     * by this class's own existing determinism/correctness test
+     * coverage. Bounding THAT method would silently make the executive
+     * dashboard's totals wrong — this method exists for
+     * PlatformIntegrationOverviewPage's actual row-by-row LISTING UI
+     * instead, where a user paging through firm rows does not need the
+     * whole table materialized in PHP the way a cross-firm SUM does.
+     *
+     * Genuine DB-level LIMIT/OFFSET (Laravel's query-builder
+     * ->paginate()) against `integration_platform_overview_summaries` —
+     * a real table this admin panel can query directly with an ordinary
+     * WHERE clause (no FORCE RLS, no per-firm loop required; see that
+     * table's own "WHY THIS TABLE HAS NO RLS" docblock), unlike
+     * FirmIntegration/FirmUser's own FORCE-RLS'd, per-firm-loop-required
+     * shape. Filters/search are applied at the SQL level, BEFORE
+     * pagination, so a filtered/searched result set is genuinely bounded
+     * end to end, never "paginate first, then discover most of the page
+     * doesn't match the filter."
+     *
+     * A true per-provider filter remains not implementable here (see
+     * PlatformIntegrationOverviewPage's own docblock) — this table
+     * carries no provider column at all.
+     *
+     * `firm_name` is resolved via ONE additional bounded query, scoped
+     * only to the firm_uuids present on the current page (never one
+     * query per row) — mirrors PlatformAdministratorResource::
+     * lastLoginAtByAdminId()'s established "bounded to the current
+     * page, one query, no N+1" discipline.
+     *
+     * @param  array<string, mixed>  $filters  Raw Filament filter state
+     *                                         (e.g. `['firm_uuid' => ['value' => '...']]`), read the same
+     *                                         `['value']`-nested shape PlatformIntegrationOverviewPage's
+     *                                         records() closure already reads for its other filters.
+     * @return LengthAwarePaginator<int, array<string, mixed>>
+     */
+    public function paginatedOverviewSummaries(
+        PlatformAdmin $admin,
+        array $filters = [],
+        ?string $search = null,
+        int $page = 1,
+        int $perPage = 25,
+    ): LengthAwarePaginator {
+        $this->boundedAccess->assertCanAccessOversight($admin);
+
+        $query = DB::table('integration_platform_overview_summaries');
+
+        $firmUuid = $filters['firm_uuid']['value'] ?? null;
+        if (filled($firmUuid)) {
+            $query->where('firm_uuid', $firmUuid);
+        }
+
+        $lastSyncOutcome = $filters['last_sync_outcome']['value'] ?? null;
+        if (filled($lastSyncOutcome)) {
+            $query->where('last_sync_outcome', $lastSyncOutcome);
+        }
+
+        $healthSummaryState = $filters['health_summary_state']['value'] ?? null;
+        if (filled($healthSummaryState)) {
+            $query->where('health_summary_state', $healthSummaryState);
+        }
+
+        $entitlementEnabled = $filters['entitlement_enabled']['value'] ?? null;
+        if ($entitlementEnabled !== null && $entitlementEnabled !== '') {
+            $query->where('entitlement_enabled', (bool) (int) $entitlementEnabled);
+        }
+
+        $failureState = $filters['failure_state']['value'] ?? null;
+        if (filled($failureState)) {
+            $query->where(function ($subQuery) use ($failureState): void {
+                if ($failureState === 'has_failures') {
+                    $subQuery->where('failed_permanent_sync_item_count', '>', 0)
+                        ->orWhere('dead_lettered_outbox_event_count', '>', 0)
+                        ->orWhere('open_conflict_count', '>', 0);
+                } else {
+                    $subQuery->where('failed_permanent_sync_item_count', 0)
+                        ->where('dead_lettered_outbox_event_count', 0)
+                        ->where('open_conflict_count', 0);
+                }
+            });
+        }
+
+        if (filled($search)) {
+            // Bounded: at most 500 name-matched firms feed the
+            // ->orWhereIn() below — a firm-name search that somehow
+            // matched more than that is truncated rather than
+            // unbounded, mirroring this class's own established
+            // LIMIT-everywhere discipline (AUDIT_HISTORY_LIMIT etc.).
+            $matchingFirmUuids = Firm::query()
+                ->where('name', 'like', '%'.$search.'%')
+                ->orderBy('id')
+                ->limit(500)
+                ->pluck('uuid');
+
+            $query->where(function ($subQuery) use ($search, $matchingFirmUuids): void {
+                $subQuery->where('firm_uuid', 'like', '%'.$search.'%');
+
+                if ($matchingFirmUuids->isNotEmpty()) {
+                    $subQuery->orWhereIn('firm_uuid', $matchingFirmUuids);
+                }
+            });
+        }
+
+        $paginator = $query
+            ->orderBy('firm_uuid')
+            ->orderBy('id')
+            ->paginate(perPage: $perPage, page: $page);
+
+        $rows = collect($paginator->items())->map(fn (object $row): array => (array) $row);
+
+        $firmNames = Firm::query()
+            ->whereIn('uuid', $rows->pluck('firm_uuid')->filter()->unique()->values())
+            ->pluck('name', 'uuid');
+
+        $rows = $rows->map(function (array $row) use ($firmNames): array {
+            $row['firm_name'] = $firmNames[$row['firm_uuid']] ?? null;
+
+            return $row;
+        })->values();
+
+        return $paginator->setCollection($rows);
+    }
+
+    /**
      * Phase 2 query-hardening fix: `orderBy('created_at')` is followed
      * by an explicit `orderBy('id')` tie-breaker, and the query is now
      * genuinely bounded/paginated at the DB level (a real `LIMIT`/

@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Integrations\Data\ConnectionHealthSummary;
 use App\Integrations\Enums\ConflictStatus;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\HealthSummaryState;
 use App\Integrations\Enums\OutboxEventStatus;
 use App\Integrations\Enums\SyncItemStatus;
+use App\Integrations\Enums\SyncRunStatus;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationConflict;
 use App\Integrations\Models\IntegrationOutboxEvent;
@@ -55,9 +57,8 @@ final class IntegrationPlatformOverviewSummaryService
     public function __construct(
         private readonly HealthStateService $healthState,
         private readonly IntegrationEntitlementPolicyService $entitlement,
-        private readonly TenantContextService $tenantContext = new TenantContextService(),
-    ) {
-    }
+        private readonly TenantContextService $tenantContext = new TenantContextService,
+    ) {}
 
     public function refreshForFirm(Firm $firm): void
     {
@@ -94,6 +95,22 @@ final class IntegrationPlatformOverviewSummaryService
             ->orderByDesc('created_at')
             ->first(['status', 'started_at', 'finished_at', 'created_at']);
 
+        // Phase 2 UI-building pass addition: unlike $latestSyncRun above
+        // (the most recent run regardless of outcome — "last sync
+        // ATTEMPT at"), this is explicitly filtered to
+        // SyncRunStatus::Succeeded only, so
+        // `last_successful_sync_at` is an honest "last time a sync for
+        // this firm actually succeeded" signal, never conflated with a
+        // recent failed/partial attempt. Ordered/tie-broken the same
+        // way as $latestSyncRun (created_at desc, id desc) for
+        // deterministic selection when two runs share a created_at.
+        $latestSucceededSyncRun = IntegrationSyncRun::query()
+            ->where('firm_id', $firm->id)
+            ->where('status', SyncRunStatus::Succeeded->value)
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->first(['finished_at', 'started_at', 'created_at']);
+
         $failedPermanentSyncItemCount = IntegrationSyncItem::query()
             ->where('firm_id', $firm->id)
             ->where('status', SyncItemStatus::FailedPermanent->value)
@@ -116,6 +133,7 @@ final class IntegrationPlatformOverviewSummaryService
             'health_summary_state' => $healthSummaryState,
             'last_sync_outcome' => $latestSyncRun?->status?->value,
             'last_sync_at' => $latestSyncRun?->finished_at ?? $latestSyncRun?->started_at ?? $latestSyncRun?->created_at,
+            'last_successful_sync_at' => $latestSucceededSyncRun?->finished_at ?? $latestSucceededSyncRun?->started_at ?? $latestSucceededSyncRun?->created_at,
             'failed_permanent_sync_item_count' => $failedPermanentSyncItemCount,
             'dead_lettered_outbox_event_count' => $deadLetteredOutboxEventCount,
             'open_conflict_count' => $openConflictCount,
@@ -124,7 +142,7 @@ final class IntegrationPlatformOverviewSummaryService
     }
 
     /**
-     * @param  Collection<int, \App\Integrations\Data\ConnectionHealthSummary>  $summaries
+     * @param  Collection<int, ConnectionHealthSummary>  $summaries
      */
     private function mostSevereHealthState(Collection $summaries): ?string
     {
@@ -162,6 +180,7 @@ final class IntegrationPlatformOverviewSummaryService
                 'health_summary_state',
                 'last_sync_outcome',
                 'last_sync_at',
+                'last_successful_sync_at',
                 'failed_permanent_sync_item_count',
                 'dead_lettered_outbox_event_count',
                 'open_conflict_count',

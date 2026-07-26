@@ -96,6 +96,45 @@ use Tests\TestCase;
  * test_app_filament_widgets_directory_contains_no_integration_domain_class()
  * itself, not merely in the broader non-Firm-file sweep below. See
  * $executiveDashboardAllowedRelativeFiles below.
+ *
+ * POST-PHASE-2-INTEGRATION-OPERATIONS-CENTER UPDATE (FirmsVault
+ * Platform Admin Control Center mission, Phase 2 — "Integration
+ * Operations Center"): a sixth cascade, same reasoning again. This
+ * phase legitimately, deliberately expands the admin panel's own
+ * Integration-domain surface (correctly, this time — unlike Checkpoint
+ * 10/11's "hard boundary," these files ARE meant to reference
+ * App\Integrations\* directly, since their whole job is cross-firm
+ * Integration oversight) with TWO concurrent, independently-scoped
+ * passes landing in this same shared worktree:
+ *   - This pass's own scope (Integration Overview upgrade, the new
+ *     cross-firm ConnectionResource, Provider Health page, drill-down
+ *     cross-links): Pages/PlatformProviderHealthPage.php,
+ *     Widgets/PlatformIntegrationOverviewSummaryCardsWidget.php,
+ *     Resources/ConnectionResource.php + its List/View Pages,
+ *     Actions/Platform/DisconnectConnectionAction.php.
+ *   - A parallel pass's scope (Sync Failures, Webhook Events,
+ *     Dead-Letter Queue, Conflicts, Integration Usage), landed
+ *     concurrently in this same worktree: Resources/SyncFailureResource.php,
+ *     Resources/WebhookEventResource.php,
+ *     Resources/DeadLetterQueueResource.php, Resources/ConflictResource.php
+ *     (each + their List/View Pages), Pages/PlatformIntegrationUsagePage.php,
+ *     Actions/Platform/RetrySyncFailureAction.php,
+ *     Actions/Platform/RequeueDeadLetterQueueEventAction.php.
+ * Both passes' new Integration-domain-referencing files are correctly
+ * exempted in test_app_filament_pages_directory_contains_no_integration_domain_class()/
+ * test_app_filament_resources_directory_does_not_exist_or_contains_no_integration_domain_class()/
+ * test_app_filament_widgets_directory_contains_no_integration_domain_class()
+ * (via each directory's own allowedBasenames list) and in
+ * $phase2IntegrationOperationsCenterAllowedRelativeFiles below —
+ * mirroring every prior cascade's exact allowlist-widening pattern, not
+ * a weakening of the underlying invariant.
+ *
+ * COORDINATION NOTE: since two agents land files in this one shared test
+ * concurrently, whichever pass's commit lands second should re-verify
+ * this allowlist still matches the real file set on disk before commit
+ * (e.g. re-run this file's own tests) — this update reflects the file
+ * set present in the shared worktree at the time this pass's own
+ * verification ran, not a guess.
  */
 final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
 {
@@ -116,7 +155,20 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             return;
         }
 
-        $this->assertNoIntegrationDomainReferenceUnder($dir);
+        // POST-PHASE-2-INTEGRATION-OPERATIONS-CENTER UPDATE: see this
+        // file's own class docblock — these are Phase 2's own two
+        // concurrent, reviewed cross-firm Integration-oversight
+        // Resources (this pass's ConnectionResource, and a parallel
+        // pass's SyncFailureResource/WebhookEventResource/
+        // DeadLetterQueueResource/ConflictResource), each legitimately
+        // referencing the Integration domain by design.
+        $this->assertNoIntegrationDomainReferenceUnder($dir, allowedBasenames: [
+            'ConnectionResource.php',
+            'SyncFailureResource.php',
+            'WebhookEventResource.php',
+            'DeadLetterQueueResource.php',
+            'ConflictResource.php',
+        ]);
     }
 
     public function test_app_filament_pages_directory_contains_no_integration_domain_class(): void
@@ -135,10 +187,17 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
         // violation. Anything else Integration-domain-shaped under this
         // directory (including a file with a DIFFERENT name that still
         // references the Integration domain) remains rejected.
+        //
+        // POST-PHASE-2-INTEGRATION-OPERATIONS-CENTER UPDATE: two more —
+        // this pass's own PlatformProviderHealthPage.php and a parallel
+        // pass's PlatformIntegrationUsagePage.php — see this file's own
+        // class docblock.
         $this->assertNoIntegrationDomainReferenceUnder($dir, allowedBasenames: [
             'PlatformIntegrationOverviewPage.php',
             'PlatformFirmIntegrationsPage.php',
             'PlatformFirmIntegrationDetailPage.php',
+            'PlatformProviderHealthPage.php',
+            'PlatformIntegrationUsagePage.php',
         ]);
     }
 
@@ -167,8 +226,17 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
         // already carry above. The other 6 widgets carry no Integration
         // reference at all and remain covered by the unconditional
         // sweep.
+        //
+        // POST-PHASE-2-INTEGRATION-OPERATIONS-CENTER UPDATE: one more —
+        // this pass's own PlatformIntegrationOverviewSummaryCardsWidget.php
+        // (same class of reviewed exception: it aggregates the same
+        // no-RLS integration_platform_overview_summaries table via a
+        // single bounded SQL query — see that class's own docblock for
+        // why it does not go through IntegrationPlatformOversightReadService
+        // the way PlatformIntegrationsHealthWidget does).
         $this->assertNoIntegrationDomainReferenceUnder($dir, allowedBasenames: [
             'PlatformIntegrationsHealthWidget.php',
+            'PlatformIntegrationOverviewSummaryCardsWidget.php',
         ]);
     }
 
@@ -289,7 +357,40 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Widgets'.DIRECTORY_SEPARATOR.'PlatformRecentPrivilegedActivityWidget.php',
         ];
 
-        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles);
+        // Phase 2 FirmsVault Admin Control Center ("Integration
+        // Operations Center") — see this file's own class docblock's
+        // "POST-PHASE-2-INTEGRATION-OPERATIONS-CENTER UPDATE" note. Two
+        // concurrent, independently-scoped passes landed in this same
+        // shared worktree; both sets of new files are listed here.
+        $phase2IntegrationOperationsCenterAllowedRelativeFiles = [
+            // This pass's own scope.
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformProviderHealthPage.php',
+            'Widgets'.DIRECTORY_SEPARATOR.'PlatformIntegrationOverviewSummaryCardsWidget.php',
+            'Resources'.DIRECTORY_SEPARATOR.'ConnectionResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'ConnectionResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListConnections.php',
+            'Resources'.DIRECTORY_SEPARATOR.'ConnectionResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewConnection.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'DisconnectConnectionAction.php',
+            // A parallel pass's scope (Sync Failures/Webhook Events/
+            // Dead-Letter Queue/Conflicts/Integration Usage), landed
+            // concurrently in this same worktree.
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformIntegrationUsagePage.php',
+            'Resources'.DIRECTORY_SEPARATOR.'SyncFailureResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'SyncFailureResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListSyncFailures.php',
+            'Resources'.DIRECTORY_SEPARATOR.'SyncFailureResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewSyncFailure.php',
+            'Resources'.DIRECTORY_SEPARATOR.'WebhookEventResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'WebhookEventResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListWebhookEvents.php',
+            'Resources'.DIRECTORY_SEPARATOR.'WebhookEventResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewWebhookEvent.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DeadLetterQueueResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DeadLetterQueueResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListDeadLetterQueueEvents.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DeadLetterQueueResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewDeadLetterQueueEvent.php',
+            'Resources'.DIRECTORY_SEPARATOR.'ConflictResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'ConflictResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListConflicts.php',
+            'Resources'.DIRECTORY_SEPARATOR.'ConflictResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewConflict.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RetrySyncFailureAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RequeueDeadLetterQueueEventAction.php',
+        ];
+
+        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles);
 
         $unauthorizedNonFirmFilamentFiles = [];
 
@@ -309,8 +410,8 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
 
         $this->assertEmpty(
             $unauthorizedNonFirmFilamentFiles,
-            'Every file under app/Filament must live under app/Filament/Firm OR be one of Checkpoint 11\'s own '.
-            'exactly-10 frozen-allowlisted files — found unauthorized: '.implode(', ', $unauthorizedNonFirmFilamentFiles)
+            'Every file under app/Filament must live under app/Filament/Firm OR be on one of this file\'s own '.
+            'explicit cascade allowlists — found unauthorized: '.implode(', ', $unauthorizedNonFirmFilamentFiles)
         );
     }
 

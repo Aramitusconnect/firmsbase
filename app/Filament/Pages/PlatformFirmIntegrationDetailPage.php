@@ -6,6 +6,8 @@ namespace App\Filament\Pages;
 
 use App\Filament\Actions\Platform\RequeueOutboxEventAsSupportAction;
 use App\Filament\Actions\Platform\RequeueSyncItemAsSupportAction;
+use App\Filament\Resources\ConnectionResource;
+use App\Filament\Resources\ConnectionResource\Pages\ViewConnection;
 use App\Integrations\Data\PlatformIntegrationConnectionSummary;
 use App\Models\Firm;
 use App\Models\PlatformAdmin;
@@ -24,9 +26,12 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
+use Throwable;
 
 /**
  * PlatformFirmIntegrationDetailPage — Checkpoint 11 (frozen-design-
@@ -137,13 +142,14 @@ class PlatformFirmIntegrationDetailPage extends Page implements HasTable
             $this->conflictsSection($admin, $firm, $connection, $readService),
             $this->retentionSection($admin, $readService),
             $this->auditHistorySection($admin, $firm, $readService),
+            $this->relatedModulesSection($connection),
         ]);
     }
 
     public function table(Table $table): Table
     {
         return $table
-            ->records(function (): \Illuminate\Support\Collection {
+            ->records(function (): Collection {
                 $admin = Auth::guard('platform_admin')->user();
 
                 if (! $admin instanceof PlatformAdmin) {
@@ -398,5 +404,110 @@ class PlatformFirmIntegrationDetailPage extends Page implements HasTable
             ])
             ->collapsible()
             ->collapsed();
+    }
+
+    /**
+     * Phase 2 UI-building pass (Integration Operations Center). Two
+     * kinds of cross-link:
+     *   1. To the new cross-firm App\Filament\Resources\ConnectionResource
+     *      — this SAME connection, viewed in the global list. Both
+     *      classes are built by this same pass, so this link is a
+     *      direct, unguarded ConnectionResource\Pages\ViewConnection::getUrl()
+     *      call.
+     *   2. To the Sync Failures/Webhook Events/Dead-Letter Queue/
+     *      Conflicts/Integration Usage resources a PARALLEL agent is
+     *      building concurrently, in separate files this pass does not
+     *      touch and cannot see the final class names of. Each is
+     *      guarded via crossLinkIfAvailable() (class_exists() + a
+     *      try/catch around ::getUrl()) so a not-yet-merged target
+     *      renders a plain "not yet available" line instead of
+     *      crashing this page. The exact FQCN/route/filter-key guesses
+     *      are placeholders — see this pass's own final report for the
+     *      full candidate list and the coordination note to verify them
+     *      once both passes land.
+     */
+    private function relatedModulesSection(PlatformIntegrationConnectionSummary $connection): Section
+    {
+        $lines = [
+            sprintf(
+                'View this connection in the global Connections list: %s',
+                ViewConnection::getUrl(['firmUuid' => $this->firmUuid, 'connectionUuid' => $this->connectionUuid]),
+            ),
+        ];
+
+        $targets = [
+            'Sync Failures' => ['App\Filament\Resources\SyncFailureResource', 'App\Filament\Resources\SyncFailuresResource'],
+            'Webhook Events' => ['App\Filament\Resources\WebhookEventResource', 'App\Filament\Resources\WebhookEventsResource'],
+            'Dead-Letter Queue' => ['App\Filament\Resources\DeadLetterQueueResource', 'App\Filament\Resources\DeadLetterEventResource', 'App\Filament\Resources\DeadLetteredEventResource'],
+            'Conflicts' => ['App\Filament\Resources\ConflictResource', 'App\Filament\Resources\IntegrationConflictResource'],
+        ];
+
+        foreach ($targets as $label => $candidates) {
+            $url = $this->crossLinkIfAvailable($candidates, $connection->id);
+
+            $lines[] = $url !== null
+                ? "{$label}: {$url}"
+                : "{$label}: not yet available (module not merged into this branch yet).";
+        }
+
+        // "Integration Usage" — see App\Filament\Resources\ConnectionResource\
+        // Pages\ViewConnection::crossLinkToUsagePage()'s identical
+        // docblock: PlatformIntegrationUsagePage is a firm/platform-wide
+        // aggregate Page with no per-connection filtering support and a
+        // different ::getUrl() signature than a Resource, so it is linked
+        // plainly rather than forced into the Resource-shaped guard above.
+        $lines[] = $this->crossLinkToUsagePage();
+
+        return Section::make('Related Modules')
+            ->description('Cross-links to other Integration Operations Center modules for this same connection. Also confirms ConnectionResource::class exists: '.(class_exists(ConnectionResource::class) ? 'yes.' : 'no.'))
+            ->schema([
+                UnorderedList::make($lines),
+            ])
+            ->collapsible()
+            ->collapsed();
+    }
+
+    private function crossLinkToUsagePage(): string
+    {
+        $class = 'App\Filament\Pages\PlatformIntegrationUsagePage';
+
+        if (! class_exists($class) || ! method_exists($class, 'getUrl')) {
+            return 'Integration Usage: not yet available (module not merged into this branch yet).';
+        }
+
+        try {
+            return 'Integration Usage: '.$class::getUrl();
+        } catch (Throwable $e) {
+            Log::info('PlatformFirmIntegrationDetailPage: PlatformIntegrationUsagePage exists but getUrl() failed — leaving it unlinked rather than crashing.', [
+                'exception' => $e->getMessage(),
+            ]);
+
+            return 'Integration Usage: not yet available (module not merged into this branch yet).';
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $candidateClasses
+     */
+    private function crossLinkIfAvailable(array $candidateClasses, int $connectionId): ?string
+    {
+        foreach ($candidateClasses as $class) {
+            if (! class_exists($class) || ! method_exists($class, 'getUrl')) {
+                continue;
+            }
+
+            try {
+                return $class::getUrl('index', ['tableFilters' => ['connection' => ['value' => $connectionId]]]);
+            } catch (Throwable $e) {
+                Log::info('PlatformFirmIntegrationDetailPage: a candidate cross-link target class exists but getUrl() failed — leaving it unlinked rather than crashing.', [
+                    'class' => $class,
+                    'exception' => $e->getMessage(),
+                ]);
+
+                continue;
+            }
+        }
+
+        return null;
     }
 }
