@@ -25,6 +25,15 @@ use Psr\Log\LoggerInterface;
  * class's own typed method signatures, not a denylist over a free-form
  * array), so there is no code path through which row-level content
  * could reach this log even by future accident.
+ *
+ * $logPath is an optional constructor override (Phase 3 final
+ * determinism correction, FirmsVault Admin Control Center mission):
+ * every production call site resolves this class with zero
+ * constructor arguments via Laravel's container, so the default
+ * (`storage_path('logs/integration-retention-sweep.log')`, unchanged
+ * production behavior) is used identically everywhere except tests,
+ * which can now inject their own isolated, per-test-unique path
+ * instead of reading/accumulating in the real fixed file.
  */
 final class RetentionSweepAuditLogger
 {
@@ -56,6 +65,8 @@ final class RetentionSweepAuditLogger
     ];
 
     private ?LoggerInterface $logger = null;
+
+    public function __construct(private readonly ?string $logPath = null) {}
 
     /**
      * $firmId is nullable — null represents the one platform-owned
@@ -89,7 +100,7 @@ final class RetentionSweepAuditLogger
         if ($this->logger === null) {
             $this->logger = Log::build([
                 'driver' => 'single',
-                'path' => storage_path('logs/integration-retention-sweep.log'),
+                'path' => $this->logPath ?? storage_path('logs/integration-retention-sweep.log'),
                 'level' => 'info',
             ]);
         }

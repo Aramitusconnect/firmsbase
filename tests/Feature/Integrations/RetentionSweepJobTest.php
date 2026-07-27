@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Integrations;
 
-use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationConflict;
 use App\Integrations\Models\IntegrationInboundWebhookEvent;
@@ -21,6 +20,7 @@ use App\Services\RetentionGovernanceRegistryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -31,10 +31,61 @@ use Tests\TestCase;
  * NOT EXISTS cascade-hazard guard on sync runs, batch/resumability,
  * OAuth Class B's documented unconfigured no-op, and sanitized-only
  * audit logging.
+ *
+ * Phase 3 final determinism correction (FirmsVault Admin Control
+ * Center mission): this class used to read/write
+ * RetentionSweepAuditLogger's real, fixed, production log path
+ * (storage_path('logs/integration-retention-sweep.log')) directly —
+ * a genuine, never-truncated file that accumulates across every suite
+ * run on the machine, making assertion counts depend on machine and
+ * test history. Every sweep() call and every direct
+ * RetentionSweepAuditLogger instantiation in this file now uses a
+ * fresh, per-test-unique, isolated log path (see setUp()/tearDown()
+ * below) via the logger's own constructor override — never the real
+ * fixed path, never shared across tests, never dependent on test
+ * order or prior cleanup succeeding.
  */
 class RetentionSweepJobTest extends TestCase
 {
     use RefreshDatabase;
+
+    private string $isolatedRetentionLogPath;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // A brand-new, per-test-unique path (never reused across test
+        // methods, never the real fixed production path) — the file is
+        // guaranteed to start empty simply because it has never existed
+        // before this exact test method ran, with zero dependency on a
+        // prior test's cleanup having succeeded or on execution order.
+        $directory = storage_path('framework/testing/retention-sweep-logs');
+        if (! is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        $this->isolatedRetentionLogPath = $directory.DIRECTORY_SEPARATOR.Str::uuid()->toString().'.log';
+    }
+
+    protected function tearDown(): void
+    {
+        $this->cleanupIsolatedRetentionLog();
+
+        parent::tearDown();
+    }
+
+    private function cleanupIsolatedRetentionLog(): void
+    {
+        if (isset($this->isolatedRetentionLogPath) && file_exists($this->isolatedRetentionLogPath)) {
+            @unlink($this->isolatedRetentionLogPath);
+        }
+    }
+
+    private function auditLogger(): RetentionSweepAuditLogger
+    {
+        return new RetentionSweepAuditLogger($this->isolatedRetentionLogPath);
+    }
 
     private function connection(Firm $firm): FirmIntegration
     {
@@ -51,7 +102,7 @@ class RetentionSweepJobTest extends TestCase
     private function sweep(Firm $firm, int $batchSize = 500): void
     {
         $job = new RetentionSweepJob($firm->id, false, $batchSize);
-        $job->handle(new RetentionSweepAuditLogger());
+        $job->handle($this->auditLogger());
     }
 
     // ------------------------------------------------------------
@@ -425,11 +476,10 @@ class RetentionSweepJobTest extends TestCase
         $exists = $this->runWithFirmContext($firm, fn () => IntegrationOAuthState::query()->find($state->id));
         $this->assertNotNull($exists, 'Class B (unconsumed-expired) must NEVER delete while the config key is unset — "never delete with an unsafe guessed default."');
 
-        $logPath = storage_path('logs/integration-retention-sweep.log');
-        $this->assertFileExists($logPath);
+        $this->assertFileExists($this->isolatedRetentionLogPath);
         $this->assertStringContainsString(
             'integration_retention.oauth_state_unconsumed_cleanup_not_configured',
-            file_get_contents($logPath)
+            file_get_contents($this->isolatedRetentionLogPath)
         );
     }
 
@@ -569,7 +619,7 @@ class RetentionSweepJobTest extends TestCase
             'Sanity check: this key must genuinely be unset for this test to prove anything.'
         );
 
-        $registry = new RetentionGovernanceRegistryService();
+        $registry = new RetentionGovernanceRegistryService;
 
         $this->assertSame(
             RetentionGovernanceRegistryService::STATUS_NOT_CONFIGURED_FAIL_SAFE,
@@ -587,7 +637,7 @@ class RetentionSweepJobTest extends TestCase
     {
         config(['integrations.usage_records.retention_days' => 60]);
 
-        $registry = new RetentionGovernanceRegistryService();
+        $registry = new RetentionGovernanceRegistryService;
         $category = $registry->categoryFor('usage_records');
 
         $this->assertSame(60, $category['current_default'], 'current_default must be resolved LIVE via config() at call time, never a hardcoded second copy of the number.');
@@ -680,8 +730,7 @@ class RetentionSweepJobTest extends TestCase
 
         $this->sweep($firm);
 
-        $logPath = storage_path('logs/integration-retention-sweep.log');
-        $this->assertStringContainsString('integration_retention.stuck_terminal_deadline_row', file_get_contents($logPath));
+        $this->assertStringContainsString('integration_retention.stuck_terminal_deadline_row', file_get_contents($this->isolatedRetentionLogPath));
     }
 
     // ------------------------------------------------------------
@@ -763,7 +812,7 @@ class RetentionSweepJobTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        (new RetentionSweepAuditLogger())->record('some.unknown.event_name');
+        $this->auditLogger()->record('some.unknown.event_name');
     }
 
     public function test_the_persisted_log_output_contains_only_the_four_allowed_keys_never_row_ids_or_error_text(): void
@@ -777,9 +826,8 @@ class RetentionSweepJobTest extends TestCase
 
         $this->sweep($firm);
 
-        $logPath = storage_path('logs/integration-retention-sweep.log');
-        $this->assertFileExists($logPath);
-        $contents = file_get_contents($logPath);
+        $this->assertFileExists($this->isolatedRetentionLogPath);
+        $contents = file_get_contents($this->isolatedRetentionLogPath);
 
         $this->assertStringNotContainsString('super-secret-raw-provider-detail-must-never-leak', $contents);
 
@@ -818,9 +866,163 @@ class RetentionSweepJobTest extends TestCase
             ->create(['completed_at' => now()->subDays(40)]));
 
         $job = new RetentionSweepJob($firm->id, dryRun: true, batchSize: 500);
-        $job->handle(new RetentionSweepAuditLogger());
+        $job->handle($this->auditLogger());
 
         $exists = $this->runWithFirmContext($firm, fn () => IntegrationOutboxEvent::query()->find($event->id));
         $this->assertNotNull($exists, 'A dry run must never actually delete an eligible row.');
+    }
+
+    // ------------------------------------------------------------
+    // Log-isolation regression tests (Phase 3 final determinism
+    // correction) — prove the isolated log path genuinely solves the
+    // problem it was introduced for, not merely relocate it.
+    // ------------------------------------------------------------
+
+    public function test_pre_existing_unrelated_log_lines_cannot_affect_the_result(): void
+    {
+        // setUp() guarantees $this->isolatedRetentionLogPath is a
+        // brand-new, never-before-existing filename (a fresh UUID every
+        // test method) — the strongest possible proof that no content
+        // from ANY prior source (an earlier test method, a stray
+        // process, accumulated history on this machine) can be present:
+        // the file has not been created yet at all.
+        $this->assertFileDoesNotExist(
+            $this->isolatedRetentionLogPath,
+            "setUp() must hand every test method a path that has never existed before — this is what guarantees pre-existing unrelated content can never leak in, rather than merely being 'usually' absent."
+        );
+
+        // Independently, simulate the exact failure mode the original
+        // bug exhibited: a large, unrelated, forbidden-shaped "prior
+        // run" log sitting on disk at a DIFFERENT path (e.g. what the
+        // old shared, never-truncated real path would have looked
+        // like). Prove reading THIS test's own isolated path is
+        // completely unaffected by that other file's existence or
+        // content — they are genuinely different files, not merely
+        // "usually" independent.
+        $simulatedPriorRunPath = dirname($this->isolatedRetentionLogPath).DIRECTORY_SEPARATOR.'simulated-unrelated-prior-run-'.Str::uuid()->toString().'.log';
+        file_put_contents(
+            $simulatedPriorRunPath,
+            "integration_retention.table_swept {\"row_id\":123,\"raw_error\":\"leaked-from-a-different-run\"}\n"
+        );
+
+        try {
+            $firm = Firm::factory()->create();
+            $connection = $this->connection($firm);
+            $this->runWithFirmContext($firm, fn () => IntegrationOutboxEvent::factory()
+                ->forFirmIntegration($connection)
+                ->completed()
+                ->create(['completed_at' => now()->subDays(40)]));
+
+            $this->sweep($firm);
+
+            $contents = file_get_contents($this->isolatedRetentionLogPath);
+
+            $this->assertStringNotContainsString('leaked-from-a-different-run', $contents, 'Content from an unrelated file must never appear in this test\'s own isolated log — they are genuinely separate files.');
+            $this->assertStringNotContainsString('row_id', $contents, 'A forbidden key from an unrelated file must never appear in this test\'s own isolated log.');
+            $this->assertStringContainsString('integration_retention.run_started', $contents);
+            $this->assertStringContainsString('integration_retention.run_completed', $contents);
+        } finally {
+            @unlink($simulatedPriorRunPath);
+        }
+    }
+
+    public function test_two_consecutive_sweep_executions_within_the_same_test_produce_the_same_assertion_path(): void
+    {
+        $firstOutcome = $this->runAllowedKeyAssertionOnFreshSweep();
+        $secondOutcome = $this->runAllowedKeyAssertionOnFreshSweep();
+
+        $this->assertSame($firstOutcome, $secondOutcome, 'Two consecutive sweep executions must exercise the exact same assertion path — same event set, same allowed-key validation outcome — regardless of what either wrote to the log before it.');
+    }
+
+    /**
+     * @return array{events: string[], allKeysAllowed: bool}
+     */
+    private function runAllowedKeyAssertionOnFreshSweep(): array
+    {
+        // Reset to a genuinely fresh, empty log before each of the two
+        // "executions" this test compares — otherwise the second call
+        // would trivially see the first call's lines too and the two
+        // outcomes would never match by construction, which would
+        // prove nothing about execution-order independence.
+        $this->cleanupIsolatedRetentionLog();
+
+        $firm = Firm::factory()->create();
+        $connection = $this->connection($firm);
+        $this->runWithFirmContext($firm, fn () => IntegrationOutboxEvent::factory()
+            ->forFirmIntegration($connection)
+            ->completed()
+            ->create(['completed_at' => now()->subDays(40), 'last_error' => 'super-secret-raw-provider-detail-must-never-leak']));
+
+        $this->sweep($firm);
+
+        $contents = file_get_contents($this->isolatedRetentionLogPath);
+        $allowedKeys = ['table', 'firm_id', 'count', 'dry_run'];
+        $events = [];
+        $allKeysAllowed = true;
+
+        foreach (explode("\n", trim($contents)) as $line) {
+            if ($line === '') {
+                continue;
+            }
+
+            $jsonStart = strpos($line, '{');
+            if ($jsonStart === false) {
+                continue;
+            }
+
+            // Only the EVENT NAME (not the full timestamped log line,
+            // and not row-specific values like table/count) is
+            // collected — the two executions create independent
+            // fixtures, so only the qualitative shape (which event
+            // types fired, whether every key was allowed) is expected
+            // to match, not byte-identical log lines.
+            $events[] = trim(preg_replace('/^\[.*?\]\s*\S+:\s*/', '', substr($line, 0, $jsonStart)));
+
+            $decoded = json_decode(substr($line, $jsonStart), true);
+            if (! is_array($decoded)) {
+                continue;
+            }
+
+            foreach (array_keys($decoded) as $key) {
+                if (! in_array($key, $allowedKeys, true)) {
+                    $allKeysAllowed = false;
+                }
+            }
+        }
+
+        return ['events' => $events, 'allKeysAllowed' => $allKeysAllowed];
+    }
+
+    public function test_the_isolated_log_file_is_cleaned_up_after_the_test(): void
+    {
+        $this->sweep(Firm::factory()->create());
+
+        $this->assertFileExists($this->isolatedRetentionLogPath, 'Sanity check: the isolated log must genuinely have been written before proving cleanup removes it.');
+
+        // Exercises the EXACT same cleanup routine tearDown() calls
+        // (cleanupIsolatedRetentionLog()) directly, rather than
+        // re-invoking the whole PHPUnit/RefreshDatabase lifecycle
+        // mid-test — proving the mechanism works without risking an
+        // out-of-order interaction with RefreshDatabase's own
+        // transaction-rollback hooks.
+        $this->cleanupIsolatedRetentionLog();
+
+        $this->assertFileDoesNotExist($this->isolatedRetentionLogPath, 'The cleanup routine tearDown() runs must remove the isolated per-test log file.');
+    }
+
+    public function test_no_production_log_path_is_touched_by_this_test_class(): void
+    {
+        $productionLogPath = storage_path('logs/integration-retention-sweep.log');
+        $existedBefore = file_exists($productionLogPath);
+        $sizeBefore = $existedBefore ? filesize($productionLogPath) : null;
+
+        $this->sweep(Firm::factory()->create());
+        $this->auditLogger()->record(RetentionSweepAuditLogger::EVENT_RUN_STARTED, dryRun: true);
+
+        $existsAfter = file_exists($productionLogPath);
+        $sizeAfter = $existsAfter ? filesize($productionLogPath) : null;
+
+        $this->assertSame($existedBefore, $existsAfter, 'This test class must never create the real production retention-sweep log file if it did not already exist.');
+        $this->assertSame($sizeBefore, $sizeAfter, 'This test class must never write to the real production retention-sweep log file, whether or not it already existed.');
     }
 }
