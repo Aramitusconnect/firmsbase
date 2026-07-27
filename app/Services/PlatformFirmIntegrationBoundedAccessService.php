@@ -175,6 +175,36 @@ final class PlatformFirmIntegrationBoundedAccessService
     }
 
     /**
+     * FVACC mission-wide final hardening review finding (HIGH):
+     * assertCanAccessOversight()/assertCanAccessFirm() gate BOTH reads
+     * and mutations in this class, so canMutate() cannot be folded into
+     * either of them without also blocking ReadOnlyAuditor's legitimate
+     * read access. This is the missing piece disconnectConnection()'s
+     * own docblock already flagged as "a real, pre-existing gap" but
+     * only closed for itself: requestSupportAccess(),
+     * enterSupportAccessSession(), leaveSupportAccessSession(),
+     * revokeSupportAccessSession(), requeueOutboxEvent(),
+     * requeueSyncItem(), and nudgeQueue() all called only
+     * assertCanAccessOversight()/assertCanAccessFirm() and never
+     * consulted canMutate() at all — a PlatformAdmin holding both
+     * ReadOnlyAuditor and any oversight-granting role simultaneously
+     * (a supported, expected combination per this class's own
+     * permissive-OR role model) could mutate through any of those 7
+     * paths despite ReadOnlyAuditor's documented "never mutate"
+     * guarantee. previewRetentionSweepDryRun() is deliberately NOT in
+     * this list — it is a genuine dry-run preview with zero mutation
+     * (frozen design §7), not a real write.
+     */
+    private function assertCanMutate(PlatformAdmin $admin): void
+    {
+        $decision = $this->accessPolicy->canMutate($admin);
+
+        if (! $decision->allowed) {
+            throw new RuntimeException($decision->reason ?? 'Not permitted to mutate data.');
+        }
+    }
+
+    /**
      * The single gate every per-firm read AND every mutating action
      * below passes through, in order: role-level oversight access, then
      * — only for below-unconditional-ceiling roles — an active
@@ -242,6 +272,7 @@ final class PlatformFirmIntegrationBoundedAccessService
         ?string $emergencyJustification = null,
     ): SupportAccessRequest {
         $this->assertCanAccessOversight($admin);
+        $this->assertCanMutate($admin);
 
         $request = $this->supportRequests->request(
             $firm,
@@ -262,6 +293,7 @@ final class PlatformFirmIntegrationBoundedAccessService
     public function enterSupportAccessSession(PlatformAdmin $admin, SupportAccessRequest $request): SupportAccessSession
     {
         $this->assertCanAccessOversight($admin);
+        $this->assertCanMutate($admin);
 
         // Gap closure #2 (frozen design §8 item 2): start() never
         // verifies the session-starter is the original requester.
@@ -289,6 +321,7 @@ final class PlatformFirmIntegrationBoundedAccessService
     public function leaveSupportAccessSession(PlatformAdmin $admin, SupportAccessSession $session): SupportAccessSession
     {
         $this->assertCanAccessOversight($admin);
+        $this->assertCanMutate($admin);
 
         // Security review Finding 1 (CHECKPOINT_11_SECURITY_IMPLEMENTATION_REJECTED):
         // leave is self-service only (see LeaveSupportAccessSessionAction's
@@ -346,6 +379,7 @@ final class PlatformFirmIntegrationBoundedAccessService
     public function revokeSupportAccessSession(PlatformAdmin $admin, SupportAccessSession $session): SupportAccessSession
     {
         $this->assertCanAccessOversight($admin);
+        $this->assertCanMutate($admin);
 
         $firm = Firm::query()->findOrFail($session->firm_id);
 
@@ -395,6 +429,7 @@ final class PlatformFirmIntegrationBoundedAccessService
     public function requeueOutboxEvent(PlatformAdmin $admin, Firm $firm, int $outboxEventId, string $reasonCode): ?IntegrationOutboxEvent
     {
         $this->assertCanAccessFirm($admin, $firm);
+        $this->assertCanMutate($admin);
 
         return $this->tenantContext->runWithFirmContext($firm, function () use ($admin, $firm, $outboxEventId, $reasonCode): ?IntegrationOutboxEvent {
             $result = $this->outboxEvents->requeue($outboxEventId, $firm->id, $reasonCode, actorFirmUserId: null);
@@ -422,6 +457,7 @@ final class PlatformFirmIntegrationBoundedAccessService
     public function requeueSyncItem(PlatformAdmin $admin, Firm $firm, int $syncItemId, string $reasonCode): ?IntegrationSyncItem
     {
         $this->assertCanAccessFirm($admin, $firm);
+        $this->assertCanMutate($admin);
 
         return $this->tenantContext->runWithFirmContext($firm, function () use ($admin, $firm, $syncItemId, $reasonCode): ?IntegrationSyncItem {
             $result = $this->syncItems->requeueFromFailedPermanent($syncItemId, $firm->id, $reasonCode, actorFirmUserId: null);
@@ -453,6 +489,7 @@ final class PlatformFirmIntegrationBoundedAccessService
     public function nudgeQueue(PlatformAdmin $admin, Firm $firm): void
     {
         $this->assertCanAccessFirm($admin, $firm);
+        $this->assertCanMutate($admin);
 
         $this->tenantContext->runWithFirmContext($firm, function () use ($admin, $firm): void {
             $this->writeOversightAuditEvent($firm, $admin, 'platform_integration_oversight.queue_nudged', []);

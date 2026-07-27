@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Feature\Integrations\Admin;
 
 use App\Enums\PlatformRoleCode;
+use App\Integrations\Enums\OutboxEventStatus;
+use App\Integrations\Enums\SyncItemStatus;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationCredential;
 use App\Integrations\Models\IntegrationOutboxEvent;
@@ -55,7 +57,7 @@ final class PlatformIntegrationOperationalActionsTest extends TestCase
         $result = $bounded->requeueOutboxEvent($admin, $firm, $event->id, 'manual_retry_transient');
 
         $this->assertNotNull($result);
-        $this->assertSame(\App\Integrations\Enums\OutboxEventStatus::Pending, $result->status);
+        $this->assertSame(OutboxEventStatus::Pending, $result->status);
         $this->assertSame(1, $result->requeue_count);
     }
 
@@ -146,7 +148,7 @@ final class PlatformIntegrationOperationalActionsTest extends TestCase
         $result = $bounded->requeueSyncItem($admin, $firm, $item->id, 'manual_retry_transient');
 
         $this->assertNotNull($result);
-        $this->assertSame(\App\Integrations\Enums\SyncItemStatus::FailedRetryable, $result->status);
+        $this->assertSame(SyncItemStatus::FailedRetryable, $result->status);
     }
 
     public function test_requeue_sync_item_wrong_status_is_denied(): void
@@ -232,7 +234,7 @@ final class PlatformIntegrationOperationalActionsTest extends TestCase
         // ever makes the preview call something synchronously.
         $fresh = $this->runWithFirmContext($firm, fn () => $event->fresh());
         $this->assertNotNull($fresh, 'The dead-lettered event must still exist untouched after a dry-run preview.');
-        $this->assertSame(\App\Integrations\Enums\OutboxEventStatus::DeadLettered, $fresh->status);
+        $this->assertSame(OutboxEventStatus::DeadLettered, $fresh->status);
     }
 
     // ------------------------------------------------------------
@@ -372,6 +374,70 @@ final class PlatformIntegrationOperationalActionsTest extends TestCase
         $source = file_get_contents(app_path('Services/PlatformFirmIntegrationBoundedAccessService.php'));
         $this->assertIsString($source);
         $this->assertStringContainsString('actorFirmUserId: null', $source);
+    }
+
+    // ------------------------------------------------------------
+    // FVACC mission-wide final hardening review finding (HIGH):
+    // requestSupportAccess/enterSupportAccessSession/
+    // leaveSupportAccessSession/revokeSupportAccessSession/
+    // requeueOutboxEvent/requeueSyncItem/nudgeQueue never consulted
+    // canMutate() at all — a PlatformAdmin holding both ReadOnlyAuditor
+    // and SupportAgent simultaneously (a supported role combination:
+    // PlatformRoleService::grant() has no mutual-exclusion check) could
+    // mutate through any of those 7 paths despite ReadOnlyAuditor's
+    // documented "never mutate" guarantee. Proven blocked here for
+    // requeueOutboxEvent/requeueSyncItem/nudgeQueue — the three this
+    // file already has fixtures for; disconnectConnection() already had
+    // this guard before the fix (unaffected, not re-tested here).
+    // ------------------------------------------------------------
+
+    public function test_read_only_auditor_combined_with_support_agent_is_blocked_from_requeuing_outbox_events(): void
+    {
+        $firm = Firm::factory()->activated()->create();
+        $connection = $this->runWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
+        $this->givenActiveCredentialFor($firm, $connection);
+        $event = $this->runWithFirmContext($firm, fn () => IntegrationOutboxEvent::factory()->forFirmIntegration($connection)->deadLettered()->create());
+
+        $admin = $this->adminWithRole(PlatformRoleCode::SupportAgent);
+        app(PlatformRoleService::class)->grant($admin, PlatformRoleCode::ReadOnlyAuditor);
+        $bounded = app(PlatformFirmIntegrationBoundedAccessService::class);
+
+        $this->expectException(\RuntimeException::class);
+
+        $bounded->requeueOutboxEvent($admin, $firm, $event->id, 'manual_retry_transient');
+    }
+
+    public function test_read_only_auditor_combined_with_support_agent_is_blocked_from_requeuing_sync_items(): void
+    {
+        $firm = Firm::factory()->activated()->create();
+        $connection = $this->runWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
+        $this->givenActiveCredentialFor($firm, $connection);
+        $item = $this->runWithFirmContext($firm, function () use ($connection) {
+            $run = IntegrationSyncRun::factory()->forFirmIntegration($connection)->succeeded()->create();
+
+            return IntegrationSyncItem::factory()->forSyncRun($run)->failedPermanent()->create();
+        });
+
+        $admin = $this->adminWithRole(PlatformRoleCode::SupportAgent);
+        app(PlatformRoleService::class)->grant($admin, PlatformRoleCode::ReadOnlyAuditor);
+        $bounded = app(PlatformFirmIntegrationBoundedAccessService::class);
+
+        $this->expectException(\RuntimeException::class);
+
+        $bounded->requeueSyncItem($admin, $firm, $item->id, 'manual_retry_transient');
+    }
+
+    public function test_read_only_auditor_combined_with_support_agent_is_blocked_from_nudging_the_queue(): void
+    {
+        $firm = Firm::factory()->activated()->create();
+
+        $admin = $this->adminWithRole(PlatformRoleCode::SupportAgent);
+        app(PlatformRoleService::class)->grant($admin, PlatformRoleCode::ReadOnlyAuditor);
+        $bounded = app(PlatformFirmIntegrationBoundedAccessService::class);
+
+        $this->expectException(\RuntimeException::class);
+
+        $bounded->nudgeQueue($admin, $firm);
     }
 
     private function adminWithRole(PlatformRoleCode $role): PlatformAdmin

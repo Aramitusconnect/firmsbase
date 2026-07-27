@@ -19,12 +19,13 @@ use Illuminate\Support\Facades\Auth;
 /**
  * AdvanceOffboardingRequestAction — OffboardingRequestResource's row
  * action. Routes exclusively through
- * OffboardingRequestService::advance() — already
- * PlatformAdmin-attribution-free (the method itself takes no actor
- * parameter; it re-evaluates export/retention/legal-hold readiness and
- * transitions to the correct next status), gated here by
- * canManageDataExports() + canMutate() before calling it, mirroring
- * every other mutating Action in this mission.
+ * OffboardingRequestService::advance() — re-evaluates export/retention/
+ * legal-hold readiness and transitions to the correct next status,
+ * gated here by canManageDataExports() + canMutate() before calling it,
+ * mirroring every other mutating Action in this mission. Passes the
+ * freshly-resolved $actor through so advance() records real attribution
+ * (FVACC mission-wide final hardening review finding — this used to be
+ * silently attribution-free).
  *
  * Not offered once the request has reached a terminal status
  * (Completed/Cancelled) or is already ReadyForDeletion (advance() would
@@ -96,7 +97,7 @@ class AdvanceOffboardingRequestAction extends Action
                 return;
             }
 
-            $advanced = $offboardingRequestService->advance($request);
+            $advanced = $offboardingRequestService->advance($request, $actor);
 
             Notification::make()
                 ->title('Readiness re-evaluated')

@@ -100,7 +100,7 @@ class CancelOffboardingRequestAction extends Action
                 return;
             }
 
-            $cancelled = $offboardingRequestService->cancel($request, (string) $data['reason']);
+            $cancelled = $offboardingRequestService->cancel($request, (string) $data['reason'], $actor);
 
             Notification::make()
                 ->title('Offboarding request cancelled')

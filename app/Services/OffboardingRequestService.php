@@ -27,18 +27,33 @@ use App\ValueObjects\OffboardingReadinessResult;
  * legal_holds fail-open bug, at the same firm) — confirmed structurally
  * safe per TenantContextService's snapshot/restore-in-finally
  * semantics; that inner wrap is left unmodified here.
+ *
+ * FVACC mission-wide final hardening review finding (MEDIUM): advance(),
+ * complete(), and cancel() used to take no actor parameter and record no
+ * attribution anywhere — no PlatformAdminAuditEventRecorder call, and no
+ * completed_by_/cancelled_by_/advanced_by_ column exists on this table
+ * (unlike verify()'s sibling OffboardingExportService, which stores
+ * verified_by_platform_admin_id directly on the row). Fixed by adding an
+ * optional ?PlatformAdmin $actor to all three and calling
+ * PlatformAdminAuditEventRecorder::record() (the firm-scoped variant —
+ * every OffboardingRequest has a real firm_id) when one is supplied,
+ * mirroring the actor/audit pattern already established throughout this
+ * mission rather than adding new schema columns. Behavior is unchanged
+ * when $actor is null.
  */
 class OffboardingRequestService
 {
+    private const AUDIT_CATEGORY = 'data_export_governance';
+
     public function __construct(
         private readonly RetentionPolicyService $retentionPolicyService,
         private readonly LegalHoldService $legalHoldService,
-    ) {
-    }
+        private readonly PlatformAdminAuditEventRecorder $auditRecorder = new PlatformAdminAuditEventRecorder,
+    ) {}
 
     public function request(Firm $firm, PlatformAdmin $requestedBy, string $reason): OffboardingRequest
     {
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => OffboardingRequest::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => OffboardingRequest::create([
             'firm_id' => $firm->id,
             'status' => OffboardingRequestStatus::Requested,
             'reason' => $reason,
@@ -64,14 +79,14 @@ class OffboardingRequestService
             ->isRetentionCleared($policy, $firm->created_at ?? now())
             ->cleared;
 
-        $legalHoldCleared = (new TenantContextService())->runWithFirmContext($firm, fn () => ! $this->legalHoldService->hasActiveHold($firm, LegalHoldScope::Firm));
+        $legalHoldCleared = (new TenantContextService)->runWithFirmContext($firm, fn () => ! $this->legalHoldService->hasActiveHold($firm, LegalHoldScope::Firm));
 
         return new OffboardingReadinessResult($exportCompleted, $retentionCleared, $legalHoldCleared);
     }
 
-    public function advance(OffboardingRequest $request): OffboardingRequest
+    public function advance(OffboardingRequest $request, ?PlatformAdmin $actor = null): OffboardingRequest
     {
-        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request) {
+        return (new TenantContextService)->runWithFirmContext($request->firm_id, function () use ($request, $actor) {
             $readiness = $this->evaluateReadiness($request);
 
             $status = match (true) {
@@ -83,29 +98,54 @@ class OffboardingRequestService
 
             $request->update(['status' => $status]);
 
-            return $request->fresh();
+            $fresh = $request->fresh();
+
+            if ($actor !== null) {
+                $this->auditRecorder->record($fresh->firm, $actor, 'offboarding_request.advanced', self::AUDIT_CATEGORY, [
+                    'offboarding_request_id' => $fresh->id,
+                    'resulting_status' => $fresh->status->value,
+                ]);
+            }
+
+            return $fresh;
         });
     }
 
-    public function complete(OffboardingRequest $request): OffboardingRequest
+    public function complete(OffboardingRequest $request, ?PlatformAdmin $actor = null): OffboardingRequest
     {
-        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request) {
+        return (new TenantContextService)->runWithFirmContext($request->firm_id, function () use ($request, $actor) {
             $request->update(['status' => OffboardingRequestStatus::Completed, 'completed_at' => now()]);
 
-            return $request->fresh();
+            $fresh = $request->fresh();
+
+            if ($actor !== null) {
+                $this->auditRecorder->record($fresh->firm, $actor, 'offboarding_request.completed', self::AUDIT_CATEGORY, [
+                    'offboarding_request_id' => $fresh->id,
+                ]);
+            }
+
+            return $fresh;
         });
     }
 
-    public function cancel(OffboardingRequest $request, string $reason): OffboardingRequest
+    public function cancel(OffboardingRequest $request, string $reason, ?PlatformAdmin $actor = null): OffboardingRequest
     {
-        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $reason) {
+        return (new TenantContextService)->runWithFirmContext($request->firm_id, function () use ($request, $reason, $actor) {
             $request->update([
                 'status' => OffboardingRequestStatus::Cancelled,
                 'cancelled_at' => now(),
                 'cancelled_reason' => $reason,
             ]);
 
-            return $request->fresh();
+            $fresh = $request->fresh();
+
+            if ($actor !== null) {
+                $this->auditRecorder->record($fresh->firm, $actor, 'offboarding_request.cancelled', self::AUDIT_CATEGORY, [
+                    'offboarding_request_id' => $fresh->id,
+                ]);
+            }
+
+            return $fresh;
         });
     }
 }

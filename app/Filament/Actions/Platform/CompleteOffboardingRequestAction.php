@@ -93,7 +93,7 @@ class CompleteOffboardingRequestAction extends Action
                 return;
             }
 
-            $completed = $offboardingRequestService->complete($request);
+            $completed = $offboardingRequestService->complete($request, $actor);
 
             Notification::make()
                 ->title('Offboarding request completed')
