@@ -45,7 +45,7 @@ final class OutboundProviderHttpClientTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->client = new OutboundProviderHttpClient();
+        $this->client = new OutboundProviderHttpClient;
     }
 
     public function test_execute_returns_the_operations_return_value_on_success(): void
@@ -61,7 +61,7 @@ final class OutboundProviderHttpClientTest extends TestCase
 
     public function test_invalid_pkce_verifier_exception_passes_through_unchanged(): void
     {
-        $original = new InvalidPkceVerifierException();
+        $original = new InvalidPkceVerifierException;
 
         try {
             $this->client->execute(function () use ($original): never {
@@ -75,7 +75,7 @@ final class OutboundProviderHttpClientTest extends TestCase
 
     public function test_expired_authorization_code_exception_passes_through_unchanged(): void
     {
-        $original = new ExpiredAuthorizationCodeException();
+        $original = new ExpiredAuthorizationCodeException;
 
         try {
             $this->client->execute(function () use ($original): never {
@@ -89,7 +89,7 @@ final class OutboundProviderHttpClientTest extends TestCase
 
     public function test_authorization_code_already_used_exception_passes_through_unchanged(): void
     {
-        $original = new AuthorizationCodeAlreadyUsedException();
+        $original = new AuthorizationCodeAlreadyUsedException;
 
         try {
             $this->client->execute(function () use ($original): never {
@@ -103,7 +103,7 @@ final class OutboundProviderHttpClientTest extends TestCase
 
     public function test_oauth_account_mismatch_exception_passes_through_unchanged(): void
     {
-        $original = new OAuthAccountMismatchException();
+        $original = new OAuthAccountMismatchException;
 
         try {
             $this->client->execute(function () use ($original): never {
@@ -237,13 +237,21 @@ final class OutboundProviderHttpClientTest extends TestCase
         // malformed_response, validation_failed, conflict,
         // configuration_error, connection_unavailable) were deliberately
         // added to support Checkpoint 8's retry/health-signal
-        // classification. The ceiling below is bumped to the new, exact,
-        // intentionally authorized count — verified directly via
-        // reflection against the real source, not merely trusted — so
-        // this guard-rail still fails the moment the set grows again
-        // WITHOUT a deliberate, reviewed update.
-        $this->assertLessThanOrEqual(13, count($categoryConstants), 'The category enum must remain small and closed, not grow into an open string.');
-        $this->assertSame(13, count($categoryConstants), 'The category enum must be exactly the Checkpoint 8 frozen count of 13 — update this deliberately, with review, if it ever changes again.');
+        // classification.
+        // FirmsVault Live Integrations Checkpoint 2 UPDATE (Microsoft 365
+        // provider — checkpoint2-combined-design.md §2 P-9; §2 P-7c): the
+        // closed category vocabulary grew intentionally and correctly
+        // again, from 13 to 14 — one new category, CATEGORY_CURSOR_EXPIRED
+        // ('cursor_expired'), deliberately added for
+        // ProviderRequestExecutor::categorizeStatus()'s new 410 Gone arm
+        // (Microsoft's delta-query cursor-expiry signal). The ceiling
+        // below is bumped to the new, exact, intentionally authorized
+        // count — verified directly via reflection against the real
+        // source, not merely trusted — so this guard-rail still fails the
+        // moment the set grows again WITHOUT a deliberate, reviewed
+        // update.
+        $this->assertLessThanOrEqual(14, count($categoryConstants), 'The category enum must remain small and closed, not grow into an open string.');
+        $this->assertSame(14, count($categoryConstants), 'The category enum must be exactly the FirmsVault Live Integrations Checkpoint 2 frozen count of 14 — update this deliberately, with review, if it ever changes again.');
     }
 
     // ---------------------------------------------------------------

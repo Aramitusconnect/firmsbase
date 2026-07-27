@@ -7,16 +7,19 @@ namespace App\Integrations\Services;
 use App\Enums\FirmUserStatus;
 use App\Integrations\Contracts\IntegrationProviderContract;
 use App\Integrations\Contracts\SupportsDisconnectContract;
+use App\Integrations\Contracts\SupportsWebhooksContract;
 use App\Integrations\Core\ProviderRegistry;
 use App\Integrations\Data\ConsumedOAuthState;
 use App\Integrations\Data\OAuthCallbackResult;
 use App\Integrations\Data\OAuthInitiationResult;
+use App\Integrations\Data\ProviderMetadata;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
 use App\Integrations\Enums\IntegrationCredentialStatus;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Exceptions\OAuthAccountMismatchException;
 use App\Integrations\Exceptions\OAuthRedirectUriMismatchException;
+use App\Integrations\Exceptions\OAuthTenantMismatchException;
 use App\Integrations\Exceptions\SanitizedProviderHttpException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationCredential;
@@ -105,12 +108,28 @@ class ProviderConnectionService
      * residual is accepted as a low-severity, purely-cosmetic gap, per
      * the frozen design's explicit ruling not to add migration scope to
      * close it.
+     *
+     * FirmsVault Live Integrations, Checkpoint 2 addition
+     * (checkpoint2-combined-design.md §2 P-6a): optional trailing
+     * `?array $requestedCapabilities = null` — the firm's pre-connect
+     * capability selection (a string[] of `ResourceType` values). When
+     * non-null, validated as a SUBSET of the resolved provider's
+     * `ProviderMetadata::resourceTypes` before being persisted —
+     * defense-in-depth against a tampered client payload, mirroring
+     * this method's own existing `ProviderRegistry::has()`-via-`get()`
+     * re-check immediately above: never trust a submitted id/array
+     * alone. Every existing call site that omits this parameter keeps
+     * today's exact behavior (null persisted, no validation performed).
      */
-    public function startConnection(int $firmId, int $integrationProviderId, int $currentUserId): FirmIntegration
-    {
+    public function startConnection(
+        int $firmId,
+        int $integrationProviderId,
+        int $currentUserId,
+        ?array $requestedCapabilities = null,
+    ): FirmIntegration {
         return (new TenantContextService)->runWithFirmContext(
             $firmId,
-            function () use ($firmId, $integrationProviderId, $currentUserId) {
+            function () use ($firmId, $integrationProviderId, $currentUserId, $requestedCapabilities) {
                 $actor = $this->resolveActingFirmUser($currentUserId, $firmId);
 
                 $this->entitlement->assertEnabled($actor->firm);
@@ -127,7 +146,19 @@ class ProviderConnectionService
                 // Fails before any row is created if this provider is not
                 // a genuinely registered, instantiable adapter — mirrors
                 // resolveProvider()'s own equivalent check below.
-                $this->providerRegistry->get(ProviderKey::from($provider->code));
+                $resolvedProvider = $this->providerRegistry->get(ProviderKey::from($provider->code));
+
+                if ($requestedCapabilities !== null) {
+                    $allowedCapabilities = ProviderMetadata::fromProvider($resolvedProvider)->resourceTypes;
+                    $unsupported = array_diff($requestedCapabilities, $allowedCapabilities);
+
+                    if ($unsupported !== []) {
+                        throw new RuntimeException(
+                            'Requested capabilities include values not supported by this provider: '
+                            .implode(', ', $unsupported)
+                        );
+                    }
+                }
 
                 $existing = FirmIntegration::query()
                     ->where('firm_id', $firmId)
@@ -146,6 +177,7 @@ class ProviderConnectionService
                     'integration_provider_id' => $integrationProviderId,
                     'status' => ConnectionStatus::Pending,
                     'connected_by_firm_user_id' => $actor->id,
+                    'requested_capabilities_json' => $requestedCapabilities,
                 ]);
 
                 $this->events->record($connection->firm, 'integration_oauth.connection_created', $connection, $actor->user, [
@@ -189,6 +221,66 @@ class ProviderConnectionService
     }
 
     /**
+     * FirmsVault Live Integrations, Checkpoint 2 addition
+     * (checkpoint2-combined-design.md §2 P-6h). `renameConnection()`-
+     * shaped: re-fetch under lock, re-authorize via the SAME existing
+     * access policy renameConnection() uses (`assertCanConfigure()` —
+     * updating which capabilities a connection requests is a
+     * configuration action, not a connect/disconnect one), a
+     * single-column update, one audit event. Deliberately does NOT
+     * itself trigger a new OAuth round-trip or touch `status`/
+     * credentials — a caller that needs the newly-requested capabilities
+     * to actually take effect (i.e. request the corresponding broader
+     * scope bundle from the provider) redirects the firm through the
+     * existing, unmodified OAuth-initiate route afterward, which reads
+     * this column fresh via `initiateOAuthConnection()`'s own
+     * `requested_capabilities_json` threading (P-6b) — no service/
+     * controller/route change needed for that reauthorization leg.
+     *
+     * Validated as a subset of the resolved provider's
+     * `ProviderMetadata::resourceTypes`, identical discipline to
+     * `startConnection()`'s own defense-in-depth check (P-6a) — never
+     * trust a submitted capability array alone.
+     */
+    public function updateRequestedCapabilities(FirmIntegration $connection, array $capabilities, int $actingFirmUserId): FirmIntegration
+    {
+        return (new TenantContextService)->runWithFirmContext(
+            $connection->firm_id,
+            function () use ($connection, $capabilities, $actingFirmUserId) {
+                $actor = $this->resolveActingFirmUser($actingFirmUserId, $connection->firm_id);
+
+                $this->entitlement->assertEnabled($connection->firm);
+                $this->accessPolicy->assertCanConfigure($actor);
+
+                $fresh = FirmIntegration::query()
+                    ->where('id', $connection->id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                $resolvedProvider = $this->resolveProvider($fresh);
+                $allowedCapabilities = ProviderMetadata::fromProvider($resolvedProvider)->resourceTypes;
+                $unsupported = array_diff($capabilities, $allowedCapabilities);
+
+                if ($unsupported !== []) {
+                    throw new RuntimeException(
+                        'Requested capabilities include values not supported by this provider: '
+                        .implode(', ', $unsupported)
+                    );
+                }
+
+                $fresh->update(['requested_capabilities_json' => $capabilities]);
+
+                $this->events->record($fresh->firm, 'integration_oauth.requested_capabilities_updated', $fresh, $actor->user, [
+                    'firm_integration_id' => $fresh->id,
+                    'requested_capabilities' => $capabilities,
+                ]);
+
+                return $fresh->fresh();
+            }
+        );
+    }
+
+    /**
      * Starts a connect/reauthorize attempt. $currentUserId is resolved
      * to a FirmUser scoped to THIS connection's own firm internally
      * (resolveActingFirmUser()) — the caller (OAuthConnectionController)
@@ -217,14 +309,39 @@ class ProviderConnectionService
                     $connection,
                     $actor,
                     $redirectUri,
+                    // Checkpoint 2 (FirmsVault Live Integrations, P-6f):
+                    // the 'client_id' key previously populated here from
+                    // $connection->integration_provider_id is REMOVED —
+                    // that value is FirmsBase's own internal
+                    // integration_providers.id primary key, never a real
+                    // OAuth client identifier. Confirmed safe to remove
+                    // (checkpoint2-security-review.md Finding 7): zero
+                    // production code anywhere reads $params['client_id'],
+                    // and TestProvider's authorizationUrl() never
+                    // referenced it either. A real OAuth provider
+                    // self-supplies its own actual client_id from
+                    // platform config (config('integrations.oauth_apps'))
+                    // instead, the same way TestProvider self-supplies
+                    // its own environment gate rather than trusting
+                    // anything the caller passes.
                     fn (string $rawState, string $codeChallenge) => $provider->authorizationUrl([
-                        'client_id' => $connection->integration_provider_id,
                         'redirect_uri' => $redirectUri,
                         'response_type' => 'code',
                         'state' => $rawState,
                         'code_challenge' => $codeChallenge,
                         'code_challenge_method' => 'S256',
-                        'scope' => implode(' ', $provider->requiredScopes()),
+                        // Checkpoint 2 (P-6b): threads the connection's
+                        // own pre-connect capability selection into
+                        // requiredScopes()'s new optional $context
+                        // parameter, so a capability-aware provider can
+                        // compute a least-privilege scope bundle instead
+                        // of a single hardcoded scope list. A provider
+                        // with no per-capability distinction (TestProvider)
+                        // simply ignores the context and returns its
+                        // existing fixed scopes, exactly as before.
+                        'scope' => implode(' ', $provider->requiredScopes([
+                            'requested_capabilities' => $connection->requested_capabilities_json ?? [],
+                        ])),
                     ]),
                 );
 
@@ -258,10 +375,33 @@ class ProviderConnectionService
         // firm-context transaction has already closed.
         $consumed = $this->stateService->resolveAndConsume($rawState, $currentUserId);
 
-        return (new TenantContextService)->runWithFirmContext(
-            $consumed->firmId,
-            fn () => $this->finishCallback($consumed, $authorizationCode, $currentUserId)
-        );
+        try {
+            return (new TenantContextService)->runWithFirmContext(
+                $consumed->firmId,
+                fn () => $this->finishCallback($consumed, $authorizationCode, $currentUserId)
+            );
+        } catch (OAuthAccountMismatchException|OAuthTenantMismatchException $e) {
+            // By this point runWithFirmContext()'s DB::transaction() has
+            // ALREADY rolled back and re-thrown — the lockForUpdate()
+            // finishCallback() held on $connection is released, so this
+            // ordinary, fresh, second transaction can write the durable
+            // Error-transition + audit event without deadlocking against
+            // it (see recordMismatchRejectionAfterRollback()'s own
+            // docblock for the full genuine-defect history this closes).
+            $this->recordMismatchRejectionAfterRollback(
+                $consumed->firmId,
+                $consumed->firmIntegrationId,
+                $consumed->initiatingFirmUserId,
+                $e instanceof OAuthAccountMismatchException
+                    ? 'integration_oauth.provider_account_mismatch'
+                    : 'integration_oauth.provider_tenant_mismatch',
+                $e instanceof OAuthAccountMismatchException
+                    ? 'Provider account mismatch on reauthorization.'
+                    : 'Provider tenant mismatch on reauthorization.',
+            );
+
+            throw $e;
+        }
     }
 
     private function finishCallback(ConsumedOAuthState $consumed, string $authorizationCode, int $currentUserId): OAuthCallbackResult
@@ -307,6 +447,14 @@ class ProviderConnectionService
             fn () => $provider->exchangeCodeForToken($authorizationCode, [
                 'code_verifier' => $consumed->pkceVerifierPlaintext,
                 'redirect_uri' => $consumed->redirectUri,
+                // FirmsVault Live Integrations, Checkpoint 2 addition
+                // (checkpoint2-combined-design.md §2 P-6c, closing FP-1):
+                // exchangeCodeForToken() cannot call
+                // ProviderRequestExecutor::send() at all without a full
+                // FirmIntegration model in hand (that method's signature
+                // requires one) — $connection is already in scope here,
+                // this simply threads it through.
+                'connection' => $connection,
             ]),
             'exchangeCodeForToken',
         );
@@ -316,17 +464,55 @@ class ProviderConnectionService
         if ($connection->external_account_id !== null
             && $returnedAccountId !== null
             && ! hash_equals((string) $connection->external_account_id, (string) $returnedAccountId)) {
-            $this->transitionStatus($connection, ConnectionStatus::Error, 'Provider account mismatch on reauthorization.');
-
-            $this->events->record($connection->firm, 'integration_oauth.provider_account_mismatch', $connection, $actor->user, [
-                'firm_integration_id' => $connection->id,
-            ]);
-
+            // Deliberately throws WITHOUT writing here — see
+            // completeOAuthCallback()'s catch block for why: this
+            // method runs inside a lockForUpdate() on $connection, held
+            // for the whole ambient transaction, so a write against the
+            // SAME row from a separate connection (the naive fix)
+            // would deadlock against that lock. The durable
+            // Error-transition + audit event are recorded by the
+            // caller, AFTER this transaction has already rolled back
+            // and released the lock.
             throw new OAuthAccountMismatchException;
         }
 
+        // FirmsVault Live Integrations, Checkpoint 2 addition
+        // (checkpoint2-combined-design.md §2 P-6d; checkpoint2-security-review.md
+        // Finding 1, confirmed sound): the EXACT same capture-if-null /
+        // hash_equals()-compare-and-reject-if-both-set pattern as the
+        // external_account_id check immediately above, applied to a
+        // second, coarser-grained column — the connected provider
+        // TENANT (e.g. a Microsoft 365 organization), distinct from the
+        // specific connected user ACCOUNT within that tenant. Correctly
+        // captures on first connect (nothing to compare against yet)
+        // and enforces on every subsequent reauthorization, closing a
+        // reconnect silently re-pointing a firm's connection at a
+        // different provider tenant than the one it was originally
+        // authorized against.
+        $returnedTenantId = $tokenSet['tenant_id'] ?? null;
+
+        if ($connection->external_tenant_id !== null
+            && $returnedTenantId !== null
+            && ! hash_equals((string) $connection->external_tenant_id, (string) $returnedTenantId)) {
+            // See the identical comment on the account-mismatch branch
+            // immediately above — same genuine defect, same fix, same
+            // lockForUpdate()-deadlock reason for not writing here.
+            throw new OAuthTenantMismatchException;
+        }
+
         $grantedScopes = $this->parseScopes($tokenSet['scope'] ?? '');
-        $requiredScopes = $provider->requiredScopes();
+        // Threads the SAME `requested_capabilities` context
+        // initiateOAuthConnection() used to build the original scope
+        // request (P-6b), so the satisfaction check here evaluates
+        // against the identical bundle that was actually requested —
+        // required for a capability-aware provider (e.g.
+        // Microsoft365Provider) whose requiredScopes() throws on an
+        // empty capability list. TestProvider (the only implementer
+        // before this checkpoint) ignores context either way, so this
+        // is a behavior-preserving change for it.
+        $requiredScopes = $provider->requiredScopes([
+            'requested_capabilities' => $connection->requested_capabilities_json ?? [],
+        ]);
         $scopeSatisfied = count(array_diff($requiredScopes, $grantedScopes)) === 0;
 
         $wasReauthorization = in_array($connection->status, [
@@ -341,6 +527,12 @@ class ProviderConnectionService
 
         if ($connection->external_account_id === null && $returnedAccountId !== null) {
             $extra['external_account_id'] = $returnedAccountId;
+        }
+
+        // Checkpoint 2 addition (P-6d) — first-connect capture, mirrors
+        // external_account_id's own capture branch immediately above.
+        if ($connection->external_tenant_id === null && $returnedTenantId !== null) {
+            $extra['external_tenant_id'] = $returnedTenantId;
         }
 
         if ($connection->connected_at === null) {
@@ -415,6 +607,28 @@ class ProviderConnectionService
             $actor->user,
             ['firm_integration_id' => $connection->id, 'new_status' => $connection->status->value],
         );
+
+        // FirmsVault Live Integrations, Checkpoint 2 addition
+        // (checkpoint2-combined-design.md §2 P-6g): generic, not
+        // Microsoft-specific — benefits every future webhook-capable
+        // provider identically. Reached only on a successful
+        // finishCallback() completion (every failure path above — the
+        // account-mismatch and tenant-mismatch branches — throws before
+        // this point, so $connection->status here is always either
+        // Active or ScopeInsufficient, never Error). enableWebhookRouting()
+        // performs its own full authorization (assertCanConfigure(),
+        // which shares the exact same MANAGEMENT_ROLES ceiling as
+        // assertCanConnect() already re-checked above, so this can never
+        // fail on role grounds for the actor who just completed this
+        // callback) and its own entitlement/lock/audit handling — called
+        // here as a fully ordinary nested call
+        // (TenantContextService::runWithFirmContext() is safely
+        // re-entrant: it opens a nested transaction/savepoint and
+        // restores whatever context was already active in a `finally`
+        // block).
+        if ($provider instanceof SupportsWebhooksContract) {
+            $this->enableWebhookRouting($connection, $currentUserId);
+        }
 
         return new OAuthCallbackResult($connection, $connection->status, $scopeSatisfied);
     }
@@ -590,7 +804,19 @@ class ProviderConnectionService
                         $provider = $this->resolveProvider($locked);
 
                         $tokenSet = $this->httpClient->execute(
-                            fn () => $provider->refreshToken($refreshTokenPlaintext, ['firm_integration_id' => $locked->id]),
+                            // FirmsVault Live Integrations, Checkpoint 2
+                            // addition (checkpoint2-combined-design.md §2
+                            // P-6e, closing FP-2): threads the ALREADY-
+                            // locked $locked model directly, rather than
+                            // only the bare firm_integration_id — avoids
+                            // a redundant, lock-external second DB read a
+                            // real provider's refreshToken() would
+                            // otherwise need to perform to get a usable
+                            // FirmIntegration for ProviderRequestExecutor::send().
+                            fn () => $provider->refreshToken($refreshTokenPlaintext, [
+                                'firm_integration_id' => $locked->id,
+                                'connection' => $locked,
+                            ]),
                             'refreshToken',
                         );
 
@@ -639,7 +865,14 @@ class ProviderConnectionService
                     // array key" warning on every no-op refresh.
                     if (($outcome['refreshedScopes'] ?? null) !== null) {
                         $provider = $this->resolveProvider($connection->fresh());
-                        $requiredScopes = $provider->requiredScopes();
+                        // Threads the same `requested_capabilities`
+                        // context as finishCallback()'s scope-satisfaction
+                        // check, so a capability-aware provider evaluates
+                        // the downgrade check against the same bundle
+                        // that was actually requested.
+                        $requiredScopes = $provider->requiredScopes([
+                            'requested_capabilities' => $connection->fresh()->requested_capabilities_json ?? [],
+                        ]);
                         $refreshedScopes = $outcome['refreshedScopes'];
                         $stillSatisfied = count(array_diff($requiredScopes, $refreshedScopes)) === 0;
 
@@ -911,6 +1144,22 @@ class ProviderConnectionService
                     // journey (startConnection() above), making this a
                     // real, not merely theoretical, risk starting now.
                     'external_account_id' => null,
+                    // Checkpoint 2 (FirmsVault Live Integrations) note
+                    // (checkpoint2-combined-design.md §2 P-6d;
+                    // checkpoint2-security-review.md Finding 1):
+                    // external_tenant_id is DELIBERATELY NOT nulled here,
+                    // unlike external_account_id immediately above — this
+                    // is not an oversight. No uniqueness constraint
+                    // anywhere depends on external_tenant_id (unlike
+                    // external_account_id's partial unique index), and
+                    // startConnection()'s own docblock confirms a
+                    // reconnect after a full disconnect() always creates
+                    // a BRAND-NEW firm_integrations row (finishCallback()
+                    // unconditionally rejects completing OAuth against an
+                    // already-Disconnected row), so this row's stale
+                    // external_tenant_id is never read again by anything.
+                    // Do not "fix" this into an inconsistency by adding a
+                    // null-out that isn't actually needed.
                 ]);
 
                 // Checkpoint 7 addition (frozen design §4, checklist
@@ -1094,6 +1343,55 @@ class ProviderConnectionService
         ]));
 
         return $connection->fresh();
+    }
+
+    /**
+     * Genuine defect found and fixed during Checkpoint 2 test-writing
+     * (checkpoint2-diff-review.md, "production bug found" — surfaced
+     * by the new tenant-mismatch code faithfully copying an existing,
+     * already-latent bug in the sibling account-mismatch branch).
+     *
+     * The account-mismatch and tenant-mismatch rejection branches in
+     * finishCallback() throw WITHOUT writing anything (see their own
+     * comments) — deliberately, because finishCallback() runs inside a
+     * lockForUpdate() on $connection, held for the WHOLE ambient
+     * transaction (completeOAuthCallback()'s
+     * TenantContextService::runWithFirmContext()/DB::transaction()
+     * wrap). An earlier version of this fix tried writing the durable
+     * Error-transition + audit event on the separate `pgsql_audit`
+     * connection (TimelineEventRecorder::recordOnIndependentConnection()'s
+     * own established technique) from INSIDE that same still-open
+     * transaction — but a write from a second session against a row
+     * already lockForUpdate()-locked by the first session's still-open
+     * transaction blocks until that transaction ends, and that
+     * transaction cannot end until finishCallback() itself returns —
+     * a genuine self-deadlock, not merely a test-environment artifact.
+     *
+     * Correct fix: this method is called from completeOAuthCallback()'s
+     * OWN catch block, AFTER runWithFirmContext()'s DB::transaction()
+     * has already caught the mismatch exception, rolled back (releasing
+     * the lock), and re-thrown it to the caller — at that point the row
+     * is unlocked and a perfectly ordinary write on the DEFAULT
+     * connection (a fresh runWithFirmContext() call of its own) commits
+     * normally, no independent-connection trick needed at all.
+     */
+    private function recordMismatchRejectionAfterRollback(int $firmId, int $connectionId, int $actorFirmUserId, string $eventType, string $reason): void
+    {
+        (new TenantContextService)->runWithFirmContext($firmId, function () use ($connectionId, $actorFirmUserId, $eventType, $reason): void {
+            $connection = FirmIntegration::query()->find($connectionId);
+
+            if ($connection === null) {
+                return;
+            }
+
+            $this->transitionStatus($connection, ConnectionStatus::Error, $reason);
+
+            $actor = FirmUser::query()->find($actorFirmUserId);
+
+            $this->events->record($connection->firm, $eventType, $connection, $actor?->user, [
+                'firm_integration_id' => $connection->id,
+            ]);
+        });
     }
 
     /**

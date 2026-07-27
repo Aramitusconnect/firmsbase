@@ -16,6 +16,9 @@ use App\Integrations\Services\SyncCursorService;
 use App\Integrations\Services\SyncItemService;
 use App\Integrations\Services\SyncRunService;
 use App\Models\Firm;
+use App\Models\TenantEncryptionKey;
+use App\Services\EmailBodyEncryptionService;
+use App\Services\EncryptionKeyService;
 use App\Services\TimelineEventRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -55,9 +58,34 @@ class SyncCursorAdvancementServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->cursorService = new SyncCursorService();
-        $this->itemService = new SyncItemService(new TimelineEventRecorder(), new IntegrationRequeueAuditLogger());
-        $this->runService = new SyncRunService(new TimelineEventRecorder());
+        // FirmsVault Live Integrations Checkpoint 2 (Microsoft 365
+        // provider — checkpoint2-combined-design.md §2 P-14) addition:
+        // SyncCursorService gained a required EmailBodyEncryptionService
+        // dependency (cursor_value is now encrypted at rest). Mirrors the
+        // exact real constructor chain this codebase already uses
+        // elsewhere for EmailBodyEncryptionService, e.g.
+        // IntegrationCredentialServiceDecryptAuditAndEnvironmentModeTest's
+        // `new EmailBodyEncryptionService(new EncryptionKeyService)`.
+        $this->cursorService = new SyncCursorService(new EmailBodyEncryptionService(new EncryptionKeyService));
+        $this->itemService = new SyncItemService(new TimelineEventRecorder, new IntegrationRequeueAuditLogger);
+        $this->runService = new SyncRunService(new TimelineEventRecorder);
+    }
+
+    /**
+     * FirmsVault Live Integrations Checkpoint 2 addition: cursor_value is
+     * now encrypted per-firm via EmailBodyEncryptionService, which fails
+     * closed when the firm has no active TenantEncryptionKey. Every firm
+     * fixture in this file that exercises advance() with a non-null
+     * cursor value, or the factory's withCursorValue() state, needs one.
+     * Mirrors IntegrationOauthStatesForceRlsActivationTest's own
+     * firmWithActiveKey() helper.
+     */
+    private function firmWithActiveKey(): Firm
+    {
+        $firm = Firm::factory()->create();
+        TenantEncryptionKey::factory()->forFirm($firm)->create();
+
+        return $firm;
     }
 
     // ------------------------------------------------------------
@@ -66,22 +94,25 @@ class SyncCursorAdvancementServiceTest extends TestCase
 
     public function test_cursor_advances_in_the_same_transaction_as_a_fully_succeeded_batch(): void
     {
-        $firm = Firm::factory()->create();
+        $firm = $this->firmWithActiveKey();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
         $run = $this->runWithFirmContext($firm, fn () => IntegrationSyncRun::factory()->forFirmIntegration($connection)->running()->create());
         $cursor = $this->runWithFirmContext($firm, fn () => IntegrationSyncCursor::factory()->forFirmIntegration($connection)->create());
 
-        $this->runWithFirmContext($firm, function () use ($firm, $run, $cursor) {
-            DB::transaction(function () use ($firm, $run, $cursor) {
+        $this->runWithFirmContext($firm, function () use ($firm, $connection, $run, $cursor) {
+            DB::transaction(function () use ($firm, $connection, $run, $cursor) {
                 $this->itemService->recordAttempt($firm->id, $run->id, 'contact', 'App\\Models\\Contact', 1, (string) Str::uuid(), SyncItemStatus::Succeeded);
                 $this->itemService->recordAttempt($firm->id, $run->id, 'contact', 'App\\Models\\Contact', 2, (string) Str::uuid(), SyncItemStatus::Succeeded);
 
-                $this->cursorService->advance($cursor->id, $cursor->cursor_version, 'cursor-token-1');
+                $this->cursorService->advance($connection, $cursor->id, $cursor->cursor_version, 'cursor-token-1');
             });
         });
 
         $fresh = $this->runWithFirmContext($firm, fn () => IntegrationSyncCursor::query()->findOrFail($cursor->id));
-        $this->assertSame('cursor-token-1', $fresh->cursor_value);
+        // cursor_value is now encrypted at rest (checkpoint2-combined-
+        // design.md §2 P-14) — decrypt via the same service that wrote it
+        // rather than comparing the raw ciphertext column.
+        $this->assertSame('cursor-token-1', $this->cursorService->decryptCursorValue($connection, $fresh));
         $this->assertSame(1, $fresh->cursor_version);
 
         $itemCount = $this->runWithFirmContext($firm, fn () => IntegrationSyncItem::query()->where('sync_run_id', $run->id)->count());
@@ -130,7 +161,7 @@ class SyncCursorAdvancementServiceTest extends TestCase
 
     public function test_cursor_does_not_advance_when_the_batch_leaves_a_retrying_item(): void
     {
-        $firm = Firm::factory()->create();
+        $firm = $this->firmWithActiveKey();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
         $run = $this->runWithFirmContext($firm, fn () => IntegrationSyncRun::factory()->forFirmIntegration($connection)->running()->create());
         $cursor = $this->runWithFirmContext($firm, fn () => IntegrationSyncCursor::factory()->forFirmIntegration($connection)->withCursorValue('prior-value')->create());
@@ -156,7 +187,7 @@ class SyncCursorAdvancementServiceTest extends TestCase
         });
 
         $fresh = $this->runWithFirmContext($firm, fn () => IntegrationSyncCursor::query()->findOrFail($cursor->id));
-        $this->assertSame('prior-value', $fresh->cursor_value, 'A Retrying item must also block advancement — the cursor is untouched.');
+        $this->assertSame('prior-value', $this->cursorService->decryptCursorValue($connection, $fresh), 'A Retrying item must also block advancement — the cursor is untouched.');
         $this->assertSame(0, $fresh->cursor_version);
     }
 
@@ -166,20 +197,20 @@ class SyncCursorAdvancementServiceTest extends TestCase
 
     public function test_advance_throws_on_a_stale_cursor_version(): void
     {
-        $firm = Firm::factory()->create();
+        $firm = $this->firmWithActiveKey();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
         $cursor = $this->runWithFirmContext($firm, fn () => IntegrationSyncCursor::factory()->forFirmIntegration($connection)->create());
 
         $this->expectException(CursorVersionConflictException::class);
 
-        $this->runWithFirmContext($firm, function () use ($cursor) {
-            $this->cursorService->advance($cursor->id, $cursor->cursor_version + 5, 'irrelevant');
+        $this->runWithFirmContext($firm, function () use ($connection, $cursor) {
+            $this->cursorService->advance($connection, $cursor->id, $cursor->cursor_version + 5, 'irrelevant');
         });
     }
 
     public function test_a_cursor_version_conflict_rolls_back_the_entire_batch_transaction_including_item_writes(): void
     {
-        $firm = Firm::factory()->create();
+        $firm = $this->firmWithActiveKey();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
         $run = $this->runWithFirmContext($firm, fn () => IntegrationSyncRun::factory()->forFirmIntegration($connection)->running()->create());
         $cursor = $this->runWithFirmContext($firm, fn () => IntegrationSyncCursor::factory()->forFirmIntegration($connection)->create());
@@ -190,8 +221,8 @@ class SyncCursorAdvancementServiceTest extends TestCase
         // etc.) advances the cursor BEFORE this batch's own transaction
         // begins its cursor write — its own transaction has already
         // committed by this point.
-        $this->runWithFirmContext($firm, function () use ($cursor) {
-            $this->cursorService->advance($cursor->id, $cursor->cursor_version, 'out-of-band-value');
+        $this->runWithFirmContext($firm, function () use ($connection, $cursor) {
+            $this->cursorService->advance($connection, $cursor->id, $cursor->cursor_version, 'out-of-band-value');
         });
 
         $externalIdOfDoomedItem = (string) Str::uuid();
@@ -199,8 +230,8 @@ class SyncCursorAdvancementServiceTest extends TestCase
         $caught = null;
 
         try {
-            $this->runWithFirmContext($firm, function () use ($firm, $run, $cursor, $staleExpectedVersion, $externalIdOfDoomedItem) {
-                DB::transaction(function () use ($firm, $run, $cursor, $staleExpectedVersion, $externalIdOfDoomedItem) {
+            $this->runWithFirmContext($firm, function () use ($firm, $connection, $run, $cursor, $staleExpectedVersion, $externalIdOfDoomedItem) {
+                DB::transaction(function () use ($firm, $connection, $run, $cursor, $staleExpectedVersion, $externalIdOfDoomedItem) {
                     // Item-status writes that WOULD have committed had the
                     // cursor CAS succeeded.
                     $this->itemService->recordAttempt($firm->id, $run->id, 'contact', 'App\\Models\\Contact', 999, $externalIdOfDoomedItem, SyncItemStatus::Succeeded);
@@ -208,7 +239,7 @@ class SyncCursorAdvancementServiceTest extends TestCase
                     // Reads the STALE version (0) — the out-of-band actor
                     // already moved it to 1 — so this must throw and
                     // propagate, rolling back the whole transaction.
-                    $this->cursorService->advance($cursor->id, $staleExpectedVersion, 'batch-value-that-must-never-land');
+                    $this->cursorService->advance($connection, $cursor->id, $staleExpectedVersion, 'batch-value-that-must-never-land');
                 });
             });
         } catch (CursorVersionConflictException $e) {
@@ -229,7 +260,7 @@ class SyncCursorAdvancementServiceTest extends TestCase
         // never further mutated by the failed advance attempt (0 rows
         // affected means nothing was written).
         $fresh = $this->runWithFirmContext($firm, fn () => IntegrationSyncCursor::query()->findOrFail($cursor->id));
-        $this->assertSame('out-of-band-value', $fresh->cursor_value);
+        $this->assertSame('out-of-band-value', $this->cursorService->decryptCursorValue($connection, $fresh));
         $this->assertSame(1, $fresh->cursor_version);
 
         // Composition proof: this is exactly the caller pattern a future
@@ -248,7 +279,7 @@ class SyncCursorAdvancementServiceTest extends TestCase
 
     public function test_invalidate_also_uses_cas_and_throws_on_stale_version(): void
     {
-        $firm = Firm::factory()->create();
+        $firm = $this->firmWithActiveKey();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
         $cursor = $this->runWithFirmContext($firm, fn () => IntegrationSyncCursor::factory()->forFirmIntegration($connection)->withCursorValue('some-value')->create());
 

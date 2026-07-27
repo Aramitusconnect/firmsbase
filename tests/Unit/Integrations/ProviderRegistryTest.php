@@ -45,7 +45,7 @@ final class ProviderRegistryTest extends TestCase
     {
         parent::setUp();
 
-        $this->registry = new ProviderRegistry();
+        $this->registry = new ProviderRegistry;
     }
 
     public function test_resolving_the_registered_test_key_returns_an_instance_implementing_the_root_contract(): void
@@ -305,8 +305,13 @@ final class FakeOAuthOnlyProvider implements IntegrationProviderContract, Suppor
         return ['access_token' => 'fixture-token'];
     }
 
-    public function requiredScopes(): array
+    public function requiredScopes(array $context = []): array
     {
         return ['fixture.scope'];
+    }
+
+    public function capabilityScopeMap(): array
+    {
+        return [];
     }
 }

@@ -57,6 +57,19 @@ final class SanitizedHealthDiagnostic
 
     public const OPERATION_OUTBOX_DISPATCH = 'outbox_dispatch';
 
+    /**
+     * FirmsVault Live Integrations, Checkpoint 2 additions
+     * (checkpoint2-combined-design.md §2 P-10): the closed 6-value
+     * operation-type vocabulary above had no slot for the initial
+     * authorization-code exchange or a webhook-subscription call — see
+     * App\Integrations\Support\ProviderRequestExecutor::SUPPORTED_OPERATION_TYPES's
+     * matching `'token_exchange'`/`'webhook_subscribe'` additions and
+     * `operationLabelFor()`'s new match arms.
+     */
+    public const OPERATION_TOKEN_EXCHANGE = 'token_exchange';
+
+    public const OPERATION_WEBHOOK_SUBSCRIBE = 'webhook_subscribe';
+
     private const VALID_OPERATION_LABELS = [
         self::OPERATION_HEALTH_CHECK,
         self::OPERATION_TOKEN_REFRESH,
@@ -64,6 +77,8 @@ final class SanitizedHealthDiagnostic
         self::OPERATION_PUSH_SYNC,
         self::OPERATION_WEBHOOK_PROCESS,
         self::OPERATION_OUTBOX_DISPATCH,
+        self::OPERATION_TOKEN_EXCHANGE,
+        self::OPERATION_WEBHOOK_SUBSCRIBE,
     ];
 
     public function __construct(

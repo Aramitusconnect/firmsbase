@@ -43,6 +43,30 @@ class IntegrationSyncCursorsForceRlsActivationTest extends TestCase
         'cursor_issued_at', 'created_at', 'updated_at',
     ];
 
+    /**
+     * FirmsVault Live Integrations, Checkpoint 2 (Microsoft 365 provider —
+     * checkpoint2-combined-design.md §2 P-13; checkpoint2-security-review.md
+     * Finding 5) addition: `cursor_value_encryption_key_id`, added by the
+     * later, separate
+     * database/migrations/2026_09_20_140001_add_cursor_value_encryption_key_id_to_integration_sync_cursors_table.php
+     * migration. Deliberately NOT folded into self::EXPECTED_COLUMNS above:
+     * that constant also backs
+     * test_migration_rollback_and_reapplication_restores_exact_prior_state()/
+     * test_migration_down_and_up_restores_exact_prior_state_via_direct_calls(),
+     * which roll back and reapply ONLY the two original
+     * 2026_09_05_053001/053002 migrations (never this later, separate ALTER
+     * TABLE migration) — after that narrower rollback/reapply cycle, this
+     * column is genuinely, correctly absent. Only the test asserting the
+     * table's CURRENT, fully-migrated live schema uses this constant.
+     * Mirrors IntegrationCredentialsForceRlsActivationTest's identical
+     * EXPECTED_COLUMNS_ON_CURRENT_LIVE_SCHEMA precedent for
+     * credential_environment_mode.
+     */
+    private const EXPECTED_COLUMNS_ON_CURRENT_LIVE_SCHEMA = [
+        ...self::EXPECTED_COLUMNS,
+        'cursor_value_encryption_key_id',
+    ];
+
     // ------------------------------------------------------------
     // 1. Schema correctness
     // ------------------------------------------------------------
@@ -57,7 +81,7 @@ class IntegrationSyncCursorsForceRlsActivationTest extends TestCase
         $columns = Schema::getColumnListing('integration_sync_cursors');
 
         sort($columns);
-        $expected = self::EXPECTED_COLUMNS;
+        $expected = self::EXPECTED_COLUMNS_ON_CURRENT_LIVE_SCHEMA;
         sort($expected);
 
         $this->assertSame($expected, $columns);
@@ -187,7 +211,7 @@ class IntegrationSyncCursorsForceRlsActivationTest extends TestCase
     {
         IntegrationSyncCursor::factory()->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(0, DB::table('integration_sync_cursors')->count());
     }
@@ -197,7 +221,7 @@ class IntegrationSyncCursorsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
 
@@ -287,7 +311,7 @@ class IntegrationSyncCursorsForceRlsActivationTest extends TestCase
     public function test_tenant_context_clears_after_success(): void
     {
         $firm = Firm::factory()->create();
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->runWithFirmContext($firm, fn () => IntegrationSyncCursor::factory()->forFirmIntegration(FirmIntegration::factory()->forFirm($firm)->create())->create());
 
@@ -383,7 +407,7 @@ class IntegrationSyncCursorsForceRlsActivationTest extends TestCase
 
     public function test_model_table_resolves_correctly(): void
     {
-        $this->assertSame('integration_sync_cursors', (new IntegrationSyncCursor())->getTable());
+        $this->assertSame('integration_sync_cursors', (new IntegrationSyncCursor)->getTable());
     }
 
     public function test_model_uses_belongs_to_tenant_trait(): void

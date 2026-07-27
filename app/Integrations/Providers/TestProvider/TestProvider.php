@@ -396,11 +396,43 @@ final class TestProvider implements IntegrationProviderContract, SupportsApiKeyC
     }
 
     /**
+     * FirmsVault Live Integrations, Checkpoint 2 paired update
+     * (checkpoint2-combined-design.md §1.2, P-3): accepts the new
+     * optional `$context` parameter SupportsOAuthContract::requiredScopes()
+     * now declares, but ignores it entirely — TestProvider has no
+     * per-capability scope distinction (its two scopes are not tied to
+     * any ResourceType-shaped capability), so its existing fixed
+     * two-scope list is returned unchanged regardless of what (if
+     * anything) `$context['requested_capabilities']` carries. Preserves
+     * every existing zero-arg call site's exact behavior.
+     *
+     * @param  array<string, mixed>  $context
      * @return string[]
      */
-    public function requiredScopes(): array
+    public function requiredScopes(array $context = []): array
     {
         return ['test.read', 'test.write'];
+    }
+
+    /**
+     * FirmsVault Live Integrations, Checkpoint 2 paired update
+     * (checkpoint2-combined-design.md §1.2, P-3): implements the new
+     * SupportsOAuthContract::capabilityScopeMap() method. TestProvider
+     * has no real capability vocabulary of its own (its
+     * pullable/pushable resource types are Contact/Task, not the same
+     * concept as a UI-facing OAuth "capability"), so this returns a
+     * small, honest, illustrative mapping over its own two synthetic
+     * scopes rather than inventing a capability taxonomy that does not
+     * otherwise exist for this provider.
+     *
+     * @return array<string, string[]>
+     */
+    public function capabilityScopeMap(): array
+    {
+        return [
+            'test_read' => ['test.read'],
+            'test_write' => ['test.write'],
+        ];
     }
 
     // ---------------------------------------------------------------

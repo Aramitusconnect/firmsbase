@@ -32,7 +32,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class IntegrationSyncCursor extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     protected $table = 'integration_sync_cursors';
 
@@ -42,6 +42,12 @@ class IntegrationSyncCursor extends Model
         'resource_type',
         'sync_direction',
         'cursor_value',
+        // Checkpoint 2 (FirmsVault Live Integrations, Microsoft 365
+        // provider — checkpoint2-design-sync-webhooks.md §1.2) addition:
+        // pairs with cursor_value, set/cleared together exclusively by
+        // SyncCursorService::advance()/invalidate() — never written
+        // directly on this model from any other caller.
+        'cursor_value_encryption_key_id',
         'cursor_version',
         'status',
         'locked_by_sync_run_id',

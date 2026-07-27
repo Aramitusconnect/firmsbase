@@ -276,18 +276,63 @@ final class PullSyncJob implements ShouldQueue
             $providerContext = is_array($decoded) ? $decoded : [];
         }
 
-        $pageCursor = $cursor->cursor_value;
+        // Checkpoint 2 (FirmsVault Live Integrations, Microsoft 365
+        // provider) fix: a real provider's pull() must reach
+        // ProviderRequestExecutor::send(), which requires a full
+        // FirmIntegration object — the pre-Checkpoint-2 $providerContext
+        // (test-only, JSON-encoded scalar bag) never carried one. Merged
+        // in unconditionally, after decoding, so any caller-supplied
+        // test keys are preserved and 'connection' is always present.
+        $providerContext['connection'] = $connection;
+
+        // Checkpoint 2 (FirmsVault Live Integrations, Microsoft 365
+        // provider — checkpoint2-design-sync-webhooks.md §1.2)
+        // addition: cursor_value is now encrypted at rest;
+        // decryptCursorValue() is the transparent decrypt-on-read layer
+        // (returns null unchanged for a fresh/invalidated cursor). The
+        // provider's pull() still only ever sees a plaintext cursor
+        // string, exactly as SupportsPullSyncContract already documents.
+        $pageCursor = $cursors->decryptCursorValue($connection, $cursor);
         $itemsTotal = 0;
         $itemsSucceeded = 0;
         $itemsFailed = 0;
         $itemsSkipped = 0;
         $sawBlockingFailure = false;
         $sanitizedErrorSummary = null;
+        // Checkpoint 2 addition (checkpoint2-design-sync-webhooks.md
+        // §1.4; checkpoint2-combined-design.md §2 P-15c): set only when
+        // the CATEGORY_CURSOR_EXPIRED branch below has already called
+        // invalidate() — that call already flips status and clears
+        // cursor_value/cursor_value_encryption_key_id (and bumps
+        // cursor_version) in one CAS-guarded statement, so the generic
+        // markFailed() call after the loop must be skipped entirely for
+        // this run; calling both would be redundant at best, a
+        // version-conflict exception at worst.
+        $cursorInvalidated = false;
 
         do {
             try {
                 $page = $httpClient->execute(fn () => $provider->pull($providerContext, $this->resourceType, $pageCursor), 'pull');
             } catch (SanitizedProviderHttpException $e) {
+                // Checkpoint 2 addition (checkpoint2-design-sync-webhooks.md
+                // §1.4; checkpoint2-combined-design.md §2 P-15c): a
+                // provider-reported expired/invalid delta cursor (e.g.
+                // Microsoft Graph's `410 Gone`) must invalidate the
+                // cursor — the mission's "clear signal, never silently
+                // restart full-history sync" self-healing mechanism —
+                // INSTEAD OF falling through to the generic markFailed()
+                // path below. SyncRunService::determineRunType() already
+                // promotes the next dispatch against this now-Invalid
+                // cursor to a Repair run; no further action is needed
+                // here for the self-heal to take effect.
+                if ($e->category() === SanitizedProviderHttpException::CATEGORY_CURSOR_EXPIRED) {
+                    $cursor = $cursors->invalidate($cursor->id, $cursor->cursor_version);
+                    $cursorInvalidated = true;
+                    $sanitizedErrorSummary = 'pull_failed: cursor_expired_resync_required';
+                    $sawBlockingFailure = true;
+                    break;
+                }
+
                 // Checkpoint 1 (FirmsVault Live Integrations) addition
                 // (checkpoint1-design-http-ratelimit-usage.md §4.4, last
                 // bullet — optional, non-blocking): thread a
@@ -372,14 +417,27 @@ final class PullSyncJob implements ShouldQueue
             $nextCursor = $page['next_cursor'] ?? null;
 
             if (! $batchBlocked) {
-                $cursor = $cursors->advance($cursor->id, $cursor->cursor_version, $nextCursor);
+                // Checkpoint 2 addition (checkpoint2-design-sync-webhooks.md
+                // §1.2): advance() now requires $connection (needed to
+                // encrypt $nextCursor per-firm before persisting).
+                $cursor = $cursors->advance($connection, $cursor->id, $cursor->cursor_version, $nextCursor);
             } else {
                 $sawBlockingFailure = true;
                 break;
             }
 
             $pageCursor = $nextCursor;
-        } while ($pageCursor !== null && ! $this->cancellationRequested($run));
+            // Checkpoint 2 addition (checkpoint2-design-sync-webhooks.md
+            // §1.3; checkpoint2-combined-design.md §2 P-15b): a provider
+            // whose continuation token never goes null (e.g. Microsoft
+            // Graph delta query's terminal deltaLink) MUST supply
+            // 'has_more' => false on its terminal page so this loop stops
+            // WITHOUT wiping the just-advanced cursor back to "no prior
+            // sync" — see SupportsPullSyncContract::pull()'s docblock.
+            // Absent 'has_more', this falls through to today's exact
+            // next_cursor-null rule — zero behavior change for
+            // TestProvider or any other provider that never sets it.
+        } while (($page['has_more'] ?? ($pageCursor !== null)) && ! $this->cancellationRequested($run));
 
         $terminalStatus = $sawBlockingFailure
             ? ($itemsSucceeded > 0 ? SyncRunStatus::PartialFailure : SyncRunStatus::Failed)
@@ -387,7 +445,13 @@ final class PullSyncJob implements ShouldQueue
 
         $runs->transitionStatus($run, $terminalStatus, $sanitizedErrorSummary);
 
-        if ($sawBlockingFailure) {
+        if ($sawBlockingFailure && ! $cursorInvalidated) {
+            // Checkpoint 2 addition (checkpoint2-design-sync-webhooks.md
+            // §1.4): skipped when the CATEGORY_CURSOR_EXPIRED branch
+            // above already called invalidate() — that call already
+            // flipped status/bumped cursor_version; calling markFailed()
+            // on top of it would be redundant at best, a version-conflict
+            // exception at worst.
             $cursors->markFailed($cursor->id);
         }
     }

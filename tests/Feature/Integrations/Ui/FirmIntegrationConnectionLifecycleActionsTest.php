@@ -21,7 +21,9 @@ use App\Models\FirmUser;
 use App\Models\TenantEncryptionKey;
 use App\Models\User;
 use App\Services\EntitlementService;
+use App\Services\TenantContextService;
 use Filament\Facades\Filament;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use RuntimeException;
@@ -184,7 +186,7 @@ final class FirmIntegrationConnectionLifecycleActionsTest extends TestCase
         );
 
         $test->assertOk();
-        $test->assertSee((new TestProvider())->displayName());
+        $test->assertSee((new TestProvider)->displayName());
     }
 
     // ------------------------------------------------------------
@@ -194,13 +196,17 @@ final class FirmIntegrationConnectionLifecycleActionsTest extends TestCase
     public function test_connect_provider_action_creates_a_pending_connection_and_redirects_to_oauth_initiate(): void
     {
         $firm = $this->entitledFirm();
-        $provider = $this->testProviderRow();
+        $provider = $this->makeTestProviderRow();
         $this->actingAsRole($firm, FirmUserRole::FirmOwner);
 
         $test = $this->runWithFirmContext($firm, fn () => Livewire::test(ListFirmIntegrations::class));
 
         $test->mountAction(ConnectProviderAction::getDefaultName());
-        $test->setActionData(['integration_provider_id' => $provider->id]);
+        // Checkpoint 2 update: the capability CheckboxList is required
+        // once visible (TestProvider declares 'contact'/'task' via
+        // ProviderMetadata::resourceTypes) — a real capability selection
+        // is now needed for the wizard's first step to validate.
+        $test->setActionData(['integration_provider_id' => $provider->id, 'capabilities' => ['contact']]);
         $test->callMountedAction();
 
         $test->assertHasNoActionErrors();
@@ -209,12 +215,13 @@ final class FirmIntegrationConnectionLifecycleActionsTest extends TestCase
 
         $this->assertNotNull($connection);
         $this->assertSame(ConnectionStatus::Pending, $connection->status);
+        $this->assertSame(['contact'], $connection->requested_capabilities_json);
     }
 
     public function test_connect_provider_action_double_submit_does_not_create_two_pending_rows(): void
     {
         $firm = $this->entitledFirm();
-        $provider = $this->testProviderRow();
+        $provider = $this->makeTestProviderRow();
         $firmUser = $this->actingAsRole($firm, FirmUserRole::FirmOwner);
 
         // Directly exercises startConnection()'s idempotency guard twice
@@ -265,7 +272,7 @@ final class FirmIntegrationConnectionLifecycleActionsTest extends TestCase
         // itself must independently re-check role authority, not merely
         // rely on the action's own visible() closure hiding the button.
         $firm = $this->entitledFirm();
-        $provider = $this->testProviderRow();
+        $provider = $this->makeTestProviderRow();
         $firmUser = $this->actingAsRole($firm, FirmUserRole::Paralegal);
 
         $this->expectException(RuntimeException::class);
@@ -281,7 +288,7 @@ final class FirmIntegrationConnectionLifecycleActionsTest extends TestCase
         config(['integrations.providers' => []]);
 
         $firm = $this->entitledFirm();
-        $provider = $this->testProviderRow();
+        $provider = $this->makeTestProviderRow();
         $firmUser = $this->actingAsRole($firm, FirmUserRole::FirmOwner);
 
         $this->expectException(RuntimeException::class);
@@ -394,10 +401,10 @@ final class FirmIntegrationConnectionLifecycleActionsTest extends TestCase
         // exception class as the original bug, but now firing for the
         // CORRECT reason (RLS excluding a real cross-firm row) rather
         // than for every firm unconditionally.
-        $this->expectException(\Illuminate\Database\Eloquent\ModelNotFoundException::class);
+        $this->expectException(ModelNotFoundException::class);
 
         $this->runWithFirmContext($firmB, function () use ($connectionA, $actorB) {
-            app(\App\Services\TenantContextService::class)->runWithFirmContext(
+            app(TenantContextService::class)->runWithFirmContext(
                 $actorB->firm_id,
                 fn () => FirmIntegration::query()->where('id', $connectionA->id)->firstOrFail(),
             );
@@ -584,7 +591,7 @@ final class FirmIntegrationConnectionLifecycleActionsTest extends TestCase
         return $firm;
     }
 
-    private function testProviderRow(): IntegrationProvider
+    private function makeTestProviderRow(): IntegrationProvider
     {
         return IntegrationProvider::query()->where('code', ProviderKey::Test->value)->first()
             ?? IntegrationProvider::factory()->create(['code' => ProviderKey::Test->value]);

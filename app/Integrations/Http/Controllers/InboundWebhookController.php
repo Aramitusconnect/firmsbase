@@ -11,6 +11,7 @@ use App\Integrations\Data\ResolvedWebhookConnection;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Enums\WebhookVerificationOutcome;
 use App\Integrations\Jobs\RecordWebhookVerificationFailureJob;
+use App\Integrations\Listeners\DispatchPullSyncOnVerifiedWebhookEvent;
 use App\Integrations\Models\IntegrationInboundWebhookEvent;
 use App\Integrations\Services\InboundWebhookAuditLogger;
 use App\Integrations\Services\InboundWebhookEventService;
@@ -362,6 +363,26 @@ final class InboundWebhookController extends Controller
             ]);
 
             $this->recordFirmTimelineEvent($resolved->firmId, $result['event']);
+
+            // FirmsVault Live Integrations, Checkpoint 2
+            // (checkpoint2-design-sync-webhooks.md §5.3;
+            // checkpoint2-combined-design.md §2 P-21) — closes the
+            // "verified webhook event never triggers sync" gap. Fired
+            // ONLY for a genuinely newly-created event row (same
+            // duplicate-guard as recordFirmTimelineEvent() immediately
+            // above — a retried/duplicate delivery must never re-trigger
+            // a second sync for the same event), dispatched directly
+            // (never a framework Illuminate event listener — see
+            // DispatchPullSyncOnVerifiedWebhookEvent's own docblock for
+            // why: recordVerifiedEvent() writes via a raw DB::table()
+            // insert, which never fires Eloquent's `created` event).
+            DispatchPullSyncOnVerifiedWebhookEvent::dispatch(
+                $resolved->firmIntegrationId,
+                $resolved->firmId,
+                $provider,
+                $result['event']->event_type,
+                (int) $result['event']->id,
+            );
         } else {
             $this->auditLogger->record(InboundWebhookAuditLogger::EVENT_DUPLICATE_ACCEPTED, [
                 'firm_integration_id' => $resolved->firmIntegrationId,

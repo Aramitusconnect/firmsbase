@@ -69,10 +69,16 @@ class IntegrationAuditEventTypeTest extends TestCase
      * (`integration_oauth.scope_downgrade_detected_on_refresh`, fired by
      * ProviderConnectionService::refreshConnectionToken() —
      * checkpoint1-design-oauth-security-review.md §8's refresh-path
-     * scope-downgrade-detection fix) — for 18 total. Any new string
-     * added to any of the seven producing files below that isn't in
-     * this list — or any of these 18 that stops appearing in source —
-     * must fail one of the two tests below.
+     * scope-downgrade-detection fix), plus 2 new FirmsVault Live
+     * Integrations Checkpoint 2 additions (`integration_oauth.
+     * provider_tenant_mismatch`, fired by
+     * ProviderConnectionService::finishCallback(), and `integration_oauth.
+     * requested_capabilities_updated`, fired by
+     * ProviderConnectionService::updateRequestedCapabilities() —
+     * checkpoint2-combined-design.md §2 P-6d/P-6h) — for 20 total. Any
+     * new string added to any of the seven producing files below that
+     * isn't in this list — or any of these 20 that stops appearing in
+     * source — must fail one of the two tests below.
      */
     private const CLOSED_TAXONOMY = [
         // Checkpoint 10 addition (frozen-design-post-security-review.md
@@ -87,6 +93,22 @@ class IntegrationAuditEventTypeTest extends TestCase
         // provider's refresh response carries a narrower scope grant
         // than required.
         'integration_oauth.scope_downgrade_detected_on_refresh',
+        // FirmsVault Live Integrations Checkpoint 2 addition (Microsoft
+        // 365 provider — checkpoint2-combined-design.md §2 P-6d;
+        // checkpoint2-security-review.md Finding 1): fired by
+        // ProviderConnectionService::finishCallback() when a
+        // reauthorization's returned tid claim doesn't hash_equals()-match
+        // the connection's already-captured external_tenant_id — the same
+        // capture-if-null/compare-and-reject-on-mismatch pattern already
+        // proven for external_account_id.
+        'integration_oauth.provider_tenant_mismatch',
+        // FirmsVault Live Integrations Checkpoint 2 addition (Microsoft
+        // 365 provider — checkpoint2-combined-design.md §2 P-6h): fired by
+        // ProviderConnectionService::updateRequestedCapabilities() (the
+        // renameConnection()-shaped small method backing "Add
+        // Capabilities / Reconnect") after a successful re-authorization
+        // and single-column update.
+        'integration_oauth.requested_capabilities_updated',
         'integration_sync.run_started',
         'integration_sync.run_completed',
         'integration_sync.run_failed',
@@ -145,10 +167,10 @@ class IntegrationAuditEventTypeTest extends TestCase
         'integration_oauth.required_scope_missing',
     ];
 
-    public function test_the_closed_taxonomy_has_exactly_eighteen_distinct_event_names(): void
+    public function test_the_closed_taxonomy_has_exactly_twenty_distinct_event_names(): void
     {
-        $this->assertCount(18, self::CLOSED_TAXONOMY);
-        $this->assertCount(18, array_unique(self::CLOSED_TAXONOMY), 'No duplicate event names in the closed taxonomy.');
+        $this->assertCount(20, self::CLOSED_TAXONOMY);
+        $this->assertCount(20, array_unique(self::CLOSED_TAXONOMY), 'No duplicate event names in the closed taxonomy.');
     }
 
     /**

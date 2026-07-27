@@ -24,8 +24,25 @@ namespace App\Integrations\Enums;
  * code-defined registry (via ProviderRegistry), never used to
  * dynamically instantiate an arbitrary class or construct an arbitrary
  * API call.
+ *
+ * FirmsVault Live Integrations, Checkpoint 2 addition
+ * (checkpoint2-combined-design.md §1.1, P-1): `Microsoft365` is the
+ * first real (non-`Test`) provider key registered in this enum. Value
+ * `'microsoft365'` — not `'microsoft'`, not `'m365'`, not
+ * `'office365'` — matches the exact string already used in this
+ * mission's own design documents and config illustrative comments, and
+ * is stable/future-proof against a later, distinct
+ * `ProviderKey::GoogleWorkspace` case (no short-form naming collision
+ * risk). Adding this case is step one of this checkpoint — nothing
+ * else (config wiring, catalog seed, `Microsoft365Provider` itself)
+ * can proceed without it. The class implementing this key
+ * (`App\Integrations\Providers\Microsoft365\Microsoft365Provider`)
+ * does not exist yet as of this change — see
+ * `config('integrations.providers')`'s env-gated, class-existence-
+ * tolerant registration comment for why that is safe.
  */
 enum ProviderKey: string
 {
     case Test = 'test';
+    case Microsoft365 = 'microsoft365';
 }

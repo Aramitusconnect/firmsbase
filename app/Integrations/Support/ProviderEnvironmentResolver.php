@@ -39,6 +39,39 @@ use App\Integrations\Exceptions\ProviderEnvironmentMisconfiguredException;
  * and port must match EXACTLY (case-insensitive); the path is then
  * checked with a boundary-anchored prefix match so `/basev2` can never
  * match a configured prefix of `/base`.
+ *
+ * FirmsVault Live Integrations, Checkpoint 2 widening
+ * (checkpoint2-combined-design.md §2 P-8; checkpoint2-security-review.md
+ * Finding 4, P1 required correction): `provider_environments`'s per-mode
+ * URL config shape widens from a singular `sandbox_base_url`/
+ * `live_base_url` string to a purpose-keyed `sandbox_base_urls`/
+ * `live_base_urls` array — needed because a provider like Microsoft 365
+ * genuinely has TWO distinct allowlisted hosts per mode (an identity
+ * host, `login.microsoftonline.com`, and a resource-API host,
+ * `graph.microsoft.com`), which a single base URL cannot represent.
+ * `baseUrlFor()`/`modeFor()`/`assertUrlAllowedFor()` all gain an
+ * optional `string $purpose = 'default'` parameter; a provider with a
+ * genuinely single-host shape (e.g. Plaid) configures only a `'default'`
+ * key and every call site may omit `$purpose` entirely, preserving
+ * today's exact single-host behavior byte-for-byte.
+ *
+ * REQUIRED FAIL-CLOSED RULE (security review Finding 4, P1): requesting
+ * a specific, non-`'default'` `$purpose` whose key is absent from the
+ * provider's configured `sandbox_base_urls`/`live_base_urls` array MUST
+ * throw `ProviderEnvironmentMisconfiguredException` — it must NEVER
+ * silently fall back to a `'default'` key. `baseUrlFor()` below performs
+ * a direct `$urls[$purpose] ?? throw`, with no fallback branch to any
+ * other key, by construction — there is no code path in this class that
+ * could resolve a requested purpose to a DIFFERENT key's URL. As an
+ * operational convention (not itself mechanically enforced by this
+ * class), a provider's `provider_environments` config block should
+ * define EITHER a bare `'default'` key (a genuinely single-host
+ * provider) OR a closed set of named purposes (e.g. Microsoft's
+ * `'identity'`/`'graph'`) — never both in the same block, removing the
+ * "forgot to pass the right purpose, silently validated against the
+ * wrong host" ambiguity Finding 4 describes, structurally, at the
+ * config-authoring level, rather than relying on every future call site
+ * remembering to pass the right purpose.
  */
 final class ProviderEnvironmentResolver
 {
@@ -62,8 +95,17 @@ final class ProviderEnvironmentResolver
      * configuration entry at all, or if the entry's `mode` is missing or
      * not one of the two valid values — never silently defaults to
      * either mode when the configuration itself is absent or malformed.
+     *
+     * Checkpoint 2 note: `$purpose` is accepted for signature parity
+     * with `baseUrlFor()`/`assertUrlAllowedFor()` (a caller may pass the
+     * same `$purpose` value to all three uniformly), but is NOT
+     * currently used in this method's own logic — a provider's `mode`
+     * (sandbox vs. live) is a single, whole-provider setting in today's
+     * config shape, never purpose-specific (unlike the base URL itself,
+     * which genuinely does vary by purpose for a dual-host provider like
+     * Microsoft 365). Reserved for forward compatibility only.
      */
-    public function modeFor(ProviderKey $key): string
+    public function modeFor(ProviderKey $key, string $purpose = 'default'): string
     {
         $config = $this->configFor($key);
         $mode = $config['mode'] ?? null;
@@ -78,22 +120,41 @@ final class ProviderEnvironmentResolver
     }
 
     /**
-     * The base URL matching $key's CURRENTLY configured mode. Throws
-     * ProviderEnvironmentMisconfiguredException if the resolved mode's
-     * URL is null/empty — NEVER silently falls back to the other mode's
-     * URL, which would defeat the entire sandbox/live isolation
-     * guarantee.
+     * The base URL matching $key's CURRENTLY configured mode, for the
+     * given $purpose. Throws ProviderEnvironmentMisconfiguredException
+     * if the resolved mode's purpose-keyed URL is missing/null/empty —
+     * NEVER silently falls back to the other mode's URL (defeats the
+     * sandbox/live isolation guarantee) and NEVER silently falls back to
+     * a different purpose's key, including `'default'` (security review
+     * Finding 4, P1 — see this class's own docblock). A provider with no
+     * `sandbox_base_urls`/`live_base_urls` array configured at all for
+     * the resolved mode also throws here, exactly as the prior
+     * singular-string shape did for a missing `sandbox_base_url`/
+     * `live_base_url`.
      */
-    public function baseUrlFor(ProviderKey $key): string
+    public function baseUrlFor(ProviderKey $key, string $purpose = 'default'): string
     {
-        $mode = $this->modeFor($key);
+        $mode = $this->modeFor($key, $purpose);
         $config = $this->configFor($key);
-        $urlConfigKey = $mode === 'live' ? 'live_base_url' : 'sandbox_base_url';
-        $url = $config[$urlConfigKey] ?? null;
+        $urlConfigKey = $mode === 'live' ? 'live_base_urls' : 'sandbox_base_urls';
+        $urls = $config[$urlConfigKey] ?? null;
+
+        if (! is_array($urls)) {
+            throw new ProviderEnvironmentMisconfiguredException(
+                "Provider \"{$key->value}\" is configured for the \"{$mode}\" environment but has no \"{$urlConfigKey}\" array set."
+            );
+        }
+
+        // Deliberately a direct, unconditional lookup — no `?? $urls['default']`
+        // fallback branch exists anywhere in this method. Requesting a
+        // specific, non-default $purpose whose key is absent MUST throw,
+        // never silently resolve against a different purpose's URL
+        // (security review Finding 4, P1 required correction).
+        $url = $urls[$purpose] ?? null;
 
         if (! is_string($url) || trim($url) === '') {
             throw new ProviderEnvironmentMisconfiguredException(
-                "Provider \"{$key->value}\" is configured for the \"{$mode}\" environment but has no \"{$urlConfigKey}\" set."
+                "Provider \"{$key->value}\" is configured for the \"{$mode}\" environment but has no \"{$urlConfigKey}.{$purpose}\" set."
             );
         }
 
@@ -126,9 +187,9 @@ final class ProviderEnvironmentResolver
      * never mapped into SanitizedProviderHttpException's retryable/
      * terminal vocabulary.
      */
-    public function assertUrlAllowedFor(ProviderKey $key, string $url): void
+    public function assertUrlAllowedFor(ProviderKey $key, string $url, string $purpose = 'default'): void
     {
-        $expectedBaseUrl = $this->baseUrlFor($key);
+        $expectedBaseUrl = $this->baseUrlFor($key, $purpose);
 
         $expectedParts = parse_url($expectedBaseUrl);
         $candidateParts = parse_url($url);

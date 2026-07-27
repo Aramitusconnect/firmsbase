@@ -323,9 +323,13 @@ final class IntegrationCredentialServiceDecryptAuditAndEnvironmentModeTest exten
         // The genuine TestProvider case: `test` is never present in
         // `integrations.provider_environments` by default — this must
         // never throw for any existing TestProvider-backed credential.
+        // Checkpoint 2 update: the array as a whole is no longer empty
+        // (a real `microsoft365` entry now exists) — narrowed to assert
+        // specifically that the `test` provider key is absent, which is
+        // this test's actual intent.
         [$firm, $connection] = $this->connectionForFirm();
 
-        $this->assertSame([], config('integrations.provider_environments'));
+        $this->assertArrayNotHasKey(ProviderKey::Test->value, config('integrations.provider_environments'));
 
         $credential = $this->runWithFirmContext($firm, fn () => $this->service()->store(
             $connection,

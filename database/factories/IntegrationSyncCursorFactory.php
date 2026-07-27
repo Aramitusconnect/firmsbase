@@ -9,10 +9,12 @@ use App\Integrations\Enums\SyncDirection;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationSyncCursor;
 use App\Models\Firm;
+use App\Services\EmailBodyEncryptionService;
 use App\Services\TenantContextService;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
+use RuntimeException;
 
 /**
  * @extends Factory<IntegrationSyncCursor>
@@ -98,9 +100,33 @@ class IntegrationSyncCursorFactory extends Factory
         ]);
     }
 
+    /**
+     * Checkpoint 2 addition (checkpoint2-combined-design.md §2 P-13/P-14):
+     * `cursor_value` is now encrypted at rest, and a DB CHECK constraint
+     * (`integration_sync_cursors_value_key_id_pair`) requires
+     * `cursor_value`/`cursor_value_encryption_key_id` to be set together.
+     * Mirrors `SyncCursorService::advance()`'s own
+     * `EmailBodyEncryptionService::encrypt()` call exactly, rather than
+     * storing a plaintext value the real write path could never produce.
+     * Resolves the firm from the attributes already merged in by
+     * `firm_id`'s own definition() closure (a state closure receives the
+     * attribute array resolved so far as its first parameter).
+     */
     public function withCursorValue(string $value): static
     {
-        return $this->state(fn () => ['cursor_value' => $value]);
+        return $this->state(function (array $attributes) use ($value): array {
+            $firm = Firm::query()->findOrFail($attributes['firm_id']);
+            $result = app(EmailBodyEncryptionService::class)->encrypt($firm, $value);
+
+            if (! $result->succeeded) {
+                throw new RuntimeException("IntegrationSyncCursorFactory::withCursorValue() could not encrypt: {$result->reason}");
+            }
+
+            return [
+                'cursor_value' => $result->ciphertext,
+                'cursor_value_encryption_key_id' => $result->encryptionKeyId,
+            ];
+        });
     }
 
     public function running(): static

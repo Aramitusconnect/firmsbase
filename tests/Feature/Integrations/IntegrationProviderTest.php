@@ -239,6 +239,45 @@ class IntegrationProviderTest extends TestCase
         'integration_usage_records',
     ];
 
+    /**
+     * FirmsVault Live Integrations, Checkpoint 2 (Microsoft 365 provider)
+     * UPDATE: Checkpoint 2 added a SEVENTH independent dependency chain
+     * reaching all the way back to firm_integrations (transitively,
+     * integration_providers) — integration_provider_webhook_subscriptions
+     * carries a real composite FK (firm_id, firm_integration_id) ->
+     * firm_integrations(firm_id, id) with cascadeOnDelete()
+     * (constraint integration_provider_webhook_subscriptions_firm_integration_fk),
+     * identical in shape to integration_connection_health's/
+     * integration_usage_records' own composite FK
+     * (checkpoint2-combined-design.md §2 P-17). Both rollback tests below
+     * now also roll back this 2-migration Checkpoint 2 wave FIRST — before
+     * the Checkpoint 9 whole-wave block, since this Checkpoint 2 wave is
+     * the newest layer (dated 2026_09_22, after Checkpoint 9's
+     * 2026_09_08) — in exact reverse of its own creation order (RLS-prep
+     * down(), then create-table down()), then reapply it LAST, after the
+     * Checkpoint 9 whole-wave block, in forward (creation) order. Order
+     * between this wave and the pre-existing firm_integrations /
+     * integration_credentials / integration_oauth_states / Checkpoint 6 /
+     * Checkpoint 7 / Checkpoint 8 / Checkpoint 9 blocks does not matter to
+     * each other, except that this wave must be fully torn down before
+     * firm_integrations itself. Mirrors the identical whole-wave precedent
+     * Checkpoint 6 through Checkpoint 9 each established for this exact
+     * class of problem.
+     *
+     * @var list<string>
+     */
+    private const CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS = [
+        'database/migrations/2026_09_22_160001_create_integration_provider_webhook_subscriptions_table.php',
+        'database/migrations/2026_09_22_160002_prepare_row_level_security_and_force_rls_on_integration_provider_webhook_subscriptions_table.php',
+    ];
+
+    /**
+     * @var list<string>
+     */
+    private const CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES = [
+        'integration_provider_webhook_subscriptions',
+    ];
+
     // ------------------------------------------------------------
     // 1. Schema correctness
     // ------------------------------------------------------------
@@ -312,14 +351,37 @@ class IntegrationProviderTest extends TestCase
     // 3. Seed data correctness
     // ------------------------------------------------------------
 
-    public function test_exactly_one_row_is_seeded_after_migration(): void
+    /**
+     * FirmsVault Live Integrations, Checkpoint 2 (Microsoft 365 provider —
+     * checkpoint2-combined-design.md §1) RENAME: this method was
+     * previously named test_exactly_one_row_is_seeded_after_migration and
+     * asserted a count of 1. The new
+     * 2026_09_21_150002_seed_microsoft365_integration_provider_catalog_entry.php
+     * migration seeds a second, independent catalog row (`microsoft365`)
+     * alongside the original `test` row, so the old name became actively
+     * misleading (not merely imprecise) — mirrors this codebase's own
+     * RlsForceRollout convention of encoding the exact expected count in
+     * the test name and renaming it whenever that count legitimately
+     * changes (e.g. "Fix stale forced-table counts after RLS Wave 10").
+     */
+    public function test_exactly_two_rows_are_seeded_after_migration(): void
     {
-        $this->assertSame(1, DB::table('integration_providers')->count());
+        $this->assertSame(2, DB::table('integration_providers')->count());
     }
 
+    /**
+     * FirmsVault Live Integrations, Checkpoint 2 UPDATE: now that a
+     * second catalog row (`microsoft365`) is seeded alongside `test`
+     * (see test_exactly_two_rows_are_seeded_after_migration() above),
+     * bare ->first() with no ORDER BY is no longer a safe way to locate
+     * the `test` row specifically — SQL gives no ordering guarantee
+     * without an explicit ORDER BY once more than one row exists. This
+     * now filters explicitly by code, matching what the test's own name
+     * always claimed to prove.
+     */
     public function test_seeded_row_matches_the_test_provider_key(): void
     {
-        $row = DB::table('integration_providers')->first();
+        $row = DB::table('integration_providers')->where('code', ProviderKey::Test->value)->first();
 
         $this->assertNotNull($row);
         $this->assertSame(ProviderKey::Test->value, $row->code);
@@ -573,6 +635,32 @@ class IntegrationProviderTest extends TestCase
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 9) must exist before this test begins, since it is now also one of firm_integrations' real (direct or transitive) FK dependents.");
         }
 
+        // Confirm the Checkpoint 2 (FirmsVault Live Integrations,
+        // Microsoft 365 provider) webhook-subscriptions whole-wave
+        // table's pre-rollback existence too (a SEVENTH, independent
+        // dependency chain reaching firm_integrations, transitively
+        // integration_providers — the newest layer of all).
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS as $path) {
+            $this->assertFileExists(base_path($path));
+        }
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must exist before this test begins, since it is now also one of firm_integrations' real (direct or transitive) FK dependents.");
+        }
+
+        // 1a-pre-pre-pre. Roll back the Checkpoint 2 webhook-subscriptions
+        // whole-wave dependency chain FIRST — before the Checkpoint 9
+        // whole-wave block below, since this wave is the newest layer of
+        // all (dated 2026_09_22, after Checkpoint 9's 2026_09_08) — see
+        // CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS docblock.
+        // Rolled back in exact reverse of its own creation order.
+        foreach (array_reverse(self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 2 webhook subscriptions whole-wave) failed: ".Artisan::output());
+        }
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must not survive its whole-wave rollback.");
+        }
+
         // 1a-pre-pre. Roll back the Checkpoint 9 whole-wave dependency
         // chain FIRST — before the Checkpoint 8 whole-wave block below,
         // since Checkpoint 9 is the newest layer (see
@@ -817,6 +905,19 @@ class IntegrationProviderTest extends TestCase
         }
         foreach (self::CP9_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 9) must be restored by the whole-wave reapplication.");
+        }
+
+        // 6f. Reapply the Checkpoint 2 webhook-subscriptions whole-wave
+        // dependency chain LAST of all — after the Checkpoint 9 whole-wave
+        // block, since this wave is the newest layer of all, and after
+        // firm_integrations (just recreated above) already exists again —
+        // in its own forward (creation) order.
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS as $path) {
+            $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 2 webhook subscriptions whole-wave) failed: ".Artisan::output());
+        }
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must be restored by the whole-wave reapplication.");
         }
 
         // 7. Assert the exact prior state is restored — same columns,
@@ -1083,6 +1184,9 @@ class IntegrationProviderTest extends TestCase
         foreach (self::CP9_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 9) must exist before this test begins, since it is now also one of firm_integrations' real (direct or transitive) FK dependents.");
         }
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must exist before this test begins, since it is now also one of firm_integrations' real (direct or transitive) FK dependents.");
+        }
 
         $providersMigration = include database_path('migrations/2026_09_01_010001_create_integration_providers_table.php');
         $firmIntegrationsRlsMigration = include database_path('migrations/2026_09_02_020002_prepare_row_level_security_and_force_rls_on_firm_integrations_table.php');
@@ -1115,6 +1219,26 @@ class IntegrationProviderTest extends TestCase
             static fn (string $path) => include base_path($path),
             self::CP9_WHOLE_WAVE_MIGRATION_PATHS,
         );
+
+        // Checkpoint 2 (FirmsVault Live Integrations, Microsoft 365
+        // provider) webhook-subscriptions whole-wave migration objects, in
+        // creation order — the newest layer of all.
+        $cp2WebhookSubscriptionsMigrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS,
+        );
+
+        // Tear down the Checkpoint 2 webhook-subscriptions whole-wave
+        // dependency chain FIRST — before the Checkpoint 9 whole-wave
+        // teardown below, since this wave is the newest layer of all (see
+        // CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS docblock).
+        // Torn down as a unit, in exact reverse of its own creation order.
+        foreach (array_reverse($cp2WebhookSubscriptionsMigrations) as $migration) {
+            $migration->down();
+        }
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must be fully dropped before the Checkpoint 9 whole-wave teardown can succeed.");
+        }
 
         // Tear down the Checkpoint 9 whole-wave dependency chain FIRST —
         // before the Checkpoint 8 whole-wave teardown below, since
@@ -1351,6 +1475,18 @@ class IntegrationProviderTest extends TestCase
         foreach (self::CP9_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 9) must be fully restored after up().");
         }
+
+        // Rebuild the Checkpoint 2 webhook-subscriptions whole-wave
+        // dependency chain LAST of all — after the Checkpoint 9 whole-wave
+        // block, since this wave is the newest layer of all, and after
+        // firm_integrations (just recreated above) already exists again —
+        // in its own forward (creation) order.
+        foreach ($cp2WebhookSubscriptionsMigrations as $migration) {
+            $migration->up();
+        }
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must be fully restored after up().");
+        }
     }
 
     // ------------------------------------------------------------
@@ -1359,14 +1495,14 @@ class IntegrationProviderTest extends TestCase
 
     public function test_model_table_resolves_to_integration_providers(): void
     {
-        $model = new IntegrationProvider();
+        $model = new IntegrationProvider;
 
         $this->assertSame('integration_providers', $model->getTable());
     }
 
     public function test_model_fillable_contains_exactly_the_expected_fields(): void
     {
-        $model = new IntegrationProvider();
+        $model = new IntegrationProvider;
 
         $expected = [
             'code',
@@ -1466,7 +1602,7 @@ class IntegrationProviderTest extends TestCase
         // zero global scopes here is a second, independent proof (beyond
         // the trait-usage check above) that no tenant-filtering behavior
         // has been silently attached some other way.
-        $model = new IntegrationProvider();
+        $model = new IntegrationProvider;
 
         $this->assertSame([], $model->getGlobalScopes());
     }
@@ -1541,7 +1677,7 @@ class IntegrationProviderTest extends TestCase
 
     public function test_factory_definition_contains_no_secret_or_credential_shaped_field(): void
     {
-        $definition = (new IntegrationProviderFactory())->definition();
+        $definition = (new IntegrationProviderFactory)->definition();
 
         $suspiciousKeys = array_filter(
             array_keys($definition),

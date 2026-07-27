@@ -9,7 +9,9 @@ use App\Integrations\Enums\SyncDirection;
 use App\Integrations\Exceptions\CursorVersionConflictException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationSyncCursor;
+use App\Services\EmailBodyEncryptionService;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 /**
  * SyncCursorService — the ONLY writer of `integration_sync_cursors`
@@ -28,9 +30,22 @@ use Illuminate\Support\Facades\DB;
  * (SyncRunService). Layer 2 — this class's `cursor_version` optimistic
  * CAS — is the detective layer underneath it; a version mismatch is
  * REJECTED, never silently serialized-and-retried (see advance()).
+ *
+ * Checkpoint 2 (FirmsVault Live Integrations, Microsoft 365 provider —
+ * checkpoint2-design-sync-webhooks.md §1.2; checkpoint2-combined-design.md
+ * §2 P-14) addition: `cursor_value` is now encrypted at rest, per-firm,
+ * via the SAME `EmailBodyEncryptionService` every other sensitive
+ * Integration-domain string already uses (IntegrationCredentialService,
+ * WebhookConnectionResolverService) — no second encryption system.
+ * Encryption/decryption happens ONLY here and in advance()'s one caller
+ * (PullSyncJob) — SupportsPullSyncContract/SupportsIncrementalSyncContract
+ * are unmodified; every provider (including Microsoft's) continues to
+ * deal exclusively in plaintext cursor strings.
  */
 final class SyncCursorService
 {
+    public function __construct(private readonly EmailBodyEncryptionService $encryption) {}
+
     /**
      * Idempotent create-or-fetch for the very first write against a
      * (connection, resource_type, direction) scope. A plain
@@ -87,16 +102,44 @@ final class SyncCursorService
      * CursorVersionConflictException, which the caller's own
      * transaction must let propagate so the WHOLE batch (item writes
      * included) rolls back — never caught-and-retried silently here.
+     *
+     * Checkpoint 2 addition (checkpoint2-design-sync-webhooks.md §1.2;
+     * checkpoint2-combined-design.md §2 P-14): gains a required
+     * `FirmIntegration $connection` parameter, needed because
+     * `EmailBodyEncryptionService::encrypt()` is keyed per-firm, not
+     * per-cursor. When `$newCursorValue !== null`, it is encrypted here
+     * (never by the caller) and both `cursor_value`/
+     * `cursor_value_encryption_key_id` are bound into the SAME `SET`
+     * clause as the rest of this method's existing atomic UPDATE — the
+     * two columns are never written by separate statements. When
+     * `$newCursorValue === null`, both columns are set NULL together
+     * (the CHECK constraint added by this checkpoint's migration,
+     * `integration_sync_cursors_value_key_id_pair`, enforces this
+     * invariant at the database layer too).
      */
-    public function advance(int $cursorId, int $expectedVersion, ?string $newCursorValue): IntegrationSyncCursor
+    public function advance(FirmIntegration $connection, int $cursorId, int $expectedVersion, ?string $newCursorValue): IntegrationSyncCursor
     {
+        $ciphertext = null;
+        $encryptionKeyId = null;
+
+        if ($newCursorValue !== null) {
+            $result = $this->encryption->encrypt($connection->firm, $newCursorValue);
+
+            if (! $result->succeeded) {
+                throw new RuntimeException("Cannot advance sync cursor {$cursorId}: {$result->reason}");
+            }
+
+            $ciphertext = $result->ciphertext;
+            $encryptionKeyId = $result->encryptionKeyId;
+        }
+
         $row = DB::selectOne(
             'UPDATE integration_sync_cursors '.
-            "SET cursor_value = ?, cursor_version = cursor_version + 1, cursor_issued_at = now(), ".
+            'SET cursor_value = ?, cursor_value_encryption_key_id = ?, cursor_version = cursor_version + 1, cursor_issued_at = now(), '.
             "status = 'idle', locked_by_sync_run_id = NULL, locked_at = NULL, consecutive_failure_count = 0 ".
             'WHERE id = ? AND cursor_version = ? '.
             'RETURNING *',
-            [$newCursorValue, $cursorId, $expectedVersion]
+            [$ciphertext, $encryptionKeyId, $cursorId, $expectedVersion]
         );
 
         if ($row === null) {
@@ -138,12 +181,27 @@ final class SyncCursorService
      * subsequently claim() an Invalid cursor; an Incremental run must
      * refuse to claim/dispatch against one at all (enforced by
      * SyncRunService, not this method).
+     *
+     * Checkpoint 2 REQUIRED correction (security review Finding 5, P1;
+     * checkpoint2-combined-design.md §2 P-14): this method's UPDATE
+     * statement ALSO sets `cursor_value_encryption_key_id = NULL` in the
+     * SAME statement as `cursor_value = NULL`. Without this, the
+     * `integration_sync_cursors_value_key_id_pair` CHECK constraint
+     * (added by this checkpoint's migration) would reject this UPDATE
+     * outright on every cursor that has previously advanced at least
+     * once — i.e. on every real-world invalidation, including the
+     * Microsoft `410 Gone` self-healing path (§1.4) this method exists
+     * to serve — throwing a raw QueryException instead of cleanly
+     * invalidating the cursor. Both columns are reset together, exactly
+     * mirroring advance()'s own "never one without the other" discipline
+     * for the `$newCursorValue === null` case above.
      */
     public function invalidate(int $cursorId, int $expectedVersion): IntegrationSyncCursor
     {
         $row = DB::selectOne(
             'UPDATE integration_sync_cursors '.
-            "SET status = 'cursor_invalid', cursor_value = NULL, cursor_version = cursor_version + 1, ".
+            "SET status = 'cursor_invalid', cursor_value = NULL, cursor_value_encryption_key_id = NULL, ".
+            'cursor_version = cursor_version + 1, '.
             'locked_by_sync_run_id = NULL, locked_at = NULL '.
             'WHERE id = ? AND cursor_version = ? '.
             'RETURNING *',
@@ -155,5 +213,32 @@ final class SyncCursorService
         }
 
         return IntegrationSyncCursor::hydrate([(array) $row])->first();
+    }
+
+    /**
+     * Checkpoint 2 addition (checkpoint2-design-sync-webhooks.md §1.2;
+     * checkpoint2-combined-design.md §2 P-14). The decrypt-side
+     * counterpart to advance()'s encrypt-on-write — returns `null`
+     * immediately if `$cursor->cursor_value === null` (a fresh or
+     * invalidated cursor; no decrypt attempted, matching
+     * `firstOrCreate()`/`invalidate()`'s "both columns NULL together"
+     * invariant). Otherwise delegates to
+     * `EmailBodyEncryptionService::decrypt()`, which fails closed exactly
+     * as `IntegrationCredentialService::decryptForOperation()` already
+     * lives with (throws if the referenced TenantEncryptionKey is no
+     * longer Active — a disclosed, pre-existing limitation, not
+     * something this checkpoint is positioned to fix).
+     */
+    public function decryptCursorValue(FirmIntegration $connection, IntegrationSyncCursor $cursor): ?string
+    {
+        if ($cursor->cursor_value === null) {
+            return null;
+        }
+
+        return $this->encryption->decrypt(
+            $connection->firm,
+            $cursor->cursor_value,
+            (int) $cursor->cursor_value_encryption_key_id,
+        );
     }
 }

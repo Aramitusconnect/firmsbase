@@ -80,6 +80,29 @@ return Application::configure(basePath: dirname(__DIR__))
             ->everyFiveMinutes()
             ->withoutOverlapping();
 
+        // FirmsVault Live Integrations, Checkpoint 2 (Microsoft 365
+        // provider) — checkpoint2-design-sync-webhooks.md §3.3;
+        // checkpoint2-combined-design.md §2 P-20. Same shape as the
+        // entries above: a plain, cheap, non-tenant Artisan command
+        // that enumerates active firms from the non-RLS `firms` table
+        // (see RenewProviderWebhookSubscriptionsCommand's own docblock
+        // for why it must loop firms, unlike a single global query,
+        // to read the FORCE-RLS integration_provider_webhook_subscriptions
+        // table) and dispatches one RenewGraphSubscriptionJob per
+        // subscription row nearing its own known expiry. Graph
+        // subscriptions have no automatic renewal — a connection that
+        // is healthy in every other respect would otherwise silently
+        // stop receiving webhooks the moment its subscription expires.
+        // Renewal windows are measured in hours/days, not minutes, so
+        // every-15-minutes (more frequent than the every-5-minutes
+        // health-refresh precedent is NOT needed) is frequent enough
+        // that a missed tick never meaningfully risks crossing an
+        // actual expiry given the safety-margin design in that
+        // command's own docblock.
+        $schedule->command('integrations:webhooks:renew-subscriptions')
+            ->everyFifteenMinutes()
+            ->withoutOverlapping();
+
         // Phase 4 — FirmsVault Platform Admin Control Center
         // ("Operations"). Resolves phase4-architecture-map-operations-
         // governance.md Open Decision 1: RunHealthChecksJob existed,

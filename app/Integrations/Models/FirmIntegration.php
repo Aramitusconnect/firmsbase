@@ -79,6 +79,12 @@ class FirmIntegration extends Model
         'last_health_status',
         'error_reason',
         'webhook_routing_token',
+        // FirmsVault Live Integrations, Checkpoint 2 additions
+        // (checkpoint2-combined-design.md §1.1/§2 P-4/P-5) — see the
+        // migration's own docblock for the full rationale distinguishing
+        // each from its nearest existing sibling column.
+        'requested_capabilities_json',
+        'external_tenant_id',
     ];
 
     /**
@@ -109,6 +115,9 @@ class FirmIntegration extends Model
         return [
             'status' => ConnectionStatus::class,
             'scopes_granted_json' => 'array',
+            // Checkpoint 2 addition — mirrors scopes_granted_json's
+            // exact cast. See $fillable's comment above.
+            'requested_capabilities_json' => 'array',
             'connected_at' => 'datetime',
             'disconnected_at' => 'datetime',
             'last_health_check_at' => 'datetime',

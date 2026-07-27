@@ -34,6 +34,17 @@ class WebhookRetryPolicyService
         'configuration_error',
         'connection_unavailable',
         'invalid_grant',
+        // Checkpoint 2 (FirmsVault Live Integrations, Microsoft 365
+        // provider — checkpoint2-design-sync-webhooks.md §1.4;
+        // checkpoint2-combined-design.md §2 P-9/P-12) addition: retrying
+        // against an expired/invalid delta cursor (e.g. Microsoft
+        // Graph's `410 Gone`) without first invalidating it is
+        // pointless — every retry would hit the identical error. This
+        // exception category is used by the sync-item/outbox retry
+        // machinery generically, so it lives here alongside the rest of
+        // the closed terminal-category set rather than inventing
+        // Checkpoint-2-specific retry logic.
+        'cursor_expired',
     ];
 
     /**
@@ -43,7 +54,7 @@ class WebhookRetryPolicyService
      * exact uncapped behavior byte-for-byte — zero-risk, backward-
      * compatible, no existing call site or test passes this key.
      *
-     * @param array{max_attempts?: int, base_delay_seconds?: int, multiplier?: int, max_delay_seconds?: int} $retryPolicy
+     * @param  array{max_attempts?: int, base_delay_seconds?: int, multiplier?: int, max_delay_seconds?: int}  $retryPolicy
      */
     public function nextAttemptDelaySeconds(int $attemptNumber, array $retryPolicy): int
     {
@@ -68,7 +79,7 @@ class WebhookRetryPolicyService
      * max_attempts) narrows the effective ceiling for a bounded-but-
      * smaller category (e.g. malformed_response).
      *
-     * @param array{max_attempts?: int, base_delay_seconds?: int, multiplier?: int, category?: string, category_max_attempts?: array<string,int>} $retryPolicy
+     * @param  array{max_attempts?: int, base_delay_seconds?: int, multiplier?: int, category?: string, category_max_attempts?: array<string,int>}  $retryPolicy
      */
     public function isExhausted(int $attemptNumber, array $retryPolicy): bool
     {

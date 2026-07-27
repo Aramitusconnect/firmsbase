@@ -55,8 +55,8 @@ final class IntegrationUsageRecorderWiredEndToEndTest extends TestCase
     {
         config(['integrations.provider_environments.'.ProviderKey::Test->value => [
             'mode' => 'sandbox',
-            'sandbox_base_url' => self::SANDBOX_BASE_URL,
-            'live_base_url' => 'https://live-api.example.test',
+            'sandbox_base_urls' => ['default' => self::SANDBOX_BASE_URL],
+            'live_base_urls' => ['default' => 'https://live-api.example.test'],
         ]]);
 
         Http::fake([

@@ -671,12 +671,21 @@ final class ProviderRequestExecutorTest extends TestCase
     // Helpers
     // ------------------------------------------------------------
 
+    /**
+     * Checkpoint 2 update (checkpoint2-combined-design.md §2 P-8):
+     * `provider_environments` widened from singular `sandbox_base_url`/
+     * `live_base_url` strings to purpose-keyed `sandbox_base_urls`/
+     * `live_base_urls` arrays. A single-host provider (like this test's
+     * synthetic `test` provider) uses a bare `'default'` key, per P-8's
+     * stated convention of never mixing a `'default'` key with
+     * purpose-specific ones in the same block.
+     */
     private function configureSandboxEnvironment(): void
     {
         config(['integrations.provider_environments.'.ProviderKey::Test->value => [
             'mode' => 'sandbox',
-            'sandbox_base_url' => self::SANDBOX_BASE_URL,
-            'live_base_url' => 'https://live-api.example.test',
+            'sandbox_base_urls' => ['default' => self::SANDBOX_BASE_URL],
+            'live_base_urls' => ['default' => 'https://live-api.example.test'],
         ]]);
     }
 

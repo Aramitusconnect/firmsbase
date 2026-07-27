@@ -12,13 +12,17 @@ use ReflectionEnum;
 /**
  * Pure unit test — no framework boot, no database, no factories.
  *
- * Checkpoint 1 registers exactly one provider key ('test'). This test
- * proves the enum's shape is stable/immutable/lowercase and — critically
- * — that it shares no case name or backed value with the existing,
- * unrelated App\Enums\IntegrationType enum (a Phase 16 enum for Stripe/
- * EmailProvider/VirusScanning/Telemetry degradation modes). A collision
- * here would mean code that branches on one enum's value could silently
- * misinterpret a value from the other.
+ * Checkpoint 1 registered exactly one provider key ('test'). FirmsVault
+ * Live Integrations Checkpoint 2 (Microsoft 365 provider —
+ * checkpoint2-combined-design.md §1.1, P-1) added a second, real
+ * (non-Test) provider key, 'microsoft365' — the first real provider key
+ * ever registered in this enum. This test proves the enum's shape is
+ * stable/immutable/lowercase and — critically — that it shares no case
+ * name or backed value with the existing, unrelated App\Enums\
+ * IntegrationType enum (a Phase 16 enum for Stripe/EmailProvider/
+ * VirusScanning/Telemetry degradation modes). A collision here would
+ * mean code that branches on one enum's value could silently misinterpret
+ * a value from the other.
  */
 final class ProviderKeyTest extends TestCase
 {
@@ -30,13 +34,26 @@ final class ProviderKeyTest extends TestCase
         $this->assertSame('string', (string) $reflection->getBackingType());
     }
 
-    public function test_it_has_exactly_the_expected_single_case(): void
+    /**
+     * RENAMED (FirmsVault Live Integrations Checkpoint 2, Microsoft 365
+     * provider — checkpoint2-combined-design.md §1.1, P-1): was
+     * test_it_has_exactly_the_expected_single_case(), asserting a count
+     * of 1. ProviderKey now registers a second case, Microsoft365, so
+     * the old "single case" name became actively misleading (not merely
+     * imprecise) — renamed to reflect the new, exact expected count,
+     * mirroring this codebase's own RlsForceRollout convention of
+     * encoding the exact expected count in a test's name and renaming it
+     * whenever that count legitimately changes.
+     */
+    public function test_it_has_exactly_the_expected_two_cases(): void
     {
         $cases = ProviderKey::cases();
 
-        $this->assertCount(1, $cases, 'ProviderKey must register exactly one case at Checkpoint 1.');
+        $this->assertCount(2, $cases, 'ProviderKey must register exactly two cases as of FirmsVault Live Integrations Checkpoint 2.');
         $this->assertSame('Test', $cases[0]->name);
         $this->assertSame(ProviderKey::Test, $cases[0]);
+        $this->assertSame('Microsoft365', $cases[1]->name);
+        $this->assertSame(ProviderKey::Microsoft365, $cases[1]);
     }
 
     public function test_backed_value_is_lowercase(): void

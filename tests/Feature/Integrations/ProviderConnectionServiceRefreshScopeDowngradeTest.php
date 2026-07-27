@@ -269,9 +269,14 @@ final class ProviderConnectionServiceRefreshScopeDowngradeTest extends TestCase
                 return $tokenSet;
             }
 
-            public function requiredScopes(): array
+            public function requiredScopes(array $context = []): array
             {
                 return $this->requiredScopes;
+            }
+
+            public function capabilityScopeMap(): array
+            {
+                return [];
             }
         };
 

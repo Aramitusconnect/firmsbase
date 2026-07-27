@@ -6,10 +6,10 @@ namespace Tests\Feature\Integrations;
 
 use App\Integrations\Contracts\IntegrationProviderContract;
 use App\Integrations\Contracts\SupportsPullSyncContract;
+use App\Integrations\Core\ProviderRegistry;
 use App\Integrations\Enums\AuthMethod;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
-use App\Integrations\Enums\CursorStatus;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Enums\SyncDirection;
 use App\Integrations\Exceptions\SimulatedProviderFailureException;
@@ -26,9 +26,9 @@ use App\Integrations\Services\SyncCursorService;
 use App\Integrations\Services\SyncItemService;
 use App\Integrations\Services\SyncRunService;
 use App\Integrations\Support\OutboundProviderHttpClient;
-use App\Integrations\Core\ProviderRegistry;
 use App\Jobs\PullSyncJob;
 use App\Models\Firm;
+use App\Models\TenantEncryptionKey;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -64,6 +64,25 @@ class PullSyncJobTest extends TestCase
     }
 
     /**
+     * FirmsVault Live Integrations Checkpoint 2 addition
+     * (checkpoint2-combined-design.md §2 P-14): cursor_value is now
+     * encrypted per-firm via SyncCursorService's EmailBodyEncryptionService
+     * dependency, which fails closed when the firm has no active
+     * TenantEncryptionKey. Only needed by tests that exercise advance()
+     * with a genuinely non-null $newCursorValue (i.e. a page whose
+     * next_cursor is non-null) — mirrors
+     * IntegrationOauthStatesForceRlsActivationTest's own
+     * firmWithActiveKey() helper.
+     */
+    private function firmWithActiveKey(): Firm
+    {
+        $firm = Firm::factory()->create();
+        TenantEncryptionKey::factory()->forFirm($firm)->create();
+
+        return $firm;
+    }
+
+    /**
      * Registers a deterministic fake pull provider under ProviderKey::Test,
      * returning $itemsPerPage[<page index>] for each successive call
      * (cursor advances 0,1,2,...). $shouldFail forces every call to
@@ -71,12 +90,12 @@ class PullSyncJobTest extends TestCase
      */
     private function registerFakePullProvider(array $itemsPerPage = [], bool $shouldFail = false): void
     {
-        $provider = new class($itemsPerPage, $shouldFail) implements IntegrationProviderContract, SupportsPullSyncContract {
+        $provider = new class($itemsPerPage, $shouldFail) implements IntegrationProviderContract, SupportsPullSyncContract
+        {
             public function __construct(
                 private readonly array $itemsPerPage,
                 private readonly bool $shouldFail,
-            ) {
-            }
+            ) {}
 
             public function key(): ProviderKey
             {
@@ -311,7 +330,11 @@ class PullSyncJobTest extends TestCase
 
     public function test_the_cursor_advances_across_multiple_successful_pages(): void
     {
-        $firm = Firm::factory()->create();
+        // FirmsVault Live Integrations Checkpoint 2: the first page's
+        // advance() call carries a genuine non-null next_cursor value
+        // ('1'), which SyncCursorService now encrypts — this firm needs
+        // an active TenantEncryptionKey (see firmWithActiveKey() above).
+        $firm = $this->firmWithActiveKey();
         $connection = $this->connection($firm);
         $this->registerFakePullProvider([
             [['external_id' => 'ext-p0', 'version_token' => 'v1']],

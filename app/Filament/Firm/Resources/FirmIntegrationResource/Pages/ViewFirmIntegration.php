@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace App\Filament\Firm\Resources\FirmIntegrationResource\Pages;
 
 use App\Filament\Firm\Resources\FirmIntegrationResource;
+use App\Integrations\Core\ProviderRegistry;
 use App\Integrations\Data\FirmIntegrationCredentialSummary;
+use App\Integrations\Enums\ConnectionStatus;
+use App\Integrations\Enums\ResourceType;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationCredential;
 use App\Integrations\Services\HealthStateService;
@@ -15,6 +18,7 @@ use App\Integrations\Services\ProviderConnectionService;
 use App\Services\IntegrationEntitlementPolicyService;
 use App\Services\TenantContextService;
 use Filament\Actions\Action;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\TextInput;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
@@ -112,6 +116,16 @@ class ViewFirmIntegration extends ViewRecord
                             default => 'gray',
                         }),
                     TextEntry::make('external_account_id')->label('External account')->placeholder('—'),
+                    // FirmsVault Live Integrations, Checkpoint 2 addition
+                    // (checkpoint2-combined-design.md §2 P-4/P-5, §4;
+                    // checkpoint2-design-ui.md §3): same styling/placeholder
+                    // convention as external_account_id immediately above.
+                    // Populated only by Microsoft-365-specific code at
+                    // OAuth-callback-finish time
+                    // (ProviderConnectionService::finishCallback(), P-6d)
+                    // from the token exchange's non-secret tid claim —
+                    // never decrypted for display here.
+                    TextEntry::make('external_tenant_id')->label('Tenant')->placeholder('—'),
                     TextEntry::make('connected_at')->dateTime()->placeholder('—'),
                     TextEntry::make('disconnected_at')->dateTime()->placeholder('—'),
                     TextEntry::make('scopes_granted_json')->label('Granted scopes')->listWithLineBreaks()->placeholder('—'),
@@ -187,6 +201,7 @@ class ViewFirmIntegration extends ViewRecord
     {
         return [
             $this->renameAction(),
+            $this->reconnectAction(),
             $this->enableWebhookRoutingAction(),
             $this->disableWebhookRoutingAction(),
             $this->disconnectAction(),
@@ -224,6 +239,87 @@ class ViewFirmIntegration extends ViewRecord
                     }
 
                     Notification::make()->title('Connection renamed')->success()->send();
+                });
+            });
+    }
+
+    /**
+     * FirmsVault Live Integrations, Checkpoint 2 addition
+     * (checkpoint2-combined-design.md §4; checkpoint2-design-ui.md §4).
+     * Closes the confirmed gap that a firm wanting to add a capability
+     * (or recover from ScopeInsufficient/ReauthorizationRequired) had no
+     * path except a full Disconnect + brand-new ConnectProviderAction
+     * flow. Structurally identical to renameAction() above: fillForm()
+     * prefills from the mount()-time record purely for display (never a
+     * security-relevant read), the action() closure re-fetches fresh
+     * inside runWithFirmContext() before calling the service, and
+     * RuntimeException is caught and surfaced via Notification::danger()
+     * exactly like every other action on this page.
+     *
+     * updateRequestedCapabilities() only updates the stored column — it
+     * deliberately does not itself start a new OAuth round-trip (see its
+     * own docblock). Redirecting here to the SAME existing
+     * `integrations.oauth.initiate` route ConnectProviderAction already
+     * uses is what actually re-requests the (now possibly broader) scope
+     * bundle from the provider — that route/controller/service call is
+     * already generic over connect-vs-reauthorize (initiateOAuthConnection()'s
+     * own docblock), so no other change is needed for this to function.
+     */
+    private function reconnectAction(): Action
+    {
+        return Action::make('reconnect')
+            ->label('Add Capabilities / Reconnect')
+            ->icon(Heroicon::OutlinedArrowPath)
+            ->schema([
+                CheckboxList::make('capabilities')
+                    ->label('What should this connection sync?')
+                    ->helperText('Choose the data this firm needs. You will be redirected to reauthorize with the provider to apply any changes.')
+                    ->options(function (FirmIntegration $record, ProviderRegistry $registry): array {
+                        $key = $record->providerKey();
+
+                        if ($key === null || ! $registry->has($key)) {
+                            return [];
+                        }
+
+                        return collect($registry->metadataFor($key)->resourceTypes)
+                            ->mapWithKeys(fn (string $type): array => [$type => self::capabilityLabel($type)])
+                            ->all();
+                    }),
+            ])
+            ->fillForm(fn (FirmIntegration $record): array => [
+                'capabilities' => $record->requested_capabilities_json ?? [],
+            ])
+            ->visible(fn (FirmIntegration $record): bool => $this->isConfigurable($record)
+                && in_array($record->status, [
+                    ConnectionStatus::Active,
+                    ConnectionStatus::ScopeInsufficient,
+                    ConnectionStatus::ReauthorizationRequired,
+                ], true))
+            ->action(function (array $data, FirmIntegration $record, ProviderConnectionService $connectionService): void {
+                $firmUser = Auth::user()?->activeFirmUser();
+
+                if ($firmUser === null) {
+                    Notification::make()->title('You do not have access to this connection.')->danger()->send();
+
+                    return;
+                }
+
+                app(TenantContextService::class)->runWithFirmContext((int) $firmUser->firm_id, function () use ($record, $data, $connectionService): void {
+                    $fresh = FirmIntegration::query()->where('id', $record->id)->firstOrFail();
+
+                    try {
+                        $updated = $connectionService->updateRequestedCapabilities(
+                            $fresh,
+                            array_values((array) ($data['capabilities'] ?? [])),
+                            (int) Auth::id(),
+                        );
+                    } catch (RuntimeException $e) {
+                        Notification::make()->title('Could not update requested capabilities')->body($e->getMessage())->danger()->send();
+
+                        return;
+                    }
+
+                    $this->redirect(route('integrations.oauth.initiate', $updated));
                 });
             });
     }
@@ -362,5 +458,26 @@ class ViewFirmIntegration extends ViewRecord
 
         return app(IntegrationEntitlementPolicyService::class)->isEnabled($firmUser->firm)
             && app(IntegrationAccessPolicyService::class)->canConfigure($firmUser->role);
+    }
+
+    /**
+     * FirmsVault Live Integrations, Checkpoint 2 addition
+     * (checkpoint2-design-ui.md §1). Byte-for-byte the same mapping as
+     * App\Filament\Firm\Resources\FirmIntegrationResource\Actions\ConnectProviderAction's
+     * own private capabilityLabel() — duplicated rather than shared,
+     * matching this codebase's existing convention of each self-contained
+     * Action/Page file owning its own small closures (see e.g. this
+     * file's own class docblock on why every action here re-fetches
+     * fresh rather than sharing state).
+     */
+    private static function capabilityLabel(string $resourceType): string
+    {
+        return match ($resourceType) {
+            ResourceType::Message->value => 'Email',
+            ResourceType::CalendarEvent->value => 'Calendar',
+            ResourceType::Document->value => 'Files',
+            ResourceType::Contact->value => 'Contacts',
+            default => (string) str($resourceType)->replace('_', ' ')->headline(),
+        };
     }
 }

@@ -104,10 +104,38 @@ use InvalidArgumentException;
  * list is deferred to whichever future checkpoint first needs it,
  * coordinated with the owner of `SanitizedHealthDiagnostic` (a file
  * this checkpoint's file allowlist does not include).
+ *
+ * FirmsVault Live Integrations, Checkpoint 2 additions
+ * (checkpoint2-combined-design.md §2 P-7): the deferral above is now
+ * resolved for `token_exchange` — every real OAuth2 provider's initial
+ * authorization-code exchange needs its own operation-type/label, and
+ * `SanitizedHealthDiagnostic::OPERATION_TOKEN_EXCHANGE` now exists (see
+ * that class). `webhook_subscribe` is added at the same time (a Graph
+ * subscription-establishment call has the identical need). Both are
+ * appended to `SUPPORTED_OPERATION_TYPES` and `operationLabelFor()`'s
+ * match, without touching the four original values' behavior.
+ *
+ *   (a) `send()` gains an optional trailing `bool $formEncoded = false`
+ *       parameter (checkpoint2-security-review.md Finding 3, confirmed
+ *       safe): when true, the outbound request body is built as
+ *       `['form_params' => $body]` instead of `['json' => $body]` —
+ *       required by every real OAuth2 token endpoint per RFC 6749
+ *       §4.1.3, which rejects a JSON-encoded body outright. Defaults
+ *       false, so every existing call site's behavior is byte-for-byte
+ *       unchanged.
+ *   (b) `send()` gains an optional trailing `string $urlPurpose = 'default'`
+ *       parameter, threaded through to
+ *       `ProviderEnvironmentResolver::assertUrlAllowedFor()` — lets a
+ *       dual-host provider (e.g. Microsoft's identity host vs. its
+ *       Graph resource-API host) validate each outbound call against
+ *       the correct configured host (see `ProviderEnvironmentResolver`'s
+ *       own Checkpoint 2 widening).
+ *   (c) `categorizeStatus()` gains a `410` arm mapping to
+ *       `SanitizedProviderHttpException::CATEGORY_CURSOR_EXPIRED`.
  */
 final class ProviderRequestExecutor
 {
-    private const SUPPORTED_OPERATION_TYPES = ['push', 'pull', 'refresh_token', 'health_check'];
+    private const SUPPORTED_OPERATION_TYPES = ['push', 'pull', 'refresh_token', 'health_check', 'token_exchange', 'webhook_subscribe'];
 
     /**
      * Response headers copied into the returned ProviderHttpResponse —
@@ -147,6 +175,8 @@ final class ProviderRequestExecutor
         ?string $correlationId = null,
         ?int $timeoutSeconds = null,
         int $usageQuantity = 1,
+        bool $formEncoded = false,
+        string $urlPurpose = 'default',
     ): ProviderHttpResponse {
         if (! in_array($operationType, self::SUPPORTED_OPERATION_TYPES, true)) {
             throw new InvalidArgumentException(
@@ -158,8 +188,10 @@ final class ProviderRequestExecutor
 
         // STEP 1 — environment/URL guard. Runs first, before the rate
         // limiter, so a misconfigured URL never consumes rate-limit
-        // budget. Deliberately uncaught here.
-        $this->environmentResolver->assertUrlAllowedFor($providerKey, $url);
+        // budget. Deliberately uncaught here. $urlPurpose lets a
+        // dual-host provider validate this specific call against the
+        // correct configured host (Checkpoint 2 addition).
+        $this->environmentResolver->assertUrlAllowedFor($providerKey, $url, $urlPurpose);
 
         // STEP 2 — proactive rate-limit gate. No HTTP call is made on
         // rejection, and no usage row is written for it.
@@ -211,7 +243,42 @@ final class ProviderRequestExecutor
 
         $request = $authInjector($request);
 
-        $options = $httpMethod === 'GET' ? ['query' => $body] : ['json' => $body];
+        // Checkpoint 2 addition: $formEncoded selects 'form_params'
+        // (application/x-www-form-urlencoded) over 'json' for a non-GET
+        // call — required by every real OAuth2 token endpoint (RFC 6749
+        // §4.1.3). Confirmed safe (checkpoint2-security-review.md
+        // Finding 3): this is the ONLY place $body influences the
+        // outbound request; no other step in this method (usage
+        // metadata, exception construction, health recording) ever
+        // reads $body, so this branch cannot introduce a new leak
+        // surface for either encoding.
+        //
+        // GAP FOUND AND FIXED (checkpoint2-diff-review.md, "production
+        // bug found" during Checkpoint 2 test-writing): the GET branch
+        // used to unconditionally pass ['query' => $body] to Guzzle —
+        // but Guzzle's `query` request option, once set to ANY value
+        // (including an empty array), REPLACES the target URL's
+        // existing query string wholesale rather than merging with it.
+        // Microsoft's delta-query pagination (Microsoft365Provider::pull())
+        // passes a full, pre-built, opaque `@odata.nextLink`/
+        // `@odata.deltaLink` URL — already carrying its own
+        // `$skiptoken`/`$deltatoken` query string — as $url, with an
+        // EMPTY $body (it has no separate params to merge in). Passing
+        // `['query' => []]` for that call silently stripped the token
+        // out of the URL before the request was ever sent, defeating
+        // pagination/incremental-sync entirely (confirmed empirically:
+        // every page after the first, and every subsequent incremental
+        // sync reusing a stored deltaLink, would have silently re-hit
+        // the bare, token-less base URL). Fix: only set the `query`
+        // option when $body is genuinely non-empty — an empty $body on
+        // a GET means "the caller's URL already carries everything it
+        // needs," never "explicitly request zero query params."
+        $options = match (true) {
+            $httpMethod === 'GET' && $body !== [] => ['query' => $body],
+            $httpMethod === 'GET' => [],
+            $formEncoded => ['form_params' => $body],
+            default => ['json' => $body],
+        };
 
         $startedAt = microtime(true);
 
@@ -375,6 +442,14 @@ final class ProviderRequestExecutor
             $status === 400, $status === 422 => SanitizedProviderHttpException::CATEGORY_VALIDATION_FAILED,
             $status === 404 => SanitizedProviderHttpException::CATEGORY_PROVIDER_REJECTED,
             $status === 409 => SanitizedProviderHttpException::CATEGORY_CONFLICT,
+            // Checkpoint 2 addition (checkpoint2-combined-design.md §2
+            // P-7c): a 410 Gone response (e.g. Microsoft Graph's
+            // delta-query cursor-expiry signal) is a distinct failure
+            // shape from a generic 404 — see
+            // SanitizedProviderHttpException::CATEGORY_CURSOR_EXPIRED's
+            // own docblock for why this is its own category rather than
+            // folded into CATEGORY_PROVIDER_REJECTED.
+            $status === 410 => SanitizedProviderHttpException::CATEGORY_CURSOR_EXPIRED,
             $status === 429 => SanitizedProviderHttpException::CATEGORY_RATE_LIMITED,
             $status >= 500 && $status <= 599 => SanitizedProviderHttpException::CATEGORY_PROVIDER_REJECTED,
             default => SanitizedProviderHttpException::CATEGORY_UNKNOWN,
@@ -477,6 +552,24 @@ final class ProviderRequestExecutor
         };
     }
 
+    /**
+     * FIXED category-mapping table (checkpoint1-security-review.md
+     * Finding 4) — must not be re-derived independently by any future
+     * caller.
+     *
+     * Checkpoint 2 note (checkpoint2-combined-design.md §2 P-11):
+     * CATEGORY_CURSOR_EXPIRED intentionally falls through to the
+     * `default` arm below (=> CATEGORY_PROVIDER_ERROR) — this is
+     * deliberate, not an oversight. From the health dashboard's
+     * perspective a cursor expiry IS a form of provider error (nothing
+     * about the connection's credentials or granted scopes is wrong);
+     * the dedicated `CATEGORY_CURSOR_EXPIRED` distinction exists for the
+     * SYNC layer's own self-healing branch (invalidate-and-restart),
+     * not for a separate health-signal category. Adding a fifth
+     * `SanitizedHealthDiagnostic::CATEGORY_*` value here would widen
+     * `HealthStateService`'s own closed `last_failure_category` column
+     * vocabulary for no operational benefit.
+     */
     private function mapToHealthCategory(string $sanitizedCategory): string
     {
         return match ($sanitizedCategory) {
@@ -484,6 +577,8 @@ final class ProviderRequestExecutor
             SanitizedProviderHttpException::CATEGORY_INVALID_GRANT => SanitizedHealthDiagnostic::CATEGORY_CREDENTIAL_ERROR,
             SanitizedProviderHttpException::CATEGORY_AUTHORIZATION_FAILED => SanitizedHealthDiagnostic::CATEGORY_SCOPE_ERROR,
             SanitizedProviderHttpException::CATEGORY_RATE_LIMITED => SanitizedHealthDiagnostic::CATEGORY_RATE_LIMITED,
+            // CATEGORY_CURSOR_EXPIRED falls through to here — see this
+            // method's own docblock above.
             default => SanitizedHealthDiagnostic::CATEGORY_PROVIDER_ERROR,
         };
     }
@@ -495,6 +590,10 @@ final class ProviderRequestExecutor
             'pull' => SanitizedHealthDiagnostic::OPERATION_PULL_SYNC,
             'refresh_token' => SanitizedHealthDiagnostic::OPERATION_TOKEN_REFRESH,
             'health_check' => SanitizedHealthDiagnostic::OPERATION_HEALTH_CHECK,
+            // Checkpoint 2 additions (checkpoint2-combined-design.md §2
+            // P-7b).
+            'token_exchange' => SanitizedHealthDiagnostic::OPERATION_TOKEN_EXCHANGE,
+            'webhook_subscribe' => SanitizedHealthDiagnostic::OPERATION_WEBHOOK_SUBSCRIBE,
             default => throw new InvalidArgumentException(
                 "ProviderRequestExecutor has no health-diagnostic operation label mapping for operationType \"{$operationType}\"."
             ),

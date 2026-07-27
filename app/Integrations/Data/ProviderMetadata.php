@@ -14,6 +14,7 @@ use App\Integrations\Contracts\SupportsPullSyncContract;
 use App\Integrations\Contracts\SupportsPushSyncContract;
 use App\Integrations\Contracts\SupportsWebhooksContract;
 use App\Integrations\Enums\ProviderKey;
+use InvalidArgumentException;
 
 /**
  * ProviderMetadata — readonly value object describing a registered
@@ -38,14 +39,14 @@ use App\Integrations\Enums\ProviderKey;
 final readonly class ProviderMetadata
 {
     /**
-     * @param class-string[] $capabilities short (basename) class names
-     *                                     of the Supports* interfaces
-     *                                     the provider actually
-     *                                     implements.
-     * @param string[] $supportedAuthMethods
-     * @param string[] $resourceTypes
-     * @param string[] $requiredOAuthScopes
-     * @param string[] $webhookEventTypes
+     * @param  class-string[]  $capabilities  short (basename) class names
+     *                                        of the Supports* interfaces
+     *                                        the provider actually
+     *                                        implements.
+     * @param  string[]  $supportedAuthMethods
+     * @param  string[]  $resourceTypes
+     * @param  string[]  $requiredOAuthScopes
+     * @param  string[]  $webhookEventTypes
      */
     public function __construct(
         public ProviderKey $key,
@@ -59,8 +60,7 @@ final readonly class ProviderMetadata
         public array $webhookEventTypes,
         public ?string $moduleCode = null,
         public ?string $degradationTypeKey = null,
-    ) {
-    }
+    ) {}
 
     /**
      * The closed set of Supports* capability interfaces this method
@@ -101,9 +101,28 @@ final readonly class ProviderMetadata
             }
         }
 
-        $requiredOAuthScopes = $provider instanceof SupportsOAuthContract
-            ? $provider->requiredScopes()
-            : [];
+        // Checkpoint 2 (FirmsVault Live Integrations, Microsoft 365
+        // provider) fix: fromProvider() reflects generically, with no
+        // firm/connection context — but a capability-aware provider's
+        // requiredScopes() (e.g. Microsoft365Provider) deliberately
+        // throws on an empty capability list, per the mission's own
+        // "never silently default to a broad scope bundle" requirement
+        // for the REAL scope-request path (initiateOAuthConnection()).
+        // requiredOAuthScopes is presentation/documentation-only here
+        // (this class's own docblock), so a provider that cannot
+        // compute a bundle without a specific connection's capability
+        // selection correctly has nothing to disclose at this generic
+        // reflection point — caught and treated as "no scopes to
+        // display," never propagated as a hard failure of metadata
+        // reflection itself.
+        $requiredOAuthScopes = [];
+        if ($provider instanceof SupportsOAuthContract) {
+            try {
+                $requiredOAuthScopes = $provider->requiredScopes();
+            } catch (InvalidArgumentException) {
+                $requiredOAuthScopes = [];
+            }
+        }
 
         $healthCheckEndpointConvention = $provider instanceof SupportsHealthCheckContract
             ? $provider->healthCheckEndpointConvention()
@@ -141,7 +160,7 @@ final readonly class ProviderMetadata
     }
 
     /**
-     * @param class-string $fqcn
+     * @param  class-string  $fqcn
      */
     private static function basename(string $fqcn): string
     {

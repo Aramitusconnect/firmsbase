@@ -1,6 +1,7 @@
 <?php
 
 use App\Integrations\Enums\ProviderKey;
+use App\Integrations\Providers\Microsoft365\Microsoft365Provider;
 use App\Integrations\Providers\TestProvider\TestProvider;
 
 /*
@@ -41,6 +42,28 @@ return [
         // same two conditions).
         ProviderKey::Test->value => env('INTEGRATIONS_TEST_PROVIDER_ENABLED', false) && ! app()->environment('production')
             ? TestProvider::class
+            : null,
+
+        // FirmsVault Live Integrations, Checkpoint 2 addition
+        // (checkpoint2-combined-design.md §1.2). Unlike TestProvider,
+        // there is no `! app()->environment('production')` term here —
+        // Microsoft 365 is meant to run in production once enabled; the
+        // env flag alone is the gate, the same shape ProviderRegistry/
+        // ConnectProviderAction already assume for a real,
+        // production-capable provider. Microsoft365Provider::isConfigured()
+        // independently re-checks that the platform-level app
+        // registration credentials (oauth_apps.microsoft365 below) are
+        // actually present, mirroring TestProvider::isEnabledByEnvironment()'s
+        // "defense in depth, never assumed true from the registry alone"
+        // discipline. The referenced class does not exist yet as of this
+        // change (a later checkpoint builds it) — this is safe: the
+        // env() gate defaults false, so this map entry resolves to null
+        // and ProviderRegistry::registeredMap() filters it out before
+        // anything would ever try to instantiate the class; the literal
+        // FQCN string below never triggers autoloading merely by being
+        // written here.
+        ProviderKey::Microsoft365->value => env('INTEGRATIONS_MICROSOFT365_ENABLED', false)
+            ? Microsoft365Provider::class
             : null,
 
     ],
@@ -200,21 +223,101 @@ return [
                 'max_attempts_per_window' => env('INTEGRATIONS_RATE_LIMIT_TEST_MAX_ATTEMPTS', 100),
                 'window_seconds' => env('INTEGRATIONS_RATE_LIMIT_TEST_WINDOW_SECONDS', 60),
             ],
-            // Checkpoints 2-5 each add one entry here, e.g.:
-            // ProviderKey::Microsoft365->value => ['max_attempts_per_window' => 10000, 'window_seconds' => 600],
+
+            // FirmsVault Live Integrations, Checkpoint 2 addition
+            // (checkpoint2-design-oauth-capabilities.md §1.2).
+            // PLACEHOLDER / CONSERVATIVE VALUES ONLY — Microsoft Graph's
+            // exact per-API throttling ceilings (Mail, Calendar, Files
+            // each publish different documented limits) were NOT
+            // deep-fetched/confirmed as part of this checkpoint. Rather
+            // than guess a specific number with false confidence
+            // (matches this file's own established discipline — see
+            // `usage_records.retention_days`'s deliberate "no default"
+            // precedent above), this reuses `rate_limits.default`'s own
+            // conservative shape/values verbatim. MUST be revisited and
+            // set to Microsoft's actual documented per-resource
+            // throttling ceilings before this provider is enabled
+            // against real production traffic.
+            ProviderKey::Microsoft365->value => [
+                'max_attempts_per_window' => env('INTEGRATIONS_RATE_LIMIT_MICROSOFT365_MAX_ATTEMPTS', 30),
+                'window_seconds' => env('INTEGRATIONS_RATE_LIMIT_MICROSOFT365_WINDOW_SECONDS', 60),
+            ],
+
+            // Checkpoints 3-5 each add one entry here, e.g.:
             // ProviderKey::Plaid->value => ['max_attempts_per_window' => 600, 'window_seconds' => 60],
         ],
     ],
 
-    // Empty until a real ProviderKey case exists beyond `Test` — same
-    // "don't pre-register" discipline the `providers` map above already
-    // follows. Checkpoints 2-5 each add their own block here, keyed by
-    // ProviderKey->value:
-    //   ProviderKey::Microsoft365->value => [
-    //       'mode' => env('INTEGRATIONS_MICROSOFT365_MODE', 'sandbox'), // 'sandbox' | 'live'
-    //       'sandbox_base_url' => env('INTEGRATIONS_MICROSOFT365_SANDBOX_BASE_URL'),
-    //       'live_base_url' => env('INTEGRATIONS_MICROSOFT365_LIVE_BASE_URL'),
-    //   ],
-    'provider_environments' => [],
+    // FirmsVault Live Integrations, Checkpoint 2 addition
+    // (checkpoint2-design-oauth-capabilities.md §1.2; checkpoint2-combined-design.md
+    // §2 P-8). Microsoft 365 needs TWO distinct allowlisted hosts per
+    // mode — an identity host (login.microsoftonline.com, for the
+    // OAuth2 authorize/token endpoints) and a resource-API host
+    // (graph.microsoft.com, for the actual Graph pull/push/webhook
+    // calls) — which the prior singular sandbox_base_url/live_base_url
+    // shape could not represent. `sandbox_base_urls`/`live_base_urls`
+    // are now purpose-keyed arrays; ProviderEnvironmentResolver's
+    // baseUrlFor()/assertUrlAllowedFor() take a matching `$purpose`
+    // parameter (defaulting to `'default'` for a genuinely single-host
+    // provider, e.g. a future Plaid entry).
+    //
+    // Note the sandbox and live URLs below are the SAME real Microsoft
+    // hosts in both modes — this is deliberate, not a copy-paste
+    // mistake (checkpoint2-design-oauth-capabilities.md §1.2/§7 FP-10):
+    // for Microsoft 365, "sandbox vs. live" is a TENANT-identity
+    // distinction (which Microsoft tenant a firm actually connects),
+    // not a host/URL distinction the way it is for a provider like
+    // Plaid with genuinely separate sandbox/production hosts. The
+    // ProviderEnvironmentResolver host-allowlist guard is still
+    // valuable here — it stops a misconfigured/non-Microsoft URL from
+    // ever being requested (a real SSRF-adjacent safety net) — but it
+    // cannot, by itself, distinguish a Developer Program tenant from a
+    // real firm's production tenant the way it can distinguish Plaid
+    // sandbox from Plaid production; that distinction lives entirely in
+    // which tenant a firm actually connects, a policy/rollout decision
+    // outside this config's scope.
+    'provider_environments' => [
+
+        ProviderKey::Microsoft365->value => [
+            'mode' => env('INTEGRATIONS_MICROSOFT365_MODE', 'sandbox'),
+            'sandbox_base_urls' => [
+                'identity' => env('INTEGRATIONS_MICROSOFT365_SANDBOX_IDENTITY_BASE_URL', 'https://login.microsoftonline.com'),
+                'graph' => env('INTEGRATIONS_MICROSOFT365_SANDBOX_GRAPH_BASE_URL', 'https://graph.microsoft.com'),
+            ],
+            'live_base_urls' => [
+                'identity' => env('INTEGRATIONS_MICROSOFT365_LIVE_IDENTITY_BASE_URL', 'https://login.microsoftonline.com'),
+                'graph' => env('INTEGRATIONS_MICROSOFT365_LIVE_GRAPH_BASE_URL', 'https://graph.microsoft.com'),
+            ],
+        ],
+
+    ],
+
+    /*
+    |----------------------------------------------------------------
+    | FirmsVault Live Integrations, Checkpoint 2 — platform OAuth app
+    | registration credentials
+    |----------------------------------------------------------------
+    |
+    | The ONE app registration's credentials FirmsVault itself owns
+    | with each provider (e.g. a single multi-tenant Azure AD app
+    | registration for Microsoft 365, consented to individually by
+    | each connecting firm's tenant/user) — NEVER a per-firm value,
+    | never something a firm enters itself. Kept centralized in this
+    | file (not config/services.php) per this file's own existing
+    | convention of owning every Integration-domain config key.
+    | `Microsoft365Provider::isConfigured()` returns true only when
+    | both values below are present and non-empty (checkpoint2-design-oauth-capabilities.md
+    | §1.2).
+    |
+    */
+
+    'oauth_apps' => [
+
+        ProviderKey::Microsoft365->value => [
+            'client_id' => env('INTEGRATIONS_MICROSOFT365_CLIENT_ID'),
+            'client_secret' => env('INTEGRATIONS_MICROSOFT365_CLIENT_SECRET'),
+        ],
+
+    ],
 
 ];

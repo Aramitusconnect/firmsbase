@@ -221,6 +221,17 @@ final class PushSyncJob implements ShouldQueue
                 $providerContext = is_array($decoded) ? $decoded : [];
             }
 
+            // Checkpoint 2 (FirmsVault Live Integrations, Microsoft 365
+            // provider) fix: a real provider's push() must reach
+            // ProviderRequestExecutor::send(), which requires a full
+            // FirmIntegration object — the pre-Checkpoint-2
+            // $providerContext (test-only, JSON-encoded scalar bag)
+            // never carried one. Merged in unconditionally, after
+            // decoding, so any caller-supplied test keys (including
+            // '__simulate_failure', handled separately below) are
+            // preserved and 'connection' is always present.
+            $providerContext['connection'] = $connection;
+
             if (array_key_exists('__simulate_failure', $providerContext)) {
                 $payload['__simulate_failure'] = $providerContext['__simulate_failure'];
             }

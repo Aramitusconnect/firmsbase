@@ -61,6 +61,21 @@ final class SanitizedProviderHttpException extends RuntimeException
 
     public const CATEGORY_CONNECTION_UNAVAILABLE = 'connection_unavailable';
 
+    /**
+     * FirmsVault Live Integrations, Checkpoint 2 addition
+     * (checkpoint2-combined-design.md §2 P-9): a real provider's
+     * incremental-sync cursor can expire server-side (e.g. Microsoft
+     * Graph delta-query's `410 Gone` response), which is a distinct
+     * failure shape from every other category above — the fix is not
+     * "retry the same request" or "reauthorize", it is "invalidate the
+     * stored cursor and restart the walk from scratch". Kept as its own
+     * closed category (never folded into CATEGORY_PROVIDER_REJECTED)
+     * specifically so a caller (e.g. a future PullSyncJob catch branch)
+     * can branch on it directly rather than re-deriving "was this a 410"
+     * from a raw status code it may not even have in scope.
+     */
+    public const CATEGORY_CURSOR_EXPIRED = 'cursor_expired';
+
     private const VALID_CATEGORIES = [
         self::CATEGORY_NETWORK_ERROR,
         self::CATEGORY_PROVIDER_REJECTED,
@@ -75,6 +90,7 @@ final class SanitizedProviderHttpException extends RuntimeException
         self::CATEGORY_CONFLICT,
         self::CATEGORY_CONFIGURATION_ERROR,
         self::CATEGORY_CONNECTION_UNAVAILABLE,
+        self::CATEGORY_CURSOR_EXPIRED,
     ];
 
     public function __construct(

@@ -75,6 +75,31 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
     ];
 
     /**
+     * FirmsVault Live Integrations, Checkpoint 2 (Microsoft 365 provider —
+     * checkpoint2-combined-design.md §1.1/§2 P-4) addition:
+     * `requested_capabilities_json` and `external_tenant_id`, added by the
+     * later, separate
+     * database/migrations/2026_09_21_150001_add_capability_and_tenant_columns_to_firm_integrations_table.php
+     * migration. Deliberately NOT folded into self::EXPECTED_COLUMNS above:
+     * that constant also backs
+     * test_migration_rollback_and_reapplication_restores_exact_prior_state()/
+     * test_migration_down_and_up_restores_exact_prior_state_via_direct_calls(),
+     * which roll back and reapply ONLY the two original
+     * 2026_09_02_020001/020002 migrations (never this later, separate ALTER
+     * TABLE migration) — after that narrower rollback/reapply cycle, these
+     * two columns are genuinely, correctly absent. Only the test asserting
+     * the table's CURRENT, fully-migrated live schema uses this constant.
+     * Mirrors IntegrationCredentialsForceRlsActivationTest's identical
+     * EXPECTED_COLUMNS_ON_CURRENT_LIVE_SCHEMA precedent for
+     * credential_environment_mode.
+     */
+    private const EXPECTED_COLUMNS_ON_CURRENT_LIVE_SCHEMA = [
+        ...self::EXPECTED_COLUMNS,
+        'requested_capabilities_json',
+        'external_tenant_id',
+    ];
+
+    /**
      * POST-CHECKPOINT-6 UPDATE: Checkpoint 6 added 5 tables that
      * independently carry a real composite FK (firm_id,
      * firm_integration_id) -> firm_integrations(firm_id, id) —
@@ -252,6 +277,43 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
         'integration_usage_records',
     ];
 
+    /**
+     * FirmsVault Live Integrations, Checkpoint 2 (Microsoft 365 provider)
+     * UPDATE: Checkpoint 2 added a SEVENTH independent dependency chain on
+     * firm_integrations — integration_provider_webhook_subscriptions
+     * carries a real composite FK (firm_id, firm_integration_id) ->
+     * firm_integrations(firm_id, id) with cascadeOnDelete()
+     * (constraint integration_provider_webhook_subscriptions_firm_integration_fk),
+     * identical in shape to integration_connection_health's/
+     * integration_usage_records' own composite FK
+     * (checkpoint2-combined-design.md §2 P-17). This test now also rolls
+     * back this 2-migration Checkpoint 2 wave FIRST — before the
+     * Checkpoint 9 whole-wave block, since this Checkpoint 2 wave is the
+     * newest layer (dated 2026_09_22, after Checkpoint 9's 2026_09_08) —
+     * in exact reverse of its own creation order (RLS-prep down(), then
+     * create-table down()), then reapplies it LAST, after the Checkpoint 9
+     * whole-wave block, in forward (creation) order. Order between this
+     * wave and the pre-existing integration_credentials /
+     * integration_oauth_states / Checkpoint 6 / Checkpoint 7 / Checkpoint 8
+     * / Checkpoint 9 blocks does not matter to each other, only each
+     * independently references firm_integrations. Mirrors the identical
+     * whole-wave precedent Checkpoint 6 through Checkpoint 9 each
+     * established for this exact class of problem.
+     *
+     * @var list<string>
+     */
+    private const CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS = [
+        'database/migrations/2026_09_22_160001_create_integration_provider_webhook_subscriptions_table.php',
+        'database/migrations/2026_09_22_160002_prepare_row_level_security_and_force_rls_on_integration_provider_webhook_subscriptions_table.php',
+    ];
+
+    /**
+     * @var list<string>
+     */
+    private const CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES = [
+        'integration_provider_webhook_subscriptions',
+    ];
+
     // ------------------------------------------------------------
     // 1. Schema correctness
     // ------------------------------------------------------------
@@ -266,7 +328,7 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
         $columns = Schema::getColumnListing('firm_integrations');
 
         sort($columns);
-        $expected = self::EXPECTED_COLUMNS;
+        $expected = self::EXPECTED_COLUMNS_ON_CURRENT_LIVE_SCHEMA;
         sort($expected);
 
         $this->assertSame(
@@ -361,7 +423,7 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
     public function test_duplicate_external_account_id_for_same_firm_and_provider_is_rejected(): void
     {
         $firm = Firm::factory()->create();
-        $provider = $this->testProvider();
+        $provider = $this->makeTestProvider();
 
         FirmIntegration::factory()->create([
             'firm_id' => $firm->id,
@@ -382,7 +444,7 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
     public function test_multiple_null_external_account_id_rows_for_same_firm_and_provider_are_allowed(): void
     {
         $firm = Firm::factory()->create();
-        $provider = $this->testProvider();
+        $provider = $this->makeTestProvider();
 
         $first = FirmIntegration::factory()->create([
             'firm_id' => $firm->id,
@@ -473,7 +535,7 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $this->createIntegrationForFirm($firm);
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(0, FirmIntegration::query()->count());
     }
@@ -482,7 +544,7 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
 
@@ -881,6 +943,31 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 9) must exist before this test begins, since it is now also one of firm_integrations' real FK dependents.");
         }
 
+        // Confirm the Checkpoint 2 (FirmsVault Live Integrations,
+        // Microsoft 365 provider) webhook-subscriptions whole-wave table's
+        // pre-rollback existence too (a SEVENTH, independent dependency
+        // chain on firm_integrations — the newest layer of all).
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS as $path) {
+            $this->assertFileExists(base_path($path));
+        }
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must exist before this test begins, since it is now also one of firm_integrations' real FK dependents.");
+        }
+
+        // 1a-pre-pre-pre. Roll back the Checkpoint 2 webhook-subscriptions
+        // whole-wave dependency chain FIRST — before the Checkpoint 9
+        // whole-wave block below, since this wave is the newest layer of
+        // all (dated 2026_09_22, after Checkpoint 9's 2026_09_08) — see
+        // CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS docblock.
+        // Rolled back in exact reverse of its own creation order.
+        foreach (array_reverse(self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 2 webhook subscriptions whole-wave) failed: ".Artisan::output());
+        }
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must not survive its whole-wave rollback.");
+        }
+
         // 1a-pre-pre. Roll back the Checkpoint 9 whole-wave dependency
         // chain FIRST — before the Checkpoint 8 whole-wave block below,
         // since Checkpoint 9 is the newest layer (see
@@ -1103,6 +1190,19 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 9) must be restored by the whole-wave reapplication.");
         }
 
+        // 5f. Reapply the Checkpoint 2 webhook-subscriptions whole-wave
+        // dependency chain LAST of all — after the Checkpoint 9 whole-wave
+        // block, since this wave is the newest layer of all, and after
+        // firm_integrations (just recreated above) already exists again —
+        // in its own forward (creation) order.
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS as $path) {
+            $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 2 webhook subscriptions whole-wave) failed: ".Artisan::output());
+        }
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must be restored by the whole-wave reapplication.");
+        }
+
         // 6. Schema restored exactly.
         $this->assertTrue(Schema::hasTable('firm_integrations'));
 
@@ -1297,6 +1397,9 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
         foreach (self::CP9_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 9) must exist before this test begins, since it is now also one of firm_integrations' real FK dependents.");
         }
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must exist before this test begins, since it is now also one of firm_integrations' real FK dependents.");
+        }
 
         $rlsMigration = include base_path(self::RLS_MIGRATION_PATH);
         $tableMigration = include base_path(self::TABLE_MIGRATION_PATH);
@@ -1330,6 +1433,26 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
             static fn (string $path) => include base_path($path),
             self::CP9_WHOLE_WAVE_MIGRATION_PATHS,
         );
+
+        // Checkpoint 2 (FirmsVault Live Integrations, Microsoft 365
+        // provider) webhook-subscriptions whole-wave migration objects, in
+        // creation order — the newest layer of all.
+        $cp2WebhookSubscriptionsMigrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS,
+        );
+
+        // Tear down the Checkpoint 2 webhook-subscriptions whole-wave
+        // dependency chain FIRST — before the Checkpoint 9 whole-wave
+        // teardown below, since this wave is the newest layer of all (see
+        // CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS docblock).
+        // Torn down as a unit, in exact reverse of its own creation order.
+        foreach (array_reverse($cp2WebhookSubscriptionsMigrations) as $migration) {
+            $migration->down();
+        }
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must be fully dropped before the Checkpoint 9 whole-wave teardown can succeed.");
+        }
 
         // Tear down the Checkpoint 9 whole-wave dependency chain FIRST —
         // before the Checkpoint 8 whole-wave teardown below, since
@@ -1527,6 +1650,18 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
         foreach (self::CP9_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 9) must be fully restored after up().");
         }
+
+        // Rebuild the Checkpoint 2 webhook-subscriptions whole-wave
+        // dependency chain LAST of all — after the Checkpoint 9 whole-wave
+        // block, since this wave is the newest layer of all, and after
+        // firm_integrations (just recreated above) already exists again —
+        // in its own forward (creation) order.
+        foreach ($cp2WebhookSubscriptionsMigrations as $migration) {
+            $migration->up();
+        }
+        foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must be fully restored after up().");
+        }
     }
 
     // ------------------------------------------------------------
@@ -1535,14 +1670,14 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
 
     public function test_model_table_resolves_to_firm_integrations(): void
     {
-        $model = new FirmIntegration();
+        $model = new FirmIntegration;
 
         $this->assertSame('firm_integrations', $model->getTable());
     }
 
     public function test_model_fillable_contains_exactly_the_expected_fields(): void
     {
-        $model = new FirmIntegration();
+        $model = new FirmIntegration;
 
         $expected = [
             'firm_id',
@@ -1558,6 +1693,12 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
             'last_health_status',
             'error_reason',
             'webhook_routing_token',
+            // FirmsVault Live Integrations, Checkpoint 2 additions
+            // (checkpoint2-combined-design.md §1.1/§2 P-4/P-5) — see
+            // FirmIntegration::$fillable's own comment for the full
+            // rationale.
+            'requested_capabilities_json',
+            'external_tenant_id',
         ];
 
         $fillable = $model->getFillable();
@@ -1585,7 +1726,7 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
 
     public function test_model_has_the_tenant_global_scope_applied(): void
     {
-        $model = new FirmIntegration();
+        $model = new FirmIntegration;
 
         $this->assertArrayHasKey('tenant', $model->getGlobalScopes());
     }
@@ -1657,7 +1798,7 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
         return FirmIntegration::factory()->forFirm($firm)->create();
     }
 
-    private function testProvider(): IntegrationProvider
+    private function makeTestProvider(): IntegrationProvider
     {
         return IntegrationProvider::query()->where('code', 'test')->first()
             ?? IntegrationProvider::factory()->create();
@@ -1678,7 +1819,7 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
 
     private function firmIntegrationPolicy(): FirmIntegrationPolicy
     {
-        return new FirmIntegrationPolicy(new IntegrationAccessPolicyService(new TimelineEventRecorder()));
+        return new FirmIntegrationPolicy(new IntegrationAccessPolicyService(new TimelineEventRecorder));
     }
 
     /**
@@ -1689,7 +1830,7 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
         return [
             'uuid' => (string) Str::uuid7(),
             'firm_id' => $firm->id,
-            'integration_provider_id' => $this->testProvider()->id,
+            'integration_provider_id' => $this->makeTestProvider()->id,
             'status' => 'pending',
             'created_at' => now(),
             'updated_at' => now(),
