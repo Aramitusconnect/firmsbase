@@ -606,7 +606,17 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // this table carries no firm_id column at all); the Global
         // count and the overall table-inventory total both increase by
         // one (48 -> 49, 224 -> 225).
-        $this->assertSame(49, $summary[TenantOwnershipClassification::Global->value]);
+        // Narrowly updated by FirmsVault Live Integrations Checkpoint 1
+        // ("Harden FirmsVault live-provider runtime") —
+        // integration_webhook_verification_failures added directly to
+        // FULL_TABLE_INVENTORY_EXTRA, classified Global (a platform,
+        // pre-tenant counter table structurally incapable of holding a
+        // tenant-identifying column, per its own "no RLS" disclaimer
+        // note — same reasoning as integration_webhook_receipts
+        // immediately above it in the registry); the Global count and
+        // the overall table-inventory total both increase by one
+        // (49 -> 50, 225 -> 226).
+        $this->assertSame(50, $summary[TenantOwnershipClassification::Global->value]);
         $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
         $this->assertSame(8, $summary[TenantOwnershipClassification::System->value]);
         $this->assertSame(1, $summary[TenantOwnershipClassification::RootTenant->value]);
@@ -624,7 +634,11 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // above), no other bucket affected. Narrowly updated AGAIN by
         // Phase 2 (224 -> 225) — integration_platform_provider_health_summaries,
         // classified Global (see above), no other bucket affected.
-        $this->assertSame(225, array_sum($summary));
+        // Narrowly updated AGAIN by FirmsVault Live Integrations
+        // Checkpoint 1 (225 -> 226) —
+        // integration_webhook_verification_failures, classified Global
+        // (see above), no other bucket affected.
+        $this->assertSame(226, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void
