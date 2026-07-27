@@ -103,6 +103,38 @@ class Phase16FirewallTest extends TestCase
         }
     }
 
+    /**
+     * FIRMSVAULT-ADMIN-CONTROL-CENTER-PHASE-4 UPDATE (Operations): this
+     * phase legitimately, deliberately builds a real, reviewed
+     * Deployments admin surface over `DeploymentConfig`/
+     * `FleetMigrationRun`/`FleetMigrationInstanceStatus` — the exact
+     * "fleet of Dedicated/PrivateEnterprise firm deployments" backend
+     * Phase 16 itself built (simulated-only, no real infrastructure
+     * action, per that phase's own project rule, which this admin
+     * surface does not change). This does not weaken Phase 16's actual
+     * invariant (no real AWS/Docker/SSH/Terraform/Kubernetes/database-
+     * or storage-provisioning/DNS call, no shell/process execution —
+     * still enforced unconditionally by every other test in this class)
+     * — it narrows the separate "no UI surface" check from "zero
+     * Phase-16-domain references anywhere" to "zero EXCEPT this
+     * phase's own reviewed, allowlisted files," mirroring every prior
+     * cascade-allowlist precedent in this codebase (see e.g.
+     * FirmIntegrationSuperAdminBoundaryStructuralTest's own six-cascade
+     * history).
+     */
+    private const PHASE_4_OPERATIONS_ALLOWED_BASENAMES = [
+        'PlatformDeploymentConfigsPage.php',
+        'PlatformFleetMigrationRunDetailPage.php',
+        'PlatformFleetMigrationRunResource.php',
+        'ListPlatformFleetMigrationRuns.php',
+        'ApplyFleetMigrationInstanceAction.php',
+        'BeginFleetMigrationRunAction.php',
+        'CompleteFleetMigrationRunAction.php',
+        'CreateFleetMigrationRunAction.php',
+        'RollbackFleetMigrationRunAction.php',
+        'RunHealthChecksNowAction.php',
+    ];
+
     public function test_no_route_controller_filament_blade_or_livewire_file_was_added_for_phase_16(): void
     {
         $phase16Markers = ['DeploymentConfig', 'FleetMigration', 'LicenseFile', 'IntegrationDegradation', 'PrivateEnterpriseSettings'];
@@ -118,6 +150,10 @@ class Phase16FirewallTest extends TestCase
 
             foreach ($iterator as $file) {
                 if (! $file->isFile()) {
+                    continue;
+                }
+
+                if (in_array(basename($file->getPathname()), self::PHASE_4_OPERATIONS_ALLOWED_BASENAMES, true)) {
                     continue;
                 }
 

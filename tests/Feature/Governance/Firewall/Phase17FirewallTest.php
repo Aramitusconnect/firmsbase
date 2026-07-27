@@ -116,6 +116,45 @@ class Phase17FirewallTest extends TestCase
         }
     }
 
+    /**
+     * FIRMSVAULT-ADMIN-CONTROL-CENTER-PHASE-4 UPDATE (Governance): this
+     * phase legitimately, deliberately builds real, reviewed admin
+     * surfaces over Retention Policies, Legal Holds, Data Exports/
+     * Offboarding, and Deletion Requests — exactly the governance
+     * backends Phase 17 itself built (its own project rule: no real
+     * AWS/network/process-execution side effect, still enforced
+     * unconditionally by every other test in this class). This does not
+     * weaken that invariant — it narrows the separate "no UI surface"
+     * check from "zero Phase-17-domain references anywhere" to "zero
+     * EXCEPT this phase's own reviewed, allowlisted files," mirroring
+     * every prior cascade-allowlist precedent in this codebase (see
+     * e.g. FirmIntegrationSuperAdminBoundaryStructuralTest's own
+     * six-cascade history).
+     */
+    private const PHASE_4_GOVERNANCE_ALLOWED_BASENAMES = [
+        'PlatformRetentionGovernancePage.php',
+        'DeletionRequestResource.php',
+        'ListDeletionRequests.php',
+        'ViewDeletionRequest.php',
+        'LegalHoldResource.php',
+        'ListLegalHolds.php',
+        'ViewLegalHold.php',
+        'OffboardingRequestResource.php',
+        'ListOffboardingRequests.php',
+        'ViewOffboardingRequest.php',
+        'AdvanceOffboardingRequestAction.php',
+        'CancelOffboardingRequestAction.php',
+        'CompleteOffboardingRequestAction.php',
+        'DenyDeletionAction.php',
+        'FirstApproveDeletionAction.php',
+        'MarkOffboardingExportVerifiedAction.php',
+        'PlaceLegalHoldAction.php',
+        'ReleaseLegalHoldAction.php',
+        'RequestDeletionApprovalAction.php',
+        'SecondApproveDeletionAction.php',
+        'SubmitDeletionRequestForApprovalAction.php',
+    ];
+
     public function test_no_route_controller_filament_blade_or_livewire_file_was_added_for_phase_17(): void
     {
         $phase17Markers = ['RetentionPolicy', 'LegalHold', 'OffboardingRequest', 'KeyDestructionRequest',
@@ -132,6 +171,10 @@ class Phase17FirewallTest extends TestCase
 
             foreach ($iterator as $file) {
                 if (! $file->isFile()) {
+                    continue;
+                }
+
+                if (in_array(basename($file->getPathname()), self::PHASE_4_GOVERNANCE_ALLOWED_BASENAMES, true)) {
                     continue;
                 }
 

@@ -43,9 +43,8 @@ use App\Models\SupportAccessRequest;
 class SupportAccessRequestService
 {
     public function __construct(
-        private readonly HighRiskPlatformChangePolicyService $highRiskPolicy = new HighRiskPlatformChangePolicyService(),
-    ) {
-    }
+        private readonly HighRiskPlatformChangePolicyService $highRiskPolicy = new HighRiskPlatformChangePolicyService,
+    ) {}
 
     public function request(
         Firm $firm,
@@ -63,7 +62,7 @@ class SupportAccessRequestService
             throw new \InvalidArgumentException('Emergency support access requires an emergency_justification in addition to reason.');
         }
 
-        $request = (new TenantContextService())->runWithFirmContext($firm, fn () => SupportAccessRequest::create([
+        $request = (new TenantContextService)->runWithFirmContext($firm, fn () => SupportAccessRequest::create([
             'firm_id' => $firm->id,
             'requested_by' => $requestedBy->id,
             'access_type' => $accessType,
@@ -103,7 +102,7 @@ class SupportAccessRequestService
 
     public function approve(SupportAccessRequest $request, FirmUser $approver): SupportAccessRequest
     {
-        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $approver) {
+        return (new TenantContextService)->runWithFirmContext($request->firm_id, function () use ($request, $approver) {
             $request->update([
                 'status' => SupportAccessRequestStatus::Approved,
                 'approved_by' => $approver->id,
@@ -116,7 +115,7 @@ class SupportAccessRequestService
 
     public function deny(SupportAccessRequest $request, FirmUser $denier): SupportAccessRequest
     {
-        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $denier) {
+        return (new TenantContextService)->runWithFirmContext($request->firm_id, function () use ($request, $denier) {
             $request->update([
                 'status' => SupportAccessRequestStatus::Denied,
                 'denied_by' => $denier->id,
@@ -127,12 +126,56 @@ class SupportAccessRequestService
         });
     }
 
-    public function expire(SupportAccessRequest $request): SupportAccessRequest
+    /**
+     * Phase 4 (FirmsVault Platform Admin Control Center, "Support"
+     * category) addition: $actor + audit plumbing, added because
+     * exposing this as an admin-facing "mark stale request Expired"
+     * action (SupportCaseResource's ExpireSupportCaseAction) requires
+     * both — this method previously had zero callers anywhere and
+     * neither. Mirrors PlatformInvoiceService::finalize()/void()'s
+     * exact shape: $actor is optional so every pre-existing caller
+     * (currently none in application code; only tests call expire()
+     * directly today) keeps byte-for-byte unchanged behavior when it is
+     * omitted.
+     *
+     * Deliberately calls PlatformAdminAuditEventRecorder::record()
+     * (firm-scoped), NOT recordPlatformEvent() (the null-firm_id
+     * variant PlatformInvoiceService uses for its own actor/audit
+     * addition) — unlike PlatformInvoice (keyed to billing_account_id,
+     * which can span an organization's multiple firms, per that
+     * class's own docblock), SupportAccessRequest carries a real,
+     * single, non-nullable firm_id and already has an established
+     * firm-scoped audit precedent in this exact table family: every
+     * other support-access security_events row
+     * (PlatformFirmIntegrationBoundedAccessService::
+     * writeOversightAuditEvent(), SupportAccessPolicyService::
+     * logSessionAudit()/logNotification()) is firm-attributed, never
+     * null-firm_id. Using record() here keeps this action's audit row
+     * consistent with its own sibling Revoke action's audit row, both
+     * correctly queryable per-firm.
+     */
+    public function expire(SupportAccessRequest $request, ?PlatformAdmin $actor = null): SupportAccessRequest
     {
-        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request) {
+        return (new TenantContextService)->runWithFirmContext($request->firm_id, function () use ($request, $actor) {
             $request->update(['status' => SupportAccessRequestStatus::Expired]);
 
-            return $request->fresh();
+            $fresh = $request->fresh();
+
+            if ($actor !== null) {
+                (new PlatformAdminAuditEventRecorder)->record(
+                    Firm::query()->findOrFail($fresh->firm_id),
+                    $actor,
+                    'support_access_request_expired',
+                    'support_access',
+                    [
+                        'support_access_request_id' => $fresh->id,
+                        'support_access_request_uuid' => $fresh->uuid,
+                        'resulting_status' => $fresh->status->value,
+                    ],
+                );
+            }
+
+            return $fresh;
         });
     }
 }

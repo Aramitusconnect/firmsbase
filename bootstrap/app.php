@@ -79,6 +79,39 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('integrations:platform-provider-health:refresh')
             ->everyFiveMinutes()
             ->withoutOverlapping();
+
+        // Phase 4 — FirmsVault Platform Admin Control Center
+        // ("Operations"). Resolves phase4-architecture-map-operations-
+        // governance.md Open Decision 1: RunHealthChecksJob existed,
+        // fully tested, but was never scheduled anywhere — a Service
+        // Health admin page built against health_checks would have
+        // shown permanently empty/stale data through no fault of the
+        // UI. Same shape and risk profile as every entry above: a
+        // plain, cheap Artisan command, ->withoutOverlapping(), no
+        // tenant data touched (the platform-wide checks run under no
+        // active firm context — see HealthCheckService::runAllAndRecord()).
+        $schedule->command('health:checks:run')
+            ->everyFiveMinutes()
+            ->withoutOverlapping();
+
+        // Phase 4 — FirmsVault Platform Admin Control Center
+        // ("Operations"). Resolves the other half of Open Decision 1:
+        // SchedulerHealthService::recordHeartbeat() was never called by
+        // anything, so isHealthy()/lastHeartbeatAt() could never report
+        // anything but "unknown" in a real environment regardless of
+        // whether the scheduler was actually running. Deliberately a
+        // dedicated Artisan command (RecordSchedulerHeartbeatCommand),
+        // not an inline $schedule->call() closure — every other entry
+        // in this schedule is a ->command() entry, so this keeps the
+        // whole file's registration shape uniform rather than
+        // introducing the one anonymous-closure exception. Runs every
+        // minute (deliberately more frequent than every other entry
+        // here) so SchedulerHealthService::isHealthy()'s default
+        // 300-second staleness window comfortably tolerates a single
+        // missed/delayed tick without flapping unhealthy.
+        $schedule->command('scheduler:heartbeat:record')
+            ->everyMinute()
+            ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware): void {
         // Trust the AWS ALB in front of this container for exactly the

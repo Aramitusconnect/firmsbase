@@ -6,8 +6,9 @@ use App\Enums\IncidentSeverity;
 use App\Enums\IncidentStatus;
 use App\Models\Firm;
 use App\Models\IncidentEvent;
+use App\Models\PlatformAdmin;
 use App\Models\User;
-use App\Services\TenantContextService;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 /**
@@ -19,11 +20,34 @@ use Illuminate\Support\Str;
  * latest row) is the internal incident dashboard's "current state"
  * view; timeline() (every row, in order) is its event-timeline view —
  * together these ARE the "internal incident dashboard data model
- * foundation" the master plan requires. No UI is built here (project
- * rule).
+ * foundation" the master plan requires.
+ *
+ * Phase 4 (FirmsVault Platform Admin Control Center, "Operations")
+ * addition: every method below now ALSO accepts an optional
+ * `?PlatformAdmin $platformAdminActor = null` parameter — the
+ * resolution to this mission's documented "actor-type gap"
+ * (PlatformAdmin has no relation to the firm-panel User model, but
+ * `actor_user_id` is typed/FK'd to `users`). `actor_user_id` is a
+ * NULLABLE FK (see incident_events' own migration), so a platform-
+ * admin-initiated event simply leaves it null — exactly like every
+ * existing caller that passes no `?User $actor` today — while the
+ * admin's real identity is captured via
+ * PlatformAdminAuditEventRecorder::recordPlatformEvent()/record()
+ * (firm-less vs firm-scoped variant, matching each method's own $firm
+ * parameter), mirroring PlanService::activate()/archive()'s exact
+ * "optional actor, additive, recordPlatformEvent when supplied"
+ * shape. When $platformAdminActor is null (every pre-existing caller
+ * — only tests call these methods directly today), behavior is
+ * byte-for-byte unchanged from before this addition.
  */
 class IncidentService
 {
+    private const AUDIT_CATEGORY = 'operations_incident';
+
+    public function __construct(
+        private readonly PlatformAdminAuditEventRecorder $auditRecorder = new PlatformAdminAuditEventRecorder,
+    ) {}
+
     public function open(
         ?Firm $firm,
         IncidentSeverity $severity,
@@ -31,6 +55,7 @@ class IncidentService
         bool $customerImpact = false,
         bool $notificationNeeded = false,
         ?User $actor = null,
+        ?PlatformAdmin $platformAdminActor = null,
     ): IncidentEvent {
         $correlationId = (string) Str::uuid();
 
@@ -48,12 +73,21 @@ class IncidentService
 
         $tenantContext = app(TenantContextService::class);
 
-        return $firm
+        $created = $firm
             ? $tenantContext->runWithFirmContext($firm, $create)
             : $tenantContext->runWithoutFirmContext($create);
+
+        $this->recordPlatformAdminAudit($firm, $platformAdminActor, 'incident_opened', [
+            'correlation_id' => $correlationId,
+            'severity' => $severity->value,
+            'customer_impact' => $customerImpact,
+            'notification_needed' => $notificationNeeded,
+        ]);
+
+        return $created;
     }
 
-    public function updateSeverity(?Firm $firm, string $correlationId, IncidentSeverity $severity, ?User $actor = null): IncidentEvent
+    public function updateSeverity(?Firm $firm, string $correlationId, IncidentSeverity $severity, ?User $actor = null, ?PlatformAdmin $platformAdminActor = null): IncidentEvent
     {
         $tenantContext = app(TenantContextService::class);
 
@@ -63,12 +97,19 @@ class IncidentService
             return $this->appendEvent($current, 'severity_changed', ['severity' => $severity], $actor);
         };
 
-        return $firm
+        $result = $firm
             ? $tenantContext->runWithFirmContext($firm, $body)
             : $tenantContext->runWithoutFirmContext($body);
+
+        $this->recordPlatformAdminAudit($firm, $platformAdminActor, 'incident_severity_updated', [
+            'correlation_id' => $correlationId,
+            'severity' => $severity->value,
+        ]);
+
+        return $result;
     }
 
-    public function updateStatus(?Firm $firm, string $correlationId, IncidentStatus $status, ?User $actor = null): IncidentEvent
+    public function updateStatus(?Firm $firm, string $correlationId, IncidentStatus $status, ?User $actor = null, ?PlatformAdmin $platformAdminActor = null): IncidentEvent
     {
         $tenantContext = app(TenantContextService::class);
 
@@ -78,12 +119,19 @@ class IncidentService
             return $this->appendEvent($current, 'status_changed', ['status' => $status], $actor);
         };
 
-        return $firm
+        $result = $firm
             ? $tenantContext->runWithFirmContext($firm, $body)
             : $tenantContext->runWithoutFirmContext($body);
+
+        $this->recordPlatformAdminAudit($firm, $platformAdminActor, 'incident_status_updated', [
+            'correlation_id' => $correlationId,
+            'status' => $status->value,
+        ]);
+
+        return $result;
     }
 
-    public function recordRootCause(?Firm $firm, string $correlationId, string $rootCause, ?User $actor = null): IncidentEvent
+    public function recordRootCause(?Firm $firm, string $correlationId, string $rootCause, ?User $actor = null, ?PlatformAdmin $platformAdminActor = null): IncidentEvent
     {
         $tenantContext = app(TenantContextService::class);
 
@@ -93,12 +141,18 @@ class IncidentService
             return $this->appendEvent($current, 'root_cause_added', ['root_cause' => $rootCause], $actor);
         };
 
-        return $firm
+        $result = $firm
             ? $tenantContext->runWithFirmContext($firm, $body)
             : $tenantContext->runWithoutFirmContext($body);
+
+        $this->recordPlatformAdminAudit($firm, $platformAdminActor, 'incident_root_cause_recorded', [
+            'correlation_id' => $correlationId,
+        ]);
+
+        return $result;
     }
 
-    public function flagCustomerImpact(?Firm $firm, string $correlationId, bool $customerImpact, ?User $actor = null): IncidentEvent
+    public function flagCustomerImpact(?Firm $firm, string $correlationId, bool $customerImpact, ?User $actor = null, ?PlatformAdmin $platformAdminActor = null): IncidentEvent
     {
         $tenantContext = app(TenantContextService::class);
 
@@ -108,12 +162,19 @@ class IncidentService
             return $this->appendEvent($current, 'customer_impact_flagged', ['customer_impact' => $customerImpact], $actor);
         };
 
-        return $firm
+        $result = $firm
             ? $tenantContext->runWithFirmContext($firm, $body)
             : $tenantContext->runWithoutFirmContext($body);
+
+        $this->recordPlatformAdminAudit($firm, $platformAdminActor, 'incident_customer_impact_flagged', [
+            'correlation_id' => $correlationId,
+            'customer_impact' => $customerImpact,
+        ]);
+
+        return $result;
     }
 
-    public function flagNotificationNeeded(?Firm $firm, string $correlationId, bool $notificationNeeded, ?User $actor = null): IncidentEvent
+    public function flagNotificationNeeded(?Firm $firm, string $correlationId, bool $notificationNeeded, ?User $actor = null, ?PlatformAdmin $platformAdminActor = null): IncidentEvent
     {
         $tenantContext = app(TenantContextService::class);
 
@@ -123,12 +184,19 @@ class IncidentService
             return $this->appendEvent($current, 'notification_needed_flagged', ['notification_needed' => $notificationNeeded], $actor);
         };
 
-        return $firm
+        $result = $firm
             ? $tenantContext->runWithFirmContext($firm, $body)
             : $tenantContext->runWithoutFirmContext($body);
+
+        $this->recordPlatformAdminAudit($firm, $platformAdminActor, 'incident_notification_needed_flagged', [
+            'correlation_id' => $correlationId,
+            'notification_needed' => $notificationNeeded,
+        ]);
+
+        return $result;
     }
 
-    public function resolve(?Firm $firm, string $correlationId, string $resolution, ?User $actor = null): IncidentEvent
+    public function resolve(?Firm $firm, string $correlationId, string $resolution, ?User $actor = null, ?PlatformAdmin $platformAdminActor = null): IncidentEvent
     {
         $tenantContext = app(TenantContextService::class);
 
@@ -138,9 +206,15 @@ class IncidentService
             return $this->appendEvent($current, 'resolved', ['status' => IncidentStatus::Resolved, 'resolution' => $resolution], $actor);
         };
 
-        return $firm
+        $result = $firm
             ? $tenantContext->runWithFirmContext($firm, $body)
             : $tenantContext->runWithoutFirmContext($body);
+
+        $this->recordPlatformAdminAudit($firm, $platformAdminActor, 'incident_resolved', [
+            'correlation_id' => $correlationId,
+        ]);
+
+        return $result;
     }
 
     public function currentState(string $correlationId): IncidentEvent
@@ -152,7 +226,7 @@ class IncidentService
     }
 
     /**
-     * @return \Illuminate\Support\Collection<int, IncidentEvent>
+     * @return Collection<int, IncidentEvent>
      */
     public function timeline(string $correlationId)
     {
@@ -177,5 +251,23 @@ class IncidentService
             'message' => $overrides['message'] ?? null,
             'actor_user_id' => $actor?->id,
         ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
+     */
+    private function recordPlatformAdminAudit(?Firm $firm, ?PlatformAdmin $platformAdminActor, string $eventType, array $metadata): void
+    {
+        if ($platformAdminActor === null) {
+            return;
+        }
+
+        if ($firm !== null) {
+            $this->auditRecorder->record($firm, $platformAdminActor, $eventType, self::AUDIT_CATEGORY, $metadata);
+
+            return;
+        }
+
+        $this->auditRecorder->recordPlatformEvent($platformAdminActor, $eventType, self::AUDIT_CATEGORY, $metadata);
     }
 }

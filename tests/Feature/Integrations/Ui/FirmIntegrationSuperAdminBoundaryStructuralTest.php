@@ -442,7 +442,155 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'VoidPlatformInvoiceAction.php',
         ];
 
-        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles);
+        // Phase 4 FirmsVault Admin Control Center ("Operations,
+        // Governance, Support, and Configuration") — GOVERNANCE category
+        // pass only (Audit Logs, Retention, Legal Holds, Data Exports,
+        // Deletion Requests). Two sibling passes (Operations; Support +
+        // Configuration) land concurrently in this same shared worktree
+        // under their own separate scope — their files are added by
+        // their own passes, not here. None of this pass's files
+        // reference the Integration domain at all (confirmed: this
+        // Governance category is its own separate domain), but they
+        // still live outside app/Filament/Firm and so still need an
+        // explicit allowlist entry against this file's broader "which
+        // non-Firm files are allowed to exist" sweep.
+        $phase4GovernanceAllowedRelativeFiles = [
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformRetentionGovernancePage.php',
+            'Resources'.DIRECTORY_SEPARATOR.'AuditLogResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'AuditLogResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListAuditLogs.php',
+            'Resources'.DIRECTORY_SEPARATOR.'AuditLogResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewAuditLog.php',
+            'Resources'.DIRECTORY_SEPARATOR.'LegalHoldResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'LegalHoldResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListLegalHolds.php',
+            'Resources'.DIRECTORY_SEPARATOR.'LegalHoldResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewLegalHold.php',
+            'Resources'.DIRECTORY_SEPARATOR.'ExportJobResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'ExportJobResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListExportJobs.php',
+            'Resources'.DIRECTORY_SEPARATOR.'ExportJobResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewExportJob.php',
+            'Resources'.DIRECTORY_SEPARATOR.'OffboardingRequestResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'OffboardingRequestResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListOffboardingRequests.php',
+            'Resources'.DIRECTORY_SEPARATOR.'OffboardingRequestResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewOffboardingRequest.php',
+            'Resources'.DIRECTORY_SEPARATOR.'ImportBatchResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'ImportBatchResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListImportBatches.php',
+            'Resources'.DIRECTORY_SEPARATOR.'ImportBatchResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewImportBatch.php',
+            'Resources'.DIRECTORY_SEPARATOR.'MigrationProjectResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'MigrationProjectResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListMigrationProjects.php',
+            'Resources'.DIRECTORY_SEPARATOR.'MigrationProjectResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewMigrationProject.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DeletionRequestResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DeletionRequestResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListDeletionRequests.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DeletionRequestResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewDeletionRequest.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'PlaceLegalHoldAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ReleaseLegalHoldAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'AdvanceOffboardingRequestAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'CompleteOffboardingRequestAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'CancelOffboardingRequestAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'MarkOffboardingExportVerifiedAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'SubmitDeletionRequestForApprovalAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RequestDeletionApprovalAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'FirstApproveDeletionAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'SecondApproveDeletionAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'DenyDeletionAction.php',
+        ];
+
+        // Phase 4 FirmsVault Admin Control Center ("Operations,
+        // Governance, Support, and Configuration") — SUPPORT +
+        // CONFIGURATION categories pass (this pass): Support Cases,
+        // Approved Support Sessions, Entitlement Overrides (relabeled
+        // "Feature Flags"), AI Policy Settings (relabeled "Platform
+        // Settings"), Notification Templates (relabeled "Email
+        // Templates"). Two sibling passes (Operations; Governance) land
+        // concurrently in this same shared worktree under their own
+        // separate scope — their files are added by their own passes,
+        // not here (see $phase4GovernanceAllowedRelativeFiles above for
+        // one of them). None of this pass's Filament classes reference
+        // the Integration domain directly (confirmed by grep for
+        // `App\Integrations\`/`FirmIntegrationResource` — zero matches):
+        // SupportCaseResource/SupportSessionResource route through the
+        // NEW PlatformSupportAccessDirectoryService (App\Services, not
+        // App\Filament), which itself calls
+        // PlatformFirmIntegrationBoundedAccessService — the same
+        // Checkpoint 11 chokepoint the existing single-firm support-
+        // access actions already use — but that reference lives in the
+        // service layer, not in either Resource file, so neither needs
+        // an entry in the Integration-domain sweeps above (those sweeps
+        // scan app/Filament/Resources|Pages|Widgets specifically, not
+        // app/Services).
+        $phase4SupportAndConfigurationAllowedRelativeFiles = [
+            'Resources'.DIRECTORY_SEPARATOR.'SupportCaseResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'SupportCaseResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListSupportCases.php',
+            'Resources'.DIRECTORY_SEPARATOR.'SupportCaseResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewSupportCase.php',
+            'Resources'.DIRECTORY_SEPARATOR.'SupportSessionResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'SupportSessionResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListSupportSessions.php',
+            'Resources'.DIRECTORY_SEPARATOR.'SupportSessionResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewSupportSession.php',
+            'Resources'.DIRECTORY_SEPARATOR.'EntitlementOverrideResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'EntitlementOverrideResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListEntitlementOverrides.php',
+            'Resources'.DIRECTORY_SEPARATOR.'EntitlementOverrideResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewEntitlementOverride.php',
+            'Resources'.DIRECTORY_SEPARATOR.'AiPolicySettingResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'AiPolicySettingResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListAiPolicySettings.php',
+            'Resources'.DIRECTORY_SEPARATOR.'AiPolicySettingResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewAiPolicySetting.php',
+            'Resources'.DIRECTORY_SEPARATOR.'NotificationTemplateResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'NotificationTemplateResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListNotificationTemplates.php',
+            'Resources'.DIRECTORY_SEPARATOR.'NotificationTemplateResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewNotificationTemplate.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ExpireSupportCaseAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RevokeApprovedSupportSessionAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'SetEntitlementOverrideAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'EditAiPolicySettingValueAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'CreateGlobalDefaultNotificationTemplateAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'CreateFirmOverrideNotificationTemplateAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ArchiveNotificationTemplateAction.php',
+        ];
+
+        // Phase 4 FirmsVault Admin Control Center ("Operations,
+        // Governance, Support, and Configuration") — OPERATIONS category
+        // pass (this pass): Service Health, Queues & Jobs, Scheduler,
+        // Deployments, Backups, Incidents/Status Page. Two sibling
+        // passes (Governance; Support + Configuration) land concurrently
+        // in this same shared worktree under their own separate scope —
+        // see $phase4GovernanceAllowedRelativeFiles/
+        // $phase4SupportAndConfigurationAllowedRelativeFiles above for
+        // those. None of this pass's Filament classes reference the
+        // Integration domain at all (confirmed by grep for
+        // `App\Integrations\`/`FirmIntegrationResource` across every
+        // file listed below — zero matches; this Operations category is
+        // its own separate domain, over HealthCheck/QueueHealthService/
+        // SchedulerHealthService/DeploymentConfig/FleetMigrationRun/
+        // BackupRestoreTest/IncidentEvent/StatusPageEvent), but they
+        // still live outside app/Filament/Firm and so still need an
+        // explicit allowlist entry against this file's broader "which
+        // non-Firm files are allowed to exist" sweep.
+        $phase4OperationsAllowedRelativeFiles = [
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformServiceHealthPage.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformQueuesAndJobsPage.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformSchedulerPage.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformBackupsPage.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformStatusPageEventsPage.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformDeploymentConfigsPage.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformFleetMigrationRunDetailPage.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformIncidentResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformIncidentResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListPlatformIncidents.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformIncidentResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewPlatformIncident.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformFleetMigrationRunResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlatformFleetMigrationRunResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListPlatformFleetMigrationRuns.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RunHealthChecksNowAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RetryFailedJobAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'DeleteFailedJobAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'OpenIncidentAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'UpdateIncidentSeverityAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'UpdateIncidentStatusAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RecordIncidentRootCauseAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'FlagIncidentCustomerImpactAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'FlagIncidentNotificationNeededAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ResolveIncidentAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'PublishStatusPageEventAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'UpdateStatusPageEventAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ResolveStatusPageEventPubliclyAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'UnpublishStatusPageEventAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'CreateFleetMigrationRunAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'BeginFleetMigrationRunAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RollbackFleetMigrationRunAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'CompleteFleetMigrationRunAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ApplyFleetMigrationInstanceAction.php',
+        ];
+
+        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles);
 
         $unauthorizedNonFirmFilamentFiles = [];
 

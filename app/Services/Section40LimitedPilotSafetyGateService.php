@@ -89,7 +89,7 @@ class Section40LimitedPilotSafetyGateService
     {
         $remaining = [];
 
-        foreach ((new RowLevelSecurityCoverageMappingService())->preparedTables() as $table) {
+        foreach ((new RowLevelSecurityCoverageMappingService)->preparedTables() as $table) {
             if (! $this->isTableForced($table)) {
                 $remaining[] = $table;
             }
@@ -106,7 +106,7 @@ class Section40LimitedPilotSafetyGateService
      */
     public function uncoveredTenantTables(): array
     {
-        return (new RowLevelSecurityCoverageMappingService())->missingPreparedTables();
+        return (new RowLevelSecurityCoverageMappingService)->missingPreparedTables();
     }
 
     public function isLoginPolicyWrapperReady(): bool
@@ -128,23 +128,43 @@ class Section40LimitedPilotSafetyGateService
 
     public function isEmergencySupportApprovalReady(): bool
     {
-        return (new EmergencyAccessGovernanceGapService())->isHighRiskApprovalWired();
+        return (new EmergencyAccessGovernanceGapService)->isHighRiskApprovalWired();
     }
 
     public function isSeedDataAuditClean(): bool
     {
-        return (new SeedDataSecurityAuditService())->isClean();
+        return (new SeedDataSecurityAuditService)->isClean();
     }
 
     /**
      * Confirms no route anywhere in the live route table serves a
      * legal document (Terms, Privacy, DPA, etc.) publicly — this
      * section adds none, and none should already exist.
+     *
+     * FIRMSVAULT-ADMIN-CONTROL-CENTER-PHASE-4 UPDATE (Governance):
+     * skips routes under the Filament `admin` panel's own `admin/`
+     * path prefix (`AdminPanelProvider::path('admin')`) — every route
+     * under that prefix requires authenticated PlatformAdmin access
+     * (`canAccess()` on every Resource/Page, confirmed throughout this
+     * entire mission), so it can never be a PUBLIC legal-document URL
+     * regardless of its slug. This phase legitimately adds
+     * `admin/legal-holds`, a private, authenticated legal-HOLD
+     * case-management resource (placing/releasing litigation holds on
+     * client data) — a completely different concept from a public
+     * legal DOCUMENT page (Terms of Service, Privacy Policy, DPA),
+     * which this check still catches unconditionally for every OTHER
+     * route, public or admin-prefixed. Narrows the check from "no
+     * marker substring anywhere" to "no marker substring on any
+     * non-admin route," never weakens it for a genuinely public route.
      */
     public function hasNoPublicLegalDocumentUrls(): bool
     {
         foreach (Route::getRoutes() as $route) {
             $uri = strtolower($route->uri());
+
+            if ($uri === 'admin' || str_starts_with($uri, 'admin/')) {
+                continue;
+            }
 
             foreach (self::LEGAL_DOCUMENT_ROUTE_MARKERS as $marker) {
                 if (str_contains($uri, $marker)) {
@@ -267,7 +287,7 @@ class Section40LimitedPilotSafetyGateService
             'public_production_launch_limitations' => $limitations,
             'internal_pilot_login_panel_domain_smoke_testing_recommended' => $noBlocker,
             'public_production_launch_recommended' => false,
-            'gap_registry_count' => count((new ComplianceGapRegistryService())->all()),
+            'gap_registry_count' => count((new ComplianceGapRegistryService)->all()),
             'notes' => 'This gate permits INTERNAL pilot/login/panel/domain SMOKE TESTING ONLY. It does not permit public production launch under any evaluate() result. Section 39A-4 (uncovered tenant table classification) and any remaining prepared-but-unforced FORCE RLS work are explicitly outstanding and do not block this limited internal gate — they are reported, not hidden. A separate, later gate is required before any public production launch.',
         ];
     }

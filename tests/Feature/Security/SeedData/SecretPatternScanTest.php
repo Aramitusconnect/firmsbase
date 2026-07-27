@@ -124,6 +124,14 @@ class SecretPatternScanTest extends TestCase
         // derived from each activated firm's own real tenant data into
         // integration_platform_provider_health_summaries — never demo/
         // seed data, and never raw production content.
+        // Phase 4 (FirmsVault Platform Admin Control Center,
+        // "Operations") added RunHealthChecksCommand and
+        // RecordSchedulerHeartbeatCommand — reviewed and safe. Neither
+        // creates demo/seed data of any kind: RunHealthChecksCommand
+        // dispatches the pre-existing, already-tested
+        // RunHealthChecksJob (records real health-check outcomes, not
+        // fixtures); RecordSchedulerHeartbeatCommand performs a single
+        // Cache write of the current timestamp, no database row at all.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
@@ -133,6 +141,8 @@ class SecretPatternScanTest extends TestCase
             'RefreshIntegrationPlatformOverviewSummariesCommand.php',
             'PlatformAdminEmergencyMfaResetCommand.php',
             'RefreshIntegrationPlatformProviderHealthSummariesCommand.php',
+            'RunHealthChecksCommand.php',
+            'RecordSchedulerHeartbeatCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

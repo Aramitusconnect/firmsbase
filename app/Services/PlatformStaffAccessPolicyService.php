@@ -156,6 +156,49 @@ class PlatformStaffAccessPolicyService
     ];
 
     /**
+     * Phase 4 (FirmsVault Platform Admin Control Center, "Operations")
+     * addition. Gates read-only visibility across the whole Operations
+     * category (Service Health, Queues & Jobs, Scheduler, Deployments,
+     * Backups, Incidents/Status Page) — infrastructure/ops-monitoring
+     * data, not client/matter/billing data, so this deliberately does
+     * NOT reuse CLIENT_AND_MATTER_DATA_ROLES or PLATFORM_BILLING_ROLES
+     * (neither role set is a good conceptual fit — a SalesRep or
+     * BillingAdmin has no legitimate reason to see queue/incident
+     * internals). Mirrors SECURITY_LOG_ROLES' exact role set
+     * (SuperAdmin/PlatformAdmin/SecurityAuditor) plus ReadOnlyAuditor —
+     * operational/infrastructure oversight is audit-adjacent by
+     * nature, and ReadOnlyAuditor's own blanket "never mutate" rule is
+     * enforced separately by canMutate(), not by narrowing this
+     * read-only view gate (same precedent already established by
+     * PLATFORM_ADMINISTRATION_ROLES above).
+     */
+    private const OPERATIONS_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+        PlatformRoleCode::SecurityAuditor,
+        PlatformRoleCode::ReadOnlyAuditor,
+    ];
+
+    /**
+     * Phase 4 (FirmsVault Platform Admin Control Center, "Operations")
+     * addition. Gates every mutating action across the Operations
+     * category (running health checks on demand, retrying/deleting a
+     * failed job, fleet migration run lifecycle actions, incident/
+     * status-page lifecycle actions) — narrower than OPERATIONS_ROLES
+     * above, mirroring every other "manage" gate's established
+     * precedent in this file: narrowed all the way down to the same
+     * unconditionally-trusted ceiling (SuperAdmin/PlatformAdmin only),
+     * deliberately excluding SecurityAuditor/ReadOnlyAuditor even
+     * though both pass the broader read gate — an auditor role has no
+     * legitimate reason to mutate operational state, only to observe
+     * it.
+     */
+    private const OPERATIONS_MANAGEMENT_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+    ];
+
+    /**
      * Phase 1 addition. Creating/deactivating/role-assigning other
      * PlatformAdmins is the single most sensitive administrative action
      * this service gates — per this checkpoint's explicit brief,
@@ -168,6 +211,82 @@ class PlatformStaffAccessPolicyService
     ];
 
     /**
+     * Phase 4 (FirmsVault Platform Admin Control Center, "Operations,
+     * Governance, Support, and Configuration") addition. Gates the new
+     * read-oriented Governance modules (Audit Logs, Retention, Legal
+     * Holds list, Data Exports list, Deletion Requests list) — these are
+     * compliance/oversight surfaces over sensitive cross-firm data
+     * (legal holds, deletion governance, retention policy, general
+     * business-activity timeline events), so the role set is narrower
+     * than PLATFORM_ADMINISTRATION_ROLES (which includes SupportAgent/
+     * ImplementationSpecialist/BillingAdmin — none of whom have a
+     * documented need for governance/compliance oversight) and instead
+     * mirrors SECURITY_LOG_ROLES' compliance-oriented shape, but adds
+     * ReadOnlyAuditor (SECURITY_LOG_ROLES deliberately excludes it,
+     * since general security-log review was scoped narrower in Phase
+     * 1) — a read-only auditor reviewing legal holds/retention/deletion
+     * governance status is squarely the intended use of that role, and
+     * canMutate()'s blanket rule below already guarantees a
+     * ReadOnlyAuditor can never act on any of this data, only view it.
+     */
+    private const GOVERNANCE_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+        PlatformRoleCode::SecurityAuditor,
+        PlatformRoleCode::ReadOnlyAuditor,
+    ];
+
+    /**
+     * Phase 4 addition. Gates LegalHoldService::place()/release() — both
+     * methods accept a loosely-typed $placedBy/$releasedBy object with
+     * no authorization logic of their own (see that service's own
+     * docblock), so a platform-admin console wiring them needs its own
+     * gate. Narrowed to the same unconditionally-trusted SuperAdmin/
+     * PlatformAdmin ceiling every other "manage" gate in this file uses
+     * — placing/releasing a legal hold is a real, consequential
+     * governance action (it can block deletion/offboarding for an
+     * entire firm), not a routine oversight-role action.
+     */
+    private const LEGAL_HOLD_MANAGEMENT_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+    ];
+
+    /**
+     * Phase 4 addition. Gates the safe, already-PlatformAdmin-typed Data
+     * Exports mutations: OffboardingRequestService::advance()/complete()/
+     * cancel() and OffboardingExportService::verify(). Same
+     * SuperAdmin/PlatformAdmin ceiling as every other manage gate.
+     */
+    private const DATA_EXPORT_MANAGEMENT_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+    ];
+
+    /**
+     * Phase 4 addition. Gates the Deletion Requests approve/deny
+     * workflow (DeletionRequestService::request()/cancel(),
+     * DeletionGovernanceService::submitForApproval(),
+     * DeletionApprovalService::requestApproval()/firstApprove()/
+     * secondApprove()/deny()). Verified directly against
+     * HighRiskPlatformChangePolicyService (the underlying engine
+     * DeletionApprovalService routes through): that service enforces
+     * ONLY "a reason string is required" and "the second approver must
+     * differ from the first" — it carries NO role-based authorization
+     * check of its own, so this UI-layer gate is not redundant with an
+     * existing one. Given this workflow governs actual production data
+     * deletion clearance (the most sensitive action in the entire
+     * Governance category), narrowed to the same SuperAdmin/PlatformAdmin
+     * ceiling as every other manage gate — deliberately not widened to
+     * SecurityAuditor/ReadOnlyAuditor even though GOVERNANCE_ROLES above
+     * lets them view this data.
+     */
+    private const DELETION_GOVERNANCE_MANAGEMENT_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+    ];
+
+    /**
      * Phase 1 addition. Role/permission catalog mutation (granting or
      * revoking a PlatformRoleCode grant) is treated as equally sensitive
      * to platform-administrator management above, for the same reason —
@@ -177,6 +296,144 @@ class PlatformStaffAccessPolicyService
      */
     private const ROLE_MANAGEMENT_ROLES = [
         PlatformRoleCode::SuperAdmin,
+    ];
+
+    /**
+     * Phase 4 (FirmsVault Platform Admin Control Center, "Support"
+     * category) addition. Gates mutation of support-access state
+     * (revoking an Approved Support Session, marking a stale Support
+     * Case Expired) — narrower than canAccessIntegrationOversight(),
+     * the existing broad read gate this phase's Support Cases/Approved
+     * Support Sessions resources reuse for reads (see
+     * PlatformSupportAccessDirectoryService's own docblock for why: it
+     * shares PlatformFirmIntegrationBoundedAccessService's chokepoint
+     * and governed-SupportAgent-session semantics with Checkpoint 11's
+     * existing single-firm support-access actions, so reusing the same
+     * read gate keeps read-side authorization consistent across both
+     * surfaces rather than introducing a second, potentially divergent
+     * read gate over the identical underlying data/session model).
+     * Mirrors every other "manage" gate in this file: narrowed all the
+     * way to the unconditionally-trusted SuperAdmin/PlatformAdmin
+     * ceiling, deliberately excluding SupportAgent/
+     * ImplementationSpecialist even though both pass the broader read
+     * gate — revoking another admin's active session or expiring a
+     * stale request is a more consequential action than merely viewing
+     * the support-access directory.
+     */
+    private const SUPPORT_ACCESS_MANAGEMENT_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+    ];
+
+    /**
+     * Phase 4 ("Configuration" category) addition. Gates the new
+     * cross-firm Entitlement Overrides read (EntitlementOverrideResource,
+     * over FirmEntitlement/EntitlementSource — the real per-firm
+     * mechanism behind the "Feature Flags" nav item, relabeled
+     * honestly). Broader than the corresponding manage gate below,
+     * mirroring canAccessPlatformBilling()/canManagePlatformBilling()'s
+     * existing read/manage split. Scoped to the roles that legitimately
+     * need to see which modules are entitled/overridden for a firm as
+     * part of their normal work: SuperAdmin/PlatformAdmin (unconditional
+     * ceiling), ImplementationSpecialist (module rollout/configuration
+     * during onboarding), BillingAdmin (entitlements correlate directly
+     * with what a firm is being billed for). SupportAgent is
+     * deliberately excluded here — unlike integration oversight,
+     * browsing another firm's entitlement configuration is not a normal
+     * part of a governed support session and has no existing precedent
+     * requiring it.
+     */
+    private const ENTITLEMENT_OVERRIDE_READ_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+        PlatformRoleCode::ImplementationSpecialist,
+        PlatformRoleCode::BillingAdmin,
+    ];
+
+    /**
+     * Phase 4 ("Configuration" category) addition. Gates the mutating
+     * Set Override action (EntitlementOverrideService::
+     * setOverrideAsPlatformAdmin()) — narrowed to the unconditionally-
+     * trusted SuperAdmin/PlatformAdmin ceiling, same as every other
+     * "manage" gate in this file (see PLATFORM_BILLING_MANAGEMENT_ROLES'
+     * own docblock for the established reasoning this mirrors):
+     * granting/revoking a firm's module access is a materially more
+     * sensitive, directly commercially-consequential action than merely
+     * viewing entitlement state, so it is deliberately narrower than
+     * ENTITLEMENT_OVERRIDE_READ_ROLES above, excluding
+     * ImplementationSpecialist/BillingAdmin even though both may read.
+     */
+    private const ENTITLEMENT_OVERRIDE_MANAGEMENT_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+    ];
+
+    /**
+     * Phase 4 ("Configuration" category) addition. Gates the new AI
+     * Policy Settings mini-module (AiPolicySettingResource, over the
+     * previously-zero-service-layer AiPolicySetting table — relabeled
+     * honestly from "Platform Settings", which has no general backing
+     * store at all). AI policy defaults are platform-wide guardrail
+     * configuration with governance/compliance weight (e.g. whether
+     * firm_owned AI mode is globally permitted) — SecurityAuditor is
+     * included in the READ set for exactly that reason (mirrors
+     * SECURITY_LOG_ROLES' own inclusion of SecurityAuditor), unlike
+     * ENTITLEMENT_OVERRIDE_READ_ROLES above which has no security/
+     * compliance-audit angle and so does not include it.
+     */
+    private const AI_POLICY_SETTING_READ_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+        PlatformRoleCode::SecurityAuditor,
+    ];
+
+    /**
+     * Phase 4 ("Configuration" category) addition. Gates the Edit Value
+     * action on AiPolicySettingResource — narrowed to SuperAdmin/
+     * PlatformAdmin only, same unconditionally-trusted ceiling every
+     * other "manage" gate in this file uses; SecurityAuditor may read
+     * AI policy settings above but must never mutate them (consistent
+     * with canMutate()'s own blanket read_only_auditor rule, applied
+     * here at the role-ceiling level instead since SecurityAuditor is a
+     * distinct role from ReadOnlyAuditor).
+     */
+    private const AI_POLICY_SETTING_MANAGEMENT_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+    ];
+
+    /**
+     * Phase 4 ("Configuration" category) addition. Gates the new
+     * Notification Templates management surface (relabeled from "Email
+     * Templates" — the backend is channel-agnostic across Email/Sms/
+     * WhatsApp/Portal, see NotificationTemplateResource's own docblock).
+     * ImplementationSpecialist is included: template content/metadata
+     * configuration (subject/body copy, sender domain records) is
+     * ordinary implementation/onboarding work, the same class of task
+     * that role already performs elsewhere in this file (e.g.
+     * INTEGRATION_CONNECTION_MANAGEMENT_ROLES' sibling read gates).
+     * BillingAdmin/SupportAgent are excluded — template content has no
+     * billing or support-session angle.
+     */
+    private const NOTIFICATION_TEMPLATE_READ_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+        PlatformRoleCode::ImplementationSpecialist,
+    ];
+
+    /**
+     * Phase 4 ("Configuration" category) addition. Gates Create Global
+     * Default / Create Firm Override / Archive on
+     * NotificationTemplateResource — narrowed to SuperAdmin/PlatformAdmin
+     * only, same unconditionally-trusted ceiling every other "manage"
+     * gate in this file uses. A global default template affects every
+     * firm's outbound notification content platform-wide; narrower than
+     * NOTIFICATION_TEMPLATE_READ_ROLES for the same reason every other
+     * manage/read split in this file exists.
+     */
+    private const NOTIFICATION_TEMPLATE_MANAGEMENT_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
     ];
 
     public function __construct(
@@ -319,6 +576,134 @@ class PlatformStaffAccessPolicyService
     public function canManagePlatformBilling(PlatformAdmin $admin): PlatformStaffAccessDecision
     {
         return $this->decideAgainst($admin, self::PLATFORM_BILLING_MANAGEMENT_ROLES, 'platform billing management');
+    }
+
+    /**
+     * Phase 4 (FirmsVault Platform Admin Control Center, "Operations")
+     * addition. Gates read-only visibility of Service Health,
+     * Queues & Jobs, Scheduler, Deployments, Backups, and Incidents/
+     * Status Page — see OPERATIONS_ROLES' own docblock for the role-set
+     * reasoning.
+     */
+    public function canAccessOperations(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::OPERATIONS_ROLES, 'operations');
+    }
+
+    /**
+     * Phase 4 (FirmsVault Platform Admin Control Center, "Operations")
+     * addition. Gates every mutating action across the Operations
+     * category — see OPERATIONS_MANAGEMENT_ROLES' own docblock.
+     */
+    public function canManageOperations(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::OPERATIONS_MANAGEMENT_ROLES, 'operations management');
+    }
+
+    /**
+     * Phase 4 addition. See GOVERNANCE_ROLES' own docblock for the
+     * role-set reasoning. Gates the new cross-firm read layers over
+     * TimelineEvent (Audit Logs), RetentionPolicy/
+     * RetentionGovernanceRegistryService (Retention), LegalHold (list),
+     * ExportJob/OffboardingRequest/OffboardingExport/ImportBatch/
+     * MigrationProject (Data Exports list), and DeletionRequest/
+     * DeletionApproval (Deletion Requests list).
+     */
+    public function canAccessGovernance(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::GOVERNANCE_ROLES, 'governance');
+    }
+
+    /**
+     * Phase 4 addition. See LEGAL_HOLD_MANAGEMENT_ROLES' own docblock.
+     */
+    public function canManageLegalHolds(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::LEGAL_HOLD_MANAGEMENT_ROLES, 'legal hold management');
+    }
+
+    /**
+     * Phase 4 addition. See DATA_EXPORT_MANAGEMENT_ROLES' own docblock.
+     */
+    public function canManageDataExports(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::DATA_EXPORT_MANAGEMENT_ROLES, 'data export management');
+    }
+
+    /**
+     * Phase 4 addition. See DELETION_GOVERNANCE_MANAGEMENT_ROLES' own
+     * docblock.
+     */
+    public function canManageDeletionGovernance(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::DELETION_GOVERNANCE_MANAGEMENT_ROLES, 'deletion governance management');
+    }
+
+    /**
+     * Phase 4 ("Support" category) addition. See
+     * SUPPORT_ACCESS_MANAGEMENT_ROLES' own docblock for why reads
+     * against Support Cases/Approved Support Sessions deliberately
+     * reuse canAccessIntegrationOversight() rather than a new read gate
+     * (this method exists only for the narrower mutating actions —
+     * Revoke/Expire).
+     */
+    public function canManageSupportAccess(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::SUPPORT_ACCESS_MANAGEMENT_ROLES, 'support access management');
+    }
+
+    /**
+     * Phase 4 ("Configuration" category) addition. See
+     * ENTITLEMENT_OVERRIDE_READ_ROLES' own docblock.
+     */
+    public function canAccessEntitlementOverrides(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::ENTITLEMENT_OVERRIDE_READ_ROLES, 'entitlement overrides');
+    }
+
+    /**
+     * Phase 4 ("Configuration" category) addition. See
+     * ENTITLEMENT_OVERRIDE_MANAGEMENT_ROLES' own docblock.
+     */
+    public function canManageEntitlementOverrides(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::ENTITLEMENT_OVERRIDE_MANAGEMENT_ROLES, 'entitlement override management');
+    }
+
+    /**
+     * Phase 4 ("Configuration" category) addition. See
+     * AI_POLICY_SETTING_READ_ROLES' own docblock.
+     */
+    public function canAccessAiPolicySettings(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::AI_POLICY_SETTING_READ_ROLES, 'AI policy settings');
+    }
+
+    /**
+     * Phase 4 ("Configuration" category) addition. See
+     * AI_POLICY_SETTING_MANAGEMENT_ROLES' own docblock.
+     */
+    public function canManageAiPolicySettings(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::AI_POLICY_SETTING_MANAGEMENT_ROLES, 'AI policy setting management');
+    }
+
+    /**
+     * Phase 4 ("Configuration" category) addition. See
+     * NOTIFICATION_TEMPLATE_READ_ROLES' own docblock.
+     */
+    public function canAccessNotificationTemplates(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::NOTIFICATION_TEMPLATE_READ_ROLES, 'notification templates');
+    }
+
+    /**
+     * Phase 4 ("Configuration" category) addition. See
+     * NOTIFICATION_TEMPLATE_MANAGEMENT_ROLES' own docblock.
+     */
+    public function canManageNotificationTemplates(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::NOTIFICATION_TEMPLATE_MANAGEMENT_ROLES, 'notification template management');
     }
 
     /**

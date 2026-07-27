@@ -85,6 +85,20 @@ class QueueConsoleTenantContextTest extends TestCase
         // no-RLS integration_platform_provider_health_summaries table —
         // no RLS bypass, no raw SQL, no BYPASSRLS, no superuser role, no
         // production data seeded or mutated (read-and-aggregate only).
+        // Phase 4 (FirmsVault Platform Admin Control Center,
+        // "Operations") added RunHealthChecksCommand and
+        // RecordSchedulerHeartbeatCommand — both reviewed and safe.
+        // RunHealthChecksCommand dispatches the pre-existing, already-
+        // tested RunHealthChecksJob with $firmId = null (the
+        // platform-wide check run only — no tenant table read, no
+        // context needed); the one firm-specific check type
+        // (TenantIsolationAnomalies) is written out-of-band by
+        // TenantIsolationAnomalyService::recordAnomaly() itself, not by
+        // this command. RecordSchedulerHeartbeatCommand performs a
+        // single synchronous Cache write via
+        // SchedulerHealthService::recordHeartbeat() — no database
+        // query, no tenant table, no RLS-relevant session variable
+        // touched at all.
         // Any OTHER command appearing here has not been reviewed for
         // the silent-bypass risk this test exists to catch.
         $allowlist = [
@@ -96,6 +110,8 @@ class QueueConsoleTenantContextTest extends TestCase
             'RefreshIntegrationPlatformOverviewSummariesCommand.php',
             'PlatformAdminEmergencyMfaResetCommand.php',
             'RefreshIntegrationPlatformProviderHealthSummariesCommand.php',
+            'RunHealthChecksCommand.php',
+            'RecordSchedulerHeartbeatCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);
