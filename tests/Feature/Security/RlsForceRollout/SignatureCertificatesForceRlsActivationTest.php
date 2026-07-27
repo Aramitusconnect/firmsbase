@@ -9,8 +9,10 @@ use App\Models\SignatureCertificate;
 use App\Models\SignatureRequest;
 use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -82,7 +84,7 @@ class SignatureCertificatesForceRlsActivationTest extends TestCase
         // Narrowly updated by Stage B Checkpoint 3 of the FirmsBase Integration Platform mission — firm_integrations added, bumping the forced-table total (113 -> 114).
         // Narrowly updated AGAIN by Stage B Checkpoint 4 of the FirmsBase Integration Platform mission (integration_credentials, a new genuine tenant-owned table with RLS prepared and FORCE-activated in the same migration) for the same reason — additive only, no existing assertion removed or weakened.
         $this->assertCount(
-            125,
+            126,
             $coverage->forcedTables(),
             'Exactly 108 tables must have FORCE ROW LEVEL SECURITY active once this final checkpoint of the Wave 7 batch lands — no more, no fewer.'
         );
@@ -364,7 +366,7 @@ class SignatureCertificatesForceRlsActivationTest extends TestCase
 
         $this->runWithFirmContext($firm, fn () => DB::table('signature_certificates')->insert($this->rowAttributes($firm, $request, $hash)));
 
-        $this->expectException(\Illuminate\Database\QueryException::class);
+        $this->expectException(QueryException::class);
 
         $this->runWithFirmContext($firm, fn () => DB::table('signature_certificates')->insert($this->rowAttributes($firm, $request, $hash)));
     }
@@ -568,7 +570,7 @@ class SignatureCertificatesForceRlsActivationTest extends TestCase
     private function rowAttributes(Firm $firm, SignatureRequest $request, DocumentHash $hash): array
     {
         return [
-            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'firm_id' => $firm->id,
             'signature_request_id' => $request->id,
             'status' => SignatureCertificateStatus::Generated->value,

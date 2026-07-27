@@ -404,7 +404,7 @@ class RlsForceRolloutFirewallTest extends TestCase
 
     public function test_only_clients_and_firm_users_have_permanent_force_row_level_security_among_prepared_tables(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         // Section 39A-3C/39A-3D/39A-3E/39A-3F/39A-3G/39A-3H/39A-3I/39A-3J/
         // 39A-3K/39A-3L (later, distinct staged-FORCE-activation branches)
@@ -686,7 +686,7 @@ class RlsForceRolloutFirewallTest extends TestCase
             // additive-only pattern, no existing assertion removed or
             // weakened.
             'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings',
-            'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records',
+            'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records', 'integration_provider_webhook_subscriptions',
         ];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -708,7 +708,7 @@ class RlsForceRolloutFirewallTest extends TestCase
 
     public function test_no_new_rls_policy_was_added_for_any_still_uncovered_tenant_table(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         // Section 39A-6 Wave 6's own six tables genuinely ARE still
         // listed in MISSING_PREPARED_TABLES (the coordinator's registry
@@ -1314,7 +1314,7 @@ class RlsForceRolloutFirewallTest extends TestCase
 
     public function test_gap_registry_still_tracks_the_rls_gap_and_count_remains_twenty_one(): void
     {
-        $registry = new ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
 
         $this->assertTrue($registry->isTracked('rls_prepared_not_enforced'));
         $this->assertCount(21, $registry->all());

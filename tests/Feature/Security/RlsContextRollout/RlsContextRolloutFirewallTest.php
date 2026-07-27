@@ -22,7 +22,7 @@ class RlsContextRolloutFirewallTest extends TestCase
 
     public function test_no_permanent_force_row_level_security_is_enabled_on_any_prepared_table(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         // Section 39A-3A/39A-3B/39A-3C/39A-3D/39A-3E/39A-3F/39A-3G/
         // 39A-3H/39A-3I/39A-3J/39A-3K/39A-3L (later, distinct staged-
@@ -182,7 +182,7 @@ class RlsContextRolloutFirewallTest extends TestCase
             // in the same migration, NOT part of the old 60-table rollout
             // above) for the same reason — additive only, no existing
             // assertion removed or weakened.
-            'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records',
+            'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records', 'integration_provider_webhook_subscriptions',
         ];
 
         // security_events is the final checkpoint in this arc: every
@@ -214,7 +214,7 @@ class RlsContextRolloutFirewallTest extends TestCase
 
     public function test_no_new_rls_policy_was_added_for_any_still_uncovered_tenant_table(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         foreach ($coverage->missingPreparedTables() as $table) {
             $row = DB::selectOne('select relrowsecurity from pg_class where relname = ?', [$table]);
@@ -601,7 +601,7 @@ class RlsContextRolloutFirewallTest extends TestCase
 
     public function test_gap_registry_still_tracks_the_rls_gap_and_count_remains_twenty_one(): void
     {
-        $registry = new ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
 
         $this->assertTrue($registry->isTracked('rls_prepared_not_enforced'));
         $this->assertCount(21, $registry->all());

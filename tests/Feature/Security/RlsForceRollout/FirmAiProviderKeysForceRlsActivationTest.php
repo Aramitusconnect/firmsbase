@@ -9,6 +9,7 @@ use App\Models\FirmAiProviderKey;
 use App\Models\TenantEncryptionKey;
 use App\Models\User;
 use App\Services\AiProviderKeyService;
+use App\Services\ComplianceGapRegistryService;
 use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -147,7 +148,7 @@ class FirmAiProviderKeysForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-5 Wave 10 (trust accounting domain, 10 tables) — additive only, no existing assertion removed or weakened.
         // Narrowly updated by Stage B Checkpoint 3 of the FirmsBase Integration Platform mission (firm_integrations) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated AGAIN by Stage B Checkpoint 4 of the FirmsBase Integration Platform mission (integration_credentials, a new genuine tenant-owned table with RLS prepared and FORCE-activated in the same migration) for the same reason — additive only, no existing assertion removed or weakened.
-        $this->assertCount(125, $forced, 'Exactly 108 tables must have a FORCE-activation migration after Section 39A-5 Wave 10 — no more, no less.');
+        $this->assertCount(126, $forced, 'Exactly 108 tables must have a FORCE-activation migration after Section 39A-5 Wave 10 — no more, no less.');
     }
 
     public function test_the_policy_has_both_an_explicit_using_and_with_check_clause(): void
@@ -662,7 +663,7 @@ class FirmAiProviderKeysForceRlsActivationTest extends TestCase
      */
     public function test_the_rls_prepared_not_enforced_gap_remains_tracked(): void
     {
-        $registry = new \App\Services\ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
 
         $gap = $registry->byKey('rls_prepared_not_enforced');
 

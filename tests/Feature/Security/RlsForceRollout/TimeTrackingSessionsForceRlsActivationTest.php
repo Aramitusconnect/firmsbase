@@ -138,7 +138,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
      */
     public function test_exactly_thirty_eight_prepared_tables_are_force_row_level_security_enabled(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 22, Table Phase C (this repo's fortieth staged FORCE activation batch, covering payment_plans) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 23,
@@ -157,7 +157,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
         // or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 27 (backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 28 (health_checks) for the same reason — additive only, no existing assertion removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records', 'integration_provider_webhook_subscriptions']);
         $actuallyForced = [];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -183,7 +183,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
         // same reason — additive only, no existing assertion removed
         // or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 26 (parties) for the same reason — additive only, no existing assertion removed or weakened.
-        $this->assertSame(125, count($actuallyForced), 'Exactly thirty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 20 — no more, no less.');
+        $this->assertSame(126, count($actuallyForced), 'Exactly thirty-eight prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 20 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -194,7 +194,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
      */
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 22, Table Phase C (payment_plans) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 23,
         // Table Phase C (this repo's forty-first staged FORCE
@@ -206,7 +206,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
         // additive only, no existing assertion removed or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 27 (backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 28 (health_checks) for the same reason — additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records', 'integration_provider_webhook_subscriptions']);
         // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is
         // the final checkpoint in this arc: $forced now equals the FULL
         // preparedTables() set exactly, so the per-table loop below
@@ -289,7 +289,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $this->runWithFirmContext($firm, fn () => TimeTrackingSession::factory()->forFirm($firm)->create());
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
         $this->assertSame(0, TimeTrackingSession::query()->count());
@@ -300,7 +300,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $user = User::factory()->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
@@ -611,10 +611,10 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
         // leaves context set afterward for the common "create then
         // read" pattern) — this test's entire point depends on NO
         // context being active the moment stop() is called.
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
-        $service = new TimeTrackingService();
+        $service = new TimeTrackingService;
         $entry = $service->stop($session);
 
         $this->assertNotNull($entry->id, 'stop() must still create the TimeEntry — this is the part that worked even before the fix.');
@@ -666,7 +666,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
             'last_resumed_at' => now()->subSeconds(600),
         ]));
 
-        $service = new TimeTrackingService();
+        $service = new TimeTrackingService;
         $service->stop($session);
 
         // Re-fetch fresh under the firm's own context — a second
@@ -680,7 +680,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
 
         $this->assertSame(TimeTrackingSessionStatus::Stopped, $freshlyStoppedSession->status);
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
         $this->expectException(\RuntimeException::class);
@@ -717,10 +717,10 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
             'last_resumed_at' => now()->subSeconds(600),
         ]));
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
-        $service = new TimeTrackingService();
+        $service = new TimeTrackingService;
         $paused = $service->pause($session);
 
         $this->assertSame(TimeTrackingSessionStatus::Paused, $paused->status);
@@ -740,7 +740,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
         // Clear context again to prove resume() re-establishes its own
         // context independently of pause()'s — no leaked/reused
         // context crossing the boundary between the two calls.
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
         $resumed = $service->resume($persistedPaused);
@@ -798,7 +798,7 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
 
     public function test_compliance_gap_registry_service_still_tracks_the_rls_gap(): void
     {
-        $registry = new ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
 
         $this->assertTrue($registry->isTracked('rls_prepared_not_enforced'));
     }

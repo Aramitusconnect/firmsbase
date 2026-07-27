@@ -237,7 +237,14 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // the same migration) added directly to PREPARED_TABLES
         // (124 -> 125); tenantOwnedTables() is the union of both and
         // increases in step (124 -> 125).
-        $this->assertCount(125, $this->service->preparedTables());
+        // Narrowly updated AGAIN by FirmsVault Live Integrations
+        // Checkpoint 2 ("Add Microsoft 365 integration provider") —
+        // integration_provider_webhook_subscriptions (a brand-new
+        // genuine tenant-owned table, RLS prepared and FORCE-activated
+        // in the same migration) added directly to PREPARED_TABLES
+        // (125 -> 126); tenantOwnedTables() is the union of both and
+        // increases in step (125 -> 126).
+        $this->assertCount(126, $this->service->preparedTables());
         $this->assertCount(0, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
@@ -274,7 +281,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // classified Global (never DirectTenant), so it does not change
         // tenantOwnedTables() or preparedTables().
         $this->assertCount(28, $this->service->exemptTables());
-        $this->assertCount(125, $this->service->tenantOwnedTables());
+        $this->assertCount(126, $this->service->tenantOwnedTables());
         $forceMigrationFiles = glob(
             database_path('migrations/*_force_rls_on_*_table.php')
         ) ?: [];
@@ -564,7 +571,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // fullTableInventory(); the DirectTenant count and the overall
         // table-inventory total both increase by one (124 -> 125,
         // 220 -> 221).
-        $this->assertSame(125, $summary[TenantOwnershipClassification::DirectTenant->value]);
+        $this->assertSame(126, $summary[TenantOwnershipClassification::DirectTenant->value]);
         $this->assertSame(24, $summary[TenantOwnershipClassification::InheritedTenant->value]);
         $this->assertSame(3, $summary[TenantOwnershipClassification::Pivot->value]);
         $this->assertSame(10, $summary[TenantOwnershipClassification::Hybrid->value]);
@@ -616,6 +623,14 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // immediately above it in the registry); the Global count and
         // the overall table-inventory total both increase by one
         // (49 -> 50, 225 -> 226).
+        // Narrowly updated by FirmsVault Live Integrations Checkpoint 2
+        // ("Add Microsoft 365 integration provider") —
+        // integration_provider_webhook_subscriptions (a brand-new
+        // genuine tenant-owned table, RLS prepared and FORCE-activated
+        // in the same migration) added directly to PREPARED_TABLES, so
+        // it is classified DirectTenant via fullTableInventory(); the
+        // DirectTenant count and the overall table-inventory total both
+        // increase by one (125 -> 126, 226 -> 227).
         $this->assertSame(50, $summary[TenantOwnershipClassification::Global->value]);
         $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
         $this->assertSame(8, $summary[TenantOwnershipClassification::System->value]);
@@ -638,7 +653,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Checkpoint 1 (225 -> 226) —
         // integration_webhook_verification_failures, classified Global
         // (see above), no other bucket affected.
-        $this->assertSame(226, array_sum($summary));
+        $this->assertSame(227, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

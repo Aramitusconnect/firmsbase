@@ -11,6 +11,7 @@ use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -98,7 +99,7 @@ class GeneratedDocumentsForceRlsActivationTest extends TestCase
         // Narrowly updated by Stage B Checkpoint 3 of the FirmsBase Integration Platform mission — firm_integrations added, bumping the forced-table total (113 -> 114).
         // Narrowly updated AGAIN by Stage B Checkpoint 4 of the FirmsBase Integration Platform mission (integration_credentials, a new genuine tenant-owned table with RLS prepared and FORCE-activated in the same migration) for the same reason — additive only, no existing assertion removed or weakened.
         $this->assertCount(
-            125,
+            126,
             $coverage->forcedTables(),
             'Exactly 108 tables must have FORCE ROW LEVEL SECURITY active after this Wave 7 batch lands — no more, no fewer.'
         );
@@ -549,13 +550,13 @@ class GeneratedDocumentsForceRlsActivationTest extends TestCase
         $actor = $this->runWithFirmContext($firm, fn () => FirmUser::factory()->create(['firm_id' => $firm->id]));
 
         return [
-            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'firm_id' => $firm->id,
             'matter_id' => null,
             'client_id' => null,
             'document_template_version_id' => $version->id,
             'status' => 'draft',
-            'simulated_storage_path' => 'generated-documents/fixture/'.\Illuminate\Support\Str::uuid().'.pdf',
+            'simulated_storage_path' => 'generated-documents/fixture/'.Str::uuid().'.pdf',
             'used_sample_content' => false,
             'generated_by_firm_user_id' => $actor->id,
             'created_at' => now(),

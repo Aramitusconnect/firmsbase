@@ -2,14 +2,18 @@
 
 namespace Tests\Feature\Security\RlsForceRollout;
 
+use App\Enums\ConsentChannel;
+use App\Enums\ConsentStatus;
+use App\Enums\DocumentRequestItemStatus;
 use App\Models\Client;
+use App\Models\CommunicationConsent;
 use App\Models\DocumentChaseEvent;
-use App\Models\DocumentChaseRule;
 use App\Models\DocumentRequest;
 use App\Models\DocumentRequestItem;
 use App\Models\Firm;
 use App\Services\ComplianceGapRegistryService;
 use App\Services\DocumentChaseService;
+use App\Services\FirmCommandCenterAggregationService;
 use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -138,7 +142,7 @@ class DocumentChaseEventsForceRlsActivationTest extends TestCase
      */
     public function test_exactly_thirty_five_prepared_tables_are_force_row_level_security_enabled(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 22, Table Phase C (this repo's fortieth staged FORCE activation batch, covering payment_plans) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 23,
@@ -157,7 +161,7 @@ class DocumentChaseEventsForceRlsActivationTest extends TestCase
         // or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 27 (backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 28 (health_checks) for the same reason — additive only, no existing assertion removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records', 'integration_provider_webhook_subscriptions']);
         $actuallyForced = [];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -183,7 +187,7 @@ class DocumentChaseEventsForceRlsActivationTest extends TestCase
         // same reason — additive only, no existing assertion removed
         // or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 26 (parties) for the same reason — additive only, no existing assertion removed or weakened.
-        $this->assertSame(125, count($actuallyForced), 'Exactly thirty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 17 — no more, no less.');
+        $this->assertSame(126, count($actuallyForced), 'Exactly thirty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 17 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -192,7 +196,7 @@ class DocumentChaseEventsForceRlsActivationTest extends TestCase
      */
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 22, Table Phase C (payment_plans) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 23,
         // Table Phase C (this repo's forty-first staged FORCE
@@ -204,7 +208,7 @@ class DocumentChaseEventsForceRlsActivationTest extends TestCase
         // additive only, no existing assertion removed or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 27 (backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 28 (health_checks) for the same reason — additive only, no existing assertion removed or weakened.
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records']);
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records', 'integration_provider_webhook_subscriptions']);
         // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is
         // the final checkpoint in this arc: $forced now equals the FULL
         // preparedTables() set exactly, so the per-table loop below
@@ -252,7 +256,7 @@ class DocumentChaseEventsForceRlsActivationTest extends TestCase
         $item = $this->runWithFirmContext($firm, fn () => $this->itemFor($firm));
         $this->runWithFirmContext($firm, fn () => DocumentChaseEvent::factory()->forItem($item, $firm)->create());
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
         $this->assertSame(0, DocumentChaseEvent::query()->count());
@@ -263,7 +267,7 @@ class DocumentChaseEventsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $item = $this->runWithFirmContext($firm, fn () => $this->itemFor($firm));
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
@@ -514,16 +518,16 @@ class DocumentChaseEventsForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $client = Client::factory()->forFirm($firm)->create();
-        \App\Models\CommunicationConsent::factory()->create([
+        CommunicationConsent::factory()->create([
             'firm_id' => $firm->id,
             'client_id' => $client->id,
-            'channel' => \App\Enums\ConsentChannel::Email,
-            'status' => \App\Enums\ConsentStatus::Granted,
+            'channel' => ConsentChannel::Email,
+            'status' => ConsentStatus::Granted,
         ]);
         $request = DocumentRequest::factory()->create(['firm_id' => $firm->id, 'client_id' => $client->id]);
         $item = DocumentRequestItem::factory()->create([
             'document_request_id' => $request->id,
-            'status' => \App\Enums\DocumentRequestItemStatus::Requested,
+            'status' => DocumentRequestItemStatus::Requested,
         ]);
 
         // The preceding CommunicationConsent/DocumentRequest factory
@@ -533,8 +537,8 @@ class DocumentChaseEventsForceRlsActivationTest extends TestCase
         // test, so the post-call assertion below proves checkAndLog()
         // itself clears context, rather than incidentally observing an
         // ambient value that runWithFirmContext() now correctly restores.
-        (new TenantContextService())->clearDatabaseTenantContext();
-        (new TenantContextService())->clearFirmContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
+        (new TenantContextService)->clearFirmContext();
         $this->assertNoDatabaseTenantContext();
 
         $service = app(DocumentChaseService::class);
@@ -565,7 +569,7 @@ class DocumentChaseEventsForceRlsActivationTest extends TestCase
             DocumentChaseEvent::factory()->forItem($item, $firm)->create(['event_type' => 'reminder_queued']);
         });
 
-        $snapshot = app(\App\Services\FirmCommandCenterAggregationService::class)->snapshot($firm);
+        $snapshot = app(FirmCommandCenterAggregationService::class)->snapshot($firm);
 
         $this->assertSame(1, $snapshot->documentChaseEscalationsCount);
     }
@@ -576,7 +580,7 @@ class DocumentChaseEventsForceRlsActivationTest extends TestCase
 
     public function test_compliance_gap_registry_service_still_tracks_the_rls_gap(): void
     {
-        $registry = new ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
 
         $this->assertTrue($registry->isTracked('rls_prepared_not_enforced'));
     }

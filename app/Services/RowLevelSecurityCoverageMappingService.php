@@ -389,6 +389,19 @@ class RowLevelSecurityCoverageMappingService
         // This table was never in MISSING_PREPARED_TABLES — it is added
         // directly here since prepare and force happened together.
         'integration_usage_records',
+        // FirmsVault Live Integrations, Checkpoint 2 ("Add Microsoft
+        // 365 integration provider") — integration_provider_webhook_subscriptions,
+        // a brand-new genuine tenant-owned table (own NOT NULL firm_id
+        // column, plus a real composite FK to firm_integrations(firm_id,
+        // id)), the durable home for a real provider webhook
+        // subscription's state (id/expiry/resource scope), with RLS
+        // prepared and FORCE-activated in the very same migration,
+        // following the identical combined prepare+force shape used
+        // throughout this rollout:
+        // 2026_09_22_160002_prepare_row_level_security_and_force_rls_on_integration_provider_webhook_subscriptions_table.php.
+        // This table was never in MISSING_PREPARED_TABLES — it is added
+        // directly here since prepare and force happened together.
+        'integration_provider_webhook_subscriptions',
     ];
 
     /**

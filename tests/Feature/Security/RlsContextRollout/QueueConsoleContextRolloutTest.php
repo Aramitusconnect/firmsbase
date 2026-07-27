@@ -95,6 +95,16 @@ class QueueConsoleContextRolloutTest extends TestCase
         // SchedulerHealthService::recordHeartbeat() — no database
         // query, no tenant table, no RLS-relevant session variable
         // touched at all.
+        // FirmsVault Live Integrations Checkpoint 2 added
+        // RenewProviderWebhookSubscriptionsCommand — reviewed and safe:
+        // it enumerates the non-RLS `firms` table directly (never the
+        // FORCE-RLS integration_provider_webhook_subscriptions table
+        // unscoped) and wraps every per-firm read of that table inside
+        // TenantContextService::runWithFirmContext(), the identical
+        // per-firm-loop pattern SyncRetryPollCommand/
+        // SweepIntegrationRetentionCommand already establish above — no
+        // RLS bypass, no raw SQL, no BYPASSRLS, no superuser role, no
+        // set_config manipulation of any RLS-relevant session variable.
         // Any OTHER command appearing here has not been reviewed for
         // the silent-bypass risk this test exists to catch.
         $allowlist = [
@@ -108,6 +118,7 @@ class QueueConsoleContextRolloutTest extends TestCase
             'RefreshIntegrationPlatformProviderHealthSummariesCommand.php',
             'RunHealthChecksCommand.php',
             'RecordSchedulerHeartbeatCommand.php',
+            'RenewProviderWebhookSubscriptionsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

@@ -132,6 +132,13 @@ class SecretPatternScanTest extends TestCase
         // RunHealthChecksJob (records real health-check outcomes, not
         // fixtures); RecordSchedulerHeartbeatCommand performs a single
         // Cache write of the current timestamp, no database row at all.
+        // FirmsVault Live Integrations Checkpoint 2 added
+        // RenewProviderWebhookSubscriptionsCommand — reviewed and safe:
+        // it creates zero new rows and seeds no demo/production data;
+        // it only reads existing integration_provider_webhook_subscriptions
+        // rows (per-firm, under explicit tenant context) and dispatches
+        // RenewGraphSubscriptionJob for whichever are due for renewal —
+        // the opposite of a seeding command.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
@@ -143,6 +150,7 @@ class SecretPatternScanTest extends TestCase
             'RefreshIntegrationPlatformProviderHealthSummariesCommand.php',
             'RunHealthChecksCommand.php',
             'RecordSchedulerHeartbeatCommand.php',
+            'RenewProviderWebhookSubscriptionsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

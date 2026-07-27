@@ -6,8 +6,8 @@ use App\Enums\ActivationChecklistStatus;
 use App\Enums\FirmActivationStatus;
 use App\Enums\LicenseStatus;
 use App\Models\ActivationChecklist;
-use App\Models\ActivationChecklistItem;
 use App\Models\BillingAccount;
+use App\Models\Document;
 use App\Models\Firm;
 use App\Models\FirmLicense;
 use App\Models\FirmSettings;
@@ -18,6 +18,7 @@ use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -153,7 +154,7 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
      */
     public function test_exactly_twenty_prepared_tables_are_force_row_level_security_enabled(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         // Narrowly updated AGAIN by Section 39A-3L, Checkpoint 9, Table
         // Phase C (seat_allocations) for the same reason — additive
@@ -200,7 +201,7 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
         // or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 27 (backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 28 (health_checks) for the same reason — additive only, no existing assertion removed or weakened.
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events', 'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'activation_checklists', 'firm_activation_events', 'firm_entitlements', 'firm_entitlement_events', 'installed_template_packs', 'template_upgrade_logs', 'template_upgrade_previews', 'seat_allocations', 'document_requests', 'communication_consents', 'communication_consent_events', 'intake_submissions', 'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events', 'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records', 'integration_provider_webhook_subscriptions']);
         $actuallyForced = [];
 
         foreach ($coverage->preparedTables() as $table) {
@@ -232,7 +233,7 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
         // same reason — additive only, no existing assertion removed
         // or weakened.
         // Narrowly updated by Section 39A-3L, Checkpoint 26 (parties) for the same reason — additive only, no existing assertion removed or weakened.
-        $this->assertSame(125, count($actuallyForced), 'Exactly thirty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (twenty-one after this batch\'s own Checkpoint 2 plus firm_activation_events from Checkpoint 3, plus firm_entitlements from Checkpoint 4, plus firm_entitlement_events from Checkpoint 5, plus installed_template_packs from Checkpoint 6, plus template_upgrade_logs from Checkpoint 7, plus template_upgrade_previews from Checkpoint 8, plus seat_allocations from Checkpoint 9, plus document_requests from Checkpoint 10, plus communication_consents from Checkpoint 11, plus communication_consent_events from Checkpoint 12, plus intake_submissions from Checkpoint 13). Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one), again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two), and again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
+        $this->assertSame(126, count($actuallyForced), 'Exactly thirty-six prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 13 — no more, no less (twenty-one after this batch\'s own Checkpoint 2 plus firm_activation_events from Checkpoint 3, plus firm_entitlements from Checkpoint 4, plus firm_entitlement_events from Checkpoint 5, plus installed_template_packs from Checkpoint 6, plus template_upgrade_logs from Checkpoint 7, plus template_upgrade_previews from Checkpoint 8, plus seat_allocations from Checkpoint 9, plus document_requests from Checkpoint 10, plus communication_consents from Checkpoint 11, plus communication_consent_events from Checkpoint 12, plus intake_submissions from Checkpoint 13). Narrowly updated again for Section 39A-3L, Checkpoint 14 (matter_readiness_scores added on top of the prior thirty-one), again for Checkpoint 15 (readiness_score_events added on top of the prior thirty-two), and again for Checkpoint 16 (tenant_encryption_keys added on top of the prior thirty-three).');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -261,7 +262,7 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $this->runWithFirmContext($firm, fn () => ActivationChecklist::factory()->forFirm($firm)->create());
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
         $this->assertSame(0, ActivationChecklist::withoutGlobalScopes()->count());
@@ -271,13 +272,13 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
 
         DB::table('activation_checklists')->insert([
-            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'firm_id' => $firm->id,
             'status' => 'in_progress',
             'started_at' => now(),
@@ -297,10 +298,10 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
-        $checklist = (new ActivationChecklistService())->createChecklist($firm);
+        $checklist = (new ActivationChecklistService)->createChecklist($firm);
 
         $this->assertNotNull($checklist->id);
         $this->assertSame($firm->id, $checklist->firm_id);
@@ -341,7 +342,7 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
 
         $checklistId = $this->runWithFirmContext($firm, function () use ($firm) {
             return DB::table('activation_checklists')->insertGetId([
-                'uuid' => (string) \Illuminate\Support\Str::uuid(),
+                'uuid' => (string) Str::uuid(),
                 'firm_id' => $firm->id,
                 'status' => 'in_progress',
                 'started_at' => now(),
@@ -362,7 +363,7 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
 
         $this->runWithFirmContext($firmA, function () use ($firmB) {
             DB::table('activation_checklists')->insert([
-                'uuid' => (string) \Illuminate\Support\Str::uuid(),
+                'uuid' => (string) Str::uuid(),
                 'firm_id' => $firmB->id,
                 'status' => 'in_progress',
                 'started_at' => now(),
@@ -539,7 +540,7 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
      */
     public function test_the_five_activation_checklist_service_methods_work_end_to_end_under_force_rls(): void
     {
-        $service = new ActivationChecklistService();
+        $service = new ActivationChecklistService;
         $firm = $this->eligibleFirm($service);
 
         $checklist = $service->createChecklist($firm);
@@ -632,12 +633,12 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
         $checklistA = $this->runWithFirmContext($firmA, fn () => ActivationChecklist::factory()->forFirm($firmA)->create());
         $checklistB = $this->runWithFirmContext($firmB, fn () => ActivationChecklist::factory()->forFirm($firmB)->create());
 
-        $documentA = $this->runWithFirmContext($firmA, fn () => \App\Models\Document::factory()->create(['firm_id' => $firmA->id]));
-        $documentB = $this->runWithFirmContext($firmB, fn () => \App\Models\Document::factory()->create(['firm_id' => $firmB->id]));
+        $documentA = $this->runWithFirmContext($firmA, fn () => Document::factory()->create(['firm_id' => $firmA->id]));
+        $documentB = $this->runWithFirmContext($firmB, fn () => Document::factory()->create(['firm_id' => $firmB->id]));
 
         $resultA = $this->runWithFirmContext($firmA, fn () => [
             'activation_checklists' => ActivationChecklist::withoutGlobalScopes()->pluck('id')->all(),
-            'documents' => \App\Models\Document::withoutGlobalScopes()->pluck('id')->all(),
+            'documents' => Document::withoutGlobalScopes()->pluck('id')->all(),
         ]);
 
         $this->assertSame([$checklistA->id], $resultA['activation_checklists']);
@@ -669,7 +670,7 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
         $checklistB = $this->runWithFirmContext($firmB, fn () => ActivationChecklist::factory()->forFirm($firmB)->create());
 
         // No tenant context active at all — not even firm A's.
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
         $itemId = DB::table('activation_checklist_items')->insertGetId([
@@ -696,7 +697,7 @@ class ActivationChecklistsForceRlsActivationTest extends TestCase
 
     public function test_compliance_gap_registry_service_still_tracks_the_rls_gap(): void
     {
-        $registry = new ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
 
         $this->assertTrue($registry->isTracked('rls_prepared_not_enforced'));
     }

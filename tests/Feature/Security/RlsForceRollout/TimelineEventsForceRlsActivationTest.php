@@ -3,21 +3,22 @@
 namespace Tests\Feature\Security\RlsForceRollout;
 
 use App\Enums\ConsentChannel;
-use App\Enums\ConsentStatus;
+use App\Enums\EntitlementSource;
+use App\Enums\FirmUserRole;
 use App\Enums\KeyDestructionRequestStatus;
-use App\Enums\LegalHoldScope;
 use App\Enums\PaymentPlanInstallmentStatus;
 use App\Enums\RetentionPolicyStatus;
 use App\Enums\RetentionRecordType;
+use App\Enums\TimeEntryStatus;
 use App\Enums\WebhookDeliveryStatus;
 use App\Models\Client;
-use App\Models\CommunicationConsent;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\Matter;
 use App\Models\PaymentPlan;
 use App\Models\PaymentPlanInstallment;
 use App\Models\PilotFeedbackItem;
+use App\Models\PlatformAdmin;
 use App\Models\RetentionPolicy;
 use App\Models\TimeEntry;
 use App\Models\TimelineEvent;
@@ -44,6 +45,7 @@ use App\Services\TimeEntryApprovalService;
 use App\Services\TimelineEventRecorder;
 use App\Services\WebhookReplayService;
 use App\Services\WebhookSubscriptionService;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -142,12 +144,12 @@ class TimelineEventsForceRlsActivationTest extends TestCase
 
     private function tenantContext(): TenantContextService
     {
-        return new TenantContextService();
+        return new TenantContextService;
     }
 
     private function recorder(): TimelineEventRecorder
     {
-        return new TimelineEventRecorder();
+        return new TimelineEventRecorder;
     }
 
     private function insertRow(?int $firmId, string $eventType): int
@@ -241,9 +243,9 @@ class TimelineEventsForceRlsActivationTest extends TestCase
      */
     public function test_exactly_fifty_one_prepared_tables_are_force_row_level_security_enabled(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records', 'integration_provider_webhook_subscriptions']);
 
         $actuallyForced = [];
 
@@ -260,7 +262,7 @@ class TimelineEventsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(125, count($actuallyForced), 'Exactly fifty-one prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 33 — no more, no less.');
+        $this->assertSame(126, count($actuallyForced), 'Exactly fifty-one prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 33 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -269,8 +271,8 @@ class TimelineEventsForceRlsActivationTest extends TestCase
      */
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records']);
+        $coverage = new RowLevelSecurityCoverageMappingService;
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records', 'integration_provider_webhook_subscriptions']);
 
         // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is
         // the final checkpoint in this arc: $forced now equals the FULL
@@ -496,7 +498,7 @@ class TimelineEventsForceRlsActivationTest extends TestCase
                 return DB::table('timeline_events')->where('id', $rowA)->update(['firm_id' => $firmB->id]);
             });
             $this->fail('Expected a row-level security policy violation when Firm A tries to reassign its own row to Firm B.');
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             $this->assertStringContainsString('row-level security policy', $e->getMessage());
         }
 
@@ -676,7 +678,7 @@ class TimelineEventsForceRlsActivationTest extends TestCase
         $this->tenantContext()->clearFirmContext();
         $this->assertNoDatabaseTenantContext();
 
-        $service = new InvoiceDraftingService(new TimeEntryApprovalService(new EmployeeRateService()), $this->recorder());
+        $service = new InvoiceDraftingService(new TimeEntryApprovalService(new EmployeeRateService), $this->recorder());
         $invoice = $service->createFlatFee($firm, $client, 'Flat fee for initial consultation', 50000, null, $createdBy);
 
         $this->assertNotNull($invoice->id);
@@ -697,7 +699,7 @@ class TimelineEventsForceRlsActivationTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $entry = TimeEntry::factory()->forFirm($firm)->create([
             'client_id' => $client->id,
-            'status' => \App\Enums\TimeEntryStatus::Approved,
+            'status' => TimeEntryStatus::Approved,
             'is_billable' => true,
             'seconds' => 3600,
             'billing_rate_cents_snapshot' => 20000,
@@ -711,7 +713,7 @@ class TimelineEventsForceRlsActivationTest extends TestCase
         $this->tenantContext()->clearFirmContext();
         $this->assertNoDatabaseTenantContext();
 
-        $service = new InvoiceDraftingService(new TimeEntryApprovalService(new EmployeeRateService()), $this->recorder());
+        $service = new InvoiceDraftingService(new TimeEntryApprovalService(new EmployeeRateService), $this->recorder());
         $invoice = $service->draftFromTimeEntries($firm, $client, [$entry]);
 
         $this->assertNotNull($invoice->id);
@@ -738,8 +740,8 @@ class TimelineEventsForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         app(EncryptionKeyService::class)->provision($firm);
-        $admin1 = \App\Models\PlatformAdmin::factory()->create();
-        $admin2 = \App\Models\PlatformAdmin::factory()->create();
+        $admin1 = PlatformAdmin::factory()->create();
+        $admin2 = PlatformAdmin::factory()->create();
 
         RetentionPolicy::factory()->create([
             'firm_id' => null,
@@ -802,7 +804,7 @@ class TimelineEventsForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $client = Client::factory()->forFirm($firm)->create();
-        (new ConsentService())->capture($firm, $client->id, ConsentChannel::Email, 'v1');
+        (new ConsentService)->capture($firm, $client->id, ConsentChannel::Email, 'v1');
 
         $plan = $this->runWithFirmContext($firm, fn () => PaymentPlan::factory()->forClient($client)->active()->create());
         $installment = PaymentPlanInstallment::factory()->forPlan($plan)->status(PaymentPlanInstallmentStatus::Missed)->create();
@@ -816,7 +818,7 @@ class TimelineEventsForceRlsActivationTest extends TestCase
         $this->tenantContext()->clearFirmContext();
         $this->assertNoDatabaseTenantContext();
 
-        $service = new PaymentPlanDunningService(new ConsentService(), $this->recorder());
+        $service = new PaymentPlanDunningService(new ConsentService, $this->recorder());
         $result = $this->runWithFirmContext($firm, fn () => $service->checkAndLog($installment));
 
         $this->assertTrue($result->eligible);
@@ -900,9 +902,9 @@ class TimelineEventsForceRlsActivationTest extends TestCase
     public function test_webhook_replay_service_replay_succeeds_under_force_and_records_a_timeline_event(): void
     {
         $firm = Firm::factory()->create();
-        app(EntitlementService::class)->setForSource($firm, 'webhook', \App\Enums\EntitlementSource::AdminOverride, true);
+        app(EntitlementService::class)->setForSource($firm, 'webhook', EntitlementSource::AdminOverride, true);
         app(EncryptionKeyService::class)->provision($firm);
-        $owner = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => \App\Enums\FirmUserRole::FirmOwner]);
+        $owner = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
 
         $subscription = app(WebhookSubscriptionService::class)->create($firm, $owner, ['matter.created'], 'https://example.com/hooks', $owner);
         $webhookEvent = WebhookEvent::factory()->forFirm($firm)->create();
@@ -1025,7 +1027,7 @@ class TimelineEventsForceRlsActivationTest extends TestCase
 
     public function test_compliance_gap_registry_service_still_tracks_the_rls_gap(): void
     {
-        $registry = new ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
 
         $this->assertTrue($registry->isTracked('rls_prepared_not_enforced'));
     }

@@ -4,6 +4,8 @@ namespace Tests\Feature\Security\RlsForceRollout;
 
 use App\Models\Firm;
 use App\Models\LeadSource;
+use App\Services\ComplianceGapRegistryService;
+use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -252,7 +254,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
             // weakened.
             // Narrowly updated by Section 39A-3L, Checkpoint 27 (this repo's forty-fifth staged FORCE activation batch, covering backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
             'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events',             // Narrowly updated by Section 39A-3L, Checkpoint 28 (this repo's forty-sixth staged FORCE activation batch, covering health_checks) for the same reason — additive only, no existing assertion removed or weakened.
-'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records',
+            'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records', 'integration_provider_webhook_subscriptions',
         ];
 
         $rows = DB::select(
@@ -268,7 +270,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
 
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
-        $coverage = new \App\Services\RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
         // Section 39A-3L, Checkpoint 1, Table Phase C (a later, distinct
         // staged-FORCE-activation branch) legitimately activated FORCE
         // for payment_classification_events too. Narrowly updated AGAIN
@@ -343,7 +345,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
             // weakened.
             // Narrowly updated by Section 39A-3L, Checkpoint 27 (this repo's forty-fifth staged FORCE activation batch, covering backup_restore_tests) for the same reason — additive only, no existing assertion removed or weakened.
             'matter_readiness_scores', 'readiness_score_events', 'tenant_encryption_keys', 'document_chase_events', 'firm_settings', 'firm_licenses', 'time_tracking_sessions', 'time_entries', 'payment_plans', 'payment_plan_events',             // Narrowly updated by Section 39A-3L, Checkpoint 28 (this repo's forty-sixth staged FORCE activation batch, covering health_checks) for the same reason — additive only, no existing assertion removed or weakened.
-'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records',
+            'notification_events', 'contacts', 'parties', 'backup_restore_tests', 'health_checks', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records', 'integration_provider_webhook_subscriptions',
         ];
 
         // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is
@@ -375,7 +377,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         LeadSource::factory()->forFirm($firm)->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(0, LeadSource::withoutGlobalScopes()->count());
     }
@@ -384,7 +386,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
 
@@ -577,7 +579,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
 
     public function test_uncovered_tenant_tables_were_not_modified(): void
     {
-        $coverage = new \App\Services\RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         foreach ($coverage->missingPreparedTables() as $table) {
             $row = DB::selectOne('select relrowsecurity from pg_class where relname = ?', [$table]);
@@ -616,7 +618,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
 
     public function test_rls_prepared_not_enforced_remains_tracked(): void
     {
-        $registry = new \App\Services\ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
 
         $this->assertTrue($registry->isTracked('rls_prepared_not_enforced'));
         $this->assertCount(21, $registry->all());

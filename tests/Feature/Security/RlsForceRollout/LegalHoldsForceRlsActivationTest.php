@@ -22,6 +22,7 @@ use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -100,7 +101,7 @@ class LegalHoldsForceRlsActivationTest extends TestCase
         // Narrowly updated by Stage B Checkpoint 3 of the FirmsBase Integration Platform mission — firm_integrations added, bumping the forced-table total (113 -> 114).
         // Narrowly updated AGAIN by Stage B Checkpoint 4 of the FirmsBase Integration Platform mission (integration_credentials, a new genuine tenant-owned table with RLS prepared and FORCE-activated in the same migration) for the same reason — additive only, no existing assertion removed or weakened.
         $this->assertCount(
-            125,
+            126,
             $coverage->forcedTables(),
             'Exactly 108 tables must have FORCE ROW LEVEL SECURITY active after this Wave 8 batch lands — no more, no fewer.'
         );
@@ -374,7 +375,7 @@ class LegalHoldsForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $admin = PlatformAdmin::factory()->create();
-        $service = new LegalHoldService();
+        $service = new LegalHoldService;
 
         $hold = $service->place($firm, LegalHoldScope::Firm, 'Litigation.', $admin);
         $this->assertNoDatabaseTenantContext('place() must clear its own context wrap before returning.');
@@ -493,7 +494,7 @@ class LegalHoldsForceRlsActivationTest extends TestCase
         // none, so a bare ->fresh() call here would return null. Wrap it
         // explicitly, keyed on the firm this request belongs to.
         $readiness = app(OffboardingRequestService::class)->evaluateReadiness(
-            (new TenantContextService())->runWithFirmContext($firm, fn () => $offboardingRequest->fresh())
+            (new TenantContextService)->runWithFirmContext($firm, fn () => $offboardingRequest->fresh())
         );
 
         $this->assertTrue($readiness->exportCompleted);
@@ -501,7 +502,7 @@ class LegalHoldsForceRlsActivationTest extends TestCase
         $this->assertFalse($readiness->legalHoldCleared, 'OffboardingRequestService::evaluateReadiness() must correctly detect the active legal hold — silently reporting it cleared here is exactly the fail-open bug this batch closes.');
 
         $advanced = app(OffboardingRequestService::class)->advance(
-            (new TenantContextService())->runWithFirmContext($firm, fn () => $offboardingRequest->fresh())
+            (new TenantContextService)->runWithFirmContext($firm, fn () => $offboardingRequest->fresh())
         );
         $this->assertSame(OffboardingRequestStatus::LegalHoldBlocked, $advanced->status, 'advance() must transition to LegalHoldBlocked, proving the hold was genuinely detected end-to-end.');
     }
@@ -548,7 +549,7 @@ class LegalHoldsForceRlsActivationTest extends TestCase
         // ambient context active would return null once offboarding_requests
         // is FORCE'd, so wrap it explicitly keyed on $firm.
         $readiness = app(OffboardingRequestService::class)->evaluateReadiness(
-            (new TenantContextService())->runWithFirmContext($firm, fn () => $offboardingRequest->fresh())
+            (new TenantContextService)->runWithFirmContext($firm, fn () => $offboardingRequest->fresh())
         );
         $this->assertTrue($readiness->legalHoldCleared);
     }
@@ -683,7 +684,7 @@ class LegalHoldsForceRlsActivationTest extends TestCase
     private function rowAttributes(Firm $firm, PlatformAdmin $admin): array
     {
         return [
-            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'firm_id' => $firm->id,
             'scope_type' => LegalHoldScope::Firm->value,
             'client_id' => null,

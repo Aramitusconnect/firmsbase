@@ -2,15 +2,20 @@
 
 namespace Tests\Feature\Security\RlsForceRollout;
 
+use App\Enums\HealthCheckStatus;
+use App\Enums\HealthCheckType;
 use App\Enums\IncidentSeverity;
 use App\Enums\IncidentStatus;
+use App\Models\Client;
 use App\Models\Firm;
+use App\Models\HealthCheck;
 use App\Models\IncidentEvent;
 use App\Services\ComplianceGapRegistryService;
 use App\Services\IncidentService;
 use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -110,12 +115,12 @@ class IncidentEventsForceRlsActivationTest extends TestCase
 
     private function tenantContext(): TenantContextService
     {
-        return new TenantContextService();
+        return new TenantContextService;
     }
 
     private function incidentService(): IncidentService
     {
-        return new IncidentService();
+        return new IncidentService;
     }
 
     private function insertRow(?int $firmId, string $suffix, ?IncidentSeverity $severity = null, ?IncidentStatus $status = null, ?string $correlationId = null): int
@@ -176,9 +181,9 @@ class IncidentEventsForceRlsActivationTest extends TestCase
      */
     public function test_exactly_forty_seven_prepared_tables_are_force_row_level_security_enabled(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
-        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records']);
+        $expectedForced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records', 'integration_provider_webhook_subscriptions']);
 
         $actuallyForced = [];
 
@@ -195,7 +200,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         sort($expectedForced);
         sort($actuallyForced);
 
-        $this->assertSame(125, count($actuallyForced), 'Exactly forty-seven prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 29 — no more, no less.');
+        $this->assertSame(126, count($actuallyForced), 'Exactly forty-seven prepared tables must be FORCE RLS enabled after Section 39A-3L, Checkpoint 29 — no more, no less.');
         $this->assertSame($expectedForced, $actuallyForced);
     }
 
@@ -204,8 +209,8 @@ class IncidentEventsForceRlsActivationTest extends TestCase
      */
     public function test_no_unrelated_prepared_table_became_force_enabled(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
-        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records']);
+        $coverage = new RowLevelSecurityCoverageMappingService;
+        $forced = array_merge(self::PREVIOUSLY_FORCED_TABLES, ['ai_retrieval_indexes', 'deployment_configs', 'firm_ai_settings', 'email_visibility_rules', 'private_enterprise_settings', 'matter_expenses', 'email_message_links', 'ai_usage_events', 'ai_tool_actions', 'firm_ai_provider_keys', 'ai_approval_requests', 'ai_approval_events', 'chart_of_accounts', 'expense_categories', 'expenses', 'expense_receipts', 'expense_approvals', 'accounting_export_batches', 'accounting_export_lines', 'email_accounts', 'email_messages', 'email_attachments', 'email_sync_events', 'generated_documents', 'form_drafts', 'generated_document_events', 'form_review_events', 'document_hashes', 'pdf_view_events', 'customer_success_health_scores', 'incident_events', 'maintenance_windows', 'notification_templates', 'pilot_feedback_items', 'timeline_events', 'security_events', 'signature_certificates', 'signature_events', 'signature_request_recipients', 'signature_requests', 'legal_holds', 'deletion_requests', 'key_destruction_requests', 'support_access_requests', 'support_access_sessions', 'deployment_health_checks', 'export_jobs', 'migration_projects', 'import_batches', 'implementation_projects', 'fleet_migration_instance_status', 'offboarding_requests', 'trust_accounts', 'trust_ledgers', 'trust_balances', 'matter_trust_balances', 'trust_ledger_entries', 'trust_approval_events', 'trust_chargeback_events', 'trust_reconciliations', 'trust_refund_requests', 'trust_transfer_requests', 'webhook_deliveries', 'webhook_delivery_attempts', 'webhook_events', 'webhook_secrets', 'webhook_subscriptions', 'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records', 'integration_provider_webhook_subscriptions']);
 
         // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is
         // the final checkpoint in this arc: $forced now equals the FULL
@@ -563,7 +568,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
                 return DB::table('incident_events')->where('id', $rowA)->update(['firm_id' => $firmB->id]);
             });
             $this->fail('Expected a row-level security policy violation when Firm A tries to reassign its own row to Firm B.');
-        } catch (\Illuminate\Database\QueryException $e) {
+        } catch (QueryException $e) {
             $this->assertStringContainsString('row-level security policy', $e->getMessage());
         }
 
@@ -669,7 +674,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         $this->assertNotNull($readUnderMismatchedContext);
         $this->assertNull($readUnderMismatchedContext->firm_id);
 
-        $this->expectException(\Illuminate\Database\QueryException::class);
+        $this->expectException(QueryException::class);
         $this->expectExceptionMessageMatches('/row-level security policy/');
 
         $service->updateSeverity($firm, $opened->correlation_id, IncidentSeverity::Critical);
@@ -770,7 +775,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
 
-        \App\Models\Client::factory()->forFirm($firm)->create();
+        Client::factory()->forFirm($firm)->create();
         $this->assertDatabaseTenantContextIs($firm, 'ClientFactory must have left a stale, non-null DB-level context active.');
 
         $row = IncidentEvent::factory()->create();
@@ -883,7 +888,7 @@ class IncidentEventsForceRlsActivationTest extends TestCase
 
     public function test_compliance_gap_registry_service_still_tracks_the_rls_gap(): void
     {
-        $registry = new ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
 
         $this->assertTrue($registry->isTracked('rls_prepared_not_enforced'));
     }
@@ -930,12 +935,12 @@ class IncidentEventsForceRlsActivationTest extends TestCase
         $rowA = $this->runWithFirmContext($firmA, fn () => $this->insertRow($firmA->id, 'simultaneous-a'));
         $rowB = $this->runWithFirmContext($firmB, fn () => $this->insertRow($firmB->id, 'simultaneous-b'));
 
-        $healthCheckA = $this->runWithFirmContext($firmA, fn () => \App\Models\HealthCheck::factory()->create(['firm_id' => $firmA->id, 'check_type' => \App\Enums\HealthCheckType::TenantIsolationAnomalies->value, 'status' => \App\Enums\HealthCheckStatus::Unhealthy->value]));
-        $healthCheckB = $this->runWithFirmContext($firmB, fn () => \App\Models\HealthCheck::factory()->create(['firm_id' => $firmB->id, 'check_type' => \App\Enums\HealthCheckType::TenantIsolationAnomalies->value, 'status' => \App\Enums\HealthCheckStatus::Unhealthy->value]));
+        $healthCheckA = $this->runWithFirmContext($firmA, fn () => HealthCheck::factory()->create(['firm_id' => $firmA->id, 'check_type' => HealthCheckType::TenantIsolationAnomalies->value, 'status' => HealthCheckStatus::Unhealthy->value]));
+        $healthCheckB = $this->runWithFirmContext($firmB, fn () => HealthCheck::factory()->create(['firm_id' => $firmB->id, 'check_type' => HealthCheckType::TenantIsolationAnomalies->value, 'status' => HealthCheckStatus::Unhealthy->value]));
 
         $resultA = $this->runWithFirmContext($firmA, fn () => [
             'incident_events' => IncidentEvent::query()->where('firm_id', $firmA->id)->pluck('id')->all(),
-            'health_checks' => \App\Models\HealthCheck::query()->pluck('id')->all(),
+            'health_checks' => HealthCheck::query()->pluck('id')->all(),
         ]);
 
         $this->assertSame([$rowA], $resultA['incident_events']);

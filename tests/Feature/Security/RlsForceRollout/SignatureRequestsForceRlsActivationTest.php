@@ -7,12 +7,14 @@ use App\Enums\SignatureSourceDocumentType;
 use App\Models\Document;
 use App\Models\Firm;
 use App\Models\FirmUser;
+use App\Models\GeneratedDocument;
 use App\Models\Matter;
 use App\Models\SignatureRequest;
 use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -91,7 +93,7 @@ class SignatureRequestsForceRlsActivationTest extends TestCase
         // Narrowly updated by Stage B Checkpoint 3 of the FirmsBase Integration Platform mission — firm_integrations added, bumping the forced-table total (113 -> 114).
         // Narrowly updated AGAIN by Stage B Checkpoint 4 of the FirmsBase Integration Platform mission (integration_credentials, a new genuine tenant-owned table with RLS prepared and FORCE-activated in the same migration) for the same reason — additive only, no existing assertion removed or weakened.
         $this->assertCount(
-            125,
+            126,
             $coverage->forcedTables(),
             'Exactly 108 tables must have FORCE ROW LEVEL SECURITY active after this Wave 7 batch lands — no more, no fewer.'
         );
@@ -347,7 +349,7 @@ class SignatureRequestsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         [$document, $generatedDocument, $actor] = $this->runWithFirmContext($firm, fn () => [
             Document::factory()->create(['firm_id' => $firm->id]),
-            \App\Models\GeneratedDocument::factory()->forFirm($firm)->create(),
+            GeneratedDocument::factory()->forFirm($firm)->create(),
             FirmUser::factory()->create(['firm_id' => $firm->id]),
         ]);
 
@@ -555,7 +557,7 @@ class SignatureRequestsForceRlsActivationTest extends TestCase
     private function rowAttributes(Firm $firm, Document $document, FirmUser $actor): array
     {
         return [
-            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'firm_id' => $firm->id,
             'matter_id' => null,
             'client_id' => null,
