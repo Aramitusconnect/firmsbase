@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace Tests\Feature\Integrations;
 
 use App\Enums\EntitlementSource;
+use App\Integrations\Core\ProviderRegistry;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
+use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Providers\TestProvider\TestProvider;
 use App\Integrations\Services\InboundWebhookAuditLogger;
 use App\Integrations\Services\IntegrationAccessPolicyService;
 use App\Integrations\Services\IntegrationCredentialService;
@@ -57,6 +60,15 @@ final class InboundWebhookAuditLoggerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Checkpoint 1 (FirmsVault Live Integrations): InboundWebhookController
+        // now resolves the provider via ProviderRegistry/ProviderKey FIRST,
+        // before anything else — without this, every real HTTP request this
+        // test makes through the controller collapses to a 401 regardless of
+        // routing token/signature validity. Mirrors
+        // InboundWebhookLifecycleRevalidationTest::setUp()'s identical,
+        // already-established override.
+        config(['integrations.providers' => [ProviderKey::Test->value => TestProvider::class]]);
 
         // The logger's own fixed, dedicated file (Log::build path in the
         // class). Start each test with a clean slate so assertions never
@@ -109,7 +121,7 @@ final class InboundWebhookAuditLoggerTest extends TestCase
             $sentinelByKey[$key] = $sentinel;
         }
 
-        (new InboundWebhookAuditLogger())->record(InboundWebhookAuditLogger::EVENT_REQUEST_RECEIVED, $context);
+        (new InboundWebhookAuditLogger)->record(InboundWebhookAuditLogger::EVENT_REQUEST_RECEIVED, $context);
 
         $contents = $this->auditLogContents();
 
@@ -137,7 +149,7 @@ final class InboundWebhookAuditLoggerTest extends TestCase
             'RAW_BODY' => 'UPPERCASE_BODY_SENTINEL',
         ];
 
-        (new InboundWebhookAuditLogger())->record(InboundWebhookAuditLogger::EVENT_SIGNATURE_REJECTED, $context);
+        (new InboundWebhookAuditLogger)->record(InboundWebhookAuditLogger::EVENT_SIGNATURE_REJECTED, $context);
 
         $contents = $this->auditLogContents();
 
@@ -162,7 +174,7 @@ final class InboundWebhookAuditLoggerTest extends TestCase
             ],
         ];
 
-        (new InboundWebhookAuditLogger())->record(InboundWebhookAuditLogger::EVENT_PROCESSING_FAILED, $context);
+        (new InboundWebhookAuditLogger)->record(InboundWebhookAuditLogger::EVENT_PROCESSING_FAILED, $context);
 
         $contents = $this->auditLogContents();
 
@@ -185,7 +197,7 @@ final class InboundWebhookAuditLoggerTest extends TestCase
             'duplicate' => false,
         ];
 
-        (new InboundWebhookAuditLogger())->record(InboundWebhookAuditLogger::EVENT_ROUTE_IDENTITY_RESOLVED, $context);
+        (new InboundWebhookAuditLogger)->record(InboundWebhookAuditLogger::EVENT_ROUTE_IDENTITY_RESOLVED, $context);
 
         $contents = $this->auditLogContents();
 
@@ -204,16 +216,21 @@ final class InboundWebhookAuditLoggerTest extends TestCase
     {
         $this->expectException(InvalidArgumentException::class);
 
-        (new InboundWebhookAuditLogger())->record('integration_webhook.some_unreviewed_new_event', ['provider' => 'test']);
+        (new InboundWebhookAuditLogger)->record('integration_webhook.some_unreviewed_new_event', ['provider' => 'test']);
     }
 
     public function test_all_eleven_frozen_event_names_are_accepted(): void
     {
         $allowed = (new ReflectionClass(InboundWebhookAuditLogger::class))->getConstant('ALLOWED_EVENT_NAMES');
         $this->assertIsArray($allowed);
-        $this->assertCount(11, $allowed, 'The frozen allowlist must contain exactly the 11 documented event names.');
+        // Checkpoint 1 (FirmsVault Live Integrations,
+        // checkpoint1-design-webhook-verification.md §4): the frozen
+        // 11-name Checkpoint 7 allowlist was extended to 12 by the new
+        // EVENT_VALIDATION_CHALLENGE_ANSWERED event — see
+        // InboundWebhookAuditLogger's own class docblock.
+        $this->assertCount(12, $allowed, 'The allowlist must contain exactly the 12 documented event names (11 frozen + Checkpoint 1\'s validation-challenge event).');
 
-        $logger = new InboundWebhookAuditLogger();
+        $logger = new InboundWebhookAuditLogger;
         foreach ($allowed as $eventName) {
             $logger->record($eventName, ['provider' => 'test']);
             $this->addToAssertionCount(1);
@@ -298,23 +315,23 @@ final class InboundWebhookAuditLoggerTest extends TestCase
 
     private function credentialService(): IntegrationCredentialService
     {
-        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService()));
+        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder);
     }
 
     private function connectionService(): ProviderConnectionService
     {
         return new ProviderConnectionService(
             new IntegrationOAuthStateService(
-                new EmailBodyEncryptionService(new EncryptionKeyService()),
-                new PkceService(),
-                new ProviderRedirectUrlValidator(),
+                new EmailBodyEncryptionService(new EncryptionKeyService),
+                new PkceService,
+                new ProviderRedirectUrlValidator,
             ),
             $this->credentialService(),
-            new IntegrationAccessPolicyService(new TimelineEventRecorder()),
-            new \App\Integrations\Core\ProviderRegistry(),
-            new OutboundProviderHttpClient(),
-            new ProviderRedirectUrlValidator(),
-            new TimelineEventRecorder(),
+            new IntegrationAccessPolicyService(new TimelineEventRecorder),
+            new ProviderRegistry,
+            new OutboundProviderHttpClient,
+            new ProviderRedirectUrlValidator,
+            new TimelineEventRecorder,
             app(IntegrationEntitlementPolicyService::class),
         );
     }
@@ -329,7 +346,17 @@ final class InboundWebhookAuditLoggerTest extends TestCase
 
     private function postWebhook(string $provider, array $headers, string $body): TestResponse
     {
-        $server = [];
+        // Checkpoint 1 (FirmsVault Live Integrations, design §6): the
+        // controller's new content-type allowlist rejects anything that
+        // isn't JSON-family for the normal per-event pipeline. Without an
+        // explicit Content-Type, Symfony's Request::create() defaults raw
+        // POST content to 'application/x-www-form-urlencoded', which the
+        // allowlist now correctly rejects — a test-fixture gap this
+        // checkpoint newly exposes, not something the request itself
+        // should be missing in reality (every real webhook sender sets
+        // this header). Explicit here so this helper exercises the SAME
+        // per-event pipeline this file's tests were written against.
+        $server = ['CONTENT_TYPE' => 'application/json'];
         foreach ($headers as $name => $value) {
             $server['HTTP_'.strtoupper(str_replace('-', '_', $name))] = $value;
         }

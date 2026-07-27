@@ -10,11 +10,13 @@ use App\Filament\Actions\Platform\DisconnectConnectionAction;
 use App\Filament\Resources\ConnectionResource;
 use App\Filament\Resources\ConnectionResource\Pages\ListConnections;
 use App\Filament\Resources\ConnectionResource\Pages\ViewConnection;
+use App\Integrations\Data\SanitizedHealthDiagnostic;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Providers\TestProvider\TestProvider;
+use App\Integrations\Services\HealthStateService;
 use App\Integrations\Services\IntegrationCredentialService;
 use App\Models\Firm;
 use App\Models\PlatformAdmin;
@@ -297,6 +299,87 @@ final class ConnectionResourceTest extends TestCase
         // The id tie-breaker (ascending, applied after created_at) means
         // the lower-id connection (A, created first) sorts before B.
         $this->assertSame([$connectionA->uuid, $connectionB->uuid], $firstOrder);
+    }
+
+    // ------------------------------------------------------------
+    // CHECKPOINT 1 (FirmsVault Live Integrations) additions —
+    // checkpoint1-design-health-sandbox.md §A.3.1/§A.4: the new
+    // per-connection metrics columns. All five are
+    // ->toggleable(isToggledHiddenByDefault: true), so a plain GET does
+    // NOT evaluate their formatState()/getState() at all (confirmed
+    // directly — a bare page load never even reaches these columns'
+    // rendering logic) — this test explicitly toggles them visible via
+    // the same table-column-manager mechanism the real "Toggle columns"
+    // UI control drives, so the underlying formatStateUsing() callback
+    // (last_operation_label's Str::headline() humanization) and every
+    // other new column's plain state resolution are genuinely exercised.
+    // ------------------------------------------------------------
+
+    public function test_the_new_metrics_columns_render_correctly_once_toggled_visible(): void
+    {
+        [$firm, $connection] = $this->entitledFirmWithConnection();
+
+        $this->runWithFirmContext($firm, fn () => app(HealthStateService::class)->recordCredentialError(
+            $connection->id,
+            $firm->id,
+            new SanitizedHealthDiagnostic(
+                SanitizedHealthDiagnostic::CATEGORY_CREDENTIAL_ERROR,
+                SanitizedHealthDiagnostic::OPERATION_TOKEN_REFRESH,
+            ),
+            latencyMs: 250,
+        ));
+
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $test = Livewire::test(ListConnections::class);
+        $test->assertOk();
+
+        $defaultState = $test->instance()->getDefaultTableColumnState();
+        $toggleOn = ['total_request_count', 'total_success_count', 'last_operation_label', 'last_latency_ms', 'last_sync_lag_seconds'];
+        foreach ($defaultState as &$item) {
+            if (in_array($item['name'] ?? null, $toggleOn, true)) {
+                $item['isToggled'] = true;
+            }
+        }
+        unset($item);
+
+        $test->call('applyTableColumnManager', $defaultState);
+        $test->assertOk();
+
+        $html = $test->html();
+        $this->assertStringContainsString('Token Refresh', $html, 'last_operation_label\'s formatStateUsing() must humanize the raw "token_refresh" value via Str::headline().');
+        $this->assertStringContainsString('250', $html, 'last_latency_ms must render the real recorded value.');
+        // 1 failure signal was recorded -> total_request_count=1,
+        // total_success_count=0.
+        $this->assertMatchesRegularExpression('/\bTotal Requests\b/', $html);
+        $this->assertMatchesRegularExpression('/\bTotal Successes\b/', $html);
+    }
+
+    public function test_a_connection_with_no_health_row_yet_shows_the_placeholder_for_every_new_metrics_column_never_an_error(): void
+    {
+        [, $connection] = $this->entitledFirmWithConnection();
+        // Deliberately NO HealthStateService call at all — no
+        // integration_connection_health row exists for this connection.
+
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $test = Livewire::test(ListConnections::class);
+        $test->assertOk();
+
+        $defaultState = $test->instance()->getDefaultTableColumnState();
+        $toggleOn = ['total_request_count', 'total_success_count', 'last_operation_label', 'last_latency_ms', 'last_sync_lag_seconds'];
+        foreach ($defaultState as &$item) {
+            if (in_array($item['name'] ?? null, $toggleOn, true)) {
+                $item['isToggled'] = true;
+            }
+        }
+        unset($item);
+
+        $test->call('applyTableColumnManager', $defaultState);
+        $test->assertOk();
+        unset($connection);
     }
 
     public function test_the_connections_list_is_bounded_and_paginated(): void

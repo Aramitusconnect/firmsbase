@@ -160,4 +160,61 @@ return [
         'retention_days' => env('INTEGRATIONS_USAGE_RECORDS_RETENTION_DAYS'),
     ],
 
+    /*
+    |----------------------------------------------------------------
+    | Checkpoint 1 (FirmsVault Live Integrations) — shared outbound
+    | HTTP path, proactive rate limiting, sandbox/live environment
+    | resolution
+    |----------------------------------------------------------------
+    |
+    | `http`/`rate_limits` back App\Integrations\Support\ProviderRequestExecutor
+    | (checkpoint1-design-http-ratelimit-usage.md §4.2) — the sole file
+    | anywhere under app/Integrations/ permitted to reference
+    | Illuminate\Support\Facades\Http. `provider_environments` backs
+    | App\Integrations\Support\ProviderEnvironmentResolver
+    | (checkpoint1-design-health-sandbox.md §B.2 point 1).
+    |
+    */
+
+    'http' => [
+        'default_timeout_seconds' => env('INTEGRATIONS_HTTP_DEFAULT_TIMEOUT_SECONDS', 15),
+        'connect_timeout_seconds' => env('INTEGRATIONS_HTTP_CONNECT_TIMEOUT_SECONDS', 5),
+        'correlation_id_header' => env('INTEGRATIONS_HTTP_CORRELATION_ID_HEADER', 'X-FirmsVault-Correlation-Id'),
+    ],
+
+    'rate_limits' => [
+        // Applied to any ProviderKey with no explicit entry in
+        // `providers` below — conservative by design (mirrors this
+        // file's existing "conservative defaults, explicit opt-in for
+        // anything looser" posture, e.g. retention.sweep_firm_data_enabled
+        // defaults false). Every real adapter (Checkpoints 2-5) should
+        // override this once its actual documented rate-limit ceiling
+        // is known.
+        'default' => [
+            'max_attempts_per_window' => env('INTEGRATIONS_RATE_LIMIT_DEFAULT_MAX_ATTEMPTS', 30),
+            'window_seconds' => env('INTEGRATIONS_RATE_LIMIT_DEFAULT_WINDOW_SECONDS', 60),
+        ],
+
+        'providers' => [
+            ProviderKey::Test->value => [
+                'max_attempts_per_window' => env('INTEGRATIONS_RATE_LIMIT_TEST_MAX_ATTEMPTS', 100),
+                'window_seconds' => env('INTEGRATIONS_RATE_LIMIT_TEST_WINDOW_SECONDS', 60),
+            ],
+            // Checkpoints 2-5 each add one entry here, e.g.:
+            // ProviderKey::Microsoft365->value => ['max_attempts_per_window' => 10000, 'window_seconds' => 600],
+            // ProviderKey::Plaid->value => ['max_attempts_per_window' => 600, 'window_seconds' => 60],
+        ],
+    ],
+
+    // Empty until a real ProviderKey case exists beyond `Test` — same
+    // "don't pre-register" discipline the `providers` map above already
+    // follows. Checkpoints 2-5 each add their own block here, keyed by
+    // ProviderKey->value:
+    //   ProviderKey::Microsoft365->value => [
+    //       'mode' => env('INTEGRATIONS_MICROSOFT365_MODE', 'sandbox'), // 'sandbox' | 'live'
+    //       'sandbox_base_url' => env('INTEGRATIONS_MICROSOFT365_SANDBOX_BASE_URL'),
+    //       'live_base_url' => env('INTEGRATIONS_MICROSOFT365_LIVE_BASE_URL'),
+    //   ],
+    'provider_environments' => [],
+
 ];

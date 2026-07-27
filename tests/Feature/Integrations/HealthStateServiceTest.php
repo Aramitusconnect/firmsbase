@@ -46,7 +46,7 @@ class HealthStateServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new HealthStateService(new TimelineEventRecorder());
+        $this->service = new HealthStateService(new TimelineEventRecorder);
     }
 
     protected function tearDown(): void
@@ -477,6 +477,176 @@ class HealthStateServiceTest extends TestCase
         } catch (\Throwable $e) {
             $this->assertStringContainsStringIgnoringCase('constraint', $e->getMessage());
         }
+    }
+
+    // ------------------------------------------------------------
+    // CHECKPOINT 1 (FirmsVault Live Integrations) additions —
+    // checkpoint1-design-health-sandbox.md §A.3.1: total_request_count/
+    // total_success_count (cumulative counters), last_operation_label
+    // (persists SanitizedHealthDiagnostic::$operationLabel, previously
+    // only folded into free-text), last_latency_ms (new optional
+    // trailing parameter on every record*() method).
+    // ------------------------------------------------------------
+
+    public function test_record_success_increments_total_request_and_total_success_count(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+
+        $this->service->recordSuccess($connection->id, $firm->id);
+        $this->service->recordSuccess($connection->id, $firm->id);
+        $this->service->recordSuccess($connection->id, $firm->id);
+
+        $row = $this->healthRow($connection);
+        $this->assertSame(3, (int) $row->total_request_count);
+        $this->assertSame(3, (int) $row->total_success_count);
+    }
+
+    public function test_record_success_persists_the_optional_latency_ms_parameter(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+
+        $this->service->recordSuccess($connection->id, $firm->id, latencyMs: 247);
+
+        $row = $this->healthRow($connection);
+        $this->assertSame(247, (int) $row->last_latency_ms);
+    }
+
+    public function test_record_success_leaves_latency_ms_null_when_not_supplied(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+
+        $this->service->recordSuccess($connection->id, $firm->id);
+
+        $row = $this->healthRow($connection);
+        $this->assertNull($row->last_latency_ms);
+    }
+
+    public function test_record_success_never_touches_last_operation_label_since_it_has_no_diagnostic_parameter(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+
+        // A prior failure sets last_operation_label; recordSuccess()
+        // clears the rest of the failure signal (category/rate-limit
+        // reset) but has no operationLabel argument of its own to
+        // overwrite it with — confirming the migration's own documented
+        // design choice (recordSuccess() intentionally was not widened
+        // to accept a diagnostic/operation-label parameter).
+        $this->service->recordScopeError($connection->id, $firm->id, $this->diagnostic(SanitizedHealthDiagnostic::CATEGORY_SCOPE_ERROR, SanitizedHealthDiagnostic::OPERATION_PULL_SYNC));
+        $beforeSuccess = $this->healthRow($connection);
+        $this->assertSame(SanitizedHealthDiagnostic::OPERATION_PULL_SYNC, $beforeSuccess->last_operation_label);
+
+        $this->service->recordSuccess($connection->id, $firm->id);
+
+        $afterSuccess = $this->healthRow($connection);
+        $this->assertSame(
+            SanitizedHealthDiagnostic::OPERATION_PULL_SYNC,
+            $afterSuccess->last_operation_label,
+            'recordSuccess() has no operationLabel parameter, so the SQL leaves this column untouched rather than clearing it — this is the documented, intentional behavior, not a bug.'
+        );
+    }
+
+    public function test_a_failure_signal_persists_total_request_count_but_never_increments_total_success_count(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+
+        $this->service->recordProviderError($connection->id, $firm->id, $this->diagnostic(SanitizedHealthDiagnostic::CATEGORY_PROVIDER_ERROR));
+        $this->service->recordProviderError($connection->id, $firm->id, $this->diagnostic(SanitizedHealthDiagnostic::CATEGORY_PROVIDER_ERROR));
+
+        $row = $this->healthRow($connection);
+        $this->assertSame(2, (int) $row->total_request_count, 'total_request_count must increment on EVERY record*() call, success or failure.');
+        $this->assertSame(0, (int) $row->total_success_count, 'total_success_count must never increment on a failure signal.');
+    }
+
+    public function test_a_mix_of_success_and_failure_calls_computes_the_correct_cumulative_counters(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+
+        $this->service->recordSuccess($connection->id, $firm->id);
+        $this->service->recordProviderError($connection->id, $firm->id, $this->diagnostic(SanitizedHealthDiagnostic::CATEGORY_PROVIDER_ERROR));
+        $this->service->recordSuccess($connection->id, $firm->id);
+        $this->service->recordRateLimited($connection->id, $firm->id, now()->addMinute(), $this->diagnostic(SanitizedHealthDiagnostic::CATEGORY_RATE_LIMITED));
+        $this->service->recordSuccess($connection->id, $firm->id);
+
+        $row = $this->healthRow($connection);
+        $this->assertSame(5, (int) $row->total_request_count, 'Every one of the 5 calls above must increment total_request_count regardless of outcome.');
+        $this->assertSame(3, (int) $row->total_success_count, 'Only the 3 recordSuccess() calls must increment total_success_count.');
+    }
+
+    public function test_record_credential_error_persists_the_operation_label_from_the_diagnostic(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+
+        $this->service->recordCredentialError(
+            $connection->id,
+            $firm->id,
+            $this->diagnostic(SanitizedHealthDiagnostic::CATEGORY_CREDENTIAL_ERROR, SanitizedHealthDiagnostic::OPERATION_TOKEN_REFRESH),
+        );
+
+        $row = $this->healthRow($connection);
+        $this->assertSame(SanitizedHealthDiagnostic::OPERATION_TOKEN_REFRESH, $row->last_operation_label);
+    }
+
+    public function test_record_provider_error_persists_a_different_operation_label(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+
+        $this->service->recordProviderError(
+            $connection->id,
+            $firm->id,
+            $this->diagnostic(SanitizedHealthDiagnostic::CATEGORY_PROVIDER_ERROR, SanitizedHealthDiagnostic::OPERATION_WEBHOOK_PROCESS),
+        );
+
+        $row = $this->healthRow($connection);
+        $this->assertSame(SanitizedHealthDiagnostic::OPERATION_WEBHOOK_PROCESS, $row->last_operation_label);
+    }
+
+    public function test_the_operation_label_is_overwritten_by_the_most_recent_failure_signal(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+
+        $this->service->recordScopeError($connection->id, $firm->id, $this->diagnostic(SanitizedHealthDiagnostic::CATEGORY_SCOPE_ERROR, SanitizedHealthDiagnostic::OPERATION_TOKEN_REFRESH));
+        $this->service->recordProviderError($connection->id, $firm->id, $this->diagnostic(SanitizedHealthDiagnostic::CATEGORY_PROVIDER_ERROR, SanitizedHealthDiagnostic::OPERATION_PUSH_SYNC));
+
+        $row = $this->healthRow($connection);
+        $this->assertSame(SanitizedHealthDiagnostic::OPERATION_PUSH_SYNC, $row->last_operation_label, 'last_operation_label is last-value-only, like last_failure_category — overwritten by the most recent call, not appended/history-tracked.');
+    }
+
+    public function test_record_rate_limited_persists_the_optional_latency_ms_parameter(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+
+        $this->service->recordRateLimited(
+            $connection->id,
+            $firm->id,
+            now()->addMinute(),
+            $this->diagnostic(SanitizedHealthDiagnostic::CATEGORY_RATE_LIMITED),
+            latencyMs: 512,
+        );
+
+        $row = $this->healthRow($connection);
+        $this->assertSame(512, (int) $row->last_latency_ms);
+    }
+
+    public function test_last_latency_ms_reflects_only_the_most_recent_call_not_an_average(): void
+    {
+        $firm = $this->firm();
+        $connection = $this->connection($firm);
+
+        $this->service->recordSuccess($connection->id, $firm->id, latencyMs: 100);
+        $this->service->recordSuccess($connection->id, $firm->id, latencyMs: 900);
+
+        $row = $this->healthRow($connection);
+        $this->assertSame(900, (int) $row->last_latency_ms);
     }
 
     // ------------------------------------------------------------

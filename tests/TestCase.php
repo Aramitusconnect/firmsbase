@@ -6,9 +6,38 @@ use App\Models\Firm;
 use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 
 abstract class TestCase extends BaseTestCase
 {
+    /**
+     * CHECKPOINT 1 addition (FirmsVault Live Integrations,
+     * checkpoint1-design-health-sandbox.md §B.3,
+     * checkpoint1-combined-design.md §2.3): global, suite-wide guard so
+     * ANY test anywhere — Integration-domain or not — that attempts a
+     * real, un-faked outbound HTTP call through Laravel's Http facade
+     * fails loudly instead of silently attempting (or appearing to
+     * succeed against) a real network destination.
+     * `Http::preventStrayRequests()` composes cleanly with `Http::fake()`
+     * — it only trips on a request that does not match any registered
+     * fake rule, so every existing/future test that already calls
+     * `Http::fake([...])` is unaffected. This is additive: the class had
+     * no setUp() override before this checkpoint.
+     *
+     * Residual, disclosed gap (not solved here): a test extending bare
+     * PHPUnit\Framework\TestCase directly (never booting the framework)
+     * cannot reach this guard, since it never resolves the Http facade
+     * at all — see NoRealNetworkCallTest's own forbidden-primitive scan
+     * for the complementary, framework-independent defense against raw
+     * curl_/fsockopen/file_get_contents('http...) usage.
+     */
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Http::preventStrayRequests();
+    }
+
     /**
      * Section 39A-2 — RLS context rollout test helpers. Pure additions
      * (no setUp/tearDown hook, no global behavior change for any
@@ -29,7 +58,7 @@ abstract class TestCase extends BaseTestCase
      */
     protected function runWithFirmContext(Firm|int|string $firm, callable $callback): mixed
     {
-        return (new TenantContextService())->runWithFirmContext($firm, $callback);
+        return (new TenantContextService)->runWithFirmContext($firm, $callback);
     }
 
     /**

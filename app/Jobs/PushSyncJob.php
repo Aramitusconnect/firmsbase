@@ -21,6 +21,7 @@ use App\Integrations\Services\IntegrationExternalMappingService;
 use App\Integrations\Services\SyncItemService;
 use App\Integrations\Services\SyncRunService;
 use App\Integrations\Support\OutboundProviderHttpClient;
+use App\Services\WebhookRetryPolicyService;
 use App\Support\TenantAwareJobContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -73,8 +74,7 @@ final class PushSyncJob implements ShouldQueue
         // Callers now pass a JSON-encoded string; decoded back to an
         // array in handle() below before use.
         public readonly ?string $providerContext = null,
-    ) {
-    }
+    ) {}
 
     public function handle(
         SyncRunService $runs,
@@ -228,12 +228,33 @@ final class PushSyncJob implements ShouldQueue
             try {
                 $result = $httpClient->execute(fn () => $provider->push($providerContext, $this->resourceType, $payload), 'push');
             } catch (SanitizedProviderHttpException $e) {
-                $items->recordAttempt(
-                    $connection->firm_id, $run->id, $this->resourceType, $this->localType, $this->localId,
-                    $existingMapping?->external_id, SyncItemStatus::FailedPermanent,
-                    lastError: "push_failed: {$e->category()}",
-                );
-                $runs->transitionStatus($run, SyncRunStatus::Failed, "push_failed: {$e->category()}");
+                // Checkpoint 1 (FirmsVault Live Integrations) fix
+                // (checkpoint1-design-http-ratelimit-usage.md §4.4): now
+                // that ProviderRequestExecutor proactively rate-limits
+                // real outbound calls, a merely-rate-limited (or
+                // otherwise transient) connection must not be
+                // permanently failed the same way a genuinely terminal
+                // failure is — that would be strictly worse than the
+                // previously-unwired state. Reuses the already-existing,
+                // already-tested WebhookRetryPolicyService::TERMINAL_CATEGORIES
+                // list, mirroring TestResourcePushHandler's already-correct
+                // identical branch — no new retry logic invented here.
+                if (in_array($e->category(), WebhookRetryPolicyService::TERMINAL_CATEGORIES, true)) {
+                    $items->recordAttempt(
+                        $connection->firm_id, $run->id, $this->resourceType, $this->localType, $this->localId,
+                        $existingMapping?->external_id, SyncItemStatus::FailedPermanent,
+                        lastError: "push_failed: {$e->category()}",
+                    );
+                    $runs->transitionStatus($run, SyncRunStatus::Failed, "push_failed: {$e->category()}");
+                } else {
+                    $items->recordAttempt(
+                        $connection->firm_id, $run->id, $this->resourceType, $this->localType, $this->localId,
+                        $existingMapping?->external_id, SyncItemStatus::FailedRetryable,
+                        lastError: "push_failed: {$e->category()}",
+                        nextAttemptAt: now()->addSeconds($e->retryAfterSeconds() ?? 60)->toDateTimeString(),
+                    );
+                    $runs->transitionStatus($run, SyncRunStatus::PartialFailure, "push_failed: {$e->category()}");
+                }
 
                 return;
             }

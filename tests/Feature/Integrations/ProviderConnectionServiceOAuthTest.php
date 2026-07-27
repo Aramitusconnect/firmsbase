@@ -6,14 +6,24 @@ namespace Tests\Feature\Integrations;
 
 use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
+use App\Integrations\Contracts\IntegrationProviderContract;
+use App\Integrations\Contracts\SupportsDisconnectContract;
+use App\Integrations\Core\ProviderRegistry;
+use App\Integrations\Data\OAuthCallbackResult;
+use App\Integrations\Data\OAuthInitiationResult;
+use App\Integrations\Enums\AuthMethod;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
 use App\Integrations\Enums\ProviderKey;
+use App\Integrations\Exceptions\AuthorizationCodeAlreadyUsedException;
+use App\Integrations\Exceptions\ExpiredAuthorizationCodeException;
+use App\Integrations\Exceptions\InvalidPkceVerifierException;
 use App\Integrations\Exceptions\OAuthAccountMismatchException;
 use App\Integrations\Exceptions\OAuthRedirectUriMismatchException;
 use App\Integrations\Exceptions\OAuthStateAlreadyConsumedException;
 use App\Integrations\Exceptions\OAuthStateExpiredException;
 use App\Integrations\Exceptions\OAuthStateNotFoundException;
+use App\Integrations\Exceptions\SimulatedProviderFailureException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationCredential;
 use App\Integrations\Models\IntegrationOAuthState;
@@ -39,6 +49,7 @@ use App\Services\TimelineEventRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Tests\TestCase;
@@ -97,13 +108,13 @@ class ProviderConnectionServiceOAuthTest extends TestCase
         // to "http://..." by the still-http request scheme. Both calls
         // are required together.
         config(['app.url' => 'https://app.firmsbase.test']);
-        \Illuminate\Support\Facades\URL::forceRootUrl('https://app.firmsbase.test');
-        \Illuminate\Support\Facades\URL::forceScheme('https');
+        URL::forceRootUrl('https://app.firmsbase.test');
+        URL::forceScheme('https');
 
         // Registers TestProvider under the real config-driven map
         // ProviderRegistry consults — mirrors production wiring exactly
         // (never a mock of ProviderRegistry itself).
-        config(['integrations.providers' => [\App\Integrations\Enums\ProviderKey::Test->value => TestProvider::class]]);
+        config(['integrations.providers' => [ProviderKey::Test->value => TestProvider::class]]);
 
         TestProvider::resetSimulationState();
     }
@@ -390,9 +401,9 @@ class ProviderConnectionServiceOAuthTest extends TestCase
 
         // Mint a code bound to a DIFFERENT (unrelated) code_challenge —
         // simulating a callback whose verifier will not match.
-        $code = $this->mintCode((new PkceService())->challengeForVerifier('unrelated-verifier'));
+        $code = $this->mintCode((new PkceService)->challengeForVerifier('unrelated-verifier'));
 
-        $this->expectException(\App\Integrations\Exceptions\InvalidPkceVerifierException::class);
+        $this->expectException(InvalidPkceVerifierException::class);
 
         $this->service()->completeOAuthCallback($flow['rawState'], $code, $firmUser->user_id);
     }
@@ -401,10 +412,10 @@ class ProviderConnectionServiceOAuthTest extends TestCase
     {
         // Directly exercises TestProvider's own guard (the layer that
         // actually performs this check) with an empty verifier context.
-        $provider = new TestProvider();
-        $code = $provider->simulateAuthorizationGrant((new PkceService())->challengeForVerifier('a-real-verifier'));
+        $provider = new TestProvider;
+        $code = $provider->simulateAuthorizationGrant((new PkceService)->challengeForVerifier('a-real-verifier'));
 
-        $this->expectException(\App\Integrations\Exceptions\InvalidPkceVerifierException::class);
+        $this->expectException(InvalidPkceVerifierException::class);
 
         $provider->exchangeCodeForToken($code, ['code_verifier' => '']);
     }
@@ -422,7 +433,7 @@ class ProviderConnectionServiceOAuthTest extends TestCase
         [, $connectionB, $firmUserB] = $this->firmConnectionAndActor();
         $flowB = $this->initiateFlow($connectionB, $firmUserB);
 
-        $this->expectException(\App\Integrations\Exceptions\AuthorizationCodeAlreadyUsedException::class);
+        $this->expectException(AuthorizationCodeAlreadyUsedException::class);
 
         $this->service()->completeOAuthCallback($flowB['rawState'], $code, $firmUserB->user_id);
     }
@@ -433,7 +444,7 @@ class ProviderConnectionServiceOAuthTest extends TestCase
         $flow = $this->initiateFlow($connection, $firmUser);
         $code = $this->mintCode($flow['codeChallenge'], expired: true);
 
-        $this->expectException(\App\Integrations\Exceptions\ExpiredAuthorizationCodeException::class);
+        $this->expectException(ExpiredAuthorizationCodeException::class);
 
         $this->service()->completeOAuthCallback($flow['rawState'], $code, $firmUser->user_id);
     }
@@ -442,12 +453,12 @@ class ProviderConnectionServiceOAuthTest extends TestCase
     {
         [, $connection, $firmUser] = $this->firmConnectionAndActor();
         $flow = $this->initiateFlow($connection, $firmUser);
-        $code = $this->mintCode((new PkceService())->challengeForVerifier('a-different-verifier'));
+        $code = $this->mintCode((new PkceService)->challengeForVerifier('a-different-verifier'));
 
         try {
             $this->service()->completeOAuthCallback($flow['rawState'], $code, $firmUser->user_id);
             $this->fail('Expected InvalidPkceVerifierException.');
-        } catch (\App\Integrations\Exceptions\InvalidPkceVerifierException $e) {
+        } catch (InvalidPkceVerifierException $e) {
             // The message may reference the word "verifier" generically
             // (it does — "The PKCE verifier does not match...") but must
             // never embed an actual secret-shaped value (a long
@@ -630,7 +641,7 @@ class ProviderConnectionServiceOAuthTest extends TestCase
 
     public function test_successful_completion_persists_both_access_and_refresh_token_credentials(): void
     {
-        [$firm, $connection, ] = $this->firmConnectionAndActor();
+        [$firm, $connection] = $this->firmConnectionAndActor();
         $connection = $connection;
         $result = $this->completeSuccessfulConnect($firm, $connection);
 
@@ -642,7 +653,7 @@ class ProviderConnectionServiceOAuthTest extends TestCase
 
     public function test_persisted_credential_ciphertext_never_contains_the_plaintext_token(): void
     {
-        [$firm, $connection, ] = $this->firmConnectionAndActor();
+        [$firm, $connection] = $this->firmConnectionAndActor();
         $this->completeSuccessfulConnect($firm, $connection);
 
         $rows = $this->runWithFirmContext($firm, fn () => DB::table('integration_credentials')->where('firm_integration_id', $connection->id)->get());
@@ -659,7 +670,7 @@ class ProviderConnectionServiceOAuthTest extends TestCase
 
     public function test_persisted_credential_is_linked_to_the_connection_completed_by_this_state(): void
     {
-        [$firm, $connection, ] = $this->firmConnectionAndActor();
+        [$firm, $connection] = $this->firmConnectionAndActor();
         $this->completeSuccessfulConnect($firm, $connection);
 
         $credential = $this->runWithFirmContext($firm, fn () => IntegrationCredential::query()->where('firm_integration_id', $connection->id)->where('credential_type', CredentialType::OauthAccessToken->value)->first());
@@ -676,7 +687,7 @@ class ProviderConnectionServiceOAuthTest extends TestCase
     {
         Http::fake();
 
-        [$firm, $connection, ] = $this->firmConnectionAndActor();
+        [$firm, $connection] = $this->firmConnectionAndActor();
         $this->completeSuccessfulConnect($firm, $connection);
 
         $fresh = $this->runWithFirmContext($firm, fn () => $connection->fresh());
@@ -687,7 +698,7 @@ class ProviderConnectionServiceOAuthTest extends TestCase
 
     public function test_refresh_rotates_the_access_token_credential(): void
     {
-        [$firm, $connection, ] = $this->firmConnectionAndActor();
+        [$firm, $connection] = $this->firmConnectionAndActor();
         $this->completeSuccessfulConnect($firm, $connection);
 
         // ProviderConnectionService::refreshConnectionToken()'s mandatory
@@ -728,7 +739,7 @@ class ProviderConnectionServiceOAuthTest extends TestCase
 
     public function test_refresh_never_creates_two_simultaneously_active_credentials_of_the_same_type(): void
     {
-        [$firm, $connection, ] = $this->firmConnectionAndActor();
+        [$firm, $connection] = $this->firmConnectionAndActor();
         $this->completeSuccessfulConnect($firm, $connection);
 
         $fresh = $this->runWithFirmContext($firm, fn () => $connection->fresh());
@@ -756,7 +767,7 @@ class ProviderConnectionServiceOAuthTest extends TestCase
     {
         Http::fake();
 
-        [$firm, $connection, ] = $this->firmConnectionAndActor();
+        [$firm, $connection] = $this->firmConnectionAndActor();
         $this->completeSuccessfulConnect($firm, $connection);
 
         $accessCredentialId = $this->runWithFirmContext($firm, function () use ($connection) {
@@ -783,13 +794,13 @@ class ProviderConnectionServiceOAuthTest extends TestCase
 
     public function test_refresh_failure_transitions_the_connection_to_reauthorization_required(): void
     {
-        [$firm, $connection, ] = $this->firmConnectionAndActor();
+        [$firm, $connection] = $this->firmConnectionAndActor();
         $this->completeSuccessfulConnect($firm, $connection);
 
         // Force the refresh credential's decrypted plaintext to the
         // FAILURE_SENTINEL by rotating it via the real credential
         // service (never a raw DB write of plaintext).
-        $credentialService = new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService()));
+        $credentialService = new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder);
         $refreshCredential = $this->runWithFirmContext($firm, fn () => IntegrationCredential::query()
             ->where('firm_integration_id', $connection->id)
             ->where('credential_type', CredentialType::OauthRefreshToken->value)
@@ -821,10 +832,10 @@ class ProviderConnectionServiceOAuthTest extends TestCase
 
     public function test_refresh_failure_message_never_contains_the_raw_provider_failure_detail(): void
     {
-        [$firm, $connection, ] = $this->firmConnectionAndActor();
+        [$firm, $connection] = $this->firmConnectionAndActor();
         $this->completeSuccessfulConnect($firm, $connection);
 
-        $credentialService = new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService()));
+        $credentialService = new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder);
         $refreshCredential = $this->runWithFirmContext($firm, fn () => IntegrationCredential::query()
             ->where('firm_integration_id', $connection->id)
             ->where('credential_type', CredentialType::OauthRefreshToken->value)
@@ -1038,9 +1049,8 @@ class ProviderConnectionServiceOAuthTest extends TestCase
         // this file.
         $this->completeSuccessfulConnect($firm, $connection, $firmUser);
 
-        $failingProvider = new class implements
-            \App\Integrations\Contracts\IntegrationProviderContract,
-            \App\Integrations\Contracts\SupportsDisconnectContract {
+        $failingProvider = new class implements IntegrationProviderContract, SupportsDisconnectContract
+        {
             public function key(): ProviderKey
             {
                 return ProviderKey::Test;
@@ -1063,12 +1073,12 @@ class ProviderConnectionServiceOAuthTest extends TestCase
 
             public function supportedAuthMethods(): array
             {
-                return [\App\Integrations\Enums\AuthMethod::OAuth2];
+                return [AuthMethod::OAuth2];
             }
 
             public function revokeAtProvider(array $context): bool
             {
-                throw new \App\Integrations\Exceptions\SimulatedProviderFailureException(
+                throw new SimulatedProviderFailureException(
                     category: 'provider_rejected',
                     statusCode: 502,
                     message: 'Simulated fixture failure — the real provider rejected the revoke call.',
@@ -1170,7 +1180,7 @@ class ProviderConnectionServiceOAuthTest extends TestCase
         $fresh = $this->runWithFirmContext($firm, fn () => $connection->fresh());
         $this->service()->disconnect($fresh, $firmUser->user_id);
 
-        $credentialService = new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService()));
+        $credentialService = new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder);
         $disconnected = $this->runWithFirmContext($firm, fn () => $connection->fresh());
 
         $this->expectException(RuntimeException::class);
@@ -1343,10 +1353,10 @@ class ProviderConnectionServiceOAuthTest extends TestCase
      */
     public function test_reauthorize_authorization_matches_the_configure_permission_oracle_for_every_role(): void
     {
-        $policy = new IntegrationAccessPolicyService(new TimelineEventRecorder());
+        $policy = new IntegrationAccessPolicyService(new TimelineEventRecorder);
 
         foreach (FirmUserRole::cases() as $role) {
-            [$firm, $connection, ] = $this->firmConnectionAndActor();
+            [$firm, $connection] = $this->firmConnectionAndActor();
             $originalOwner = $this->firmUserFor($firm, FirmUserRole::FirmOwner);
             $this->completeSuccessfulConnect($firm, $connection, $originalOwner);
 
@@ -1536,7 +1546,7 @@ class ProviderConnectionServiceOAuthTest extends TestCase
         // completing OAuth against an already-Disconnected row, so
         // startConnection() must be used, never a re-initiate on the
         // old row).
-        $provider = $this->runWithFirmContext($firm, fn () => \App\Integrations\Models\IntegrationProvider::query()->find($connection->integration_provider_id));
+        $provider = $this->runWithFirmContext($firm, fn () => IntegrationProvider::query()->find($connection->integration_provider_id));
         $newConnection = $this->service()->startConnection($firm->id, $provider->id, $firmUser->user_id);
 
         $reauthFlow = $this->initiateFlow($this->runWithFirmContext($firm, fn () => $newConnection->fresh()), $firmUser);
@@ -1660,16 +1670,16 @@ class ProviderConnectionServiceOAuthTest extends TestCase
     {
         return new ProviderConnectionService(
             new IntegrationOAuthStateService(
-                new EmailBodyEncryptionService(new EncryptionKeyService()),
-                new PkceService(),
-                new ProviderRedirectUrlValidator(),
+                new EmailBodyEncryptionService(new EncryptionKeyService),
+                new PkceService,
+                new ProviderRedirectUrlValidator,
             ),
-            new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService())),
-            new IntegrationAccessPolicyService(new TimelineEventRecorder()),
-            new \App\Integrations\Core\ProviderRegistry(),
-            new OutboundProviderHttpClient(),
-            new ProviderRedirectUrlValidator(),
-            new TimelineEventRecorder(),
+            new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder),
+            new IntegrationAccessPolicyService(new TimelineEventRecorder),
+            new ProviderRegistry,
+            new OutboundProviderHttpClient,
+            new ProviderRedirectUrlValidator,
+            new TimelineEventRecorder,
             // Checkpoint 10 addition (frozen design §4): ProviderConnectionService's
             // constructor gained this 8th, required dependency — every
             // manual construction site in this file must supply it.
@@ -1744,7 +1754,7 @@ class ProviderConnectionServiceOAuthTest extends TestCase
     }
 
     /**
-     * @return array{result: \App\Integrations\Data\OAuthInitiationResult, rawState: string, codeChallenge: string, redirectUri: string}
+     * @return array{result: OAuthInitiationResult, rawState: string, codeChallenge: string, redirectUri: string}
      */
     private function initiateFlow(FirmIntegration $connection, FirmUser $firmUser): array
     {
@@ -1768,10 +1778,10 @@ class ProviderConnectionServiceOAuthTest extends TestCase
         ?array $grantedScopes = null,
         bool $expired = false,
     ): string {
-        return (new TestProvider())->simulateAuthorizationGrant($codeChallenge, $externalAccountId, $grantedScopes, $expired);
+        return (new TestProvider)->simulateAuthorizationGrant($codeChallenge, $externalAccountId, $grantedScopes, $expired);
     }
 
-    private function completeSuccessfulConnect(?Firm $firm = null, ?FirmIntegration $connection = null, ?FirmUser $firmUser = null): \App\Integrations\Data\OAuthCallbackResult
+    private function completeSuccessfulConnect(?Firm $firm = null, ?FirmIntegration $connection = null, ?FirmUser $firmUser = null): OAuthCallbackResult
     {
         // Each parameter is defaulted independently. The previous
         // all-or-nothing `||` guard replaced firm/connection/firmUser

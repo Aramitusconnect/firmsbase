@@ -4,9 +4,13 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Integrations;
 
+use App\Enums\EntitlementSource;
+use App\Integrations\Core\ProviderRegistry;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
+use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Providers\TestProvider\TestProvider;
 use App\Integrations\Services\IntegrationAccessPolicyService;
 use App\Integrations\Services\IntegrationCredentialService;
 use App\Integrations\Services\IntegrationOAuthStateService;
@@ -14,7 +18,6 @@ use App\Integrations\Services\ProviderConnectionService;
 use App\Integrations\Support\OutboundProviderHttpClient;
 use App\Integrations\Support\PkceService;
 use App\Integrations\Support\ProviderRedirectUrlValidator;
-use App\Enums\EntitlementSource;
 use App\Models\Firm;
 use App\Models\TenantEncryptionKey;
 use App\Services\EmailBodyEncryptionService;
@@ -23,7 +26,9 @@ use App\Services\EntitlementService;
 use App\Services\IntegrationEntitlementPolicyService;
 use App\Services\TenantContextService;
 use App\Services\TimelineEventRecorder;
+use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -44,6 +49,15 @@ final class InboundWebhookSignatureVerificationTest extends TestCase
     {
         parent::setUp();
         Cache::flush();
+
+        // Checkpoint 1 (FirmsVault Live Integrations): InboundWebhookController
+        // now resolves the provider via ProviderRegistry/ProviderKey FIRST,
+        // before anything else — without this, every real HTTP request this
+        // test makes through the controller collapses to a 401 regardless of
+        // routing token/signature validity. Mirrors
+        // InboundWebhookLifecycleRevalidationTest::setUp()'s identical,
+        // already-established override.
+        config(['integrations.providers' => [ProviderKey::Test->value => TestProvider::class]]);
     }
 
     public function test_a_valid_signature_is_accepted(): void
@@ -188,6 +202,12 @@ final class InboundWebhookSignatureVerificationTest extends TestCase
         $headers = $this->signedHeaders($fixture['secret'], $fixture['rawToken'], $body);
 
         $server = [
+            // Checkpoint 1 (design §6): explicit Content-Type, otherwise
+            // Symfony defaults raw POST content to
+            // 'application/x-www-form-urlencoded', which the controller's
+            // new content-type allowlist now correctly rejects (see
+            // postWebhook()'s own docblock below for the full rationale).
+            'CONTENT_TYPE' => 'application/json',
             'HTTP_X_TEST_PROVIDER_CONNECTION_TOKEN' => $headers['X-Test-Provider-Connection-Token'],
             'HTTP_X_TEST_PROVIDER_SIGNATURE' => $headers['X-Test-Provider-Signature'],
             'HTTP_X_TEST_PROVIDER_TIMESTAMP' => $headers['X-Test-Provider-Timestamp'],
@@ -231,7 +251,7 @@ final class InboundWebhookSignatureVerificationTest extends TestCase
     {
         $fixture = $this->activeConnectionWithWebhookSecret();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $rows = DB::table('integration_credentials')
             ->where('firm_integration_id', $fixture['connection']->id)
@@ -298,23 +318,23 @@ final class InboundWebhookSignatureVerificationTest extends TestCase
 
     private function credentialService(): IntegrationCredentialService
     {
-        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService()));
+        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder);
     }
 
     private function connectionService(): ProviderConnectionService
     {
         return new ProviderConnectionService(
             new IntegrationOAuthStateService(
-                new EmailBodyEncryptionService(new EncryptionKeyService()),
-                new PkceService(),
-                new ProviderRedirectUrlValidator(),
+                new EmailBodyEncryptionService(new EncryptionKeyService),
+                new PkceService,
+                new ProviderRedirectUrlValidator,
             ),
             $this->credentialService(),
-            new IntegrationAccessPolicyService(new TimelineEventRecorder()),
-            new \App\Integrations\Core\ProviderRegistry(),
-            new OutboundProviderHttpClient(),
-            new ProviderRedirectUrlValidator(),
-            new TimelineEventRecorder(),
+            new IntegrationAccessPolicyService(new TimelineEventRecorder),
+            new ProviderRegistry,
+            new OutboundProviderHttpClient,
+            new ProviderRedirectUrlValidator,
+            new TimelineEventRecorder,
             // Checkpoint 10 addition (frozen design §4): ProviderConnectionService's
             // constructor gained this 8th, required dependency — every
             // manual construction site in this file must supply it.
@@ -361,7 +381,11 @@ final class InboundWebhookSignatureVerificationTest extends TestCase
 
     private function postWebhook(string $provider, array $headers, string $body): TestResponse
     {
-        $server = [];
+        // Checkpoint 1 (design §6): the controller's new content-type
+        // allowlist rejects Symfony's default 'application/x-www-form-urlencoded'
+        // for raw POST content with no explicit Content-Type — every real
+        // webhook sender sets this, so this is the correct fixture fix.
+        $server = ['CONTENT_TYPE' => 'application/json'];
         foreach ($headers as $name => $value) {
             $server['HTTP_'.strtoupper(str_replace('-', '_', $name))] = $value;
         }
@@ -371,7 +395,12 @@ final class InboundWebhookSignatureVerificationTest extends TestCase
 
     private function postWebhookWithDuplicateHeader(string $provider, array $headers, string $body, string $duplicateHeaderName, array $duplicateValues): TestResponse
     {
-        $server = [];
+        // Checkpoint 1: same content-type-allowlist fixture fix as
+        // postWebhook() above — without it, every one of this helper's
+        // callers would collapse to the content-type rejection BEFORE
+        // ever reaching the duplicate-header comparison this helper
+        // exists to exercise.
+        $server = ['CONTENT_TYPE' => 'application/json'];
         foreach ($headers as $name => $value) {
             if (strcasecmp($name, $duplicateHeaderName) === 0) {
                 continue;
@@ -382,8 +411,8 @@ final class InboundWebhookSignatureVerificationTest extends TestCase
         $symfonyRequest = SymfonyRequest::create(url("/webhooks/integrations/{$provider}"), 'POST', [], [], [], $server, $body);
         $symfonyRequest->headers->set($duplicateHeaderName, $duplicateValues, true);
 
-        $request = \Illuminate\Http\Request::createFromBase($symfonyRequest);
-        $kernel = $this->app->make(\Illuminate\Contracts\Http\Kernel::class);
+        $request = Request::createFromBase($symfonyRequest);
+        $kernel = $this->app->make(Kernel::class);
         $response = $kernel->handle($request);
         $kernel->terminate($request, $response);
 

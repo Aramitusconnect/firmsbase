@@ -92,8 +92,7 @@ final class PullSyncJob implements ShouldQueue
         // Callers now pass a JSON-encoded string; decoded back to an
         // array in handle() below before use.
         public readonly ?string $providerContext = null,
-    ) {
-    }
+    ) {}
 
     public function handle(
         SyncRunService $runs,
@@ -289,7 +288,19 @@ final class PullSyncJob implements ShouldQueue
             try {
                 $page = $httpClient->execute(fn () => $provider->pull($providerContext, $this->resourceType, $pageCursor), 'pull');
             } catch (SanitizedProviderHttpException $e) {
+                // Checkpoint 1 (FirmsVault Live Integrations) addition
+                // (checkpoint1-design-http-ratelimit-usage.md §4.4, last
+                // bullet — optional, non-blocking): thread a
+                // provider-supplied retryAfterSeconds into the run's
+                // failure summary so a future scheduler-level "don't
+                // re-dispatch before this timestamp" check (out of this
+                // checkpoint's scope) has the data available. Purely
+                // additive to the existing summary text — no behavior
+                // change to cursor/run status handling below.
                 $sanitizedErrorSummary = "pull_failed: {$e->category()}";
+                if ($e->retryAfterSeconds() !== null) {
+                    $sanitizedErrorSummary .= " retry_after_seconds={$e->retryAfterSeconds()}";
+                }
                 $sawBlockingFailure = true;
                 break;
             }

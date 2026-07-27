@@ -6,6 +6,7 @@ namespace Tests\Feature\Integrations\EndToEnd;
 
 use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
+use App\Integrations\Core\ProviderRegistry;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
 use App\Integrations\Enums\ProviderKey;
@@ -214,6 +215,23 @@ final class TestProviderWebhookRoutedSyncAndIdempotencyScenarioTest extends Test
         // providerContext — the exact mechanism the frozen design's
         // literal wording called for — rather than a manually
         // orchestrated provider/httpClient pairing.
+        //
+        // CHECKPOINT 1 (FirmsVault Live Integrations) update
+        // (checkpoint1-design-http-ratelimit-usage.md §4.4): PushSyncJob
+        // now branches on WebhookRetryPolicyService::TERMINAL_CATEGORIES
+        // before deciding Failed vs. PartialFailure — a merely
+        // rate-limited/transient failure must not be treated the same
+        // as a genuinely terminal one. TestProvider::push()'s
+        // FAILURE_SENTINEL throws with category 'provider_rejected',
+        // which is NOT in TERMINAL_CATEGORIES (only
+        // authentication_failed/authorization_failed/validation_failed/
+        // conflict/configuration_error/connection_unavailable/
+        // invalid_grant are), so the run now correctly lands in
+        // SyncRunStatus::PartialFailure (retryable) rather than
+        // SyncRunStatus::Failed (permanent) — this is the intended,
+        // reviewed behavior of that fix, not a regression, so this
+        // test's expected status is updated to match rather than
+        // asserting the old, now-incorrect 'failed' outcome.
         // ------------------------------------------------------------
         $this->assertNoDatabaseTenantContext();
 
@@ -227,7 +245,7 @@ final class TestProviderWebhookRoutedSyncAndIdempotencyScenarioTest extends Test
             ->first());
 
         $this->assertNotNull($failedRun);
-        $this->assertSame('failed', $failedRun->status, 'A real PushSyncJob dispatch carrying providerContext[\'__simulate_failure\'] => FAILURE_SENTINEL must now genuinely reach and throw inside genuine TestProvider::push(), routed through $payload by this checkpoint\'s fix.');
+        $this->assertSame('partial_failure', $failedRun->status, 'A real PushSyncJob dispatch carrying providerContext[\'__simulate_failure\'] => FAILURE_SENTINEL must genuinely reach and throw inside genuine TestProvider::push(), routed through $payload by this checkpoint\'s fix — and since \'provider_rejected\' is not a TERMINAL_CATEGORIES category, Checkpoint 1\'s category-aware retry branch correctly lands this run in PartialFailure (retryable), not the old unconditional Failed.');
         $this->assertStringContainsString('provider_rejected', $failedRun->error_summary);
 
         // Mirrors PushSyncJob::handle()'s own real catch-block
@@ -254,23 +272,23 @@ final class TestProviderWebhookRoutedSyncAndIdempotencyScenarioTest extends Test
     {
         return new ProviderConnectionService(
             new IntegrationOAuthStateService(
-                new EmailBodyEncryptionService(new EncryptionKeyService()),
-                new PkceService(),
-                new ProviderRedirectUrlValidator(),
+                new EmailBodyEncryptionService(new EncryptionKeyService),
+                new PkceService,
+                new ProviderRedirectUrlValidator,
             ),
             $this->credentialService(),
-            new IntegrationAccessPolicyService(new TimelineEventRecorder()),
-            new \App\Integrations\Core\ProviderRegistry(),
-            new OutboundProviderHttpClient(),
-            new ProviderRedirectUrlValidator(),
-            new TimelineEventRecorder(),
+            new IntegrationAccessPolicyService(new TimelineEventRecorder),
+            new ProviderRegistry,
+            new OutboundProviderHttpClient,
+            new ProviderRedirectUrlValidator,
+            new TimelineEventRecorder,
             app(IntegrationEntitlementPolicyService::class),
         );
     }
 
     private function credentialService(): IntegrationCredentialService
     {
-        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService()));
+        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder);
     }
 
     private function firmWithActiveKey(): Firm
@@ -309,7 +327,7 @@ final class TestProviderWebhookRoutedSyncAndIdempotencyScenarioTest extends Test
         $query = [];
         parse_str((string) parse_url($result->authorizationUrl, PHP_URL_QUERY), $query);
 
-        $code = (new TestProvider())->simulateAuthorizationGrant($query['code_challenge']);
+        $code = (new TestProvider)->simulateAuthorizationGrant($query['code_challenge']);
 
         $this->service()->completeOAuthCallback($query['state'], $code, $firmUser->user_id);
     }
@@ -337,7 +355,13 @@ final class TestProviderWebhookRoutedSyncAndIdempotencyScenarioTest extends Test
 
     private function postWebhook(string $provider, array $headers, string $body): TestResponse
     {
-        $server = [];
+        // Checkpoint 1 (design §6): the controller's new content-type
+        // allowlist rejects Symfony's default 'application/x-www-form-urlencoded'
+        // for raw POST content with no explicit Content-Type — every real
+        // webhook sender sets this, so this is the correct fixture fix
+        // (see InboundWebhookAuditLoggerTest::postWebhook() for the full
+        // rationale).
+        $server = ['CONTENT_TYPE' => 'application/json'];
         foreach ($headers as $name => $value) {
             $server['HTTP_'.strtoupper(str_replace('-', '_', $name))] = $value;
         }

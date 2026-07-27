@@ -47,6 +47,16 @@ class IntegrationPlatformProviderHealthSummary extends Model
         'rate_limit_condition_signal',
         'recent_error_classification_summary',
         'computed_at',
+        // Checkpoint 1 (FirmsVault Live Integrations,
+        // checkpoint1-design-health-sandbox.md §A.3.2) additions — see
+        // database/migrations/2026_09_13_130003_add_metrics_columns_to_integration_platform_provider_health_summaries_table.php.
+        'total_request_count',
+        'total_success_count',
+        'throttled_connection_count',
+        'token_refresh_failure_count',
+        'webhook_verification_failure_count',
+        'dead_letter_count',
+        'avg_latency_ms',
     ];
 
     protected function casts(): array
@@ -58,6 +68,13 @@ class IntegrationPlatformProviderHealthSummary extends Model
             'firms_requiring_attention_count' => 'integer',
             'recent_error_classification_summary' => 'array',
             'computed_at' => 'datetime',
+            'total_request_count' => 'integer',
+            'total_success_count' => 'integer',
+            'throttled_connection_count' => 'integer',
+            'token_refresh_failure_count' => 'integer',
+            'webhook_verification_failure_count' => 'integer',
+            'dead_letter_count' => 'integer',
+            'avg_latency_ms' => 'integer',
         ];
     }
 

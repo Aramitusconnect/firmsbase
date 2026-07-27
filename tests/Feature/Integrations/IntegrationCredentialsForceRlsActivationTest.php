@@ -16,6 +16,7 @@ use App\Models\TenantEncryptionKey;
 use App\Services\EmailBodyEncryptionService;
 use App\Services\EncryptionKeyService;
 use App\Services\TenantContextService;
+use App\Services\TimelineEventRecorder;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -85,6 +86,27 @@ class IntegrationCredentialsForceRlsActivationTest extends TestCase
     ];
 
     /**
+     * Checkpoint 1 (FirmsVault Live Integrations) addition
+     * (checkpoint1-security-review.md Finding 3;
+     * database/migrations/2026_09_13_130001_add_credential_environment_mode_to_integration_credentials_table.php) —
+     * a dedicated, DB-CHECK-constrained column, never folded into
+     * masked_display_metadata. Deliberately NOT folded into
+     * self::EXPECTED_COLUMNS above: that constant also backs
+     * test_migration_rollback_and_reapplication_restores_exact_prior_state()/
+     * test_migration_down_and_up_restores_exact_prior_state_via_direct_calls(),
+     * which roll back and reapply ONLY the two original
+     * 2026_09_03_030001/030002 migrations (never this later, separate
+     * ALTER TABLE migration) — after that narrower rollback/reapply
+     * cycle, this column is genuinely, correctly absent. Only the tests
+     * asserting the table's CURRENT, fully-migrated live schema use this
+     * constant.
+     */
+    private const EXPECTED_COLUMNS_ON_CURRENT_LIVE_SCHEMA = [
+        ...self::EXPECTED_COLUMNS,
+        'credential_environment_mode',
+    ];
+
+    /**
      * firm_id => id of the Active TenantEncryptionKey provisioned by
      * firmWithActiveKey() for that firm. Captured at creation time rather
      * than re-queried later, since tenant_encryption_keys is itself FORCE
@@ -109,7 +131,7 @@ class IntegrationCredentialsForceRlsActivationTest extends TestCase
         $columns = Schema::getColumnListing('integration_credentials');
 
         sort($columns);
-        $expected = self::EXPECTED_COLUMNS;
+        $expected = self::EXPECTED_COLUMNS_ON_CURRENT_LIVE_SCHEMA;
         sort($expected);
 
         $this->assertSame(
@@ -321,7 +343,7 @@ class IntegrationCredentialsForceRlsActivationTest extends TestCase
         $connection = $this->connectionForFirm($firm);
         $this->service()->store($connection, CredentialType::ApiKey, 'test-oauth-token-'.Str::random(32));
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(0, IntegrationCredential::query()->count());
     }
@@ -332,7 +354,7 @@ class IntegrationCredentialsForceRlsActivationTest extends TestCase
         $connection = $this->connectionForFirm($firm);
         $encryptionKeyId = $this->encryptionKeyIdFor($firm);
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
 
@@ -480,7 +502,7 @@ class IntegrationCredentialsForceRlsActivationTest extends TestCase
         // on store()'s own cleanup. Matches
         // WebhookSecretsForceRlsActivationTest::test_tenant_context_clears_after_success()'s
         // identical precedent for the identical reason.
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->service()->store($connection, CredentialType::ApiKey, 'test-oauth-token-'.Str::random(32));
 
@@ -643,14 +665,14 @@ class IntegrationCredentialsForceRlsActivationTest extends TestCase
 
     public function test_model_table_resolves_to_integration_credentials(): void
     {
-        $model = new IntegrationCredential();
+        $model = new IntegrationCredential;
 
         $this->assertSame('integration_credentials', $model->getTable());
     }
 
     public function test_model_fillable_contains_exactly_the_expected_fields(): void
     {
-        $model = new IntegrationCredential();
+        $model = new IntegrationCredential;
 
         $expected = [
             'firm_id',
@@ -659,6 +681,10 @@ class IntegrationCredentialsForceRlsActivationTest extends TestCase
             'encrypted_payload_ciphertext',
             'encryption_key_id',
             'status',
+            // Checkpoint 1 (FirmsVault Live Integrations) addition
+            // (checkpoint1-security-review.md Finding 3) — see the
+            // identical addition to EXPECTED_COLUMNS above.
+            'credential_environment_mode',
             'granted_scopes_json',
             'expires_at',
             'masked_display_metadata',
@@ -693,7 +719,7 @@ class IntegrationCredentialsForceRlsActivationTest extends TestCase
 
     public function test_model_has_the_tenant_global_scope_applied(): void
     {
-        $model = new IntegrationCredential();
+        $model = new IntegrationCredential;
 
         $this->assertArrayHasKey('tenant', $model->getGlobalScopes());
     }
@@ -1003,7 +1029,7 @@ class IntegrationCredentialsForceRlsActivationTest extends TestCase
 
     public function test_model_hidden_attributes_contain_encrypted_payload_ciphertext(): void
     {
-        $model = new IntegrationCredential();
+        $model = new IntegrationCredential;
 
         $this->assertContains('encrypted_payload_ciphertext', $model->getHidden());
     }
@@ -1211,7 +1237,7 @@ class IntegrationCredentialsForceRlsActivationTest extends TestCase
 
     private function service(): IntegrationCredentialService
     {
-        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService()));
+        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder);
     }
 
     /**

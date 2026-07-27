@@ -6,9 +6,12 @@ namespace Tests\Feature\Integrations;
 
 use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
+use App\Integrations\Core\ProviderRegistry;
+use App\Integrations\Data\OAuthInitiationResult;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Models\IntegrationCredential;
 use App\Integrations\Providers\TestProvider\TestProvider;
 use App\Integrations\Services\IntegrationAccessPolicyService;
 use App\Integrations\Services\IntegrationCredentialService;
@@ -109,7 +112,7 @@ final class OAuthConnectionControllerCallbackRouteTest extends TestCase
         $this->actingAs($firmUser->user)
             ->get(route('integrations.oauth.callback', ['state' => $flow['rawState'], 'code' => $code]));
 
-        $credentialCount = $this->runWithFirmContext($firm, fn () => \App\Integrations\Models\IntegrationCredential::query()
+        $credentialCount = $this->runWithFirmContext($firm, fn () => IntegrationCredential::query()
             ->where('firm_integration_id', $connection->id)
             ->where('status', 'active')
             ->count());
@@ -146,7 +149,7 @@ final class OAuthConnectionControllerCallbackRouteTest extends TestCase
         // A code bound to a DIFFERENT, unrelated code_challenge — the
         // real controller's own catch(InvalidPkceVerifierException)
         // branch must fire, not the service-layer test's direct call.
-        $code = $this->mintCode((new PkceService())->challengeForVerifier('an-unrelated-verifier'));
+        $code = $this->mintCode((new PkceService)->challengeForVerifier('an-unrelated-verifier'));
 
         $response = $this->actingAs($firmUser->user)
             ->get(route('integrations.oauth.callback', ['state' => $flow['rawState'], 'code' => $code]));
@@ -245,16 +248,16 @@ final class OAuthConnectionControllerCallbackRouteTest extends TestCase
     {
         return new ProviderConnectionService(
             new IntegrationOAuthStateService(
-                new EmailBodyEncryptionService(new EncryptionKeyService()),
-                new PkceService(),
-                new ProviderRedirectUrlValidator(),
+                new EmailBodyEncryptionService(new EncryptionKeyService),
+                new PkceService,
+                new ProviderRedirectUrlValidator,
             ),
-            new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService())),
-            new IntegrationAccessPolicyService(new TimelineEventRecorder()),
-            new \App\Integrations\Core\ProviderRegistry(),
-            new OutboundProviderHttpClient(),
-            new ProviderRedirectUrlValidator(),
-            new TimelineEventRecorder(),
+            new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder),
+            new IntegrationAccessPolicyService(new TimelineEventRecorder),
+            new ProviderRegistry,
+            new OutboundProviderHttpClient,
+            new ProviderRedirectUrlValidator,
+            new TimelineEventRecorder,
             app(IntegrationEntitlementPolicyService::class),
         );
     }
@@ -288,7 +291,7 @@ final class OAuthConnectionControllerCallbackRouteTest extends TestCase
     }
 
     /**
-     * @return array{result: \App\Integrations\Data\OAuthInitiationResult, rawState: string, codeChallenge: string}
+     * @return array{result: OAuthInitiationResult, rawState: string, codeChallenge: string}
      */
     private function initiateFlow(FirmIntegration $connection, FirmUser $firmUser): array
     {
@@ -311,6 +314,6 @@ final class OAuthConnectionControllerCallbackRouteTest extends TestCase
         ?array $grantedScopes = null,
         bool $expired = false,
     ): string {
-        return (new TestProvider())->simulateAuthorizationGrant($codeChallenge, $externalAccountId, $grantedScopes, $expired);
+        return (new TestProvider)->simulateAuthorizationGrant($codeChallenge, $externalAccountId, $grantedScopes, $expired);
     }
 }

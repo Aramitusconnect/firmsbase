@@ -8,6 +8,7 @@ use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
 use App\Enums\PlatformRoleCode;
 use App\Filament\Pages\PlatformFirmIntegrationDetailPage;
+use App\Integrations\Core\ProviderRegistry;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\FirmIntegration;
@@ -37,6 +38,8 @@ use App\Services\IntegrationPlatformOversightReadService;
 use App\Services\PlatformRoleService;
 use App\Services\TenantContextService;
 use App\Services\TimelineEventRecorder;
+use Filament\Facades\Filament;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
@@ -102,7 +105,7 @@ final class TestProviderConnectPullConflictDisconnectScenarioTest extends TestCa
         [$firm, $connection, $firmUser] = $this->firmConnectionAndActor();
 
         $flow = $this->initiateFlow($connection, $firmUser);
-        $code = (new TestProvider())->simulateAuthorizationGrant($flow['codeChallenge']);
+        $code = (new TestProvider)->simulateAuthorizationGrant($flow['codeChallenge']);
 
         $callbackResponse = $this->actingAs($firmUser->user)
             ->get(route('integrations.oauth.callback', ['state' => $flow['rawState'], 'code' => $code]));
@@ -199,7 +202,7 @@ final class TestProviderConnectPullConflictDisconnectScenarioTest extends TestCa
         $this->assertNotNull($matchingRow, 'The read service backing the SuperAdmin conflict view must surface the SAME conflict id created above.');
         $this->assertSame('remote_version_changed', $matchingRow['conflict_type']);
 
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $page = Livewire::test(PlatformFirmIntegrationDetailPage::class, [
@@ -218,7 +221,7 @@ final class TestProviderConnectPullConflictDisconnectScenarioTest extends TestCa
         // this connection's credentials, and a different firm's actor
         // cannot dispatch a pull against it.
         // ------------------------------------------------------------
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $noContextCredentialRows = DB::table('integration_credentials')->where('firm_integration_id', $connection->id)->get();
         $this->assertCount(0, $noContextCredentialRows, 'FORCE RLS must deny an ordinary no-context session, independent of the connection id being known.');
 
@@ -226,7 +229,7 @@ final class TestProviderConnectPullConflictDisconnectScenarioTest extends TestCa
         try {
             PullSyncJob::dispatchSync($connection->id, $attackerFirm->id, 'contact');
             $this->fail('A pull dispatch claiming the wrong firm id must be denied.');
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+        } catch (ModelNotFoundException) {
             // expected — the job's own ->where('firm_id', ...) guard
             // (plus RLS) finds zero rows for the wrong firm.
         }
@@ -276,16 +279,16 @@ final class TestProviderConnectPullConflictDisconnectScenarioTest extends TestCa
     {
         return new ProviderConnectionService(
             new IntegrationOAuthStateService(
-                new EmailBodyEncryptionService(new EncryptionKeyService()),
-                new PkceService(),
-                new ProviderRedirectUrlValidator(),
+                new EmailBodyEncryptionService(new EncryptionKeyService),
+                new PkceService,
+                new ProviderRedirectUrlValidator,
             ),
-            new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService())),
-            new IntegrationAccessPolicyService(new TimelineEventRecorder()),
-            new \App\Integrations\Core\ProviderRegistry(),
-            new OutboundProviderHttpClient(),
-            new ProviderRedirectUrlValidator(),
-            new TimelineEventRecorder(),
+            new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder),
+            new IntegrationAccessPolicyService(new TimelineEventRecorder),
+            new ProviderRegistry,
+            new OutboundProviderHttpClient,
+            new ProviderRedirectUrlValidator,
+            new TimelineEventRecorder,
             app(IntegrationEntitlementPolicyService::class),
         );
     }

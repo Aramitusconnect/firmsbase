@@ -59,13 +59,22 @@ use Illuminate\Support\Str;
  */
 final class HealthStateService
 {
-    public function __construct(private readonly TimelineEventRecorder $events)
-    {
-    }
+    public function __construct(private readonly TimelineEventRecorder $events) {}
 
-    public function recordSuccess(int $firmIntegrationId, int $firmId): void
+    /**
+     * CHECKPOINT 1 addition (FirmsVault Live Integrations,
+     * checkpoint1-design-health-sandbox.md §A.3.1/§A.3.4;
+     * checkpoint1-combined-design.md §1 step 5): the trailing
+     * $latencyMs parameter is optional and additive on every record*()
+     * method on this class — existing call sites (job-level, per the
+     * inventory's Checkpoint-12 docblocks) remain valid unmodified; the
+     * shared outbound HTTP call path (App\Integrations\Support\ProviderRequestExecutor,
+     * a parallel Checkpoint 1 workstream) is expected to pass a real
+     * measured duration here going forward.
+     */
+    public function recordSuccess(int $firmIntegrationId, int $firmId, ?int $latencyMs = null): void
     {
-        (new TenantContextService())->runWithFirmContext($firmId, function () use ($firmIntegrationId, $firmId) {
+        (new TenantContextService)->runWithFirmContext($firmId, function () use ($firmIntegrationId, $firmId, $latencyMs) {
             $connection = FirmIntegration::query()->where('id', $firmIntegrationId)->first();
             $connectionStatus = $connection?->status ?? ConnectionStatus::Active;
 
@@ -80,14 +89,23 @@ final class HealthStateService
             $summaryState = $this->computeSummaryState($connectionStatus, null, null, 0);
             $uuid = (string) Str::uuid7();
 
+            // Checkpoint 1 (checkpoint1-design-health-sandbox.md
+            // §A.3.1): total_request_count/total_success_count are
+            // cumulative counters, incremented on every call — never
+            // reset, unlike consecutive_failures. last_operation_label
+            // is deliberately NOT touched here: recordSuccess() carries
+            // no SanitizedHealthDiagnostic (and therefore no
+            // operationLabel) — see this method's own migration
+            // docblock for why that parameter was not added here.
             DB::statement(
                 'INSERT INTO integration_connection_health '.
                 '(uuid, firm_id, firm_integration_id, summary_state, last_success_at, last_failure_at, '.
                 'consecutive_failures, last_failure_category, rate_limited_reset_at, next_retry_at, '.
-                'sanitized_diagnostic_summary, last_checked_at, created_at, updated_at) '.
+                'sanitized_diagnostic_summary, last_checked_at, total_request_count, total_success_count, '.
+                'last_latency_ms, created_at, updated_at) '.
                 'VALUES (?, ?, ?, ?, statement_timestamp(), NULL, 0, NULL, NULL, '.
                 'to_timestamp(ceil(extract(epoch from statement_timestamp()))), '.
-                'NULL, statement_timestamp(), statement_timestamp(), statement_timestamp()) '.
+                'NULL, statement_timestamp(), 1, 1, ?, statement_timestamp(), statement_timestamp()) '.
                 'ON CONFLICT (firm_integration_id) DO UPDATE SET '.
                 'summary_state = EXCLUDED.summary_state, '.
                 'last_success_at = EXCLUDED.last_success_at, '.
@@ -97,8 +115,11 @@ final class HealthStateService
                 'next_retry_at = to_timestamp(ceil(extract(epoch from statement_timestamp()))), '.
                 'sanitized_diagnostic_summary = NULL, '.
                 'last_checked_at = EXCLUDED.last_checked_at, '.
+                'total_request_count = integration_connection_health.total_request_count + 1, '.
+                'total_success_count = integration_connection_health.total_success_count + 1, '.
+                'last_latency_ms = EXCLUDED.last_latency_ms, '.
                 'updated_at = EXCLUDED.updated_at',
-                [$uuid, $firmId, $firmIntegrationId, $summaryState->value]
+                [$uuid, $firmId, $firmIntegrationId, $summaryState->value, $latencyMs]
             );
 
             $this->syncDenormalizedCache($connection, $summaryState, null);
@@ -111,23 +132,24 @@ final class HealthStateService
         int $firmId,
         CarbonInterface $resetAt,
         SanitizedHealthDiagnostic $diagnostic,
+        ?int $latencyMs = null,
     ): void {
-        $this->recordFailureSignal($firmIntegrationId, $firmId, $diagnostic, Carbon::instance($resetAt));
+        $this->recordFailureSignal($firmIntegrationId, $firmId, $diagnostic, Carbon::instance($resetAt), $latencyMs);
     }
 
-    public function recordCredentialError(int $firmIntegrationId, int $firmId, SanitizedHealthDiagnostic $diagnostic): void
+    public function recordCredentialError(int $firmIntegrationId, int $firmId, SanitizedHealthDiagnostic $diagnostic, ?int $latencyMs = null): void
     {
-        $this->recordFailureSignal($firmIntegrationId, $firmId, $diagnostic);
+        $this->recordFailureSignal($firmIntegrationId, $firmId, $diagnostic, null, $latencyMs);
     }
 
-    public function recordScopeError(int $firmIntegrationId, int $firmId, SanitizedHealthDiagnostic $diagnostic): void
+    public function recordScopeError(int $firmIntegrationId, int $firmId, SanitizedHealthDiagnostic $diagnostic, ?int $latencyMs = null): void
     {
-        $this->recordFailureSignal($firmIntegrationId, $firmId, $diagnostic);
+        $this->recordFailureSignal($firmIntegrationId, $firmId, $diagnostic, null, $latencyMs);
     }
 
-    public function recordProviderError(int $firmIntegrationId, int $firmId, SanitizedHealthDiagnostic $diagnostic): void
+    public function recordProviderError(int $firmIntegrationId, int $firmId, SanitizedHealthDiagnostic $diagnostic, ?int $latencyMs = null): void
     {
-        $this->recordFailureSignal($firmIntegrationId, $firmId, $diagnostic);
+        $this->recordFailureSignal($firmIntegrationId, $firmId, $diagnostic, null, $latencyMs);
     }
 
     /**
@@ -151,7 +173,7 @@ final class HealthStateService
      */
     public function summariesForFirm(int $firmId): Collection
     {
-        return (new TenantContextService())->runWithFirmContext($firmId, function () use ($firmId) {
+        return (new TenantContextService)->runWithFirmContext($firmId, function () use ($firmId) {
             return IntegrationConnectionHealth::query()
                 ->where('firm_id', $firmId)
                 ->get()
@@ -190,10 +212,11 @@ final class HealthStateService
         int $firmId,
         SanitizedHealthDiagnostic $diagnostic,
         ?Carbon $resetAt = null,
+        ?int $latencyMs = null,
     ): void {
-        (new TenantContextService())->runWithFirmContext(
+        (new TenantContextService)->runWithFirmContext(
             $firmId,
-            function () use ($firmIntegrationId, $firmId, $diagnostic, $resetAt) {
+            function () use ($firmIntegrationId, $firmId, $diagnostic, $resetAt, $latencyMs) {
                 $connection = FirmIntegration::query()->where('id', $firmIntegrationId)->first();
                 $connectionStatus = $connection?->status ?? ConnectionStatus::Active;
 
@@ -218,15 +241,25 @@ final class HealthStateService
                 $uuid = (string) Str::uuid7();
                 $summaryText = $diagnostic->toSummaryText();
 
+                // Checkpoint 1 (checkpoint1-design-health-sandbox.md
+                // §A.3.1): total_request_count is incremented on every
+                // failure signal too (never just successes);
+                // total_success_count is NOT incremented here (a
+                // literal 0 on first insert, untouched on conflict).
+                // last_operation_label persists $diagnostic's own
+                // operationLabel — already passed at every call site
+                // today, previously folded only into the free-text
+                // sanitized_diagnostic_summary template.
                 if ($resetAt !== null) {
                     DB::statement(
                         'INSERT INTO integration_connection_health '.
                         '(uuid, firm_id, firm_integration_id, summary_state, last_success_at, last_failure_at, '.
                         'consecutive_failures, last_failure_category, rate_limited_reset_at, next_retry_at, '.
-                        'sanitized_diagnostic_summary, last_checked_at, created_at, updated_at) '.
+                        'sanitized_diagnostic_summary, last_checked_at, total_request_count, total_success_count, '.
+                        'last_operation_label, last_latency_ms, created_at, updated_at) '.
                         'VALUES (?, ?, ?, ?, NULL, statement_timestamp(), 1, ?, ?, '.
                         'GREATEST(to_timestamp(ceil(extract(epoch from statement_timestamp()))) + (? * interval \'1 second\'), ?::timestamp), '.
-                        '?, statement_timestamp(), statement_timestamp(), statement_timestamp()) '.
+                        '?, statement_timestamp(), 1, 0, ?, ?, statement_timestamp(), statement_timestamp()) '.
                         'ON CONFLICT (firm_integration_id) DO UPDATE SET '.
                         'summary_state = EXCLUDED.summary_state, '.
                         'last_failure_at = EXCLUDED.last_failure_at, '.
@@ -236,10 +269,13 @@ final class HealthStateService
                         'next_retry_at = GREATEST(to_timestamp(ceil(extract(epoch from statement_timestamp()))) + (? * interval \'1 second\'), ?::timestamp), '.
                         'sanitized_diagnostic_summary = EXCLUDED.sanitized_diagnostic_summary, '.
                         'last_checked_at = EXCLUDED.last_checked_at, '.
+                        'total_request_count = integration_connection_health.total_request_count + 1, '.
+                        'last_operation_label = EXCLUDED.last_operation_label, '.
+                        'last_latency_ms = EXCLUDED.last_latency_ms, '.
                         'updated_at = EXCLUDED.updated_at',
                         [
                             $uuid, $firmId, $firmIntegrationId, $summaryState->value, $diagnostic->category(), $resetAt,
-                            $delaySeconds, $resetAt, $summaryText,
+                            $delaySeconds, $resetAt, $summaryText, $diagnostic->operationLabel(), $latencyMs,
                             $delaySeconds, $resetAt,
                         ]
                     );
@@ -248,10 +284,11 @@ final class HealthStateService
                         'INSERT INTO integration_connection_health '.
                         '(uuid, firm_id, firm_integration_id, summary_state, last_success_at, last_failure_at, '.
                         'consecutive_failures, last_failure_category, rate_limited_reset_at, next_retry_at, '.
-                        'sanitized_diagnostic_summary, last_checked_at, created_at, updated_at) '.
+                        'sanitized_diagnostic_summary, last_checked_at, total_request_count, total_success_count, '.
+                        'last_operation_label, last_latency_ms, created_at, updated_at) '.
                         'VALUES (?, ?, ?, ?, NULL, statement_timestamp(), 1, ?, NULL, '.
                         'to_timestamp(ceil(extract(epoch from statement_timestamp()))) + (? * interval \'1 second\'), '.
-                        '?, statement_timestamp(), statement_timestamp(), statement_timestamp()) '.
+                        '?, statement_timestamp(), 1, 0, ?, ?, statement_timestamp(), statement_timestamp()) '.
                         'ON CONFLICT (firm_integration_id) DO UPDATE SET '.
                         'summary_state = EXCLUDED.summary_state, '.
                         'last_failure_at = EXCLUDED.last_failure_at, '.
@@ -261,10 +298,13 @@ final class HealthStateService
                         'next_retry_at = to_timestamp(ceil(extract(epoch from statement_timestamp()))) + (? * interval \'1 second\'), '.
                         'sanitized_diagnostic_summary = EXCLUDED.sanitized_diagnostic_summary, '.
                         'last_checked_at = EXCLUDED.last_checked_at, '.
+                        'total_request_count = integration_connection_health.total_request_count + 1, '.
+                        'last_operation_label = EXCLUDED.last_operation_label, '.
+                        'last_latency_ms = EXCLUDED.last_latency_ms, '.
                         'updated_at = EXCLUDED.updated_at',
                         [
                             $uuid, $firmId, $firmIntegrationId, $summaryState->value, $diagnostic->category(),
-                            $delaySeconds, $summaryText,
+                            $delaySeconds, $summaryText, $diagnostic->operationLabel(), $latencyMs,
                             $delaySeconds,
                         ]
                     );
@@ -286,7 +326,7 @@ final class HealthStateService
      */
     private function maybeRecordStateChangeEvent(
         ?FirmIntegration $connection,
-        string|null $previousSummaryState,
+        ?string $previousSummaryState,
         HealthSummaryState $newSummaryState,
     ): void {
         if ($connection === null || $previousSummaryState === null) {

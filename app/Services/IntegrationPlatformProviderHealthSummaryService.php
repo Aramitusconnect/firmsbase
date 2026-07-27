@@ -67,6 +67,19 @@ final class IntegrationPlatformProviderHealthSummaryService
         $webhookConfiguredFirmCount = 0;
         $errorCategoryCounts = [];
 
+        // Checkpoint 1 (FirmsVault Live Integrations,
+        // checkpoint1-design-health-sandbox.md §A.3.2) accumulators —
+        // summed across every connection's new
+        // integration_connection_health metrics columns during the
+        // same per-firm loop below.
+        $totalRequestCount = 0;
+        $totalSuccessCount = 0;
+        $throttledConnectionCount = 0;
+        $tokenRefreshFailureCount = 0;
+        $deadLetterCount = 0;
+        $latencySum = 0;
+        $latencySampleCount = 0;
+
         Firm::query()
             ->where('activation_status', FirmActivationStatus::Activated)
             ->orderBy('id')
@@ -81,6 +94,13 @@ final class IntegrationPlatformProviderHealthSummaryService
                 &$rateLimitedFirmCount,
                 &$webhookConfiguredFirmCount,
                 &$errorCategoryCounts,
+                &$totalRequestCount,
+                &$totalSuccessCount,
+                &$throttledConnectionCount,
+                &$tokenRefreshFailureCount,
+                &$deadLetterCount,
+                &$latencySum,
+                &$latencySampleCount,
             ): void {
                 $this->tenantContext->runWithFirmContext($firmId, function () use (
                     $provider,
@@ -93,12 +113,36 @@ final class IntegrationPlatformProviderHealthSummaryService
                     &$rateLimitedFirmCount,
                     &$webhookConfiguredFirmCount,
                     &$errorCategoryCounts,
+                    &$totalRequestCount,
+                    &$totalSuccessCount,
+                    &$throttledConnectionCount,
+                    &$tokenRefreshFailureCount,
+                    &$deadLetterCount,
+                    &$latencySum,
+                    &$latencySampleCount,
                 ): void {
                     $connections = FirmIntegration::query()
                         ->where('firm_id', $firmId)
                         ->where('integration_provider_id', $provider->id)
                         ->orderBy('id')
                         ->get(['id', 'status']);
+
+                    if ($connections->isEmpty()) {
+                        return;
+                    }
+
+                    $connectionIds = $connections->pluck('id');
+
+                    // Checkpoint 1: one batched dead-letter count per
+                    // firm (never per connection) — mirrors
+                    // App\Services\PlatformConnectionDirectoryService's
+                    // own "batched per firm, never per connection"
+                    // discipline.
+                    $deadLetterCount += DB::table('integration_outbox_events')
+                        ->where('firm_id', $firmId)
+                        ->whereIn('firm_integration_id', $connectionIds)
+                        ->where('status', 'dead_lettered')
+                        ->count();
 
                     foreach ($connections as $connection) {
                         if ($connection->status === ConnectionStatus::Active) {
@@ -124,9 +168,17 @@ final class IntegrationPlatformProviderHealthSummaryService
                             $firmsRequiringAttentionCount++;
                         }
 
-                        $lastFailureCategory = DB::table('integration_connection_health')
+                        $healthRow = DB::table('integration_connection_health')
                             ->where('firm_integration_id', $connection->id)
-                            ->value('last_failure_category');
+                            ->first([
+                                'last_failure_category',
+                                'last_operation_label',
+                                'last_latency_ms',
+                                'total_request_count',
+                                'total_success_count',
+                            ]);
+
+                        $lastFailureCategory = $healthRow?->last_failure_category;
 
                         if ($lastFailureCategory !== null) {
                             $connectedFirmsWithHealthData++;
@@ -141,9 +193,22 @@ final class IntegrationPlatformProviderHealthSummaryService
 
                             if ($lastFailureCategory === SanitizedHealthDiagnostic::CATEGORY_RATE_LIMITED) {
                                 $rateLimitedFirmCount++;
+                                $throttledConnectionCount++;
                             }
                         } else {
                             $connectedFirmsWithHealthData++;
+                        }
+
+                        if ($healthRow?->last_operation_label === SanitizedHealthDiagnostic::OPERATION_TOKEN_REFRESH) {
+                            $tokenRefreshFailureCount++;
+                        }
+
+                        $totalRequestCount += (int) ($healthRow->total_request_count ?? 0);
+                        $totalSuccessCount += (int) ($healthRow->total_success_count ?? 0);
+
+                        if ($healthRow?->last_latency_ms !== null) {
+                            $latencySum += (int) $healthRow->last_latency_ms;
+                            $latencySampleCount++;
                         }
 
                         $webhookConfigured = DB::table('integration_webhook_routing_index')
@@ -157,6 +222,20 @@ final class IntegrationPlatformProviderHealthSummaryService
                 });
             });
 
+        // Checkpoint 1 (checkpoint1-design-health-sandbox.md §A.3.3):
+        // webhook verification failures CANNOT come from the per-firm
+        // connection loop above at all — a rejected inbound webhook
+        // frequently cannot be attributed to any resolved connection.
+        // Summed instead from the new, platform-owned, no-RLS
+        // integration_webhook_verification_failures counter table, a
+        // single cheap aggregate query outside any tenant context,
+        // windowed to the last 24h (matching
+        // recent_error_classification_summary's own "recent" framing).
+        $webhookVerificationFailureCount = DB::table('integration_webhook_verification_failures')
+            ->where('provider_code', $provider->code)
+            ->where('occurred_at', '>=', now()->subDay())
+            ->count();
+
         return [
             'connected_firm_count' => $connectedFirmCount,
             'disconnected_firm_count' => $disconnectedFirmCount,
@@ -166,6 +245,13 @@ final class IntegrationPlatformProviderHealthSummaryService
             'rate_limit_condition_signal' => $this->deriveRateLimitSignal($connectedFirmsWithHealthData, $rateLimitedFirmCount),
             'recent_error_classification_summary' => empty($errorCategoryCounts) ? null : $errorCategoryCounts,
             'provider_enabled' => $provider->status === 'active',
+            'total_request_count' => $totalRequestCount,
+            'total_success_count' => $totalSuccessCount,
+            'throttled_connection_count' => $throttledConnectionCount,
+            'token_refresh_failure_count' => $tokenRefreshFailureCount,
+            'webhook_verification_failure_count' => $webhookVerificationFailureCount,
+            'dead_letter_count' => $deadLetterCount,
+            'avg_latency_ms' => $latencySampleCount > 0 ? (int) round($latencySum / $latencySampleCount) : null,
         ];
     }
 
@@ -241,6 +327,19 @@ final class IntegrationPlatformProviderHealthSummaryService
                 'recent_error_classification_summary',
                 'computed_at',
                 'updated_at',
+                // Checkpoint 1 (FirmsVault Live Integrations,
+                // checkpoint1-design-health-sandbox.md §A.3.2) additions
+                // — this array is explicit, so a new field added to
+                // $aggregate without also being added here would
+                // silently never upsert (confirmed by reading this
+                // method directly, per that design doc's own A.4 note).
+                'total_request_count',
+                'total_success_count',
+                'throttled_connection_count',
+                'token_refresh_failure_count',
+                'webhook_verification_failure_count',
+                'dead_letter_count',
+                'avg_latency_ms',
             ],
         );
     }

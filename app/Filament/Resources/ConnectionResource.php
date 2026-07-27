@@ -232,6 +232,18 @@ class ConnectionResource extends Resource
                         return "{$consecutiveFailures} consecutive failure(s), next retry: {$retryLabel}";
                     }),
                 TextColumn::make('rate_limited_reset_at')->label('Rate Limit Resets At')->dateTime()->placeholder('Not rate-limited'),
+                // Checkpoint 1 (FirmsVault Live Integrations,
+                // checkpoint1-design-health-sandbox.md §A.3.1/§A.4)
+                // additions — one TextColumn per new metrics field.
+                TextColumn::make('total_request_count')->label('Total Requests')->alignEnd()->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('total_success_count')->label('Total Successes')->alignEnd()->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('last_operation_label')
+                    ->label('Last Operation')
+                    ->placeholder('—')
+                    ->formatStateUsing(fn (?string $state): string => $state === null ? '—' : Str::headline($state))
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('last_latency_ms')->label('Last Latency (ms)')->placeholder('—')->alignEnd()->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('last_sync_lag_seconds')->label('Last Sync Lag (s)')->placeholder('—')->alignEnd()->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('connected_at')->label('Connected at')->dateTime()->placeholder('—'),
                 TextColumn::make('created_at')->label('Created')->dateTime()->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('updated_at')->label('Updated')->dateTime()->toggleable(isToggledHiddenByDefault: true),

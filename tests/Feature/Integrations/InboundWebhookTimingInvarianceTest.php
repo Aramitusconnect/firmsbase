@@ -4,9 +4,13 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Integrations;
 
+use App\Enums\EntitlementSource;
+use App\Integrations\Core\ProviderRegistry;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
+use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Providers\TestProvider\TestProvider;
 use App\Integrations\Services\IntegrationAccessPolicyService;
 use App\Integrations\Services\IntegrationCredentialService;
 use App\Integrations\Services\IntegrationOAuthStateService;
@@ -14,7 +18,6 @@ use App\Integrations\Services\ProviderConnectionService;
 use App\Integrations\Support\OutboundProviderHttpClient;
 use App\Integrations\Support\PkceService;
 use App\Integrations\Support\ProviderRedirectUrlValidator;
-use App\Enums\EntitlementSource;
 use App\Models\Firm;
 use App\Models\TenantEncryptionKey;
 use App\Services\EmailBodyEncryptionService;
@@ -24,6 +27,7 @@ use App\Services\IntegrationEntitlementPolicyService;
 use App\Services\TimelineEventRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
@@ -43,7 +47,7 @@ use Tests\TestCase;
  *     on a single sample;
  *   - the tolerance band is generous (a fixed absolute floor PLUS a
  *     wide relative multiplier) — chosen to catch a genuine multiple-
-     *     orders-of-magnitude regression (e.g. someone removing
+ *     orders-of-magnitude regression (e.g. someone removing
  *     performConstantWorkPadding() entirely, which the frozen design's
  *     own risk analysis estimates at a "1-2 order-of-magnitude" gap)
  *     while tolerating ordinary test-environment noise;
@@ -62,6 +66,17 @@ final class InboundWebhookTimingInvarianceTest extends TestCase
     {
         parent::setUp();
         Cache::flush();
+
+        // Checkpoint 1 (FirmsVault Live Integrations): InboundWebhookController
+        // now resolves the provider via ProviderRegistry/ProviderKey FIRST,
+        // before anything else — without this, every real HTTP request this
+        // test makes through the controller collapses to a 401 regardless of
+        // routing token/signature validity. Only the 'test' key is
+        // registered here — 'unknownprovider' used by this file's own
+        // early-exit comparison stays deliberately unregistered. Mirrors
+        // InboundWebhookLifecycleRevalidationTest::setUp()'s identical,
+        // already-established override.
+        config(['integrations.providers' => [ProviderKey::Test->value => TestProvider::class]]);
     }
 
     public function test_unknown_provider_unknown_token_and_invalid_signature_rejections_fall_within_a_generous_tolerance_band(): void
@@ -119,6 +134,53 @@ final class InboundWebhookTimingInvarianceTest extends TestCase
     }
 
     /**
+     * CHECKPOINT 1 addition (FirmsVault Live Integrations, security
+     * review Finding 5): confirms the tolerance-band measurement above
+     * genuinely INCLUDES RecordWebhookVerificationFailureJob's real
+     * synchronous execution (this suite's phpunit.xml sets
+     * QUEUE_CONNECTION=sync, so a ShouldQueue job dispatched here
+     * actually runs its handle() — including the real DB INSERT — within
+     * the same request, not skipped/deferred) — i.e. the measurement
+     * above is not silently exempt from the very overhead Finding 5
+     * raised the concern about. All three rejection paths dispatch the
+     * job (confirmed directly, not inferred), so the comparison stays
+     * apples-to-apples.
+     */
+    public function test_all_three_measured_rejection_paths_genuinely_dispatch_and_execute_the_verification_failure_job(): void
+    {
+        $fixture = $this->activeConnectionWithWebhookSecret();
+        $body = $this->eventBody();
+
+        $countBefore = DB::table('integration_webhook_verification_failures')->count();
+
+        $this->postWebhook('unknownprovider', [
+            'X-Test-Provider-Connection-Token' => Str::random(43),
+            'X-Test-Provider-Signature' => 'v1='.str_repeat('a', 64),
+            'X-Test-Provider-Timestamp' => (string) now()->getTimestamp(),
+        ], $body);
+
+        $this->postWebhook('test', [
+            'X-Test-Provider-Connection-Token' => Str::random(43),
+            'X-Test-Provider-Signature' => 'v1='.str_repeat('a', 64),
+            'X-Test-Provider-Timestamp' => (string) now()->getTimestamp(),
+        ], $body);
+
+        $this->postWebhook('test', [
+            'X-Test-Provider-Connection-Token' => $fixture['rawToken'],
+            'X-Test-Provider-Signature' => 'v1='.str_repeat('9', 64),
+            'X-Test-Provider-Timestamp' => (string) now()->getTimestamp(),
+        ], $body);
+
+        $countAfter = DB::table('integration_webhook_verification_failures')->count();
+
+        $this->assertSame(
+            $countBefore + 3,
+            $countAfter,
+            'All three rejection paths measured by this file\'s timing-invariance assertion must genuinely dispatch and execute RecordWebhookVerificationFailureJob — otherwise the tolerance-band comparison above would not actually be proving what it claims to prove.'
+        );
+    }
+
+    /**
      * @return float average wall-clock seconds per call
      */
     private function averageMicroseconds(callable $callback): float
@@ -155,23 +217,23 @@ final class InboundWebhookTimingInvarianceTest extends TestCase
 
     private function credentialService(): IntegrationCredentialService
     {
-        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService()));
+        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder);
     }
 
     private function connectionService(): ProviderConnectionService
     {
         return new ProviderConnectionService(
             new IntegrationOAuthStateService(
-                new EmailBodyEncryptionService(new EncryptionKeyService()),
-                new PkceService(),
-                new ProviderRedirectUrlValidator(),
+                new EmailBodyEncryptionService(new EncryptionKeyService),
+                new PkceService,
+                new ProviderRedirectUrlValidator,
             ),
             $this->credentialService(),
-            new IntegrationAccessPolicyService(new TimelineEventRecorder()),
-            new \App\Integrations\Core\ProviderRegistry(),
-            new OutboundProviderHttpClient(),
-            new ProviderRedirectUrlValidator(),
-            new TimelineEventRecorder(),
+            new IntegrationAccessPolicyService(new TimelineEventRecorder),
+            new ProviderRegistry,
+            new OutboundProviderHttpClient,
+            new ProviderRedirectUrlValidator,
+            new TimelineEventRecorder,
             // Checkpoint 10 addition (frozen design §4): ProviderConnectionService's
             // constructor gained this 8th, required dependency — every
             // manual construction site in this file must supply it.
@@ -206,7 +268,14 @@ final class InboundWebhookTimingInvarianceTest extends TestCase
 
     private function postWebhook(string $provider, array $headers, string $body): TestResponse
     {
-        $server = [];
+        // Checkpoint 1 (design §6): the controller's new content-type
+        // allowlist rejects Symfony's default 'application/x-www-form-urlencoded'
+        // for raw POST content with no explicit Content-Type — every real
+        // webhook sender sets this, so this is the correct fixture fix
+        // (see InboundWebhookAuditLoggerTest::postWebhook() for the full
+        // rationale). This applies uniformly to all three timing-comparison
+        // branches below, so it does not distort the relative comparison.
+        $server = ['CONTENT_TYPE' => 'application/json'];
         foreach ($headers as $name => $value) {
             $server['HTTP_'.strtoupper(str_replace('-', '_', $name))] = $value;
         }

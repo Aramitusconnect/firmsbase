@@ -23,6 +23,7 @@ use App\Integrations\Exceptions\InvalidPkceVerifierException;
 use App\Integrations\Exceptions\SimulatedProviderFailureException;
 use App\Integrations\Services\InboundWebhookSignatureVerifier;
 use App\Integrations\Support\PkceService;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 /**
@@ -97,16 +98,7 @@ use Illuminate\Support\Str;
  * provider's own code store — is itself out of scope for TestProvider
  * by design).
  */
-final class TestProvider implements
-    IntegrationProviderContract,
-    SupportsOAuthContract,
-    SupportsApiKeyContract,
-    SupportsWebhooksContract,
-    SupportsHealthCheckContract,
-    SupportsPullSyncContract,
-    SupportsPushSyncContract,
-    SupportsIncrementalSyncContract,
-    SupportsDisconnectContract
+final class TestProvider implements IntegrationProviderContract, SupportsApiKeyContract, SupportsDisconnectContract, SupportsHealthCheckContract, SupportsIncrementalSyncContract, SupportsOAuthContract, SupportsPullSyncContract, SupportsPushSyncContract, SupportsWebhooksContract
 {
     /**
      * A magic, non-secret sentinel value: if passed as the
@@ -157,7 +149,7 @@ final class TestProvider implements
     public const RATE_LIMIT_SENTINEL = '__simulate_rate_limited_provider_failure__';
 
     /**
-     * @var array<string, array{code_challenge: string, external_account_id: string, granted_scopes: string[], used: bool, expires_at: \Illuminate\Support\Carbon}>
+     * @var array<string, array{code_challenge: string, external_account_id: string, granted_scopes: string[], used: bool, expires_at: Carbon}>
      */
     private static array $issuedAuthorizationCodes = [];
 
@@ -301,10 +293,10 @@ final class TestProvider implements
      * OAuthConnectionController's callback route, exactly as a real
      * provider would hand one back via the browser redirect.
      *
-     * @param  string[]|null $grantedScopes defaults to requiredScopes()
-     *                                      when null — pass a narrower
-     *                                      array to simulate a
-     *                                      missing-scope grant.
+     * @param  string[]|null  $grantedScopes  defaults to requiredScopes()
+     *                                        when null — pass a narrower
+     *                                        array to simulate a
+     *                                        missing-scope grant.
      */
     public function simulateAuthorizationGrant(
         string $codeChallenge,
@@ -338,21 +330,21 @@ final class TestProvider implements
         $entry = self::$issuedAuthorizationCodes[$code] ?? null;
 
         if ($entry === null) {
-            throw new ExpiredAuthorizationCodeException();
+            throw new ExpiredAuthorizationCodeException;
         }
 
         if ($entry['used']) {
-            throw new AuthorizationCodeAlreadyUsedException();
+            throw new AuthorizationCodeAlreadyUsedException;
         }
 
         if (now()->greaterThan($entry['expires_at'])) {
-            throw new ExpiredAuthorizationCodeException();
+            throw new ExpiredAuthorizationCodeException;
         }
 
         $verifier = $context['code_verifier'] ?? '';
 
-        if (! is_string($verifier) || $verifier === '' || ! (new PkceService())->verify($verifier, $entry['code_challenge'])) {
-            throw new InvalidPkceVerifierException();
+        if (! is_string($verifier) || $verifier === '' || ! (new PkceService)->verify($verifier, $entry['code_challenge'])) {
+            throw new InvalidPkceVerifierException;
         }
 
         self::$issuedAuthorizationCodes[$code]['used'] = true;
@@ -475,32 +467,67 @@ final class TestProvider implements
      * enforced where it structurally applies, in
      * InboundWebhookController's own real-Request header extraction.
      *
-     * CHECKPOINT 12 clarification, no behavior change
-     * (frozen-design-post-security-review.md §2 F6/§5 N1): this method
-     * has ZERO production callers. It exists to satisfy
+     * CHECKPOINT 1 UPDATE (FirmsVault Live Integrations,
+     * checkpoint1-design-webhook-verification.md §0/§2/§7): the
+     * "ZERO production callers" framing below is now HISTORICAL only.
+     * As of Checkpoint 1, App\Integrations\Http\Controllers\InboundWebhookController
+     * fully delegates verification to
+     * App\Integrations\Contracts\SupportsWebhooksContract::verifyInboundSignature()
+     * for whichever provider is resolved — this method is therefore
+     * now the genuinely-exercised production verification path for
+     * TestProvider-routed webhooks, not merely a reference
+     * construction.
+     *
+     * CORRECTION (post-diff-review, checkpoint1-diff-review.md): $headers
+     * here MAY carry SupportsWebhooksContract::SECRET_CANDIDATES_HEADER_KEY
+     * (see that interface's class docblock), and this method MUST prefer
+     * it when present. `ProviderRegistry::get()` resolves a fresh,
+     * transient TestProvider instance per call (no singleton binding),
+     * whose constructor mints a brand-new random $webhookSigningKey — so
+     * the instance the real controller resolves to call
+     * verifyInboundSignature() on is never the same instance whose key
+     * was used to store the connection's actual webhook-signing
+     * credential. Verifying only against this instance's own
+     * $webhookSigningKey/$previousWebhookSigningKey would therefore
+     * reject every genuinely-signed webhook delivered through the real
+     * route. The framework-resolved candidates (decrypted from the
+     * connection's real stored credentials by
+     * WebhookConnectionResolverService) are the actual secret material
+     * for the real flow; this instance's own keys remain the fallback
+     * used ONLY by the direct-unit-test simulation harness
+     * (TestProviderStubTest), which constructs a TestProvider and calls
+     * this method on the SAME instance without going through the
+     * controller and therefore never populates the synthetic header.
+     * Never logs/throws/echoes $headers or the synthetic key's value
+     * regardless of which branch is taken.
+     *
+     * CHECKPOINT 12 clarification (historical; frozen-design-post-
+     * security-review.md §2 F6/§5 N1): this method exists to satisfy
      * SupportsWebhooksContract/CapabilityContractTest's non-vacuousness
      * requirement and to provide a documented reference construction
      * matching the real inbound webhook route's header/HMAC convention
-     * (see the Checkpoint 7 rewrite note above). It is explicitly NOT
-     * the code path that verifies a genuine inbound TestProvider-
-     * originated webhook in production — that flows through the real,
-     * unmodified App\Integrations\Http\Controllers\InboundWebhookController
-     * / App\Integrations\Services\WebhookConnectionResolverService,
-     * driven by App\Integrations\Services\ProviderConnectionService::enableWebhookRouting()'s
-     * already-generic, provider-agnostic wiring — no TestProvider-
-     * specific glue is needed or was added anywhere in that pipeline.
+     * (see the Checkpoint 7 rewrite note above).
      */
     public function verifyInboundSignature(string $rawBody, array $headers): bool
     {
         $signatureRaw = $this->findHeaderCaseInsensitive($headers, 'X-Test-Provider-Signature');
         $timestampRaw = $this->findHeaderCaseInsensitive($headers, 'X-Test-Provider-Timestamp');
 
-        $candidates = array_values(array_filter(
-            [$this->webhookSigningKey, $this->previousWebhookSigningKey],
-            static fn (?string $key): bool => $key !== null,
-        ));
+        $injectedCandidates = $headers[SupportsWebhooksContract::SECRET_CANDIDATES_HEADER_KEY] ?? null;
 
-        return (new InboundWebhookSignatureVerifier())->verify($candidates, $rawBody, $timestampRaw, $signatureRaw);
+        if (is_array($injectedCandidates) && $injectedCandidates !== []) {
+            $candidates = array_values(array_filter(
+                $injectedCandidates,
+                static fn ($key): bool => is_string($key) && $key !== '',
+            ));
+        } else {
+            $candidates = array_values(array_filter(
+                [$this->webhookSigningKey, $this->previousWebhookSigningKey],
+                static fn (?string $key): bool => $key !== null,
+            ));
+        }
+
+        return (new InboundWebhookSignatureVerifier)->verify($candidates, $rawBody, $timestampRaw, $signatureRaw);
     }
 
     /**
@@ -512,20 +539,18 @@ final class TestProvider implements
      * array — a distinct, caller-visible malformed-payload signal —
      * never a randomly-generated substitute value.
      *
-     * CHECKPOINT 12 clarification, no behavior change
-     * (frozen-design-post-security-review.md §2 F6/§5 N1): this method
-     * has ZERO production callers. It exists to satisfy
+     * CHECKPOINT 1 UPDATE: as of Checkpoint 1, this method is now the
+     * genuinely-exercised production event-parsing path for
+     * TestProvider-routed webhooks (see verifyInboundSignature()'s own
+     * Checkpoint 1 update note immediately above for the full
+     * explanation) — the "ZERO production callers" framing below is
+     * historical only.
+     *
+     * CHECKPOINT 12 clarification (historical; frozen-design-post-
+     * security-review.md §2 F6/§5 N1): this method exists to satisfy
      * SupportsWebhooksContract/CapabilityContractTest's non-vacuousness
      * requirement and to provide a documented reference construction
      * matching the real inbound webhook route's header/HMAC convention.
-     * It is explicitly NOT the code path that verifies/parses a genuine
-     * inbound TestProvider-originated webhook in production — that
-     * flows through the real, unmodified
-     * App\Integrations\Http\Controllers\InboundWebhookController /
-     * App\Integrations\Services\WebhookConnectionResolverService, driven
-     * by App\Integrations\Services\ProviderConnectionService::enableWebhookRouting()'s
-     * already-generic, provider-agnostic wiring — no TestProvider-
-     * specific glue is needed or was added anywhere in that pipeline.
      */
     public function parseInboundEvent(string $rawBody, array $headers): array
     {
@@ -546,6 +571,34 @@ final class TestProvider implements
             'event_type' => $decoded['event_type'] ?? $this->webhookEventTypes()[0],
             'payload' => $decoded['payload'] ?? [],
         ];
+    }
+
+    /**
+     * CHECKPOINT 1 addition (FirmsVault Live Integrations,
+     * checkpoint1-design-webhook-verification.md §4/§7): TestProvider
+     * has no subscription-validation-challenge concept at all (unlike
+     * Microsoft Graph's `validationToken` handshake) — always returns
+     * null, meaning "not a challenge, proceed with the normal
+     * per-event pipeline."
+     */
+    public function detectSubscriptionValidationChallenge(array $queryParams, array $headers): ?array
+    {
+        return null;
+    }
+
+    /**
+     * CHECKPOINT 1 addition (FirmsVault Live Integrations,
+     * checkpoint1-design-webhook-verification.md §1.3/§7): replicates
+     * what InboundWebhookController used to do inline via its own
+     * hardcoded ROUTING_TOKEN_HEADER constant — reads
+     * `X-Test-Provider-Connection-Token` from the generic $headers
+     * array, case-insensitively. Never throws; a missing/non-string
+     * value simply yields null, treated identically to "unknown
+     * identifier" by the caller (anti-enumeration collapse-to-false).
+     */
+    public function extractRoutingIdentifier(string $rawBody, array $headers): ?string
+    {
+        return $this->findHeaderCaseInsensitive($headers, 'X-Test-Provider-Connection-Token');
     }
 
     /**

@@ -68,16 +68,16 @@ class RefreshIntegrationTokenJobTest extends TestCase
     {
         return new ProviderConnectionService(
             new IntegrationOAuthStateService(
-                new EmailBodyEncryptionService(new EncryptionKeyService()),
-                new PkceService(),
-                new ProviderRedirectUrlValidator(),
+                new EmailBodyEncryptionService(new EncryptionKeyService),
+                new PkceService,
+                new ProviderRedirectUrlValidator,
             ),
-            new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService())),
-            new IntegrationAccessPolicyService(new TimelineEventRecorder()),
-            new ProviderRegistry(),
-            new OutboundProviderHttpClient(),
-            new ProviderRedirectUrlValidator(),
-            new TimelineEventRecorder(),
+            new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder),
+            new IntegrationAccessPolicyService(new TimelineEventRecorder),
+            new ProviderRegistry,
+            new OutboundProviderHttpClient,
+            new ProviderRedirectUrlValidator,
+            new TimelineEventRecorder,
             // Checkpoint 10 addition (frozen design §4): ProviderConnectionService's
             // constructor gained this 8th, required dependency — every
             // manual construction site in this file must supply it.
@@ -87,7 +87,7 @@ class RefreshIntegrationTokenJobTest extends TestCase
 
     private function credentialService(): IntegrationCredentialService
     {
-        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService()));
+        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder);
     }
 
     /**

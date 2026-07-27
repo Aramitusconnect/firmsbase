@@ -497,14 +497,35 @@ class ProviderConnectionService
      * outcome is instead reflected at the firm_integrations level
      * (status/error_reason), which ProviderConnectionService, as the
      * sole writer of that table, IS authorized to write directly.
+     *
+     * Checkpoint 1 (FirmsVault Live Integrations) additions:
+     *
+     *   - $callAttemptNumber: additive, OPTIONAL, trailing scalar param
+     *     (checkpoint1-design-http-ratelimit-usage.md §2.6's derivation
+     *     table) — folded into the refresh-token decrypt's own
+     *     operationId label for extra audit precision across a job's
+     *     bounded retries; a future
+     *     `IntegrationUsageRecorderService::deriveIdempotencyKey('firm_integration_refresh', ...)`
+     *     caller can also use it once usage-metering is wired into this
+     *     method (not this checkpoint's scope). Every existing caller
+     *     that omits it preserves today's exact behavior.
+     *   - Scope-downgrade detection on the refresh path itself
+     *     (checkpoint1-design-oauth-security-review.md §8;
+     *     checkpoint1-security-review.md Finding 8's one code-quality
+     *     fix applied: guarded with `($outcome['refreshedScopes'] ?? null) !== null`,
+     *     not a bare `!== null`, since the `'already_fresh'` outcome
+     *     branch never sets that key at all). Reuses parseScopes()
+     *     (already private on this class) and the already-legal
+     *     `active -> scope_insufficient` transition — no new
+     *     dependency, no new migration.
      */
-    public function refreshConnectionToken(FirmIntegration $connection): OAuthCallbackResult
+    public function refreshConnectionToken(FirmIntegration $connection, ?int $callAttemptNumber = null): OAuthCallbackResult
     {
         return (new TenantContextService)->runWithFirmContext(
             $connection->firm_id,
-            function () use ($connection) {
+            function () use ($connection, $callAttemptNumber) {
                 try {
-                    $outcome = $this->credentialService->withRefreshLock($connection, function (FirmIntegration $locked) {
+                    $outcome = $this->credentialService->withRefreshLock($connection, function (FirmIntegration $locked) use ($callAttemptNumber) {
                         // CHECKPOINT 8 GATE 2 (agent-8h-architecture-security-review.md
                         // §1 item 4 / §2 item 5): post-lock ConnectionStatus
                         // re-check, using the ALREADY-locked $locked row —
@@ -552,10 +573,17 @@ class ProviderConnectionService
                             throw new RuntimeException("No active access token for connection {$locked->id}.");
                         }
 
+                        // Spaces (not hyphens) deliberately break up the digit runs here so
+                        // this label never trips IntegrationCredentialService::assertSafeAuditLabel()'s
+                        // 20+-contiguous-character high-entropy heuristic (checkpoint1-diff-review.md) —
+                        // matches the convention already established in WebhookConnectionResolverService.
+                        $operationId = 'oauth refresh: connection '.$locked->id.' at '.now()->timestamp
+                            .($callAttemptNumber !== null ? ' attempt '.$callAttemptNumber : '');
+
                         $refreshTokenPlaintext = $this->credentialService->decryptForOperation(
                             $locked,
                             $refreshCredential,
-                            (string) $locked->id.'-refresh-'.now()->timestamp,
+                            $operationId,
                             'oauth_token_refresh',
                         );
 
@@ -577,13 +605,61 @@ class ProviderConnectionService
                             $this->credentialService->rotate($locked, $refreshCredential, (string) $tokenSet['refresh_token']);
                         }
 
-                        return ['outcome' => 'refreshed', 'credential' => $newAccessCredential];
+                        // Checkpoint 1 addition (checkpoint1-design-oauth-security-review.md
+                        // §8): some providers' refresh responses carry a
+                        // `scope` field reflecting the CURRENT actual
+                        // grant, which can legitimately narrow between
+                        // two refreshes without the refresh itself
+                        // failing (invalid_grant is not raised) — e.g. a
+                        // user revoking one scope via their provider
+                        // account permissions page while the refresh
+                        // token remains technically valid for the
+                        // remaining scopes. null (not an empty array)
+                        // when the provider didn't return a scope field
+                        // at all, so the caller below can distinguish
+                        // "no scope info returned" from "returned an
+                        // empty scope grant".
+                        $refreshedScopes = isset($tokenSet['scope']) ? $this->parseScopes((string) $tokenSet['scope']) : null;
+
+                        return ['outcome' => 'refreshed', 'credential' => $newAccessCredential, 'refreshedScopes' => $refreshedScopes];
                     });
 
                     if ($outcome['outcome'] === 'not_active') {
                         $fresh = $connection->fresh();
 
                         return new OAuthCallbackResult($fresh, $fresh->status, false, 'Connection is not Active; refresh skipped.');
+                    }
+
+                    // Checkpoint 1 addition (checkpoint1-design-oauth-security-review.md
+                    // §8; checkpoint1-security-review.md Finding 8's
+                    // guard fix): `?? null` is REQUIRED here, not a bare
+                    // `!== null` — the 'already_fresh' outcome branch
+                    // above never sets the 'refreshedScopes' key at all,
+                    // which would otherwise trigger a PHP "undefined
+                    // array key" warning on every no-op refresh.
+                    if (($outcome['refreshedScopes'] ?? null) !== null) {
+                        $provider = $this->resolveProvider($connection->fresh());
+                        $requiredScopes = $provider->requiredScopes();
+                        $refreshedScopes = $outcome['refreshedScopes'];
+                        $stillSatisfied = count(array_diff($requiredScopes, $refreshedScopes)) === 0;
+
+                        if (! $stillSatisfied || $refreshedScopes !== $connection->fresh()->scopes_granted_json) {
+                            $target = $stillSatisfied ? $connection->fresh()->status : ConnectionStatus::ScopeInsufficient;
+
+                            $downgraded = $this->transitionStatus(
+                                $connection->fresh(),
+                                $target,
+                                $stillSatisfied ? null : 'Refresh returned a narrower scope grant than required.',
+                                ['scopes_granted_json' => $refreshedScopes],
+                            );
+
+                            $this->events->record($downgraded->firm, 'integration_oauth.scope_downgrade_detected_on_refresh', $downgraded, null, [
+                                'firm_integration_id' => $downgraded->id,
+                                'required_scopes' => $requiredScopes,
+                                'refreshed_scopes' => $refreshedScopes,
+                                'still_satisfied' => $stillSatisfied,
+                            ]);
+                        }
                     }
 
                     $fresh = $connection->fresh();

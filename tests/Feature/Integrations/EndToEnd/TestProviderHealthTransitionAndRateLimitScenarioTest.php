@@ -6,6 +6,7 @@ namespace Tests\Feature\Integrations\EndToEnd;
 
 use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
+use App\Integrations\Core\ProviderRegistry;
 use App\Integrations\Data\ConnectionHealthSummary;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
@@ -136,8 +137,8 @@ final class TestProviderHealthTransitionAndRateLimitScenarioTest extends TestCas
         // retryAfterSeconds() value — before relying on that same
         // mechanism firing inside the real job dispatch below.
         // ------------------------------------------------------------
-        $sanityProvider = new TestProvider();
-        $sanityHttpClient = new OutboundProviderHttpClient();
+        $sanityProvider = new TestProvider;
+        $sanityHttpClient = new OutboundProviderHttpClient;
 
         $caughtRateLimited = null;
         try {
@@ -195,7 +196,7 @@ final class TestProviderHealthTransitionAndRateLimitScenarioTest extends TestCas
         // as ProviderConnectionServiceOAuthTest's
         // test_refresh_failure_transitions_the_connection_to_reauthorization_required.
         // ------------------------------------------------------------
-        $credentialService = new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService()));
+        $credentialService = new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder);
         $refreshCredential = $this->runWithFirmContext($firm, fn () => IntegrationCredential::query()
             ->where('firm_integration_id', $connection->id)
             ->where('credential_type', CredentialType::OauthRefreshToken->value)
@@ -284,16 +285,16 @@ final class TestProviderHealthTransitionAndRateLimitScenarioTest extends TestCas
     {
         return new ProviderConnectionService(
             new IntegrationOAuthStateService(
-                new EmailBodyEncryptionService(new EncryptionKeyService()),
-                new PkceService(),
-                new ProviderRedirectUrlValidator(),
+                new EmailBodyEncryptionService(new EncryptionKeyService),
+                new PkceService,
+                new ProviderRedirectUrlValidator,
             ),
-            new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService())),
-            new IntegrationAccessPolicyService(new TimelineEventRecorder()),
-            new \App\Integrations\Core\ProviderRegistry(),
-            new OutboundProviderHttpClient(),
-            new ProviderRedirectUrlValidator(),
-            new TimelineEventRecorder(),
+            new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder),
+            new IntegrationAccessPolicyService(new TimelineEventRecorder),
+            new ProviderRegistry,
+            new OutboundProviderHttpClient,
+            new ProviderRedirectUrlValidator,
+            new TimelineEventRecorder,
             app(IntegrationEntitlementPolicyService::class),
         );
     }
@@ -334,7 +335,7 @@ final class TestProviderHealthTransitionAndRateLimitScenarioTest extends TestCas
         $query = [];
         parse_str((string) parse_url($result->authorizationUrl, PHP_URL_QUERY), $query);
 
-        $code = (new TestProvider())->simulateAuthorizationGrant($query['code_challenge'], $externalAccountId);
+        $code = (new TestProvider)->simulateAuthorizationGrant($query['code_challenge'], $externalAccountId);
 
         $this->service()->completeOAuthCallback($query['state'], $code, $firmUser->user_id);
     }
@@ -347,7 +348,7 @@ final class TestProviderHealthTransitionAndRateLimitScenarioTest extends TestCas
         $query = [];
         parse_str((string) parse_url($result->authorizationUrl, PHP_URL_QUERY), $query);
 
-        $code = (new TestProvider())->simulateAuthorizationGrant($query['code_challenge'], $externalAccountId);
+        $code = (new TestProvider)->simulateAuthorizationGrant($query['code_challenge'], $externalAccountId);
 
         $this->service()->completeOAuthCallback($query['state'], $code, $firmUser->user_id);
     }

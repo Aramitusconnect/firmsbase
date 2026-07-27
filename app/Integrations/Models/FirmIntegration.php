@@ -6,6 +6,7 @@ namespace App\Integrations\Models;
 
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\HealthSummaryState;
+use App\Integrations\Enums\ProviderKey;
 use App\Models\Concerns\BelongsToTenant;
 use App\Models\Concerns\HasPublicUuid;
 use App\Models\Firm;
@@ -60,7 +61,7 @@ use RuntimeException;
  */
 class FirmIntegration extends Model
 {
-    use HasFactory, HasPublicUuid, BelongsToTenant;
+    use BelongsToTenant, HasFactory, HasPublicUuid;
 
     protected $table = 'firm_integrations';
 
@@ -141,6 +142,26 @@ class FirmIntegration extends Model
     public function connectedByFirmUser(): BelongsTo
     {
         return $this->belongsTo(FirmUser::class, 'connected_by_firm_user_id');
+    }
+
+    /**
+     * Checkpoint 1 (FirmsVault Live Integrations) addition. Mirrors
+     * ProviderConnectionService::resolveProvider()'s existing, identical
+     * `ProviderKey::from($connection->integrationProvider->code)`
+     * derivation exactly, exposed as a small read-only accessor so
+     * callers that only need the KEY (not a resolved provider instance)
+     * — e.g. IntegrationCredentialService's sandbox/live
+     * mode-consistency check — don't need their own copy of this
+     * lookup. Returns null rather than throwing when no
+     * integration_providers row is resolvable or its code is not a
+     * known ProviderKey case, so callers can fail open/closed as their
+     * own context requires rather than this accessor deciding for them.
+     */
+    public function providerKey(): ?ProviderKey
+    {
+        $code = $this->integrationProvider?->code;
+
+        return $code === null ? null : ProviderKey::tryFrom($code);
     }
 
     /**

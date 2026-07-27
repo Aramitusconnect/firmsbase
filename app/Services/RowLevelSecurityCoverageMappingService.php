@@ -1223,6 +1223,27 @@ class RowLevelSecurityCoverageMappingService
                 .'for the full reasoning, including why a session-GUC-gated RLS alternative was explicitly '
                 .'rejected (agent-7h-security-design-review.md §1.3).',
         ],
+        // Checkpoint 1 (FirmsVault Live Integrations,
+        // checkpoint1-design-health-sandbox.md §A.3.3) addition — same
+        // DISCLAIMER category as integration_webhook_receipts
+        // immediately above: platform pre-tenant, structurally
+        // incapable of holding a tenant-identifying column, since a
+        // rejected inbound webhook frequently cannot be attributed to
+        // any resolved connection at all (an attacker-supplied
+        // routing token that never maps to a real connection).
+        'integration_webhook_verification_failures' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'DISCLAIMER: Global, no RLS — platform pre-tenant counter table, structurally '
+                .'incapable of holding tenant-identifying columns for the same reason as '
+                .'integration_webhook_receipts immediately above: a rejected inbound webhook delivery '
+                .'frequently cannot be attributed to a resolved firm_integration_id at all. Sole writer is '
+                .'App\\Integrations\\Jobs\\RecordWebhookVerificationFailureJob, dispatched (never a '
+                .'synchronous write) from App\\Integrations\\Http\\Controllers\\InboundWebhookController\'s '
+                .'rejection branches — see '
+                .'database/migrations/2026_09_13_130001_create_integration_webhook_verification_failures_table.php '
+                .'for the full "WHY THIS TABLE HAS NO RLS" reasoning.',
+        ],
 
         // --- Audit (4) — pure platform-wide append-only event logs -----
         'commission_events' => [

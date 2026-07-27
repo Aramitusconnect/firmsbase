@@ -137,6 +137,15 @@ final class IntegrationWebhookRoutingIndexNoRlsAndNoSecretColumnTest extends Tes
             // selects/exposes webhook_routing_token_hash or any other
             // column from this table.
             'IntegrationPlatformProviderHealthSummaryService.php',
+            // Checkpoint 1 (FirmsVault Live Integrations,
+            // checkpoint1-design-webhook-verification.md §1.3/§5)
+            // addition — SupportsWebhooksContract::extractRoutingIdentifier()'s
+            // own docblock names this table in prose, explaining what the
+            // returned raw identifier gets hashed and looked up against
+            // once resolveConnectionIdentity() runs. Purely documentation
+            // — no query, no model reference, no executable code in this
+            // file touches the table at all.
+            'SupportsWebhooksContract.php',
         ];
 
         $violations = [];

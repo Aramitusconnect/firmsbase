@@ -24,18 +24,23 @@ use Throwable;
  * exist before this checkpoint).
  *
  * Deliberately holds NO reference anywhere to a real HTTP client
- * (`Illuminate\Support\Facades\Http`, GuzzleHttp, curl_*, etc.) — this
- * is what keeps tests/Unit/Integrations/NoRealNetworkCallTest.php's
- * whole-tree scan green, and is not a shortcut: Checkpoint 5's only
- * caller is TestProvider's simulated call paths, which themselves make
- * zero real network calls by design (checkpoint-00-final-specification.md
- * §18/§21) — there is nothing for this checkpoint to genuinely transport
- * over HTTP yet. This class's real job today is structural: it is the
- * fixed shape a FUTURE live-provider checkpoint's `Http::timeout()->...`
- * call sites are required to be wrapped by, passed in here as the
- * $operation closure — execute() never knows or cares whether that
- * closure did real I/O or purely in-memory simulation, only how to
- * sanitize whatever it throws.
+ * (`Illuminate\Support\Facades\Http`, GuzzleHttp, curl_*, etc.) itself —
+ * this class never imports Http:: and never will. This is NOT the same
+ * claim as "zero real-HTTP-code exists anywhere in this codebase" —
+ * that premise flipped from true to false the moment Checkpoint 1
+ * (FirmsVault Live Integrations) shipped
+ * `App\Integrations\Support\ProviderRequestExecutor`, the one
+ * designated, reviewed exception `tests/Unit/Integrations/NoRealNetworkCallTest.php`
+ * now carves out. `execute()` stays green under that test not because
+ * no real HTTP client exists, but because THIS class specifically still
+ * doesn't reference one: a provider adapter's `push()`/`pull()`/
+ * `refreshToken()` method (Checkpoints 2-5) calls `ProviderRequestExecutor::send()`
+ * internally to make the real call, and the resulting, already-sanitized
+ * `SanitizedProviderHttpException` simply propagates up through the
+ * closure this method wraps — see the first catch group below, which
+ * now rethrows that exception type unchanged rather than letting it
+ * fall into the generic `catch (Throwable)` branch and lose its real
+ * category.
  *
  * Catches, in order:
  *   1. Exception types this codebase ALREADY defines to be safe,
@@ -43,18 +48,20 @@ use Throwable;
  *      rethrown completely unchanged, since sanitizing them further
  *      would only destroy information a caller legitimately needs
  *      (e.g. ProviderConnectionService branching on
- *      InvalidPkceVerifierException vs OAuthAccountMismatchException).
+ *      InvalidPkceVerifierException vs OAuthAccountMismatchException,
+ *      or a job-level catch branching on SanitizedProviderHttpException::category()).
  *   2. SimulatedProviderFailureException — TestProvider's stand-in for
  *      "a real provider's outbound call failed" (see that exception's
  *      own docblock) — translated 1:1 into a SanitizedProviderHttpException
  *      carrying only its category/statusCode.
  *   3. Any other \Throwable — the generic, defensive fallback for a
- *      future live provider's raw client exception (Guzzle
- *      RequestException/ConnectionException, or anything else whose
- *      default getMessage() might embed request/response headers or
- *      body) — sanitized down to CATEGORY_UNKNOWN with no status code
- *      and, critically, the original message is NEVER read, logged, or
- *      forwarded anywhere by this method.
+ *      raw client exception that somehow escapes ProviderRequestExecutor's
+ *      own sanitization (Guzzle RequestException/ConnectionException, or
+ *      anything else whose default getMessage() might embed
+ *      request/response headers or body) — sanitized down to
+ *      CATEGORY_UNKNOWN with no status code and, critically, the
+ *      original message is NEVER read, logged, or forwarded anywhere by
+ *      this method.
  */
 final class OutboundProviderHttpClient
 {
@@ -68,7 +75,7 @@ final class OutboundProviderHttpClient
     {
         try {
             return $operation();
-        } catch (InvalidPkceVerifierException|ExpiredAuthorizationCodeException|AuthorizationCodeAlreadyUsedException|OAuthAccountMismatchException $e) {
+        } catch (InvalidPkceVerifierException|ExpiredAuthorizationCodeException|AuthorizationCodeAlreadyUsedException|OAuthAccountMismatchException|SanitizedProviderHttpException $e) {
             throw $e;
         } catch (SimulatedProviderFailureException $e) {
             // CHECKPOINT 8 addition (agent-8e-retry-backoff-ratelimit-design.md
@@ -82,7 +89,7 @@ final class OutboundProviderHttpClient
             $retryAfterSeconds = $e->retryAfterRaw() === null
                 ? null
                 : (new RetryAfterParser((int) config('integrations.outbox.max_backoff_seconds', 3600)))
-                    ->parse($e->retryAfterRaw(), new DateTimeImmutable());
+                    ->parse($e->retryAfterRaw(), new DateTimeImmutable);
 
             throw new SanitizedProviderHttpException($e->category(), $e->statusCode(), $operationLabel, $retryAfterSeconds);
         } catch (Throwable) {

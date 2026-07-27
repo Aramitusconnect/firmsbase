@@ -5,18 +5,35 @@ declare(strict_types=1);
 namespace App\Integrations\Services;
 
 /**
- * InboundWebhookSignatureVerifier — STEP 4 of the frozen design's
- * four-step identity-scoped secret-resolution mechanism
+ * InboundWebhookSignatureVerifier — originally STEP 4 of Checkpoint 7's
+ * frozen four-step identity-scoped secret-resolution mechanism
  * (reviews/checkpoint-07/frozen-design-post-security-review.md §5/§8;
  * agent-7h-security-design-review.md §1.5). The narrow, pure,
  * HTTP-request-agnostic verification boundary: every method here
  * operates only on already-extracted strings, never on an
  * `Illuminate\Http\Request` directly — case-insensitive header lookup
  * and duplicate-header rejection are the CALLER's responsibility
- * (App\Integrations\Http\Controllers\InboundWebhookController and
- * App\Integrations\Providers\TestProvider\TestProvider, both of which
- * have access to the real header collection this class deliberately
+ * (historically App\Integrations\Http\Controllers\InboundWebhookController;
+ * still App\Integrations\Providers\TestProvider\TestProvider, which
+ * has access to the real header collection this class deliberately
  * does not need).
+ *
+ * CHECKPOINT 1 (FirmsVault Live Integrations) RE-SCOPE
+ * (checkpoint1-design-webhook-verification.md §2): no longer "the"
+ * verification mechanism. As of this checkpoint,
+ * InboundWebhookController no longer calls this class directly at
+ * all — verification is fully delegated per-provider via
+ * App\Integrations\Contracts\SupportsWebhooksContract::verifyInboundSignature().
+ * The only remaining production caller is
+ * App\Integrations\Providers\TestProvider\TestProvider::verifyInboundSignature(),
+ * which continues to construct and call this class exactly as before,
+ * now genuinely exercised through the real controller flow (via the
+ * contract) rather than only via direct unit tests. Retained here,
+ * unmoved, as an optional, explicitly-reusable HMAC-SHA256 +
+ * timestamp + replay-window helper for any FUTURE provider whose own
+ * webhook scheme happens to match this exact shape — it is not a
+ * required or default scheme for a new provider to adopt, and none of
+ * Microsoft Graph/Google/Plaid use it.
  *
  * Never logs, persists, or re-throws any secret candidate passed to
  * it. Callers MUST discard every plaintext candidate immediately after
@@ -131,21 +148,29 @@ final class InboundWebhookSignatureVerifier
     }
 
     /**
-     * Timing-oracle mitigation (frozen design §9, required): callers
+     * Timing-oracle mitigation (originally frozen design §9): callers
      * MUST invoke this exactly once, before returning a rejection,
-     * whenever
-     * App\Integrations\Services\WebhookConnectionResolverService::resolveConnectionIdentity()
-     * itself returned null (unknown provider or unknown routing token —
-     * the "one indexed lookup" early-exit path). Performs one
+     * whenever no connection identity could be resolved yet (unknown
+     * provider, unknown routing token, or any other early-exit
+     * rejection reached before a real tenant-context/RLS-scoped read
+     * happens) — the "one indexed lookup" early-exit path. Performs one
      * fixed-cost `hash_hmac()` + `hash_equals()` call against the fixed,
      * non-secret dummy key above, so the cryptographic-work floor for
      * that early-exit path is comparable to the "connection found"
      * path's own real transaction/RLS-read/AES-decrypt/HMAC-compare
-     * cost. Deliberately NOT invoked for the "connection found but zero
-     * usable secret candidates" case (disconnected connection, revoked
-     * credential) — that path already performed the real, comparable
-     * work (a transaction, `SET LOCAL`, an RLS-scoped read) before
-     * concluding there is nothing to verify against.
+     * cost. Deliberately NOT invoked for the "connection found but not
+     * usable" case (disconnected connection) — that path already
+     * performed the real, comparable work (a transaction, `SET LOCAL`,
+     * an RLS-scoped read) before concluding there is nothing to verify
+     * against.
+     *
+     * CHECKPOINT 1 note: this call is now purely a convenience reuse of
+     * an existing implementation — its only job is "spend a comparable,
+     * fixed amount of CPU," not "be semantically about HMAC signatures"
+     * — so App\Integrations\Http\Controllers\InboundWebhookController
+     * may keep calling this method for its own early-exit padding
+     * (provider/routing-identifier resolution failures) even though it
+     * no longer calls anything else on this class.
      */
     public function performConstantWorkPadding(): void
     {

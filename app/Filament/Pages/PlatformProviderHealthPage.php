@@ -139,6 +139,28 @@ class PlatformProviderHealthPage extends Page implements HasTable
                 TextColumn::make('oauth_health_signal')->label('OAuth Health')->badge()->placeholder('—'),
                 TextColumn::make('webhook_health_signal')->label('Webhook Health')->badge()->placeholder('—'),
                 TextColumn::make('rate_limit_condition_signal')->label('Rate-Limit Condition')->badge()->placeholder('—'),
+                // Checkpoint 1 (FirmsVault Live Integrations,
+                // checkpoint1-design-health-sandbox.md §A.3.2/§A.4)
+                // additions — one TextColumn per new metrics column,
+                // confirmed mechanical per that design's own note.
+                TextColumn::make('total_request_count')->label('Total Requests')->alignEnd()->sortable(),
+                TextColumn::make('total_success_count')
+                    ->label('Success Rate')
+                    ->alignEnd()
+                    ->formatStateUsing(function (int $state, $record): string {
+                        $total = (int) $record->total_request_count;
+
+                        if ($total === 0) {
+                            return '—';
+                        }
+
+                        return round(($state / $total) * 100, 1).'% ('.$state.'/'.$total.')';
+                    }),
+                TextColumn::make('throttled_connection_count')->label('Throttled Connections')->alignEnd()->sortable(),
+                TextColumn::make('token_refresh_failure_count')->label('Token Refresh Failures')->alignEnd()->sortable(),
+                TextColumn::make('webhook_verification_failure_count')->label('Webhook Verification Failures (24h)')->alignEnd()->sortable(),
+                TextColumn::make('dead_letter_count')->label('Dead-Lettered Events')->alignEnd()->sortable(),
+                TextColumn::make('avg_latency_ms')->label('Avg Latency (ms)')->alignEnd()->placeholder('—')->sortable(),
                 TextColumn::make('recent_error_classification_summary')
                     ->label('Recent Error Classifications')
                     ->placeholder('—')

@@ -55,15 +55,15 @@ class PushSyncJobTest extends TestCase
      */
     private function registerFakePushProvider(?string $externalId = null, ?string $versionToken = null, bool $shouldFail = false): object
     {
-        $provider = new class($externalId, $versionToken, $shouldFail) implements IntegrationProviderContract, SupportsPushSyncContract {
+        $provider = new class($externalId, $versionToken, $shouldFail) implements IntegrationProviderContract, SupportsPushSyncContract
+        {
             public array $calls = [];
 
             public function __construct(
                 private readonly ?string $externalId,
                 private readonly ?string $versionToken,
                 private readonly bool $shouldFail,
-            ) {
-            }
+            ) {}
 
             public function key(): ProviderKey
             {
@@ -424,7 +424,15 @@ class PushSyncJobTest extends TestCase
         $this->dispatchPush($connection, $firm->id, 'App\\Models\\Contact', 901, 'local-v1');
 
         $run = $this->latestRun($firm, $connection);
-        $this->assertSame('failed', $run->status);
+        // Checkpoint 1 (FirmsVault Live Integrations,
+        // checkpoint1-design-http-ratelimit-usage.md §4.4): PushSyncJob
+        // now branches on WebhookRetryPolicyService::TERMINAL_CATEGORIES
+        // before deciding Failed vs. PartialFailure. This fixture's fake
+        // provider throws with category 'provider_rejected', which is
+        // NOT in TERMINAL_CATEGORIES, so the run now correctly lands in
+        // SyncRunStatus::PartialFailure (retryable) — the intended,
+        // reviewed behavior of that fix, not a regression.
+        $this->assertSame('partial_failure', $run->status);
         $this->assertStringContainsString('provider_rejected', $run->error_summary);
         $this->assertStringNotContainsString('Simulated fixture failure', $run->error_summary);
     }
@@ -465,7 +473,15 @@ class PushSyncJobTest extends TestCase
             $this->dispatchPushWithProviderContext($connection, $firm->id, 'contact', 'App\\Models\\Contact', 960, 'local-v1', ['__simulate_failure' => TestProvider::FAILURE_SENTINEL]);
 
             $run = $this->latestRun($firm, $connection);
-            $this->assertSame('failed', $run->status, 'A real PushSyncJob dispatch carrying providerContext[\'__simulate_failure\'] => FAILURE_SENTINEL must now genuinely reach and throw inside TestProvider::push(), routed through $payload by this checkpoint\'s fix.');
+            // Checkpoint 1 (FirmsVault Live Integrations,
+            // checkpoint1-design-http-ratelimit-usage.md §4.4): 'provider_rejected'
+            // is not in WebhookRetryPolicyService::TERMINAL_CATEGORIES, so
+            // PushSyncJob's category-aware retry branch now correctly
+            // lands this run in PartialFailure (retryable), not the old
+            // unconditional Failed — see this file's sibling test
+            // ("...only_the_sanitized_category_never_raw_text") for the
+            // identical reasoning.
+            $this->assertSame('partial_failure', $run->status, 'A real PushSyncJob dispatch carrying providerContext[\'__simulate_failure\'] => FAILURE_SENTINEL must genuinely reach and throw inside TestProvider::push(), routed through $payload by this checkpoint\'s fix — and since \'provider_rejected\' is not a TERMINAL_CATEGORIES category, the run correctly lands in PartialFailure.');
             $this->assertStringContainsString('provider_rejected', $run->error_summary);
             $this->assertStringNotContainsString('Simulated provider failure', $run->error_summary, 'The sanitized error_summary persisted by the job must never contain TestProvider\'s own raw, internal exception message.');
 

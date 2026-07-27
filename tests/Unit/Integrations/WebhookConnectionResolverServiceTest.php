@@ -8,7 +8,6 @@ use App\Integrations\Data\ResolvedWebhookConnection;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
 use App\Integrations\Models\FirmIntegration;
-use App\Integrations\Models\IntegrationCredential;
 use App\Integrations\Models\IntegrationProvider;
 use App\Integrations\Models\IntegrationWebhookRoutingIndex;
 use App\Integrations\Services\IntegrationCredentialService;
@@ -18,6 +17,7 @@ use App\Models\TenantEncryptionKey;
 use App\Services\EmailBodyEncryptionService;
 use App\Services\EncryptionKeyService;
 use App\Services\TenantContextService;
+use App\Services\TimelineEventRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -129,6 +129,86 @@ final class WebhookConnectionResolverServiceTest extends TestCase
     }
 
     // ------------------------------------------------------------
+    // isConnectionActive() — Checkpoint 1 addition (FirmsVault Live
+    // Integrations, checkpoint1-design-webhook-verification.md §1.4;
+    // checkpoint1-diff-review.md's confirmed real bug fix). Factored out
+    // of activeAndPreviousWebhookSecretsFor() so the controller can
+    // decide reject-vs-proceed WITHOUT conflating "connection not
+    // found/not Active" with "connection Active but zero usable secret
+    // credentials."
+    // ------------------------------------------------------------
+
+    public function test_is_connection_active_returns_true_for_an_active_connection_with_zero_webhook_signing_secret_credentials(): void
+    {
+        [$firm, $connection] = $this->connectionForFirm();
+        // Deliberately no credentialService()->store(...) call at all —
+        // this is the exact regression scenario: an Active connection
+        // that has never had a WebhookSigningSecret credential stored
+        // (true for every Microsoft/Google/Plaid connection, which never
+        // use a symmetric secret at all).
+        $resolved = new ResolvedWebhookConnection($firm->id, $connection->id, $connection->integration_provider_id, 'test');
+
+        $this->assertTrue(
+            $this->resolver()->isConnectionActive($resolved),
+            'isConnectionActive() must return true for an Active connection regardless of whether any WebhookSigningSecret credential exists — conflating the two is exactly the bug this checkpoint fixed.'
+        );
+    }
+
+    public function test_is_connection_active_returns_true_even_when_a_webhook_signing_secret_credential_does_exist(): void
+    {
+        [$firm, $connection] = $this->connectionForFirm();
+        $this->runWithFirmContext($firm, fn () => $this->credentialService()->store($connection, CredentialType::WebhookSigningSecret, 'some-secret-'.Str::random(24)));
+
+        $resolved = new ResolvedWebhookConnection($firm->id, $connection->id, $connection->integration_provider_id, 'test');
+
+        $this->assertTrue($this->resolver()->isConnectionActive($resolved));
+    }
+
+    public function test_is_connection_active_returns_false_for_a_disconnected_connection(): void
+    {
+        [$firm, $connection] = $this->connectionForFirm(ConnectionStatus::Disconnected);
+        $resolved = new ResolvedWebhookConnection($firm->id, $connection->id, $connection->integration_provider_id, 'test');
+
+        $this->assertFalse($this->resolver()->isConnectionActive($resolved));
+    }
+
+    public function test_is_connection_active_returns_false_for_a_pending_connection(): void
+    {
+        [$firm, $connection] = $this->connectionForFirm(ConnectionStatus::Pending);
+        $resolved = new ResolvedWebhookConnection($firm->id, $connection->id, $connection->integration_provider_id, 'test');
+
+        $this->assertFalse($this->resolver()->isConnectionActive($resolved), 'A non-Active status (Pending, ScopeInsufficient, Error, ReauthorizationRequired, Disconnected) must never be treated as active.');
+    }
+
+    public function test_is_connection_active_returns_false_for_a_nonexistent_firm_integration_id(): void
+    {
+        [$firm, $connection] = $this->connectionForFirm();
+        // A ResolvedWebhookConnection pointing at an id that does not
+        // exist at all (never plausible from a real resolveConnectionIdentity()
+        // call, but proves findConnection() fails closed rather than
+        // throwing or defaulting to true).
+        $resolved = new ResolvedWebhookConnection($firm->id, $connection->id + 999_000, $connection->integration_provider_id, 'test');
+
+        $this->assertFalse($this->resolver()->isConnectionActive($resolved));
+    }
+
+    public function test_is_connection_active_never_queries_integration_credentials(): void
+    {
+        [$firm, $connection] = $this->connectionForFirm();
+        $resolved = new ResolvedWebhookConnection($firm->id, $connection->id, $connection->integration_provider_id, 'test');
+
+        $capturedSql = [];
+        DB::listen(function ($query) use (&$capturedSql) {
+            $capturedSql[] = strtolower($query->sql);
+        });
+
+        $this->resolver()->isConnectionActive($resolved);
+
+        $touchesCredentials = array_filter($capturedSql, fn ($sql) => str_contains($sql, 'integration_credentials'));
+        $this->assertEmpty($touchesCredentials, 'isConnectionActive() must decide purely from firm_integrations.status — it has no reason to ever touch integration_credentials.');
+    }
+
+    // ------------------------------------------------------------
     // Steps 2-3 — activeAndPreviousWebhookSecretsFor()
     // ------------------------------------------------------------
 
@@ -237,14 +317,14 @@ final class WebhookConnectionResolverServiceTest extends TestCase
     {
         return new WebhookConnectionResolverService(
             $this->credentialService(),
-            new EmailBodyEncryptionService(new EncryptionKeyService()),
-            new TenantContextService(),
+            new EmailBodyEncryptionService(new EncryptionKeyService),
+            new TenantContextService,
         );
     }
 
     private function credentialService(): IntegrationCredentialService
     {
-        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService()));
+        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder);
     }
 
     /**

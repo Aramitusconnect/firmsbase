@@ -39,6 +39,14 @@ class IntegrationConnectionHealth extends Model
         'next_retry_at',
         'sanitized_diagnostic_summary',
         'last_checked_at',
+        // Checkpoint 1 (FirmsVault Live Integrations,
+        // checkpoint1-design-health-sandbox.md §A.3.1) additions — see
+        // database/migrations/2026_09_13_130002_add_metrics_columns_to_integration_connection_health_table.php.
+        'total_request_count',
+        'total_success_count',
+        'last_operation_label',
+        'last_latency_ms',
+        'last_sync_lag_seconds',
     ];
 
     protected function casts(): array
@@ -50,6 +58,10 @@ class IntegrationConnectionHealth extends Model
             'rate_limited_reset_at' => 'datetime',
             'next_retry_at' => 'datetime',
             'last_checked_at' => 'datetime',
+            'total_request_count' => 'integer',
+            'total_success_count' => 'integer',
+            'last_latency_ms' => 'integer',
+            'last_sync_lag_seconds' => 'integer',
         ];
     }
 

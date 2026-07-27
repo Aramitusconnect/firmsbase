@@ -8,14 +8,12 @@ use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
 use App\Integrations\Enums\ConflictStatus;
 use App\Integrations\Enums\SyncDirection;
+use App\Integrations\Enums\SyncItemStatus;
 use App\Integrations\Enums\SyncRunStatus;
 use App\Integrations\Enums\SyncTriggerSource;
-use App\Integrations\Exceptions\SanitizedProviderHttpException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationConflict;
-use App\Integrations\Models\IntegrationCredential;
 use App\Integrations\Models\IntegrationOutboxEvent;
-use App\Integrations\Models\IntegrationSyncItem;
 use App\Integrations\Models\IntegrationSyncRun;
 use App\Integrations\Services\FinancialIntegrationAccessPolicyService;
 use App\Integrations\Services\HealthStateService;
@@ -30,7 +28,6 @@ use App\Models\FirmUser;
 use App\Models\TimelineEvent;
 use App\Services\EntitlementService;
 use App\Services\TimelineEventRecorder;
-use App\Services\WebhookRetryPolicyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -67,10 +64,15 @@ class IntegrationAuditEventTypeTest extends TestCase
      * additions (`integration_oauth.connection_created`, fired by
      * ProviderConnectionService::startConnection(), and
      * `integration_conflict.resolution_proposed`, fired by
-     * IntegrationConflictService::proposeResolution()) — for 17 total.
-     * Any new string added to any of the seven producing files below
-     * that isn't in this list — or any of these 17 that stops appearing
-     * in source — must fail one of the two tests below.
+     * IntegrationConflictService::proposeResolution()), plus 1 new
+     * FirmsVault Live Integrations Checkpoint 1 addition
+     * (`integration_oauth.scope_downgrade_detected_on_refresh`, fired by
+     * ProviderConnectionService::refreshConnectionToken() —
+     * checkpoint1-design-oauth-security-review.md §8's refresh-path
+     * scope-downgrade-detection fix) — for 18 total. Any new string
+     * added to any of the seven producing files below that isn't in
+     * this list — or any of these 18 that stops appearing in source —
+     * must fail one of the two tests below.
      */
     private const CLOSED_TAXONOMY = [
         // Checkpoint 10 addition (frozen-design-post-security-review.md
@@ -79,6 +81,12 @@ class IntegrationAuditEventTypeTest extends TestCase
         'integration_oauth.connection_created',
         'integration_oauth.credential_revoked',
         'integration_oauth.provider_revocation_failed',
+        // FirmsVault Live Integrations Checkpoint 1 addition (see class
+        // docblock above): fired by
+        // ProviderConnectionService::refreshConnectionToken() when a
+        // provider's refresh response carries a narrower scope grant
+        // than required.
+        'integration_oauth.scope_downgrade_detected_on_refresh',
         'integration_sync.run_started',
         'integration_sync.run_completed',
         'integration_sync.run_failed',
@@ -137,10 +145,10 @@ class IntegrationAuditEventTypeTest extends TestCase
         'integration_oauth.required_scope_missing',
     ];
 
-    public function test_the_closed_taxonomy_has_exactly_seventeen_distinct_event_names(): void
+    public function test_the_closed_taxonomy_has_exactly_eighteen_distinct_event_names(): void
     {
-        $this->assertCount(17, self::CLOSED_TAXONOMY);
-        $this->assertCount(17, array_unique(self::CLOSED_TAXONOMY), 'No duplicate event names in the closed taxonomy.');
+        $this->assertCount(18, self::CLOSED_TAXONOMY);
+        $this->assertCount(18, array_unique(self::CLOSED_TAXONOMY), 'No duplicate event names in the closed taxonomy.');
     }
 
     /**
@@ -191,7 +199,7 @@ class IntegrationAuditEventTypeTest extends TestCase
         $firm = Firm::factory()->create();
         $connection = $this->createWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
 
-        $this->runWithFirmContext($firm, fn () => (new SyncRunService(new TimelineEventRecorder()))->startRun(
+        $this->runWithFirmContext($firm, fn () => (new SyncRunService(new TimelineEventRecorder))->startRun(
             $connection, 'contact', SyncDirection::Inbound, SyncTriggerSource::Manual
         ));
 
@@ -203,7 +211,7 @@ class IntegrationAuditEventTypeTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $connection = $this->createWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
-        $service = new SyncRunService(new TimelineEventRecorder());
+        $service = new SyncRunService(new TimelineEventRecorder);
 
         $succeededRun = $this->createWithFirmContext($firm, fn () => IntegrationSyncRun::factory()->forFirmIntegration($connection)->running()->create());
         $this->runWithFirmContext($firm, fn () => $service->transitionStatus($succeededRun, SyncRunStatus::Succeeded));
@@ -233,13 +241,13 @@ class IntegrationAuditEventTypeTest extends TestCase
 
         // A first-attempt Succeeded outcome must never fire the event.
         $this->runWithFirmContext($firm, fn () => $service->recordAttempt(
-            $firm->id, $run->id, 'contact', null, null, 'ext-ok', \App\Integrations\Enums\SyncItemStatus::Succeeded
+            $firm->id, $run->id, 'contact', null, null, 'ext-ok', SyncItemStatus::Succeeded
         ));
         $this->assertSame(0, $this->runWithFirmContext($firm, fn () => TimelineEvent::query()->where('event_type', 'integration_sync.item_retry_exhausted')->count()));
 
         // A FailedPermanent outcome must fire it exactly once.
         $this->runWithFirmContext($firm, fn () => $service->recordAttempt(
-            $firm->id, $run->id, 'contact', null, null, 'ext-exhausted', \App\Integrations\Enums\SyncItemStatus::FailedPermanent, null, 'exhausted'
+            $firm->id, $run->id, 'contact', null, null, 'ext-exhausted', SyncItemStatus::FailedPermanent, null, 'exhausted'
         ));
 
         $event = $this->runWithFirmContext($firm, fn () => TimelineEvent::query()->where('event_type', 'integration_sync.item_retry_exhausted')->first());
@@ -253,7 +261,7 @@ class IntegrationAuditEventTypeTest extends TestCase
         $event = $this->createWithFirmContext($firm, fn () => IntegrationOutboxEvent::factory()->forFirmIntegration($connection)->processing()->create(['attempts' => 10, 'max_attempts' => 10]));
 
         $service = app(IntegrationOutboxEventService::class);
-        $lockToken = $this->runWithFirmContext($firm, fn () => \Illuminate\Support\Facades\DB::table('integration_outbox_events')->where('id', $event->id)->value('lock_token'));
+        $lockToken = $this->runWithFirmContext($firm, fn () => DB::table('integration_outbox_events')->where('id', $event->id)->value('lock_token'));
 
         $this->runWithFirmContext($firm, fn () => $service->fail($event->id, $lockToken, 'sanitized failure'));
 
@@ -265,7 +273,7 @@ class IntegrationAuditEventTypeTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $connection = $this->createWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
-        $service = new HealthStateService(new TimelineEventRecorder());
+        $service = new HealthStateService(new TimelineEventRecorder);
 
         // Baseline: first signal ever for this connection — no prior
         // row exists, so no event.
@@ -284,7 +292,7 @@ class IntegrationAuditEventTypeTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $connection = $this->createWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
-        $service = new IntegrationConflictService(new TimelineEventRecorder());
+        $service = new IntegrationConflictService(new TimelineEventRecorder);
 
         $this->runWithFirmContext($firm, fn () => $service->recordDetection(
             $connection, 'contact', 'App\\Models\\Contact', 1, 'field_value_mismatch',
@@ -309,7 +317,7 @@ class IntegrationAuditEventTypeTest extends TestCase
         $resolvableConflict = $this->createWithFirmContext($firm, fn () => IntegrationConflict::factory()->forFirmIntegration($connection)->create());
         $expirableConflict = $this->createWithFirmContext($firm, fn () => IntegrationConflict::factory()->forFirmIntegration($connection)->create());
 
-        $service = new IntegrationConflictService(new TimelineEventRecorder());
+        $service = new IntegrationConflictService(new TimelineEventRecorder);
 
         $this->runWithFirmContext($firm, fn () => $service->transitionStatus($resolvableConflict, ConflictStatus::ResolvedLocalWins, $resolver->id));
         $this->runWithFirmContext($firm, fn () => $service->transitionStatus($expirableConflict, ConflictStatus::Expired));
@@ -344,7 +352,7 @@ class IntegrationAuditEventTypeTest extends TestCase
 
         $paralegal = FirmUser::factory()->role(FirmUserRole::Paralegal)->create(['firm_id' => $firm->id]);
 
-        $service = new IntegrationAccessPolicyService(new TimelineEventRecorder());
+        $service = new IntegrationAccessPolicyService(new TimelineEventRecorder);
 
         $this->runWithFirmContext($firm, function () use ($service, $paralegal) {
             try {
@@ -380,7 +388,7 @@ class IntegrationAuditEventTypeTest extends TestCase
         $owner = FirmUser::factory()->role(FirmUserRole::FirmOwner)->create(['firm_id' => $firm->id]);
         $attorney = FirmUser::factory()->role(FirmUserRole::Attorney)->create(['firm_id' => $firm->id]);
 
-        $service = new FinancialIntegrationAccessPolicyService(new TimelineEventRecorder());
+        $service = new FinancialIntegrationAccessPolicyService(new TimelineEventRecorder);
 
         $this->runWithFirmContext($firm, function () use ($service, $owner) {
             try {
@@ -451,7 +459,7 @@ class IntegrationAuditEventTypeTest extends TestCase
         // ProviderConnectionServiceOAuthTest::firmWithActiveKey().
         app(EntitlementService::class)->setForSource($firm, 'integration', EntitlementSource::AdminOverride, true);
 
-        $service = app(\App\Integrations\Services\ProviderConnectionService::class);
+        $service = app(ProviderConnectionService::class);
 
         $threw = false;
 

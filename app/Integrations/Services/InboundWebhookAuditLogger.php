@@ -33,8 +33,10 @@ use Psr\Log\LoggerInterface;
  * file, independent of the default application log), just constructed
  * on demand.
  *
- * $eventName MUST be one of the 11 frozen, closed event names below
- * (frozen design §14) — this class refuses to log anything else, so a
+ * $eventName MUST be one of the closed event names below (originally
+ * 11, frozen design §14; extended to 12 by Checkpoint 1's
+ * EVENT_VALIDATION_CHALLENGE_ANSWERED addition — see that constant's
+ * own docblock) — this class refuses to log anything else, so a
  * future call site cannot silently introduce a new, unreviewed event
  * name. $context is defensively stripped of any key matching the
  * forbidden-key denylist before it is ever written, as a second,
@@ -72,6 +74,19 @@ final class InboundWebhookAuditLogger
     public const EVENT_SECRET_ROTATION_USED = 'integration_webhook.secret_rotation_used';
 
     /**
+     * CHECKPOINT 1 addition (FirmsVault Live Integrations,
+     * checkpoint1-design-webhook-verification.md §4). Logged when
+     * InboundWebhookController answers a provider's subscription-
+     * validation challenge (e.g. Microsoft Graph's `validationToken`
+     * handshake) — a distinct code path from every other event above,
+     * since it happens BEFORE any routing/connection resolution (no
+     * firm/connection context exists yet). Deliberately not piggybacked
+     * onto EVENT_SIGNATURE_VERIFIED or any other existing event name
+     * that means something else.
+     */
+    public const EVENT_VALIDATION_CHALLENGE_ANSWERED = 'integration_webhook.validation_challenge_answered';
+
+    /**
      * @var string[]
      */
     private const ALLOWED_EVENT_NAMES = [
@@ -86,6 +101,7 @@ final class InboundWebhookAuditLogger
         self::EVENT_PROCESSING_HANDOFF_CREATED,
         self::EVENT_PROCESSING_FAILED,
         self::EVENT_SECRET_ROTATION_USED,
+        self::EVENT_VALIDATION_CHALLENGE_ANSWERED,
     ];
 
     /**

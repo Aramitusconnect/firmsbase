@@ -59,8 +59,7 @@ final class RefreshIntegrationToken implements ShouldQueue
     public function __construct(
         public readonly int $firmIntegrationId,
         public readonly int $firmId,
-    ) {
-    }
+    ) {}
 
     /**
      * Fixed schedule (base_delay_seconds=30, multiplier=2) — reuses
@@ -110,7 +109,13 @@ final class RefreshIntegrationToken implements ShouldQueue
                 return;
             }
 
-            $result = $connectionService->refreshConnectionToken($connection);
+            // Checkpoint 1 (FirmsVault Live Integrations) addition
+            // (checkpoint1-design-http-ratelimit-usage.md §2.6):
+            // threads Laravel's own per-job attempt counter into
+            // refreshConnectionToken()'s new optional trailing param —
+            // available via InteractsWithQueue, already `use`d by this
+            // class.
+            $result = $connectionService->refreshConnectionToken($connection, $this->attempts());
 
             if (! $result->successful) {
                 // refreshConnectionToken() only ever returns a

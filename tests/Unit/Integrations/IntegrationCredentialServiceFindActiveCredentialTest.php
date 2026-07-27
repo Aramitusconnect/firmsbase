@@ -12,6 +12,7 @@ use App\Models\TenantEncryptionKey;
 use App\Services\EmailBodyEncryptionService;
 use App\Services\EncryptionKeyService;
 use App\Services\TenantContextService;
+use App\Services\TimelineEventRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -87,7 +88,7 @@ final class IntegrationCredentialServiceFindActiveCredentialTest extends TestCas
     {
         [, $connection] = $this->connectionForFirm();
 
-        (new TenantContextService())->clearFirmContext();
+        (new TenantContextService)->clearFirmContext();
 
         $this->expectException(RuntimeException::class);
 
@@ -97,7 +98,7 @@ final class IntegrationCredentialServiceFindActiveCredentialTest extends TestCas
     public function test_throws_when_the_active_context_belongs_to_a_different_firm(): void
     {
         [, $connectionA] = $this->connectionForFirm();
-        [$firmB, ] = $this->connectionForFirm();
+        [$firmB] = $this->connectionForFirm();
 
         $this->expectException(RuntimeException::class);
 
@@ -126,7 +127,7 @@ final class IntegrationCredentialServiceFindActiveCredentialTest extends TestCas
 
     private function service(): IntegrationCredentialService
     {
-        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService()));
+        return new IntegrationCredentialService(new EmailBodyEncryptionService(new EncryptionKeyService), new TimelineEventRecorder);
     }
 
     /**

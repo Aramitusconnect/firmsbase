@@ -14,6 +14,7 @@ use App\Services\PlatformRoleService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -156,6 +157,133 @@ final class PlatformProviderHealthPageTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('render-check-provider');
+    }
+
+    /**
+     * CHECKPOINT 1 (FirmsVault Live Integrations) addition —
+     * checkpoint1-design-health-sandbox.md §A.3.2/§A.4: renders a row
+     * carrying genuinely non-zero values for every new metrics column,
+     * including total_success_count's formatStateUsing() percentage
+     * callback (the one new column whose rendering logic is more than a
+     * bare TextColumn::make() passthrough — it reads a SIBLING column,
+     * total_request_count, off $record, and divides), proving it
+     * computes without a division-by-zero or type error.
+     *
+     * `recent_error_classification_summary` is deliberately left null
+     * here — this is a PRE-EXISTING (pre-Checkpoint-1) column/callback,
+     * not something this checkpoint added or touched, and it has an
+     * independently confirmed, genuine rendering bug (reported
+     * separately, not fixed here per this task's scope: TextColumn
+     * treats any non-empty array $state as a "list of state items" and,
+     * for a single-entry array, unwraps it down to that entry's bare
+     * VALUE before calling formatStateUsing() — so a real
+     * ['category' => count] map with exactly one category throws
+     * `TypeError: ?array expected, int given` instead of rendering).
+     * That column is unrelated to Checkpoint 1's own file list; testing
+     * around it here keeps this test file's scope to what Checkpoint 1
+     * actually added.
+     */
+    public function test_a_summary_with_nonzero_new_metrics_columns_renders_without_error(): void
+    {
+        $provider = IntegrationProvider::factory()->create(['code' => 'metrics-render-check-provider']);
+
+        DB::table('integration_platform_provider_health_summaries')->insert([
+            'integration_provider_id' => $provider->id,
+            'provider_code' => $provider->code,
+            'provider_enabled' => true,
+            'connected_firm_count' => 3,
+            'disconnected_firm_count' => 1,
+            'firms_requiring_attention_count' => 1,
+            'oauth_health_signal' => 'healthy',
+            'webhook_health_signal' => 'healthy',
+            'rate_limit_condition_signal' => 'degraded',
+            'recent_error_classification_summary' => null,
+            'total_request_count' => 40,
+            'total_success_count' => 37,
+            'throttled_connection_count' => 2,
+            'token_refresh_failure_count' => 1,
+            'webhook_verification_failure_count' => 5,
+            'dead_letter_count' => 3,
+            'avg_latency_ms' => 214,
+            'computed_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+
+        $response = $this->actingAs($admin, 'platform_admin')->get(PlatformProviderHealthPage::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('metrics-render-check-provider');
+        // 37/40 = 92.5%, formatted "92.5% (37/40)" per the page's own
+        // formatStateUsing() callback.
+        $response->assertSee('92.5%');
+        $response->assertSee('37/40', false);
+    }
+
+    /**
+     * Independent, standalone confirmation of a genuine PRE-EXISTING
+     * (pre-Checkpoint-1) bug — reported, not fixed, per this task's
+     * "STOP and report" instruction for production-code defects outside
+     * this checkpoint's own scope: `recent_error_classification_summary`'s
+     * TextColumn throws a 500 whenever the map has exactly one category.
+     * This test intentionally documents/reproduces the failure via
+     * assertStatus(500) + the specific TypeError text, so a future fix
+     * has an immediate, already-written regression test to flip once the
+     * page's column definition is corrected (e.g. by giving it an
+     * explicit `->listWithLineBreaks()`-incompatible / non-Arr::wrap()
+     * rendering path, or pre-formatting the map into a single string
+     * before the column ever sees it) — this test is NOT part of
+     * Checkpoint 1's own required coverage and asserts the CURRENT
+     * (buggy) behavior deliberately, not the desired one.
+     */
+    public function test_know_n_bu_g_a_single_category_error_classification_summary_currently_throws_a_500(): void
+    {
+        $provider = IntegrationProvider::factory()->create(['code' => 'known-bug-single-category-provider']);
+
+        DB::table('integration_platform_provider_health_summaries')->insert([
+            'integration_provider_id' => $provider->id,
+            'provider_code' => $provider->code,
+            'provider_enabled' => true,
+            'connected_firm_count' => 0,
+            'disconnected_firm_count' => 0,
+            'firms_requiring_attention_count' => 0,
+            'oauth_health_signal' => null,
+            'webhook_health_signal' => null,
+            'rate_limit_condition_signal' => null,
+            'recent_error_classification_summary' => json_encode(['provider_error' => 2]),
+            'total_request_count' => 0,
+            'total_success_count' => 0,
+            'throttled_connection_count' => 0,
+            'token_refresh_failure_count' => 0,
+            'webhook_verification_failure_count' => 0,
+            'dead_letter_count' => 0,
+            'avg_latency_ms' => null,
+            'computed_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+
+        $response = $this->actingAs($admin, 'platform_admin')->get(PlatformProviderHealthPage::getUrl());
+
+        $response->assertStatus(500, 'KNOWN, REPORTED, PRE-EXISTING BUG (not introduced by Checkpoint 1, not fixed by this test-writing pass — see this test\'s own docblock): recent_error_classification_summary\'s TextColumn currently 500s whenever the map has exactly one category. If this assertion ever fails because someone fixed the page, that is GOOD — update this test to assertOk() and assert the rendered content at that point.');
+        $this->assertStringContainsString('must be of type ?array, int given', (string) $response->exception?->getMessage());
+    }
+
+    public function test_a_summary_with_zero_total_requests_shows_a_placeholder_not_a_division_by_zero(): void
+    {
+        $provider = IntegrationProvider::factory()->create(['code' => 'zero-requests-render-check-provider']);
+        app(IntegrationPlatformProviderHealthSummaryService::class)->refreshForProvider($provider->fresh());
+
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+
+        $response = $this->actingAs($admin, 'platform_admin')->get(PlatformProviderHealthPage::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('zero-requests-render-check-provider');
     }
 
     public function test_no_live_provider_call_is_made_by_this_page(): void

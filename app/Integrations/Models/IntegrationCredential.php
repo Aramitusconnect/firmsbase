@@ -67,7 +67,7 @@ use LogicException;
  */
 class IntegrationCredential extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     protected $table = 'integration_credentials';
 
@@ -78,6 +78,13 @@ class IntegrationCredential extends Model
         'encrypted_payload_ciphertext',
         'encryption_key_id',
         'status',
+        // Checkpoint 1 (FirmsVault Live Integrations) addition
+        // (checkpoint1-security-review.md Finding 3): a dedicated,
+        // DB-CHECK-constrained column — never populated from the open
+        // $metadata array — see IntegrationCredentialService::store()/
+        // rotate()'s new $environmentMode parameter and this model's
+        // migration for the full rationale.
+        'credential_environment_mode',
         'granted_scopes_json',
         'expires_at',
         'masked_display_metadata',

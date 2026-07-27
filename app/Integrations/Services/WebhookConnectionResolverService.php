@@ -63,8 +63,7 @@ class WebhookConnectionResolverService
         private readonly IntegrationCredentialService $credentialService,
         private readonly EmailBodyEncryptionService $encryption,
         private readonly TenantContextService $tenantContext,
-    ) {
-    }
+    ) {}
 
     /**
      * STEP 1 — bounded connection-identity resolution. No RLS bypass
@@ -108,6 +107,43 @@ class WebhookConnectionResolverService
             integrationProviderId: (int) $provider->id,
             providerKey: $providerKeyValue,
         );
+    }
+
+    /**
+     * CHECKPOINT 1 addition (FirmsVault Live Integrations,
+     * checkpoint1-design-webhook-verification.md §1.4). Factored out of
+     * activeAndPreviousWebhookSecretsFor()'s own connection-lookup-and-
+     * status-check logic (below), so the controller can decide
+     * reject-vs-proceed WITHOUT conflating "connection not
+     * found/not Active" (a real, provider-agnostic rejection reason)
+     * with "connection Active but zero usable secret credentials"
+     * (expected and harmless for non-HMAC providers like Microsoft/
+     * Google/Plaid, whose verification never consults a symmetric
+     * secret at all). Same collapse-to-false discipline as every other
+     * method on this class: returns a plain bool, never a distinguishable
+     * reason.
+     */
+    public function isConnectionActive(ResolvedWebhookConnection $resolved): bool
+    {
+        return $this->tenantContext->runWithFirmContext(
+            $resolved->firmId,
+            fn (): bool => $this->findConnection($resolved)?->status === ConnectionStatus::Active
+        );
+    }
+
+    /**
+     * Shared connection lookup — used by both isConnectionActive() and
+     * activeAndPreviousWebhookSecretsFor() below, so the
+     * "found, then check status" logic exists in exactly one place.
+     * Callers are responsible for already running inside
+     * TenantContextService::runWithFirmContext() (both do).
+     */
+    private function findConnection(ResolvedWebhookConnection $resolved): ?FirmIntegration
+    {
+        return FirmIntegration::query()
+            ->where('id', $resolved->firmIntegrationId)
+            ->where('firm_id', $resolved->firmId)
+            ->first();
     }
 
     /**
@@ -163,10 +199,7 @@ class WebhookConnectionResolverService
         return $this->tenantContext->runWithFirmContext(
             $resolved->firmId,
             function () use ($resolved): array {
-                $connection = FirmIntegration::query()
-                    ->where('id', $resolved->firmIntegrationId)
-                    ->where('firm_id', $resolved->firmId)
-                    ->first();
+                $connection = $this->findConnection($resolved);
 
                 if ($connection === null || $connection->status !== ConnectionStatus::Active) {
                     return [];
@@ -177,11 +210,28 @@ class WebhookConnectionResolverService
                 $active = $this->credentialService->findActiveCredential($connection, CredentialType::WebhookSigningSecret);
 
                 if ($active !== null) {
+                    // CHECKPOINT 1 note (FirmsVault Live Integrations):
+                    // these two labels use SPACE-separated words rather
+                    // than this codebase's more common hyphen/
+                    // underscore-joined style, deliberately — the
+                    // parallel Checkpoint 1 workstream's
+                    // IntegrationCredentialService::decryptForOperation()
+                    // now rejects any operationId/reason containing a
+                    // contiguous run of 20+ characters drawn from
+                    // [A-Za-z0-9+/=_-] (security review Finding 6, a
+                    // token-shaped-value heuristic) — a hyphen/underscore
+                    // -joined label of this length is entirely within
+                    // that character class end to end and would trip
+                    // the same false positive as an actual token. Space
+                    // characters fall outside that class, so this stays
+                    // a short, deterministic, non-secret, human-readable
+                    // label while remaining compatible with the new
+                    // guard.
                     $candidates[] = $this->credentialService->decryptForOperation(
                         $connection,
                         $active,
-                        'inbound-webhook-verify-'.$connection->id.'-'.now()->getTimestampMs(),
-                        'inbound_webhook_signature_verification',
+                        'inbound webhook verify: connection '.$connection->id.' at '.now()->getTimestampMs(),
+                        'inbound webhook signature verification',
                     );
                 }
 

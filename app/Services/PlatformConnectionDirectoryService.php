@@ -266,6 +266,15 @@ class PlatformConnectionDirectoryService
             'last_failure_category' => $connectionHealth?->last_failure_category,
             'next_retry_at' => $connectionHealth?->next_retry_at,
             'rate_limited_reset_at' => $connectionHealth?->rate_limited_reset_at,
+            // Checkpoint 1 (FirmsVault Live Integrations,
+            // checkpoint1-design-health-sandbox.md §A.3.1/§A.4)
+            // additions — sourced from the same already-fetched
+            // $connectionHealth row, zero new query.
+            'total_request_count' => $connectionHealth?->total_request_count ?? 0,
+            'total_success_count' => $connectionHealth?->total_success_count ?? 0,
+            'last_operation_label' => $connectionHealth?->last_operation_label,
+            'last_latency_ms' => $connectionHealth?->last_latency_ms,
+            'last_sync_lag_seconds' => $connectionHealth?->last_sync_lag_seconds,
             'last_successful_sync_at' => $lastSuccessfulSync?->finished_at ?? $lastSuccessfulSync?->started_at ?? $lastSuccessfulSync?->created_at,
             'connected_at' => $connection->connected_at,
             'disconnected_at' => $connection->disconnected_at,

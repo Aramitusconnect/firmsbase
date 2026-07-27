@@ -10,7 +10,11 @@ use RuntimeException;
 /**
  * SanitizedProviderHttpException — the ONLY shape an outbound-provider-
  * call failure may take once it leaves App\Integrations\Support\OutboundProviderHttpClient
- * (agent-h-security-architecture-review.md item 19). Carries ONLY a
+ * or App\Integrations\Support\ProviderRequestExecutor (agent-h-security-architecture-review.md
+ * item 19; checkpoint1-design-http-ratelimit-usage.md §2.9 —
+ * ProviderRequestExecutor is a second authorized construction site,
+ * added by the FirmsVault Live Integrations mission's Checkpoint 1).
+ * Carries ONLY a
  * small, closed category string and an optional HTTP status code —
  * NEVER the original exception's message, headers, or response body,
  * which may embed request/response detail (tokens, secrets, internal
@@ -78,6 +82,16 @@ final class SanitizedProviderHttpException extends RuntimeException
         private readonly ?int $statusCode,
         string $operationLabel,
         private readonly ?int $retryAfterSeconds = null,
+        // Checkpoint 1 (FirmsVault Live Integrations) addition
+        // (checkpoint1-design-http-ratelimit-usage.md §2.9): additive,
+        // optional, trailing param — every existing call site (both in
+        // OutboundProviderHttpClient::execute()) is unaffected. Never a
+        // secret: a synthetic UUID minted by this system, never derived
+        // from or containing provider response content, so carrying it
+        // on the exception lets a job's catch block fold it into a
+        // TimelineEventRecorder metadata array or a last_error string
+        // for tracing without ever risking a real secret leak.
+        private readonly ?string $correlationId = null,
     ) {
         if (! in_array($category, self::VALID_CATEGORIES, true)) {
             throw new InvalidArgumentException("Unknown provider-error category: \"{$category}\".");
@@ -113,5 +127,10 @@ final class SanitizedProviderHttpException extends RuntimeException
     public function retryAfterSeconds(): ?int
     {
         return $this->retryAfterSeconds;
+    }
+
+    public function correlationId(): ?string
+    {
+        return $this->correlationId;
     }
 }

@@ -9,8 +9,10 @@ use App\Integrations\Enums\CredentialType;
 use App\Integrations\Enums\IntegrationCredentialStatus;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationCredential;
+use App\Integrations\Support\ProviderEnvironmentResolver;
 use App\Services\EmailBodyEncryptionService;
 use App\Services\TenantContextService;
+use App\Services\TimelineEventRecorder;
 use Closure;
 use DateTimeInterface;
 use Illuminate\Support\Facades\DB;
@@ -42,12 +44,31 @@ use RuntimeException;
  * It is NEVER derived from, or computed as a substring/hash/truncation
  * of, $plaintextSecret. getMaskedMetadata() performs no decrypt call at
  * all and only ever reads this already-non-secret column back.
+ *
+ * Checkpoint 1 (FirmsVault Live Integrations) additions
+ * (checkpoint1-design-oauth-security-review.md §6;
+ * checkpoint1-security-review.md Finding 3/Finding 6):
+ * `TimelineEventRecorder` is a new constructor dependency, used solely
+ * to record a `integration_credential.decrypted` audit event inside
+ * decryptForOperation() — the SAME class every OAuth event in
+ * ProviderConnectionService already uses, no new audit subsystem.
+ * `credential_environment_mode` is a new, dedicated, DB-CHECK-constrained
+ * column (never the open `$metadata` bag — see that migration's own
+ * docblock for why) populated only via the new `$environmentMode`
+ * parameter on store()/rotate(), and consulted by a new mode-consistency
+ * check inside decryptForOperation(). `App\Integrations\Support\ProviderEnvironmentResolver`
+ * is intentionally NOT a constructor dependency — it is stateless and
+ * zero-config, so it is instantiated inline exactly where needed,
+ * mirroring this file's own established `new TenantContextService()`
+ * convention rather than growing the constructor for a service used by
+ * exactly one method.
  */
 class IntegrationCredentialService
 {
-    public function __construct(private readonly EmailBodyEncryptionService $encryption)
-    {
-    }
+    public function __construct(
+        private readonly EmailBodyEncryptionService $encryption,
+        private readonly TimelineEventRecorder $events,
+    ) {}
 
     /**
      * Creates a new Active credential row for $connection.
@@ -74,10 +95,20 @@ class IntegrationCredentialService
         string $plaintextSecret,
         array $metadata = [],
         ?DateTimeInterface $expiresAt = null,
+        // Checkpoint 1 (FirmsVault Live Integrations) addition
+        // (checkpoint1-security-review.md Finding 3): additive, OPTIONAL,
+        // trailing typed param — NEVER folded into $metadata, which has
+        // no tamper-evidence at all (see this table's
+        // credential_environment_mode migration docblock). Every
+        // existing caller that omits it preserves today's exact
+        // behavior (a null, untagged credential).
+        ?string $environmentMode = null,
     ): IntegrationCredential {
-        return (new TenantContextService())->runWithFirmContext(
+        $this->assertValidEnvironmentMode($environmentMode);
+
+        return (new TenantContextService)->runWithFirmContext(
             $connection->firm_id,
-            function () use ($connection, $type, $plaintextSecret, $metadata, $expiresAt) {
+            function () use ($connection, $type, $plaintextSecret, $metadata, $expiresAt, $environmentMode) {
                 $this->assertConnectionUsable($connection);
 
                 $result = $this->encryption->encrypt($connection->firm, $plaintextSecret);
@@ -93,6 +124,7 @@ class IntegrationCredentialService
                     'encrypted_payload_ciphertext' => $result->ciphertext,
                     'encryption_key_id' => $result->encryptionKeyId,
                     'status' => IntegrationCredentialStatus::Active,
+                    'credential_environment_mode' => $environmentMode,
                     'masked_display_metadata' => $metadata === [] ? null : $metadata,
                     'expires_at' => $expiresAt,
                 ]);
@@ -116,7 +148,14 @@ class IntegrationCredentialService
         array $metadata = [],
         ?DateTimeInterface $expiresAt = null,
     ): IntegrationCredential {
-        return $this->rotateExistingCredential($connection, $existing, $newPlaintextSecret, $metadata, $expiresAt);
+        // Environment mode is carried forward from $existing, same
+        // "carry forward unless explicitly changed" posture rotate()
+        // uses for masked_display_metadata — a human replacing a
+        // credential's SECRET is not, by itself, evidence they intend to
+        // also change which sandbox/live environment it was issued for.
+        return $this->rotateExistingCredential(
+            $connection, $existing, $newPlaintextSecret, $metadata, $expiresAt, $existing->credential_environment_mode
+        );
     }
 
     /**
@@ -141,13 +180,24 @@ class IntegrationCredentialService
         IntegrationCredential $existing,
         string $newPlaintextSecret,
         ?DateTimeInterface $expiresAt = null,
+        // Checkpoint 1 (FirmsVault Live Integrations) addition
+        // (checkpoint1-security-review.md Finding 3): additive,
+        // OPTIONAL, trailing typed param. When omitted (the common
+        // system-initiated-refresh case), $existing's own
+        // credential_environment_mode is carried forward unchanged —
+        // identical "carry forward, never wipe" posture already
+        // established for masked_display_metadata below.
+        ?string $environmentMode = null,
     ): IntegrationCredential {
+        $this->assertValidEnvironmentMode($environmentMode);
+
         return $this->rotateExistingCredential(
             $connection,
             $existing,
             $newPlaintextSecret,
             $existing->masked_display_metadata ?? [],
-            $expiresAt
+            $expiresAt,
+            $environmentMode ?? $existing->credential_environment_mode,
         );
     }
 
@@ -168,10 +218,11 @@ class IntegrationCredentialService
         string $newPlaintextSecret,
         array $metadata,
         ?DateTimeInterface $expiresAt,
+        ?string $environmentMode = null,
     ): IntegrationCredential {
-        return (new TenantContextService())->runWithFirmContext(
+        return (new TenantContextService)->runWithFirmContext(
             $connection->firm_id,
-            function () use ($connection, $existing, $newPlaintextSecret, $metadata, $expiresAt) {
+            function () use ($connection, $existing, $newPlaintextSecret, $metadata, $expiresAt, $environmentMode) {
                 $this->assertCredentialBelongsToConnection($existing, $connection);
 
                 if ($existing->status !== IntegrationCredentialStatus::Active) {
@@ -192,7 +243,7 @@ class IntegrationCredentialService
                     'rotated_at' => now(),
                 ]);
 
-                return $this->store($connection, $existing->credential_type, $newPlaintextSecret, $metadata, $expiresAt);
+                return $this->store($connection, $existing->credential_type, $newPlaintextSecret, $metadata, $expiresAt, $environmentMode);
             }
         );
     }
@@ -213,7 +264,7 @@ class IntegrationCredentialService
      */
     public function revoke(FirmIntegration $connection, IntegrationCredential $credential, string $reason): IntegrationCredential
     {
-        return (new TenantContextService())->runWithFirmContext(
+        return (new TenantContextService)->runWithFirmContext(
             $connection->firm_id,
             function () use ($connection, $credential) {
                 $this->assertCredentialBelongsToConnection($credential, $connection);
@@ -243,24 +294,48 @@ class IntegrationCredentialService
      * firm matches $connection->firm_id; (2) $credential belongs to
      * $connection; (3) $connection->status is Active; (4)
      * $credential->status is Active; (5) $operationId and $reason are
-     * both non-empty (\InvalidArgumentException otherwise). Relies on
-     * ambient caller-supplied tenant context (check (1) enforces that
-     * one is actually active and correct) rather than establishing its
-     * own — a decrypt is a read performed on behalf of an
-     * already-in-flight caller operation, not an independent unit of
+     * both non-empty AND pass the closed-shape audit-label validation
+     * below (\InvalidArgumentException otherwise); (6) $credential's
+     * tagged environment mode (if any) is consistent with the
+     * connection's provider's CURRENTLY configured mode (if any).
+     * Relies on ambient caller-supplied tenant context (check (1)
+     * enforces that one is actually active and correct) rather than
+     * establishing its own — a decrypt is a read performed on behalf of
+     * an already-in-flight caller operation, not an independent unit of
      * work that should silently swap tenant context underneath it.
      *
-     * No audit-log write is implemented in this checkpoint: no
-     * dedicated audit table/service exists yet for credential-decrypt
-     * operations. This deliberately matches what "audit" actually means
-     * today in EmailOAuthTokenService — its rotate()/revoke() methods
-     * merely wrap a call to EmailSyncAuditService (itself a plain model
-     * write, not a separate audit subsystem) in
-     * runWithFirmContext($account->firm_id, ...); there is no
-     * comparable audit service for integration credentials yet.
-     * $operationId/$reason are validated as non-empty above to
-     * establish the call-site contract a future audit wire-up will
-     * depend on, but neither is persisted anywhere by this checkpoint.
+     * Checkpoint 1 (FirmsVault Live Integrations) additions
+     * (checkpoint1-design-oauth-security-review.md §6;
+     * checkpoint1-security-review.md Finding 6):
+     *
+     *   - $operationId/$reason, beyond the pre-existing non-emptiness
+     *     guard, are now ALSO capped at 128 characters and rejected if
+     *     either contains a contiguous run of 20+ base64/hex-alphabet
+     *     characters — a simple heuristic to catch an accidentally-
+     *     passed token/secret. Every current call site already passes
+     *     short, deterministic, non-secret labels (e.g.
+     *     'inbound-webhook-verify-'.$connection->id.'-'.now()->getTimestampMs()),
+     *     so this closes what was otherwise the ONE open free-text
+     *     exception in this domain's otherwise-closed-vocabulary audit
+     *     surfaces (SanitizedProviderHttpException, InboundWebhookAuditLogger,
+     *     SanitizedHealthDiagnostic).
+     *   - Immediately before the decrypt itself, a
+     *     `integration_credential.decrypted` timeline event is recorded
+     *     via the new TimelineEventRecorder constructor dependency —
+     *     firm-facing, matching this domain's existing
+     *     dot-namespaced-event convention. Never includes plaintext or
+     *     ciphertext — only the already-non-secret, now-validated
+     *     $operationId/$reason plus identifying columns.
+     *
+     * Checkpoint 1 also closes the health-sandbox design's §B.2 point 4
+     * gap: if $credential->credential_environment_mode is tagged AND the
+     * connection's provider currently has a `provider_environments`
+     * config entry, the tagged mode must match the provider's CURRENT
+     * mode or this method throws. Both preconditions are checked with
+     * "fail open" tolerance — an untagged credential, or a provider with
+     * no environment configured at all (every TestProvider-backed
+     * credential today, since `test` is never present in
+     * `provider_environments`), never triggers this check.
      */
     public function decryptForOperation(
         FirmIntegration $connection,
@@ -268,7 +343,7 @@ class IntegrationCredentialService
         string $operationId,
         string $reason,
     ): string {
-        if ((new TenantContextService())->currentFirmId() !== $connection->firm_id) {
+        if ((new TenantContextService)->currentFirmId() !== $connection->firm_id) {
             throw new RuntimeException(
                 'Cannot decrypt credential: no active tenant context, or the active context does not match this connection\'s firm.'
             );
@@ -287,6 +362,19 @@ class IntegrationCredentialService
         if (trim($operationId) === '' || trim($reason) === '') {
             throw new InvalidArgumentException('decryptForOperation() requires a non-empty operationId and reason.');
         }
+
+        $this->assertSafeAuditLabel($operationId, 'operationId');
+        $this->assertSafeAuditLabel($reason, 'reason');
+
+        $this->assertCredentialEnvironmentModeMatchesConnection($connection, $credential);
+
+        $this->events->record($connection->firm, 'integration_credential.decrypted', $connection, null, [
+            'firm_integration_id' => $connection->id,
+            'integration_credential_id' => $credential->id,
+            'credential_type' => $credential->credential_type->value,
+            'operation_id' => $operationId,
+            'reason' => $reason,
+        ]);
 
         return $this->encryption->decrypt(
             $connection->firm,
@@ -325,7 +413,7 @@ class IntegrationCredentialService
      */
     public function reEncrypt(FirmIntegration $connection, IntegrationCredential $credential): IntegrationCredential
     {
-        return (new TenantContextService())->runWithFirmContext(
+        return (new TenantContextService)->runWithFirmContext(
             $connection->firm_id,
             function () use ($connection, $credential) {
                 $this->assertCredentialBelongsToConnection($credential, $connection);
@@ -380,7 +468,7 @@ class IntegrationCredentialService
      */
     public function findActiveCredential(FirmIntegration $connection, CredentialType $type): ?IntegrationCredential
     {
-        if ((new TenantContextService())->currentFirmId() !== $connection->firm_id) {
+        if ((new TenantContextService)->currentFirmId() !== $connection->firm_id) {
             throw new RuntimeException(
                 'Cannot look up active credential: no active tenant context, or the active context does not match this connection\'s firm.'
             );
@@ -481,6 +569,81 @@ class IntegrationCredentialService
         if ((int) $credential->firm_integration_id !== (int) $connection->id) {
             throw new RuntimeException(
                 "Credential {$credential->id} does not belong to connection {$connection->id}."
+            );
+        }
+    }
+
+    /**
+     * Checkpoint 1 (FirmsVault Live Integrations) addition
+     * (checkpoint1-security-review.md Finding 3). Never throws for
+     * null (the "no environment tag supplied" default).
+     */
+    private function assertValidEnvironmentMode(?string $environmentMode): void
+    {
+        if ($environmentMode === null) {
+            return;
+        }
+
+        if (! in_array($environmentMode, ['sandbox', 'live'], true)) {
+            throw new InvalidArgumentException(
+                "Invalid credential environment mode \"{$environmentMode}\"; expected \"sandbox\" or \"live\"."
+            );
+        }
+    }
+
+    /**
+     * Checkpoint 1 (FirmsVault Live Integrations) addition
+     * (checkpoint1-security-review.md Finding 6). A conservative length
+     * cap plus a simple high-entropy/token-shaped-value heuristic —
+     * rejects (never silently truncates) any candidate that looks like
+     * it might accidentally carry real secret material, closing the one
+     * open free-text exception in this domain's otherwise closed-
+     * vocabulary audit surfaces.
+     */
+    private function assertSafeAuditLabel(string $value, string $fieldName): void
+    {
+        if (mb_strlen($value) > 128) {
+            throw new InvalidArgumentException(
+                "decryptForOperation() {$fieldName} exceeds the maximum allowed length of 128 characters."
+            );
+        }
+
+        if (preg_match('/[A-Za-z0-9+\/=_-]{20,}/', $value) === 1) {
+            throw new InvalidArgumentException(
+                "decryptForOperation() {$fieldName} looks like it may contain high-entropy/token-shaped content ".
+                'and was rejected; pass a short, developer-controlled label instead.'
+            );
+        }
+    }
+
+    /**
+     * Checkpoint 1 (FirmsVault Live Integrations) addition
+     * (checkpoint1-design-health-sandbox.md §B.2 point 4). Deliberately
+     * tolerant: an untagged credential (credential_environment_mode ===
+     * null) or a provider with no `provider_environments` configuration
+     * entry at all (every TestProvider-backed credential today) never
+     * triggers this check — only an ACTUAL mismatch between a tagged
+     * credential and its provider's currently configured mode throws.
+     */
+    private function assertCredentialEnvironmentModeMatchesConnection(FirmIntegration $connection, IntegrationCredential $credential): void
+    {
+        if ($credential->credential_environment_mode === null) {
+            return;
+        }
+
+        $providerKey = $connection->providerKey();
+        $environmentResolver = new ProviderEnvironmentResolver;
+
+        if ($providerKey === null || ! $environmentResolver->hasConfiguredEnvironment($providerKey)) {
+            return;
+        }
+
+        $expectedMode = $environmentResolver->modeFor($providerKey);
+
+        if ($credential->credential_environment_mode !== $expectedMode) {
+            throw new RuntimeException(
+                "Cannot decrypt credential {$credential->id}: it was issued for the \"{$credential->credential_environment_mode}\" ".
+                "environment, but connection {$connection->id}'s provider is currently configured for \"{$expectedMode}\"."
             );
         }
     }
