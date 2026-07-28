@@ -32,7 +32,7 @@ class InboundWebhookReceiptRetentionFixTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new InboundWebhookReceiptService();
+        $this->service = new InboundWebhookReceiptService;
 
         // Deliberately NEVER uses Carbon::setTestNow() here: the
         // defense-in-depth sweep tests below compare PHP-fixture-built
@@ -60,6 +60,16 @@ class InboundWebhookReceiptRetentionFixTest extends TestCase
 
     public function test_a_verified_receipt_gets_a_thirty_day_retention_deadline(): void
     {
+        // Freezes time for this method only (reset in tearDown()) —
+        // fixes a genuine now()-drift race: recordReceipt()'s internal
+        // now() and this assertion's separate now() call can straddle
+        // a one-second boundary otherwise (same class of bug as
+        // 6dbed91's DowngradeEvaluationServiceTest fix). Safe here
+        // specifically because this method never compares against
+        // PostgreSQL's own live statement_timestamp() the way the
+        // sweep tests below do — see this class's setUp() docblock.
+        $this->travelTo(now());
+
         $receipt = $this->service->recordReceipt(
             providerKey: 'test',
             routingTokenHash: hash('sha256', (string) Str::uuid()),
@@ -81,6 +91,8 @@ class InboundWebhookReceiptRetentionFixTest extends TestCase
 
     public function test_a_malformed_receipt_gets_the_seven_day_default(): void
     {
+        $this->travelTo(now());
+
         $receipt = $this->service->recordReceipt(
             providerKey: 'test',
             routingTokenHash: hash('sha256', (string) Str::uuid()),
@@ -102,6 +114,8 @@ class InboundWebhookReceiptRetentionFixTest extends TestCase
 
     public function test_the_verified_retention_days_config_key_is_independently_honored(): void
     {
+        $this->travelTo(now());
+
         config(['integrations.webhook.receipt_verified_retention_days' => 45]);
 
         $receipt = $this->service->recordReceipt(
@@ -121,6 +135,8 @@ class InboundWebhookReceiptRetentionFixTest extends TestCase
 
     public function test_the_non_verified_retention_days_config_key_remains_independent_of_the_verified_key(): void
     {
+        $this->travelTo(now());
+
         config([
             'integrations.webhook.receipt_verified_retention_days' => 90,
             'integrations.webhook.receipt_retention_days' => 3,
