@@ -16,9 +16,12 @@ use ReflectionEnum;
  * Live Integrations Checkpoint 2 (Microsoft 365 provider —
  * checkpoint2-combined-design.md §1.1, P-1) added a second, real
  * (non-Test) provider key, 'microsoft365' — the first real provider key
- * ever registered in this enum. This test proves the enum's shape is
- * stable/immutable/lowercase and — critically — that it shares no case
- * name or backed value with the existing, unrelated App\Enums\
+ * ever registered in this enum. Checkpoint 3 (Google Workspace provider —
+ * checkpoint3-combined-design.md §1.1) added a third, 'googleworkspace'
+ * — a full compound provider name, lowercase, zero separator, an exact
+ * structural match to 'microsoft365'. This test proves the enum's shape
+ * is stable/immutable/lowercase and — critically — that it shares no
+ * case name or backed value with the existing, unrelated App\Enums\
  * IntegrationType enum (a Phase 16 enum for Stripe/EmailProvider/
  * VirusScanning/Telemetry degradation modes). A collision here would
  * mean code that branches on one enum's value could silently misinterpret
@@ -35,25 +38,31 @@ final class ProviderKeyTest extends TestCase
     }
 
     /**
-     * RENAMED (FirmsVault Live Integrations Checkpoint 2, Microsoft 365
-     * provider — checkpoint2-combined-design.md §1.1, P-1): was
-     * test_it_has_exactly_the_expected_single_case(), asserting a count
-     * of 1. ProviderKey now registers a second case, Microsoft365, so
-     * the old "single case" name became actively misleading (not merely
-     * imprecise) — renamed to reflect the new, exact expected count,
-     * mirroring this codebase's own RlsForceRollout convention of
-     * encoding the exact expected count in a test's name and renaming it
-     * whenever that count legitimately changes.
+     * RENAMED AGAIN (FirmsVault Live Integrations Checkpoint 3, Google
+     * Workspace provider — checkpoint3-combined-design.md §1.1/§6 item
+     * 1): was test_it_has_exactly_the_expected_two_cases(), asserting a
+     * count of 2. ProviderKey now registers a third case,
+     * GoogleWorkspace, so the old "two cases" name became actively
+     * misleading (not merely imprecise) — renamed to reflect the new,
+     * exact expected count. This is the SECOND, anticipated occurrence
+     * of the same rename pattern this test already went through once,
+     * from "single case" to "two cases", when Checkpoint 2 added
+     * Microsoft365 — mirrors this codebase's own RlsForceRollout
+     * convention of encoding the exact expected count in a test's name
+     * and renaming it whenever that count legitimately changes.
      */
-    public function test_it_has_exactly_the_expected_two_cases(): void
+    public function test_it_has_exactly_the_expected_three_cases(): void
     {
         $cases = ProviderKey::cases();
 
-        $this->assertCount(2, $cases, 'ProviderKey must register exactly two cases as of FirmsVault Live Integrations Checkpoint 2.');
+        $this->assertCount(3, $cases, 'ProviderKey must register exactly three cases as of FirmsVault Live Integrations Checkpoint 3.');
         $this->assertSame('Test', $cases[0]->name);
         $this->assertSame(ProviderKey::Test, $cases[0]);
         $this->assertSame('Microsoft365', $cases[1]->name);
         $this->assertSame(ProviderKey::Microsoft365, $cases[1]);
+        $this->assertSame('GoogleWorkspace', $cases[2]->name);
+        $this->assertSame(ProviderKey::GoogleWorkspace, $cases[2]);
+        $this->assertSame('googleworkspace', $cases[2]->value);
     }
 
     public function test_backed_value_is_lowercase(): void

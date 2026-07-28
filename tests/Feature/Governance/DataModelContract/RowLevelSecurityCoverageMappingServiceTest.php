@@ -280,7 +280,21 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // EXEMPT_TABLE_METADATA for the full reasoning. This table is
         // classified Global (never DirectTenant), so it does not change
         // tenantOwnedTables() or preparedTables().
-        $this->assertCount(28, $this->service->exemptTables());
+        // Narrowly updated AGAIN by Phase 2 (FirmsVault Platform Admin
+        // Control Center, "Integration Operations Center") —
+        // integration_platform_provider_health_summaries, an ordinary
+        // "no firm_id" exemption, added to EXEMPT_TABLES (27 -> 28).
+        // Narrowly updated AGAIN by FirmsVault Live Integrations
+        // Checkpoint 3 (Google Workspace provider —
+        // checkpoint3-combined-design.md §5/§6.4.3; checkpoint3-security-review.md
+        // Finding 3) — integration_gmail_mailbox_routes added to
+        // EXEMPT_TABLES for the identical "genuinely has a firm_id column
+        // but is documented-exempt anyway" reason as
+        // integration_webhook_routing_index/integration_platform_overview_summaries
+        // above (28 -> 29); see EXEMPT_TABLE_METADATA for the full
+        // reasoning. This table is classified Global (never DirectTenant),
+        // so it does not change tenantOwnedTables() or preparedTables().
+        $this->assertCount(29, $this->service->exemptTables());
         $this->assertCount(126, $this->service->tenantOwnedTables());
         $forceMigrationFiles = glob(
             database_path('migrations/*_force_rls_on_*_table.php')
@@ -631,7 +645,17 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // it is classified DirectTenant via fullTableInventory(); the
         // DirectTenant count and the overall table-inventory total both
         // increase by one (125 -> 126, 226 -> 227).
-        $this->assertSame(50, $summary[TenantOwnershipClassification::Global->value]);
+        // Narrowly updated AGAIN by FirmsVault Live Integrations
+        // Checkpoint 3 ("Add Google Workspace integration provider") —
+        // integration_gmail_mailbox_routes added directly to
+        // FULL_TABLE_INVENTORY_EXTRA, classified Global (per its own
+        // "no RLS" disclaimer note, exactly like
+        // integration_webhook_routing_index/integration_platform_overview_summaries
+        // above — checkpoint3-combined-design.md §5/§6.4.3;
+        // checkpoint3-security-review.md Finding 3); the Global count and
+        // the overall table-inventory total both increase by one
+        // (50 -> 51, 227 -> 228).
+        $this->assertSame(51, $summary[TenantOwnershipClassification::Global->value]);
         $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
         $this->assertSame(8, $summary[TenantOwnershipClassification::System->value]);
         $this->assertSame(1, $summary[TenantOwnershipClassification::RootTenant->value]);
@@ -652,8 +676,14 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Narrowly updated AGAIN by FirmsVault Live Integrations
         // Checkpoint 1 (225 -> 226) —
         // integration_webhook_verification_failures, classified Global
-        // (see above), no other bucket affected.
-        $this->assertSame(227, array_sum($summary));
+        // (see above), no other bucket affected. Narrowly updated AGAIN
+        // by FirmsVault Live Integrations Checkpoint 2 (226 -> 227) —
+        // integration_provider_webhook_subscriptions, classified
+        // DirectTenant (see above). Narrowly updated AGAIN by FirmsVault
+        // Live Integrations Checkpoint 3 (227 -> 228) —
+        // integration_gmail_mailbox_routes, classified Global (see
+        // above), no other bucket affected.
+        $this->assertSame(228, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

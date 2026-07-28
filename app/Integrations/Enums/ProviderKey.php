@@ -40,9 +40,24 @@ namespace App\Integrations\Enums;
  * does not exist yet as of this change — see
  * `config('integrations.providers')`'s env-gated, class-existence-
  * tolerant registration comment for why that is safe.
+ *
+ * FirmsVault Live Integrations, Checkpoint 3 addition
+ * (checkpoint3-combined-design.md §1.1, the reconciled/binding value):
+ * `GoogleWorkspace`. Value `'googleworkspace'` — full compound provider
+ * name, lowercase, zero separator — an exact structural match to
+ * `'microsoft365'` immediately above, NOT `'google_workspace'` (an
+ * underscored form one of this checkpoint's three independent design
+ * passes originally proposed but which the combined-design reconciliation
+ * rejected as inconsistent with this enum's own existing naming rule).
+ * The class implementing this key
+ * (`App\Integrations\Providers\GoogleWorkspace\GoogleWorkspaceProvider`)
+ * is built as a parallel, disjoint change in this same checkpoint — see
+ * `config('integrations.providers')`'s identical class-existence-tolerant
+ * registration comment.
  */
 enum ProviderKey: string
 {
     case Test = 'test';
     case Microsoft365 = 'microsoft365';
+    case GoogleWorkspace = 'googleworkspace';
 }

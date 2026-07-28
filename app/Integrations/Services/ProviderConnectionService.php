@@ -7,6 +7,7 @@ namespace App\Integrations\Services;
 use App\Enums\FirmUserStatus;
 use App\Integrations\Contracts\IntegrationProviderContract;
 use App\Integrations\Contracts\SupportsDisconnectContract;
+use App\Integrations\Contracts\SupportsPullSyncContract;
 use App\Integrations\Contracts\SupportsWebhooksContract;
 use App\Integrations\Core\ProviderRegistry;
 use App\Integrations\Data\ConsumedOAuthState;
@@ -17,6 +18,7 @@ use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
 use App\Integrations\Enums\IntegrationCredentialStatus;
 use App\Integrations\Enums\ProviderKey;
+use App\Integrations\Enums\ProviderWebhookSubscriptionStatus;
 use App\Integrations\Exceptions\OAuthAccountMismatchException;
 use App\Integrations\Exceptions\OAuthRedirectUriMismatchException;
 use App\Integrations\Exceptions\OAuthTenantMismatchException;
@@ -24,7 +26,9 @@ use App\Integrations\Exceptions\SanitizedProviderHttpException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationCredential;
 use App\Integrations\Models\IntegrationProvider;
+use App\Integrations\Models\IntegrationProviderWebhookSubscription;
 use App\Integrations\Models\IntegrationWebhookRoutingIndex;
+use App\Integrations\Support\GmailMailboxRoutingService;
 use App\Integrations\Support\OutboundProviderHttpClient;
 use App\Integrations\Support\ProviderRedirectUrlValidator;
 use App\Models\FirmUser;
@@ -32,7 +36,9 @@ use App\Services\IntegrationEntitlementPolicyService;
 use App\Services\TenantContextService;
 use App\Services\TimelineEventRecorder;
 use DateTimeInterface;
+use Illuminate\Support\Carbon;
 use RuntimeException;
+use Throwable;
 
 /**
  * ProviderConnectionService — the SOLE writer of
@@ -87,6 +93,7 @@ class ProviderConnectionService
         private readonly ProviderRedirectUrlValidator $redirectValidator,
         private readonly TimelineEventRecorder $events,
         private readonly IntegrationEntitlementPolicyService $entitlement,
+        private readonly GmailMailboxRoutingService $gmailMailboxRouting,
     ) {}
 
     /**
@@ -626,8 +633,18 @@ class ProviderConnectionService
         // re-entrant: it opens a nested transaction/savepoint and
         // restores whatever context was already active in a `finally`
         // block).
+        // FirmsVault Live Integrations, Checkpoint 3 addition
+        // (checkpoint3-combined-design.md §4.7; checkpoint3-security-review.md
+        // Finding 1, required). See bootstrapWebhookSubscriptions()'s own
+        // docblock for the full "this orchestration did not exist
+        // anywhere in this codebase before this change" history — called
+        // here, alongside enableWebhookRouting(), inside the SAME
+        // `if ($provider instanceof SupportsWebhooksContract)` branch and
+        // the SAME ambient transaction/lock finishCallback() already runs
+        // under.
         if ($provider instanceof SupportsWebhooksContract) {
             $this->enableWebhookRouting($connection, $currentUserId);
+            $this->bootstrapWebhookSubscriptions($connection, $provider, $currentUserId);
         }
 
         return new OAuthCallbackResult($connection, $connection->status, $scopeSatisfied);
@@ -1179,6 +1196,19 @@ class ProviderConnectionService
                     ->where('firm_integration_id', $fresh->id)
                     ->delete();
 
+                // Checkpoint 3 addition (FirmsVault Live Integrations,
+                // Google Workspace — checkpoint3-combined-design.md §4.7):
+                // clears any Gmail mailbox-routing mapping in the SAME
+                // transaction as the routing-index clear immediately
+                // above, so a disconnected connection can never leave a
+                // stale, forever-resolvable email-correlator row behind.
+                // Idempotent/cheap no-op for every non-Gmail connection
+                // (GmailMailboxRoutingService::unroute()'s own documented
+                // contract) — unconditional, not provider-instanceof-gated,
+                // so this can never be skipped by a future provider whose
+                // capability detection doesn't happen to match here.
+                $this->gmailMailboxRouting->unroute($fresh);
+
                 $this->events->record($fresh->firm, 'integration_oauth.disconnect', $fresh, $actorUser, array_merge([
                     'firm_integration_id' => $fresh->id,
                 ], $auditMetadataExtra));
@@ -1256,6 +1286,175 @@ class ProviderConnectionService
     }
 
     /**
+     * FirmsVault Live Integrations, Checkpoint 3 addition
+     * (checkpoint3-combined-design.md §4.7; checkpoint3-design-sync-webhooks.md
+     * §6.5; checkpoint3-security-review.md Finding 1, required). The
+     * missing "subscribe()-on-connect" orchestration, traced and proven
+     * NOT to exist anywhere in this codebase, for any provider, before
+     * this change: `enableWebhookRouting()` above only ever writes
+     * `firm_integrations.webhook_routing_token` and one
+     * `integration_webhook_routing_index` row — it never calls
+     * `$provider->subscribe()` — and the ONLY pre-existing production
+     * call site of `->subscribe(` anywhere under `app/Integrations/` was
+     * `RenewGraphSubscriptionJob.php`'s own 404-triggered re-subscribe
+     * fallback, reached exclusively from the RENEWAL schedule's
+     * enumeration of already-`Active` subscription rows — never on a
+     * first connect. This means Microsoft 365 (Checkpoint 2) has carried
+     * a real, pre-existing production defect since it shipped: no
+     * webhook subscription was ever created for any connection, only
+     * renewed if one already (impossibly) existed. This method is the
+     * fix — generic, provider-agnostic, not Gmail/Google-specific —
+     * retroactively correcting Microsoft 365's behavior as a byproduct
+     * while giving Google Workspace correct behavior from day one.
+     *
+     * Called from finishCallback() immediately alongside the existing
+     * enableWebhookRouting() call, inside the SAME
+     * `if ($provider instanceof SupportsWebhooksContract)` branch and the
+     * SAME ambient `TenantContextService::runWithFirmContext()`/
+     * `DB::transaction()` wrap `completeOAuthCallback()` already opens
+     * around the whole of `finishCallback()` — so a failure here (e.g. a
+     * provider-specific routing conflict raised from inside
+     * `$provider->subscribe()`) rolls back the entire OAuth connect,
+     * leaving the connection never `Active`, rather than silently
+     * degrading to manual-sync-only.
+     *
+     * Only subscribes to a resource type that is BOTH something this
+     * provider can push webhooks for (`SupportsPullSyncContract::
+     * pullableResourceTypes()`) AND something this specific connection
+     * actually requested (`requested_capabilities_json`) — never a
+     * broader, unrequested grant. A provider that does not implement
+     * `SupportsPullSyncContract` has no resource types to intersect
+     * against and this is a safe no-op for it.
+     *
+     * Idempotent on reauthorization (skips any resource type already
+     * backed by an `Active` `integration_provider_webhook_subscriptions`
+     * row for this connection), mirroring
+     * `Microsoft365Provider::subscribe()`'s own pre-call idempotency
+     * check — so a same-mailbox/same-tenant reauthorization safely
+     * replaces rather than duplicates.
+     *
+     * Persists the returned subscription state by parsing
+     * `subscription_id`/`expires_at` the same way
+     * `RenewGraphSubscriptionJob::extractSubscriptionState()` already
+     * does (narrowly duplicated here rather than shared, per the design's
+     * own explicit "implementer's choice" allowance) — a missing/
+     * unparseable required field throws, letting the surrounding
+     * transaction roll back rather than persist a malformed row.
+     * `provider_resource`/`provider_change_type` (this table's own two
+     * further NOT NULL columns) are read from the provider's `resource`/
+     * `change_type` response keys — the exact shape
+     * `Microsoft365Provider::subscribe()` already returns — falling back
+     * to the requested resource type / a fixed default respectively if a
+     * provider's response omits them, so this can never attempt to
+     * persist a NULL into either column.
+     */
+    private function bootstrapWebhookSubscriptions(
+        FirmIntegration $connection,
+        IntegrationProviderContract $provider,
+        int $currentUserId,
+    ): void {
+        if (! $provider instanceof SupportsPullSyncContract) {
+            return;
+        }
+
+        $requestedCapabilities = $connection->requested_capabilities_json ?? [];
+        $resourceTypes = array_values(array_intersect($provider->pullableResourceTypes(), $requestedCapabilities));
+
+        if ($resourceTypes === []) {
+            return;
+        }
+
+        $actor = $this->resolveActingFirmUser($currentUserId, $connection->firm_id);
+
+        foreach ($resourceTypes as $resourceType) {
+            $alreadyActive = IntegrationProviderWebhookSubscription::query()
+                ->where('firm_integration_id', $connection->id)
+                ->where('resource_type', $resourceType)
+                ->where('status', ProviderWebhookSubscriptionStatus::Active->value)
+                ->exists();
+
+            if ($alreadyActive) {
+                continue;
+            }
+
+            $result = $this->httpClient->execute(
+                fn () => $provider->subscribe([
+                    'connection' => $connection,
+                    'resource_type' => $resourceType,
+                ]),
+                'subscribe',
+            );
+
+            [$providerSubscriptionId, $expiresAt] = $this->extractSubscriptionState($result);
+
+            $providerResourceRaw = $result['resource'] ?? null;
+            $providerResource = (is_string($providerResourceRaw) && $providerResourceRaw !== '')
+                ? $providerResourceRaw
+                : $resourceType;
+
+            $providerChangeTypeRaw = $result['change_type'] ?? null;
+            $providerChangeType = (is_string($providerChangeTypeRaw) && $providerChangeTypeRaw !== '')
+                ? $providerChangeTypeRaw
+                : 'default';
+
+            IntegrationProviderWebhookSubscription::query()->create([
+                'firm_id' => $connection->firm_id,
+                'firm_integration_id' => $connection->id,
+                'provider_key' => $provider->key()->value,
+                'resource_type' => $resourceType,
+                'provider_resource' => $providerResource,
+                'provider_change_type' => $providerChangeType,
+                'provider_subscription_id' => $providerSubscriptionId,
+                'expires_at' => $expiresAt,
+                'status' => ProviderWebhookSubscriptionStatus::Active,
+            ]);
+
+            $this->events->record($connection->firm, 'integration_oauth.webhook_subscription_bootstrapped', $connection, $actor->user, [
+                'firm_integration_id' => $connection->id,
+                'resource_type' => $resourceType,
+            ]);
+        }
+    }
+
+    /**
+     * Byte-for-byte the same extraction discipline as
+     * `RenewGraphSubscriptionJob::extractSubscriptionState()` (narrowly
+     * duplicated here rather than shared — see
+     * bootstrapWebhookSubscriptions()'s own docblock): `subscribe()`
+     * (`SupportsWebhooksContract`) returns only an open
+     * `array<string, mixed>` — "subscription state (e.g. subscription
+     * id, expiry)", no fixed key names guaranteed by the interface. A
+     * missing/unparseable required field is treated as a malformed-
+     * response failure, propagating out and rolling back the enclosing
+     * transaction, never silently persisted as a NULL against this
+     * table's NOT NULL `expires_at` column.
+     *
+     * @param  array<string, mixed>  $result
+     * @return array{0: string, 1: Carbon}
+     */
+    private function extractSubscriptionState(array $result): array
+    {
+        $subscriptionId = $result['subscription_id'] ?? null;
+        $expiresAtRaw = $result['expires_at'] ?? null;
+
+        if (! is_string($subscriptionId) || trim($subscriptionId) === '') {
+            throw new RuntimeException('Provider returned a subscription result with no usable subscription_id.');
+        }
+
+        if (! is_string($expiresAtRaw) && ! $expiresAtRaw instanceof DateTimeInterface) {
+            throw new RuntimeException('Provider returned a subscription result with no usable expires_at.');
+        }
+
+        try {
+            $expiresAt = Carbon::parse($expiresAtRaw);
+        } catch (Throwable) {
+            throw new RuntimeException('Provider returned an unparseable expires_at value.');
+        }
+
+        return [$subscriptionId, $expiresAt];
+    }
+
+    /**
      * Checkpoint 7 addition (see enableWebhookRouting() above) — clears
      * both the plaintext-display column and the hashed routing-index
      * row in the SAME transaction. Idempotent: safe to call on a
@@ -1284,6 +1483,15 @@ class ProviderConnectionService
                 IntegrationWebhookRoutingIndex::query()
                     ->where('firm_integration_id', $fresh->id)
                     ->delete();
+
+                // Checkpoint 3 addition (FirmsVault Live Integrations,
+                // Google Workspace) — see disconnect()'s identical
+                // addition for the full rationale; this is the sibling
+                // call site checkpoint3-combined-design.md §4.7 and
+                // RowLevelSecurityCoverageMappingService's own registry
+                // entry for GmailMailboxRoutingService both name
+                // explicitly.
+                $this->gmailMailboxRouting->unroute($fresh);
             }
         );
     }

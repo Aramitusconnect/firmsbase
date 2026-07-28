@@ -12,6 +12,7 @@ use App\Integrations\Models\IntegrationProvider;
 use App\Integrations\Models\IntegrationWebhookRoutingIndex;
 use App\Integrations\Services\IntegrationCredentialService;
 use App\Integrations\Services\WebhookConnectionResolverService;
+use App\Integrations\Support\GmailMailboxRoutingService;
 use App\Models\Firm;
 use App\Models\TenantEncryptionKey;
 use App\Services\EmailBodyEncryptionService;
@@ -319,6 +320,10 @@ final class WebhookConnectionResolverServiceTest extends TestCase
             $this->credentialService(),
             new EmailBodyEncryptionService(new EncryptionKeyService),
             new TenantContextService,
+            // Checkpoint 3 addition (FirmsVault Live Integrations,
+            // Google Workspace): WebhookConnectionResolverService's
+            // constructor gained this 4th, required dependency.
+            app(GmailMailboxRoutingService::class),
         );
     }
 

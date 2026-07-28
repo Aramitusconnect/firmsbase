@@ -607,6 +607,27 @@ class RowLevelSecurityCoverageMappingService
      * writers. The 27 entries above are untouched — this addition only
      * appends.
      *
+     * FirmsVault Live Integrations, Checkpoint 3 ("Add Google Workspace
+     * integration provider") appended one further exemption at the end
+     * of this array: integration_gmail_mailbox_routes
+     * (checkpoint3-combined-design.md §5/§6.4.3;
+     * checkpoint3-security-review.md Finding 3, required — the identical
+     * registry-omission class of defect integration_webhook_routing_index
+     * itself already required a post-implementation correction for).
+     * Like integration_webhook_routing_index and
+     * integration_platform_overview_summaries, this is NOT a "no firm_id"
+     * exemption — direct inspection of
+     * database/migrations/2026_09_23_170001_create_integration_gmail_mailbox_routes_table.php
+     * confirms it carries a genuine NOT NULL firm_id column
+     * ($table->foreignId('firm_id')->constrained('firms')->cascadeOnDelete()).
+     * It is exempted anyway, for the identical structural reason
+     * integration_webhook_routing_index itself carries no RLS: it must be
+     * queryable during GmailMailboxRoutingService::resolveByMailbox()'s
+     * pre-tenant-context routing step, before any firm identity exists on
+     * the inbound Gmail Pub/Sub webhook request. See EXEMPT_TABLE_METADATA
+     * below for the full reason/readers/writers. The 28 entries above are
+     * untouched — this addition only appends.
+     *
      * @var array<int, string>
      */
     private const EXEMPT_TABLES = [
@@ -639,6 +660,13 @@ class RowLevelSecurityCoverageMappingService
         // see docblock above. An ordinary "no firm_id" exemption, unlike
         // the two entries immediately above.
         'integration_platform_provider_health_summaries',
+        // FirmsVault Live Integrations, Checkpoint 3 (Google Workspace
+        // provider) addition — see docblock above. Has a real NOT NULL
+        // firm_id column (like integration_webhook_routing_index, unlike
+        // every "no firm_id" entry above); exempted for a documented,
+        // independently-reviewed reason instead — see
+        // EXEMPT_TABLE_METADATA below.
+        'integration_gmail_mailbox_routes',
     ];
 
     /**
@@ -1221,6 +1249,29 @@ class RowLevelSecurityCoverageMappingService
                 .'database/migrations/2026_09_11_110001_create_integration_platform_provider_health_summaries_table.php '
                 .'for the full "WHY THIS TABLE HAS NO RLS AND NO FORCE RLS" reasoning.',
         ],
+        // FirmsVault Live Integrations, Checkpoint 3 (Google Workspace
+        // provider) addition — checkpoint3-combined-design.md §5/§6.4.3;
+        // checkpoint3-security-review.md Finding 3. Same DISCLAIMER
+        // category as integration_webhook_routing_index above: genuinely
+        // carries a NOT NULL firm_id column, exempted anyway for a
+        // documented reason — see EXEMPT_TABLE_METADATA.
+        'integration_gmail_mailbox_routes' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'DISCLAIMER: Global, no RLS — but NOT a "no firm_id" exemption either: this table '
+                .'genuinely carries a NOT NULL firm_id column (plus firm_integration_id), by deliberate design, '
+                .'and is exempted from RLS anyway (see EXEMPT_TABLE_METADATA). Structural sibling of '
+                .'integration_webhook_routing_index, for the identical reason: it must be readable before any '
+                .'tenant context exists at all, to bootstrap Gmail Cloud Pub/Sub inbound-webhook mailbox-to-'
+                .'connection routing (App\\Integrations\\Support\\GmailMailboxRoutingService::resolveByMailbox()). '
+                .'Carries no secret material — only a keyed HMAC-SHA256 lookup digest of a normalized mailbox '
+                .'address and an already-encrypted display-value ciphertext, never a plaintext mailbox. Written '
+                .'only by App\\Integrations\\Support\\GmailMailboxRoutingService::route()/unroute(). See '
+                .'database/migrations/2026_09_23_170001_create_integration_gmail_mailbox_routes_table.php for the '
+                .'full "WHY THIS TABLE HAS NO RLS" reasoning, cross-referencing '
+                .'2026_09_06_060001_create_integration_webhook_routing_index_table.php directly. See '
+                .'EXEMPT_TABLE_METADATA.',
+        ],
         'integration_webhook_receipts' => [
             'classification' => TenantOwnershipClassification::Global,
             'ownership_path' => null,
@@ -1551,6 +1602,46 @@ class RowLevelSecurityCoverageMappingService
             ],
             'authorized_writers' => [
                 'App\\Services\\IntegrationPlatformProviderHealthSummaryService::refreshForProvider() — invoked exclusively by App\\Jobs\\RefreshIntegrationPlatformProviderHealthSummaryJob, one job per registered provider, dispatched by the integrations:platform-provider-health:refresh scheduled command',
+            ],
+        ],
+        // FirmsVault Live Integrations, Checkpoint 3 ("Add Google
+        // Workspace integration provider") addition —
+        // checkpoint3-combined-design.md §5/§6.4.3;
+        // checkpoint3-security-review.md Finding 3, required.
+        'integration_gmail_mailbox_routes' => [
+            'reason' => 'FirmsVault Live Integrations, Checkpoint 3 (Google Workspace provider): like '
+                .'integration_webhook_routing_index, this table genuinely carries a NOT NULL firm_id column '
+                .'($table->foreignId(\'firm_id\')->constrained(\'firms\')->cascadeOnDelete(), per '
+                .'database/migrations/2026_09_23_170001_create_integration_gmail_mailbox_routes_table.php) — it '
+                .'is exempt from RLS despite that, not because it lacks it. Reviewed and approved as a '
+                .'deliberate, narrow exception, for the identical three-reason structure '
+                .'integration_webhook_routing_index\'s own exemption already established: (1) it holds no secret '
+                .'or credential material of any kind — only {firm_id, firm_integration_id, '
+                .'integration_provider_id, mailbox_lookup_hmac, mailbox_display_ciphertext, '
+                .'mailbox_display_encryption_key_id}, where mailbox_lookup_hmac is a KEYED HMAC-SHA256 digest '
+                .'(not a plain hash — a Gmail mailbox address is a small, structured, guessable string, unlike '
+                .'the sibling table\'s CSPRNG-token hash, so a plain hash would be dictionary-attackable offline; '
+                .'the HMAC key is a dedicated, platform-wide secret, never APP_KEY, never a per-firm key) and '
+                .'mailbox_display_ciphertext is already-encrypted, never plaintext; (2) it MUST be queryable in a '
+                .'genuinely pre-tenant-context bootstrap step — Gmail\'s Cloud Pub/Sub push delivery uses ONE '
+                .'shared topic/subscription for every connected firm, so the inbound webhook request arrives '
+                .'before any firm identity is authenticated, and app.current_firm_id cannot be SET LOCAL before '
+                .'this exact lookup resolves which firm/connection the mailbox belongs to — a FORCE RLS policy '
+                .'here would make GmailMailboxRoutingService::resolveByMailbox() structurally impossible for the '
+                .'identical reason integration_webhook_routing_index\'s own exemption gives; and (3) the firm_id '
+                .'read back from this table is never treated as authoritative on its own — every subsequent step '
+                .'re-establishes and re-verifies real tenant context via the ordinary, unmodified '
+                .'TenantContextService::runWithFirmContext() before anything RLS-protected is touched, so this '
+                .'table\'s firm_id is a non-authoritative routing pointer only, not a security boundary. See '
+                .'database/migrations/2026_09_23_170001_create_integration_gmail_mailbox_routes_table.php\'s own '
+                .'"WHY THIS TABLE HAS NO RLS" class docblock, which cross-references '
+                .'2026_09_06_060001_create_integration_webhook_routing_index_table.php directly, for the full '
+                .'reasoning.',
+            'expected_readers' => [
+                'App\\Integrations\\Support\\GmailMailboxRoutingService::resolveByMailbox() — the sole pre-tenant-context read, returning only a resolved {firm_id, firm_integration_id} pair (or null), never a secret or hydrated model',
+            ],
+            'authorized_writers' => [
+                'App\\Integrations\\Support\\GmailMailboxRoutingService::route()/unroute() — route() is the sole writer (delete-before-insert, never updateOrCreate()); unroute() is the sole deleter, per checkpoint3-combined-design.md §4.7 intended to be called from ProviderConnectionService::disconnect()/disableWebhookRouting() in the same transaction as those methods\' existing firm_integrations/integration_webhook_routing_index cleanup',
             ],
         ],
     ];

@@ -146,6 +146,19 @@ final class IntegrationWebhookRoutingIndexNoRlsAndNoSecretColumnTest extends Tes
             // — no query, no model reference, no executable code in this
             // file touches the table at all.
             'SupportsWebhooksContract.php',
+            // Checkpoint 3 (FirmsVault Live Integrations, Google
+            // Workspace — checkpoint3-design-sync-webhooks.md §6.4)
+            // additions — all three files' docblocks name this table in
+            // prose ONLY, explaining why Gmail's mailbox routing needed a
+            // new, dedicated table rather than an undocumented second
+            // writer/row inserted into this frozen, security-reviewed
+            // one (the human reviewer's own binding mandate), and
+            // contrasting the two tables' otherwise-identical no-RLS
+            // rationale. None of the three ever queries, writes, or
+            // imports the IntegrationWebhookRoutingIndex model.
+            'GmailMailboxRoutingService.php',
+            'GoogleWorkspaceProvider.php',
+            'ResolvedGmailMailboxRoute.php',
         ];
 
         $violations = [];

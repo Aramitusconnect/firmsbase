@@ -8,9 +8,11 @@ use App\Integrations\Data\ResolvedWebhookConnection;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
 use App\Integrations\Enums\IntegrationCredentialStatus;
+use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationCredential;
 use App\Integrations\Models\IntegrationProvider;
+use App\Integrations\Support\GmailMailboxRoutingService;
 use App\Services\EmailBodyEncryptionService;
 use App\Services\TenantContextService;
 use Illuminate\Support\Facades\DB;
@@ -63,6 +65,7 @@ class WebhookConnectionResolverService
         private readonly IntegrationCredentialService $credentialService,
         private readonly EmailBodyEncryptionService $encryption,
         private readonly TenantContextService $tenantContext,
+        private readonly GmailMailboxRoutingService $gmailMailboxRouting,
     ) {}
 
     /**
@@ -81,6 +84,25 @@ class WebhookConnectionResolverService
      * returns null, exactly like an unrecognized routing token, so a
      * caller cannot distinguish "provider doesn't exist" from "provider
      * exists, token wrong" (frozen design §1/§8).
+     *
+     * Checkpoint 3 addition (FirmsVault Live Integrations, Google
+     * Workspace — checkpoint3-design-sync-webhooks.md §6.4): Gmail's
+     * shared-topic Pub/Sub push model has no per-connection CSPRNG
+     * routing token to hash the way every other provider (Microsoft,
+     * Google Calendar, Google Drive) does — its routing identifier
+     * (extracted by GoogleWorkspaceProvider::extractRoutingIdentifier())
+     * is instead the Pub/Sub message's own `emailAddress` field. When
+     * the primary hash-based lookup above misses AND the provider is
+     * specifically GoogleWorkspace, this method falls back to
+     * GmailMailboxRoutingService::resolveByMailbox() — the dedicated,
+     * pre-tenant-context resolver built for exactly this shape (see
+     * that service's own class docblock). Scoped to this one provider
+     * only: every other provider's routing identifier is a 256-bit
+     * CSPRNG token that could never coincidentally collide with an
+     * email-shaped string, so this fallback can never accidentally
+     * "rescue" a wrong-shaped identifier for a non-Gmail provider, and
+     * the anti-enumeration/collapse-to-null discipline this method's
+     * class docblock requires is preserved identically on both paths.
      */
     public function resolveConnectionIdentity(string $providerKeyValue, string $rawRoutingToken): ?ResolvedWebhookConnection
     {
@@ -97,16 +119,29 @@ class WebhookConnectionResolverService
             ->where('webhook_routing_token_hash', $tokenHash)
             ->first();
 
-        if ($row === null) {
-            return null;
+        if ($row !== null) {
+            return new ResolvedWebhookConnection(
+                firmId: (int) $row->firm_id,
+                firmIntegrationId: (int) $row->firm_integration_id,
+                integrationProviderId: (int) $provider->id,
+                providerKey: $providerKeyValue,
+            );
         }
 
-        return new ResolvedWebhookConnection(
-            firmId: (int) $row->firm_id,
-            firmIntegrationId: (int) $row->firm_integration_id,
-            integrationProviderId: (int) $provider->id,
-            providerKey: $providerKeyValue,
-        );
+        if ($providerKeyValue === ProviderKey::GoogleWorkspace->value) {
+            $mailboxRoute = $this->gmailMailboxRouting->resolveByMailbox($rawRoutingToken);
+
+            if ($mailboxRoute !== null) {
+                return new ResolvedWebhookConnection(
+                    firmId: $mailboxRoute->firmId,
+                    firmIntegrationId: $mailboxRoute->firmIntegrationId,
+                    integrationProviderId: $mailboxRoute->integrationProviderId,
+                    providerKey: $providerKeyValue,
+                );
+            }
+        }
+
+        return null;
     }
 
     /**

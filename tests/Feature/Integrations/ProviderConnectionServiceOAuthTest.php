@@ -33,6 +33,7 @@ use App\Integrations\Services\IntegrationAccessPolicyService;
 use App\Integrations\Services\IntegrationCredentialService;
 use App\Integrations\Services\IntegrationOAuthStateService;
 use App\Integrations\Services\ProviderConnectionService;
+use App\Integrations\Support\GmailMailboxRoutingService;
 use App\Integrations\Support\OutboundProviderHttpClient;
 use App\Integrations\Support\PkceService;
 use App\Integrations\Support\ProviderRedirectUrlValidator;
@@ -1479,7 +1480,7 @@ class ProviderConnectionServiceOAuthTest extends TestCase
     {
         $firm = Firm::factory()->create(); // NOT entitled (no firmWithActiveKey())
         $this->runWithFirmContext($firm, fn () => TenantEncryptionKey::factory()->forFirm($firm)->create());
-        $provider = $this->testProviderRow();
+        $provider = $this->makeTestProviderRow();
         $firmUser = $this->firmUserFor($firm, FirmUserRole::FirmOwner);
 
         $this->expectException(RuntimeException::class);
@@ -1654,13 +1655,13 @@ class ProviderConnectionServiceOAuthTest extends TestCase
     private function firmProviderAndActor(FirmUserRole $role = FirmUserRole::FirmOwner): array
     {
         $firm = $this->firmWithActiveKey();
-        $provider = $this->testProviderRow();
+        $provider = $this->makeTestProviderRow();
         $firmUser = $this->firmUserFor($firm, $role);
 
         return [$firm, $provider, $firmUser];
     }
 
-    private function testProviderRow(): IntegrationProvider
+    private function makeTestProviderRow(): IntegrationProvider
     {
         return IntegrationProvider::query()->where('code', ProviderKey::Test->value)->first()
             ?? IntegrationProvider::factory()->create(['code' => ProviderKey::Test->value]);
@@ -1684,6 +1685,11 @@ class ProviderConnectionServiceOAuthTest extends TestCase
             // constructor gained this 8th, required dependency — every
             // manual construction site in this file must supply it.
             app(IntegrationEntitlementPolicyService::class),
+            // Checkpoint 3 addition (FirmsVault Live Integrations,
+            // Google Workspace): ProviderConnectionService's constructor
+            // gained this 9th, required dependency -- every manual
+            // construction site in this file must supply it.
+            app(GmailMailboxRoutingService::class),
         );
     }
 

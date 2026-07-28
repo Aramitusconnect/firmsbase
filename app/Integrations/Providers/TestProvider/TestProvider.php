@@ -672,6 +672,16 @@ final class TestProvider implements IntegrationProviderContract, SupportsApiKeyC
             'subscription_id' => (string) Str::uuid(),
             'status' => 'active',
             'event_types' => $this->webhookEventTypes(),
+            // FirmsVault Live Integrations, Checkpoint 3 addition: every
+            // real provider's subscribe() response includes expires_at
+            // (Microsoft365Provider/GoogleWorkspaceProvider both do), and
+            // ProviderConnectionService::extractSubscriptionState() (now
+            // generically wired to call subscribe() for ANY
+            // SupportsWebhooksContract provider via
+            // bootstrapWebhookSubscriptions()) throws on a missing value
+            // — this simulated response must match that shape too, not
+            // just the two real providers'.
+            'expires_at' => now()->addDays(3)->toIso8601String(),
         ];
     }
 

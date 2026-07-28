@@ -21,6 +21,7 @@ use App\Integrations\Services\IntegrationCredentialService;
 use App\Integrations\Services\IntegrationOAuthStateService;
 use App\Integrations\Services\ProviderConnectionService;
 use App\Integrations\Services\WebhookConnectionResolverService;
+use App\Integrations\Support\GmailMailboxRoutingService;
 use App\Integrations\Support\OutboundProviderHttpClient;
 use App\Integrations\Support\PkceService;
 use App\Integrations\Support\ProviderRedirectUrlValidator;
@@ -361,6 +362,7 @@ final class InboundWebhookValidationChallengeAndContentTypeTest extends TestCase
             $this->credentialService(),
             new EmailBodyEncryptionService(new EncryptionKeyService),
             new TenantContextService,
+            app(GmailMailboxRoutingService::class),
         );
 
         $resolved = new ResolvedWebhookConnection(
@@ -434,6 +436,11 @@ final class InboundWebhookValidationChallengeAndContentTypeTest extends TestCase
             new ProviderRedirectUrlValidator,
             new TimelineEventRecorder,
             app(IntegrationEntitlementPolicyService::class),
+            // Checkpoint 3 addition (FirmsVault Live Integrations,
+            // Google Workspace): ProviderConnectionService's constructor
+            // gained this 9th, required dependency -- every manual
+            // construction site in this file must supply it.
+            app(GmailMailboxRoutingService::class),
         );
     }
 

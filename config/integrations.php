@@ -1,6 +1,7 @@
 <?php
 
 use App\Integrations\Enums\ProviderKey;
+use App\Integrations\Providers\GoogleWorkspace\GoogleWorkspaceProvider;
 use App\Integrations\Providers\Microsoft365\Microsoft365Provider;
 use App\Integrations\Providers\TestProvider\TestProvider;
 
@@ -64,6 +65,21 @@ return [
         // written here.
         ProviderKey::Microsoft365->value => env('INTEGRATIONS_MICROSOFT365_ENABLED', false)
             ? Microsoft365Provider::class
+            : null,
+
+        // FirmsVault Live Integrations, Checkpoint 3 addition
+        // (checkpoint3-combined-design.md §4.1). Same production-capable
+        // shape as Microsoft365 immediately above (no
+        // `! app()->environment('production')` term) — the env flag
+        // alone is the gate; GoogleWorkspaceProvider::isConfigured()
+        // independently re-checks that oauth_apps.googleworkspace's
+        // platform credentials are actually present. The referenced
+        // class is built as a parallel, disjoint change in this same
+        // checkpoint — safe for the identical reason documented on the
+        // Microsoft365 entry above: the env() gate defaults false, so
+        // this map entry resolves to null until explicitly enabled.
+        ProviderKey::GoogleWorkspace->value => env('INTEGRATIONS_GOOGLEWORKSPACE_ENABLED', false)
+            ? GoogleWorkspaceProvider::class
             : null,
 
     ],
@@ -243,7 +259,24 @@ return [
                 'window_seconds' => env('INTEGRATIONS_RATE_LIMIT_MICROSOFT365_WINDOW_SECONDS', 60),
             ],
 
-            // Checkpoints 3-5 each add one entry here, e.g.:
+            // FirmsVault Live Integrations, Checkpoint 3 addition
+            // (checkpoint3-combined-design.md §4.1). PLACEHOLDER /
+            // CONSERVATIVE VALUES ONLY, identical posture to Microsoft
+            // 365's own entry immediately above — Gmail/Calendar/Drive
+            // each publish different documented per-API throttling
+            // ceilings that were NOT deep-fetched/confirmed as part of
+            // this checkpoint. Reuses `rate_limits.default`'s own
+            // conservative shape/values verbatim rather than guessing a
+            // specific number with false confidence. MUST be revisited
+            // and set to Google's actual documented per-resource
+            // throttling ceilings before this provider is enabled
+            // against real production traffic.
+            ProviderKey::GoogleWorkspace->value => [
+                'max_attempts_per_window' => env('INTEGRATIONS_RATE_LIMIT_GOOGLEWORKSPACE_MAX_ATTEMPTS', 30),
+                'window_seconds' => env('INTEGRATIONS_RATE_LIMIT_GOOGLEWORKSPACE_WINDOW_SECONDS', 60),
+            ],
+
+            // Checkpoints 4-5 each add one entry here, e.g.:
             // ProviderKey::Plaid->value => ['max_attempts_per_window' => 600, 'window_seconds' => 60],
         ],
     ],
@@ -290,6 +323,43 @@ return [
             ],
         ],
 
+        // FirmsVault Live Integrations, Checkpoint 3 addition
+        // (checkpoint3-combined-design.md §1.2, the reconciled/binding
+        // shape). Google needs FOUR named purposes, not Microsoft's two —
+        // the reconciliation between this checkpoint's OAuth design (which
+        // proposed a 3-purpose split sharing one `workspace_api` purpose
+        // for Calendar+Drive via ProviderEnvironmentResolver's boundary-
+        // anchored path matching) and its sync/webhooks design (which
+        // implements pull()/push()/subscribe() against Calendar and Drive
+        // as two independently-toggleable purposes) resolved in favor of
+        // four explicit purposes: simpler to reason about and test than
+        // relying on path-prefix disambiguation between two Google APIs
+        // that happen to share one host. `token` (not `identity`) is kept
+        // as the auth-token purpose name — "analogous to, but distinct
+        // from, Microsoft's `identity` purpose" (the one purpose name
+        // either source design actually argued for). Deliberately NO
+        // `'default'` key alongside these named purposes (Checkpoint 2
+        // security review Finding 4's binding rule for every future
+        // provider) — every call site
+        // (exchangeCodeForToken()/refreshToken()/revokeAtProvider()/
+        // pullGmail*()/pullCalendar()/pullDrive*()/subscribe()/
+        // renewSubscription()) must pass an explicit `urlPurpose`.
+        ProviderKey::GoogleWorkspace->value => [
+            'mode' => env('INTEGRATIONS_GOOGLEWORKSPACE_MODE', 'sandbox'),
+            'sandbox_base_urls' => [
+                'token' => env('INTEGRATIONS_GOOGLEWORKSPACE_SANDBOX_TOKEN_BASE_URL', 'https://oauth2.googleapis.com'),
+                'gmail' => env('INTEGRATIONS_GOOGLEWORKSPACE_SANDBOX_GMAIL_BASE_URL', 'https://gmail.googleapis.com'),
+                'calendar' => env('INTEGRATIONS_GOOGLEWORKSPACE_SANDBOX_CALENDAR_BASE_URL', 'https://www.googleapis.com'),
+                'drive' => env('INTEGRATIONS_GOOGLEWORKSPACE_SANDBOX_DRIVE_BASE_URL', 'https://www.googleapis.com'),
+            ],
+            'live_base_urls' => [
+                'token' => env('INTEGRATIONS_GOOGLEWORKSPACE_LIVE_TOKEN_BASE_URL', 'https://oauth2.googleapis.com'),
+                'gmail' => env('INTEGRATIONS_GOOGLEWORKSPACE_LIVE_GMAIL_BASE_URL', 'https://gmail.googleapis.com'),
+                'calendar' => env('INTEGRATIONS_GOOGLEWORKSPACE_LIVE_CALENDAR_BASE_URL', 'https://www.googleapis.com'),
+                'drive' => env('INTEGRATIONS_GOOGLEWORKSPACE_LIVE_DRIVE_BASE_URL', 'https://www.googleapis.com'),
+            ],
+        ],
+
     ],
 
     /*
@@ -316,6 +386,49 @@ return [
         ProviderKey::Microsoft365->value => [
             'client_id' => env('INTEGRATIONS_MICROSOFT365_CLIENT_ID'),
             'client_secret' => env('INTEGRATIONS_MICROSOFT365_CLIENT_SECRET'),
+        ],
+
+        // FirmsVault Live Integrations, Checkpoint 3 addition
+        // (checkpoint3-combined-design.md §4.1/§4.6, §6.4.4 of
+        // checkpoint3-design-sync-webhooks.md). `client_id`/`client_secret`
+        // are the same "one app registration's credentials FirmsVault
+        // itself owns" shape as Microsoft365's own entry above.
+        //
+        // The three Gmail-specific keys below are NOT OAuth client
+        // credentials — they back the Gmail Cloud Pub/Sub push-delivery
+        // trust boundary (a genuinely new, inbound, attacker-reachable
+        // verification path with no Microsoft 365 precedent):
+        //   - `pubsub_push_audience` / `pubsub_push_service_account_email`:
+        //     the exact `aud` claim and push-auth service-account `email`
+        //     claim GoogleWorkspaceProvider's inbound OIDC JWT
+        //     verification (via Google\Auth\AccessToken::verify(), bound
+        //     in app/Providers/IntegrationServiceProvider.php) checks with
+        //     hash_equals() — never partial match, never trusted from the
+        //     unverified webhook payload itself.
+        //   - `gmail_mailbox_routing_hmac_key`: a NEW, DEDICATED,
+        //     platform-wide secret (generated once via random_bytes(32),
+        //     the same CSPRNG discipline
+        //     ProviderConnectionService::generateRawWebhookRoutingToken()
+        //     already uses), the HMAC key GmailMailboxRoutingService uses
+        //     to compute integration_gmail_mailbox_routes.mailbox_lookup_hmac.
+        //     Deliberately NEVER derived from APP_KEY (no cross-purpose
+        //     key reuse) and NEVER a per-firm EmailBodyEncryptionService
+        //     key (wrong shape for a lookup that must resolve BEFORE any
+        //     firm context exists — see that migration's own "WHY THIS
+        //     TABLE HAS NO RLS" docblock).
+        //   - `gmail_pubsub_topic_name`: the fully-qualified Cloud Pub/Sub
+        //     topic name (`projects/<project>/topics/<topic>`) GoogleWorkspaceProvider::subscribe()/renewSubscription()
+        //     pass as watch()'s required `topicName` parameter — a
+        //     platform-level, project-scoped resource (one shared topic
+        //     for the whole platform, per checkpoint3-design-sync-webhooks.md
+        //     §6.2's Path B design), never a per-firm value.
+        ProviderKey::GoogleWorkspace->value => [
+            'client_id' => env('INTEGRATIONS_GOOGLEWORKSPACE_CLIENT_ID'),
+            'client_secret' => env('INTEGRATIONS_GOOGLEWORKSPACE_CLIENT_SECRET'),
+            'pubsub_push_audience' => env('INTEGRATIONS_GOOGLEWORKSPACE_PUBSUB_PUSH_AUDIENCE'),
+            'pubsub_push_service_account_email' => env('INTEGRATIONS_GOOGLEWORKSPACE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL'),
+            'gmail_mailbox_routing_hmac_key' => env('INTEGRATIONS_GOOGLEWORKSPACE_GMAIL_MAILBOX_ROUTING_HMAC_KEY'),
+            'gmail_pubsub_topic_name' => env('INTEGRATIONS_GOOGLEWORKSPACE_GMAIL_PUBSUB_TOPIC_NAME'),
         ],
 
     ],

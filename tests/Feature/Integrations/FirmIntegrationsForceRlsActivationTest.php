@@ -314,6 +314,46 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
         'integration_provider_webhook_subscriptions',
     ];
 
+    /**
+     * FirmsVault Live Integrations, Checkpoint 3 (Google Workspace
+     * provider) added an EIGHTH independent dependency chain on
+     * firm_integrations — integration_gmail_mailbox_routes carries a real
+     * composite FK (firm_id, firm_integration_id) ->
+     * firm_integrations(firm_id, id) with cascadeOnDelete(), identical in
+     * shape to integration_provider_webhook_subscriptions' own composite
+     * FK (checkpoint3-design-sync-webhooks.md §6.4). Unlike every prior
+     * whole-wave layer, this one is a SINGLE migration — the table is
+     * Global/no-RLS by deliberate design (mirrors
+     * integration_webhook_routing_index's own no-RLS classification; see
+     * that create migration's own "WHY THIS TABLE HAS NO RLS" docblock and
+     * this table's identical-in-spirit one), so there is no companion
+     * RLS-prepare migration. This test now also rolls back this
+     * 1-migration Checkpoint 3 wave FIRST — before the Checkpoint 2
+     * webhook-subscriptions whole-wave block, since this Checkpoint 3 wave
+     * is the newest layer of all (dated 2026_09_23, after Checkpoint 2's
+     * own 2026_09_22) — then reapplies it LAST, after the Checkpoint 2
+     * webhook-subscriptions whole-wave block. Order between this wave and
+     * the pre-existing integration_credentials / integration_oauth_states
+     * / Checkpoint 6 / Checkpoint 7 / Checkpoint 8 / Checkpoint 9 /
+     * Checkpoint 2 webhook-subscriptions blocks does not matter to each
+     * other, only each independently references firm_integrations.
+     * Mirrors the identical whole-wave precedent Checkpoint 6 through the
+     * Checkpoint 2 webhook-subscriptions wave each established for this
+     * exact class of problem.
+     *
+     * @var list<string>
+     */
+    private const CP3_GMAIL_MAILBOX_ROUTES_WHOLE_WAVE_MIGRATION_PATHS = [
+        'database/migrations/2026_09_23_170001_create_integration_gmail_mailbox_routes_table.php',
+    ];
+
+    /**
+     * @var list<string>
+     */
+    private const CP3_GMAIL_MAILBOX_ROUTES_WHOLE_WAVE_TABLES = [
+        'integration_gmail_mailbox_routes',
+    ];
+
     // ------------------------------------------------------------
     // 1. Schema correctness
     // ------------------------------------------------------------
@@ -954,6 +994,33 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must exist before this test begins, since it is now also one of firm_integrations' real FK dependents.");
         }
 
+        // Confirm the Checkpoint 3 (FirmsVault Live Integrations, Google
+        // Workspace provider) gmail-mailbox-routes whole-wave table's
+        // pre-rollback existence too (an EIGHTH, independent dependency
+        // chain on firm_integrations — the newest layer of all).
+        foreach (self::CP3_GMAIL_MAILBOX_ROUTES_WHOLE_WAVE_MIGRATION_PATHS as $path) {
+            $this->assertFileExists(base_path($path));
+        }
+        foreach (self::CP3_GMAIL_MAILBOX_ROUTES_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 3 gmail mailbox routes) must exist before this test begins, since it is now also one of firm_integrations' real FK dependents.");
+        }
+
+        // 1a-pre-pre-pre-pre. Roll back the Checkpoint 3 gmail-mailbox-
+        // routes whole-wave dependency chain FIRST — before the Checkpoint
+        // 2 webhook-subscriptions whole-wave block below, since this wave
+        // is the newest layer of all (dated 2026_09_23, after Checkpoint
+        // 2's own 2026_09_22) — see
+        // CP3_GMAIL_MAILBOX_ROUTES_WHOLE_WAVE_MIGRATION_PATHS docblock.
+        // Rolled back in exact reverse of its own creation order (a single
+        // migration, so this is just its own down()).
+        foreach (array_reverse(self::CP3_GMAIL_MAILBOX_ROUTES_WHOLE_WAVE_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 3 gmail mailbox routes whole-wave) failed: ".Artisan::output());
+        }
+        foreach (self::CP3_GMAIL_MAILBOX_ROUTES_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 3 gmail mailbox routes) must not survive its whole-wave rollback.");
+        }
+
         // 1a-pre-pre-pre. Roll back the Checkpoint 2 webhook-subscriptions
         // whole-wave dependency chain FIRST — before the Checkpoint 9
         // whole-wave block below, since this wave is the newest layer of
@@ -1191,16 +1258,31 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
         }
 
         // 5f. Reapply the Checkpoint 2 webhook-subscriptions whole-wave
-        // dependency chain LAST of all — after the Checkpoint 9 whole-wave
-        // block, since this wave is the newest layer of all, and after
-        // firm_integrations (just recreated above) already exists again —
-        // in its own forward (creation) order.
+        // dependency chain LAST — after the Checkpoint 9 whole-wave block,
+        // since this wave is the newest layer other than Checkpoint 3, and
+        // after firm_integrations (just recreated above) already exists
+        // again — in its own forward (creation) order.
         foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS as $path) {
             $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
             $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 2 webhook subscriptions whole-wave) failed: ".Artisan::output());
         }
         foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must be restored by the whole-wave reapplication.");
+        }
+
+        // 5g. Reapply the Checkpoint 3 gmail-mailbox-routes whole-wave
+        // dependency chain LAST of all — after the Checkpoint 2
+        // webhook-subscriptions whole-wave block, since this wave is the
+        // newest layer of all, and after firm_integrations (just
+        // recreated above) already exists again — in its own forward
+        // (creation) order (a single migration, so this is just its own
+        // up()).
+        foreach (self::CP3_GMAIL_MAILBOX_ROUTES_WHOLE_WAVE_MIGRATION_PATHS as $path) {
+            $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 3 gmail mailbox routes whole-wave) failed: ".Artisan::output());
+        }
+        foreach (self::CP3_GMAIL_MAILBOX_ROUTES_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 3 gmail mailbox routes) must be restored by the whole-wave reapplication.");
         }
 
         // 6. Schema restored exactly.
@@ -1400,6 +1482,9 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
         foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must exist before this test begins, since it is now also one of firm_integrations' real FK dependents.");
         }
+        foreach (self::CP3_GMAIL_MAILBOX_ROUTES_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 3 gmail mailbox routes) must exist before this test begins, since it is now also one of firm_integrations' real FK dependents.");
+        }
 
         $rlsMigration = include base_path(self::RLS_MIGRATION_PATH);
         $tableMigration = include base_path(self::TABLE_MIGRATION_PATH);
@@ -1436,15 +1521,38 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
 
         // Checkpoint 2 (FirmsVault Live Integrations, Microsoft 365
         // provider) webhook-subscriptions whole-wave migration objects, in
-        // creation order — the newest layer of all.
+        // creation order.
         $cp2WebhookSubscriptionsMigrations = array_map(
             static fn (string $path) => include base_path($path),
             self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS,
         );
 
+        // Checkpoint 3 (FirmsVault Live Integrations, Google Workspace
+        // provider) gmail-mailbox-routes whole-wave migration objects, in
+        // creation order — the newest layer of all.
+        $cp3GmailMailboxRoutesMigrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::CP3_GMAIL_MAILBOX_ROUTES_WHOLE_WAVE_MIGRATION_PATHS,
+        );
+
+        // Tear down the Checkpoint 3 gmail-mailbox-routes whole-wave
+        // dependency chain FIRST — before the Checkpoint 2
+        // webhook-subscriptions whole-wave teardown below, since this
+        // wave is the newest layer of all (see
+        // CP3_GMAIL_MAILBOX_ROUTES_WHOLE_WAVE_MIGRATION_PATHS docblock).
+        // Torn down as a unit, in exact reverse of its own creation order
+        // (a single migration, so this is just its own down()).
+        foreach (array_reverse($cp3GmailMailboxRoutesMigrations) as $migration) {
+            $migration->down();
+        }
+        foreach (self::CP3_GMAIL_MAILBOX_ROUTES_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 3 gmail mailbox routes) must be fully dropped before the Checkpoint 2 webhook-subscriptions whole-wave teardown can succeed.");
+        }
+
         // Tear down the Checkpoint 2 webhook-subscriptions whole-wave
         // dependency chain FIRST — before the Checkpoint 9 whole-wave
-        // teardown below, since this wave is the newest layer of all (see
+        // teardown below, since this wave is the newest layer other than
+        // Checkpoint 3 (see
         // CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_MIGRATION_PATHS docblock).
         // Torn down as a unit, in exact reverse of its own creation order.
         foreach (array_reverse($cp2WebhookSubscriptionsMigrations) as $migration) {
@@ -1652,15 +1760,29 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
         }
 
         // Rebuild the Checkpoint 2 webhook-subscriptions whole-wave
-        // dependency chain LAST of all — after the Checkpoint 9 whole-wave
-        // block, since this wave is the newest layer of all, and after
-        // firm_integrations (just recreated above) already exists again —
-        // in its own forward (creation) order.
+        // dependency chain LAST — after the Checkpoint 9 whole-wave block,
+        // since this wave is the newest layer other than Checkpoint 3, and
+        // after firm_integrations (just recreated above) already exists
+        // again — in its own forward (creation) order.
         foreach ($cp2WebhookSubscriptionsMigrations as $migration) {
             $migration->up();
         }
         foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must be fully restored after up().");
+        }
+
+        // Rebuild the Checkpoint 3 gmail-mailbox-routes whole-wave
+        // dependency chain LAST of all — after the Checkpoint 2
+        // webhook-subscriptions whole-wave block, since this wave is the
+        // newest layer of all, and after firm_integrations (just
+        // recreated above) already exists again — in its own forward
+        // (creation) order (a single migration, so this is just its own
+        // up()).
+        foreach ($cp3GmailMailboxRoutesMigrations as $migration) {
+            $migration->up();
+        }
+        foreach (self::CP3_GMAIL_MAILBOX_ROUTES_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 3 gmail mailbox routes) must be fully restored after up().");
         }
     }
 

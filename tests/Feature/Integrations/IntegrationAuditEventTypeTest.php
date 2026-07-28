@@ -126,6 +126,17 @@ class IntegrationAuditEventTypeTest extends TestCase
         'integration_governance.action_denied',
         'integration_governance.distinct_approver_violation',
         'integration_governance.distinct_approvers_confirmed',
+        // FirmsVault Live Integrations Checkpoint 3 addition (Google
+        // Workspace provider — checkpoint3-combined-design.md §4.7,
+        // Finding 1 of checkpoint3-security-review.md): fired by
+        // ProviderConnectionService::bootstrapWebhookSubscriptions()
+        // (the new, generic, provider-agnostic subscribe()-bootstrap
+        // addition, called from finishCallback() alongside the
+        // existing enableWebhookRouting() call) each time a webhook
+        // subscription is successfully created for a newly-connected
+        // or newly-capability-widened SupportsWebhooksContract
+        // provider connection.
+        'integration_oauth.webhook_subscription_bootstrapped',
     ];
 
     /**
@@ -167,10 +178,10 @@ class IntegrationAuditEventTypeTest extends TestCase
         'integration_oauth.required_scope_missing',
     ];
 
-    public function test_the_closed_taxonomy_has_exactly_twenty_distinct_event_names(): void
+    public function test_the_closed_taxonomy_has_exactly_twenty_one_distinct_event_names(): void
     {
-        $this->assertCount(20, self::CLOSED_TAXONOMY);
-        $this->assertCount(20, array_unique(self::CLOSED_TAXONOMY), 'No duplicate event names in the closed taxonomy.');
+        $this->assertCount(21, self::CLOSED_TAXONOMY);
+        $this->assertCount(21, array_unique(self::CLOSED_TAXONOMY), 'No duplicate event names in the closed taxonomy.');
     }
 
     /**

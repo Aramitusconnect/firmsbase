@@ -17,6 +17,7 @@ use App\Integrations\Services\IntegrationAccessPolicyService;
 use App\Integrations\Services\IntegrationCredentialService;
 use App\Integrations\Services\IntegrationOAuthStateService;
 use App\Integrations\Services\ProviderConnectionService;
+use App\Integrations\Support\GmailMailboxRoutingService;
 use App\Integrations\Support\OutboundProviderHttpClient;
 use App\Integrations\Support\PkceService;
 use App\Integrations\Support\ProviderRedirectUrlValidator;
@@ -283,6 +284,11 @@ final class TestProviderWebhookRoutedSyncAndIdempotencyScenarioTest extends Test
             new ProviderRedirectUrlValidator,
             new TimelineEventRecorder,
             app(IntegrationEntitlementPolicyService::class),
+            // Checkpoint 3 addition (FirmsVault Live Integrations,
+            // Google Workspace): ProviderConnectionService's constructor
+            // gained this 9th, required dependency -- every manual
+            // construction site in this file must supply it.
+            app(GmailMailboxRoutingService::class),
         );
     }
 
