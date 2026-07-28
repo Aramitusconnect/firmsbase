@@ -16,6 +16,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -66,6 +67,26 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
     private const CP9_USAGE_RECORDS_MIGRATION_PATHS = [
         'database/migrations/2026_09_08_080001_create_integration_usage_records_table.php',
         'database/migrations/2026_09_08_080002_prepare_row_level_security_and_force_rls_on_integration_usage_records_table.php',
+    ];
+
+    /**
+     * POST-CHECKPOINT-4-PLAID UPDATE: Checkpoint 4's
+     * `2026_09_24_500002_create_provider_billable_call_reservations_table`
+     * migration adds a real (bare, single-column) FK `usage_record_id` ->
+     * integration_usage_records(id) (nullOnDelete()) — a bare FK still
+     * blocks dropping the referenced table in PostgreSQL exactly like the
+     * Checkpoint 9 composite one does, so provider_billable_call_reservations
+     * must now be rolled back BEFORE integration_usage_records itself (see
+     * CP9_USAGE_RECORDS_MIGRATION_PATHS above), or dropping THAT table
+     * fails with "cannot drop table ... because other objects depend on
+     * it". Reapplied LAST of all, after integration_usage_records is
+     * restored.
+     *
+     * @var list<string>
+     */
+    private const CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATION_PATHS = [
+        'database/migrations/2026_09_24_500002_create_provider_billable_call_reservations_table.php',
+        'database/migrations/2026_09_24_500003_prepare_row_level_security_and_force_rls_on_provider_billable_call_reservations_table.php',
     ];
 
     private const POLICY_NAME = 'integration_inbound_webhook_events_tenant_isolation';
@@ -297,7 +318,7 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
         $this->runWithFirmContext($firm, fn () => IntegrationInboundWebhookEvent::factory()->forFirmIntegration($connection)->create());
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(0, DB::table('integration_inbound_webhook_events')->count());
     }
@@ -308,7 +329,7 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
         $receipt = IntegrationWebhookReceipt::factory()->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
 
@@ -404,7 +425,7 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->runWithFirmContext($firm, fn () => IntegrationInboundWebhookEvent::factory()->forFirmIntegration($connection)->create());
 
@@ -447,6 +468,16 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
         // table (see CP9_USAGE_RECORDS_MIGRATION_PATHS docblock above) —
         // it must roll back FIRST too, before this table's own migrations
         // below.
+        // Checkpoint 4's provider_billable_call_reservations FK-references
+        // integration_usage_records (see
+        // CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATION_PATHS docblock above) —
+        // it must be rolled back first, before integration_usage_records itself.
+        foreach (array_reverse(self::CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 4 provider_billable_call_reservations) failed: ".Artisan::output());
+        }
+        $this->assertFalse(Schema::hasTable('provider_billable_call_reservations'), 'provider_billable_call_reservations must not survive its own rollback.');
+
         foreach (array_reverse(self::CP9_USAGE_RECORDS_MIGRATION_PATHS) as $path) {
             $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
             $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 9 integration_usage_records) failed: ".Artisan::output());
@@ -488,6 +519,14 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
         }
         $this->assertTrue(Schema::hasTable('integration_usage_records'), 'integration_usage_records must be restored by its own reapplication.');
 
+        // Reapply Checkpoint 4's provider_billable_call_reservations LAST —
+        // after integration_usage_records already exists again.
+        foreach (self::CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATION_PATHS as $path) {
+            $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 4 provider_billable_call_reservations) failed: ".Artisan::output());
+        }
+        $this->assertTrue(Schema::hasTable('provider_billable_call_reservations'), 'provider_billable_call_reservations must be restored by its own reapplication.');
+
         $this->assertTrue(Schema::hasTable('integration_inbound_webhook_events'));
 
         $rowAfterReapply = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'integration_inbound_webhook_events'");
@@ -513,6 +552,17 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
             static fn (string $path) => include base_path($path),
             self::CP9_USAGE_RECORDS_MIGRATION_PATHS,
         );
+        $providerBillableReservationsMigrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATION_PATHS,
+        );
+        // Checkpoint 4's provider_billable_call_reservations FK-references
+        // integration_usage_records — it must be rolled back first, before
+        // integration_usage_records itself.
+        foreach (array_reverse($providerBillableReservationsMigrations) as $migration) {
+            $migration->down();
+        }
+        $this->assertFalse(Schema::hasTable('provider_billable_call_reservations'));
 
         // Dependent migration (sync_runs FK) rolls back FIRST, then
         // integration_usage_records, then this table's own migrations.
@@ -537,6 +587,12 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
         }
         $this->assertTrue(Schema::hasTable('integration_usage_records'));
 
+        // Reapply Checkpoint 4's provider_billable_call_reservations LAST —
+        // after integration_usage_records already exists again.
+        foreach ($providerBillableReservationsMigrations as $migration) {
+            $migration->up();
+        }
+        $this->assertTrue(Schema::hasTable('provider_billable_call_reservations'));
         $dependentMigration->up();
 
         $this->assertTrue(Schema::hasTable('integration_inbound_webhook_events'));
@@ -556,7 +612,7 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
 
     public function test_model_table_resolves_to_integration_inbound_webhook_events(): void
     {
-        $model = new IntegrationInboundWebhookEvent();
+        $model = new IntegrationInboundWebhookEvent;
 
         $this->assertSame('integration_inbound_webhook_events', $model->getTable());
     }
@@ -570,7 +626,7 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
 
     public function test_model_has_the_tenant_global_scope_applied(): void
     {
-        $model = new IntegrationInboundWebhookEvent();
+        $model = new IntegrationInboundWebhookEvent;
 
         $this->assertArrayHasKey('tenant', $model->getGlobalScopes());
     }
@@ -596,12 +652,12 @@ class IntegrationInboundWebhookEventsForceRlsActivationTest extends TestCase
     private function rawRowAttributes(Firm $firm, FirmIntegration $connection, IntegrationWebhookReceipt $receipt): array
     {
         return [
-            'uuid' => (string) \Illuminate\Support\Str::uuid7(),
+            'uuid' => (string) Str::uuid7(),
             'firm_id' => $firm->id,
             'firm_integration_id' => $connection->id,
             'receipt_id' => $receipt->id,
             'provider_key' => 'test',
-            'provider_event_id' => (string) \Illuminate\Support\Str::uuid(),
+            'provider_event_id' => (string) Str::uuid(),
             'receipt_body_hash' => $receipt->body_hash,
             'event_type' => 'test.resource.created',
             'payload_reference_json' => '{}',

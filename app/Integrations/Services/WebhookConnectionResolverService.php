@@ -13,6 +13,7 @@ use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationCredential;
 use App\Integrations\Models\IntegrationProvider;
 use App\Integrations\Support\GmailMailboxRoutingService;
+use App\Integrations\Support\PlaidItemRoutingService;
 use App\Services\EmailBodyEncryptionService;
 use App\Services\TenantContextService;
 use Illuminate\Support\Facades\DB;
@@ -66,6 +67,12 @@ class WebhookConnectionResolverService
         private readonly EmailBodyEncryptionService $encryption,
         private readonly TenantContextService $tenantContext,
         private readonly GmailMailboxRoutingService $gmailMailboxRouting,
+        // FirmsVault Live Integrations, Checkpoint 4 addition ("Plaid
+        // financial evidence add-on" — checkpoint4-combined-design.md
+        // §1.1.1, binding "Option B"; checkpoint4-design-plaid-provider-core.md
+        // §11.2). Mirrors $gmailMailboxRouting's identical injection
+        // shape immediately above.
+        private readonly PlaidItemRoutingService $plaidItemRouting,
     ) {}
 
     /**
@@ -136,6 +143,30 @@ class WebhookConnectionResolverService
                     firmId: $mailboxRoute->firmId,
                     firmIntegrationId: $mailboxRoute->firmIntegrationId,
                     integrationProviderId: $mailboxRoute->integrationProviderId,
+                    providerKey: $providerKeyValue,
+                );
+            }
+        }
+
+        // FirmsVault Live Integrations, Checkpoint 4 addition ("Plaid
+        // financial evidence add-on" — checkpoint4-combined-design.md
+        // §1.1.1, binding "Option B"; checkpoint4-design-plaid-provider-core.md
+        // §11.2). Plaid's `item_id` has no per-connection CSPRNG routing
+        // token to hash the way every other provider does — its routing
+        // identifier (extracted by PlaidProvider::extractRoutingIdentifier())
+        // is instead the webhook body's own `item_id` field. Scoped to
+        // this one provider only, mirroring the Gmail fallback's
+        // identical "cannot accidentally rescue a wrong-shaped
+        // identifier for a different provider" reasoning immediately
+        // above.
+        if ($providerKeyValue === ProviderKey::Plaid->value) {
+            $itemRoute = $this->plaidItemRouting->resolveByItemId($rawRoutingToken);
+
+            if ($itemRoute !== null) {
+                return new ResolvedWebhookConnection(
+                    firmId: $itemRoute->firmId,
+                    firmIntegrationId: $itemRoute->firmIntegrationId,
+                    integrationProviderId: $itemRoute->integrationProviderId,
                     providerKey: $providerKeyValue,
                 );
             }

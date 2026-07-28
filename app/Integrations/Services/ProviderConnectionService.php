@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace App\Integrations\Services;
 
 use App\Enums\FirmUserStatus;
+use App\Integrations\Billing\ProviderBillableCallPipeline;
 use App\Integrations\Contracts\IntegrationProviderContract;
+use App\Integrations\Contracts\RequiresBillableCallPipelineContract;
 use App\Integrations\Contracts\SupportsDisconnectContract;
+use App\Integrations\Contracts\SupportsLinkTokenContract;
 use App\Integrations\Contracts\SupportsPullSyncContract;
 use App\Integrations\Contracts\SupportsWebhooksContract;
 use App\Integrations\Core\ProviderRegistry;
 use App\Integrations\Data\ConsumedOAuthState;
+use App\Integrations\Data\LinkTokenInitiationResult;
 use App\Integrations\Data\OAuthCallbackResult;
 use App\Integrations\Data\OAuthInitiationResult;
 use App\Integrations\Data\ProviderMetadata;
@@ -19,6 +23,8 @@ use App\Integrations\Enums\CredentialType;
 use App\Integrations\Enums\IntegrationCredentialStatus;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Enums\ProviderWebhookSubscriptionStatus;
+use App\Integrations\Enums\ResourceType;
+use App\Integrations\Enums\SyncDirection;
 use App\Integrations\Exceptions\OAuthAccountMismatchException;
 use App\Integrations\Exceptions\OAuthRedirectUriMismatchException;
 use App\Integrations\Exceptions\OAuthTenantMismatchException;
@@ -30,7 +36,10 @@ use App\Integrations\Models\IntegrationProviderWebhookSubscription;
 use App\Integrations\Models\IntegrationWebhookRoutingIndex;
 use App\Integrations\Support\GmailMailboxRoutingService;
 use App\Integrations\Support\OutboundProviderHttpClient;
+use App\Integrations\Support\PlaidItemRoutingService;
+use App\Integrations\Support\ProviderEnvironmentResolver;
 use App\Integrations\Support\ProviderRedirectUrlValidator;
+use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Services\IntegrationEntitlementPolicyService;
 use App\Services\TenantContextService;
@@ -84,6 +93,21 @@ class ProviderConnectionService
         'disconnected' => [],
     ];
 
+    /**
+     * FirmsVault Live Integrations, Checkpoint 4 addition ("Plaid
+     * financial evidence add-on" §6). The design's own binding
+     * Plaid-Item-error-code -> `ConnectionStatus::ReauthorizationRequired`
+     * mapping table — see `markItemErrorState()`, the sole reader.
+     */
+    private const REAUTHORIZATION_REQUIRED_PLAID_ERROR_CODES = [
+        'ITEM_LOGIN_REQUIRED',
+        'USER_PERMISSION_REVOKED',
+        'USER_ACCOUNT_REVOKED',
+        'OAUTH_INVALID_TOKEN',
+        'OAUTH_CONSENT_EXPIRED',
+        'OAUTH_USER_REVOKED',
+    ];
+
     public function __construct(
         private readonly IntegrationOAuthStateService $stateService,
         private readonly IntegrationCredentialService $credentialService,
@@ -94,6 +118,15 @@ class ProviderConnectionService
         private readonly TimelineEventRecorder $events,
         private readonly IntegrationEntitlementPolicyService $entitlement,
         private readonly GmailMailboxRoutingService $gmailMailboxRouting,
+        // FirmsVault Live Integrations, Checkpoint 4 addition ("Plaid
+        // financial evidence add-on" — checkpoint4-combined-design.md
+        // §1.1.1/§6.5, binding "Option B"): mirrors
+        // $gmailMailboxRouting's identical injection shape immediately
+        // above. Used by disconnect()/disableWebhookRouting() to widen
+        // their existing routing-table cleanup with
+        // PlaidItemRoutingService::unroute() — the exact sibling call
+        // site $gmailMailboxRouting->unroute() already establishes.
+        private readonly PlaidItemRoutingService $plaidItemRouting,
     ) {}
 
     /**
@@ -644,10 +677,379 @@ class ProviderConnectionService
         // under.
         if ($provider instanceof SupportsWebhooksContract) {
             $this->enableWebhookRouting($connection, $currentUserId);
-            $this->bootstrapWebhookSubscriptions($connection, $provider, $currentUserId);
+            // Anti-tautology (ProviderBillableCallPipeline's own class
+            // docblock, addition #0): $consumed->firmId is the OAuth
+            // state's own independently-resolved firm id (established
+            // long before $connection was loaded), never $connection->firm
+            // itself — see bootstrapWebhookSubscriptions()'s own docblock
+            // addition below for the full reasoning.
+            $this->bootstrapWebhookSubscriptions($connection, $provider, $currentUserId, Firm::query()->findOrFail($consumed->firmId));
         }
 
         return new OAuthCallbackResult($connection, $connection->status, $scopeSatisfied);
+    }
+
+    /**
+     * FirmsVault Live Integrations, Checkpoint 4 addition ("Plaid
+     * financial evidence add-on" — checkpoint4-design-plaid-provider-core.md
+     * §5.1; checkpoint4-combined-design.md §6.3). The Link-token
+     * sibling of initiateOAuthConnection() — a genuinely narrower flow,
+     * per SupportsLinkTokenContract's own docblock: Plaid Link never
+     * leaves FirmsVault's own page (no cross-origin redirect), so there
+     * is no `state`/PKCE CSRF-defeat requirement and no
+     * `IntegrationOAuthState` row is ever created here — nothing needs
+     * to survive an untrusted round-trip the way an OAuth authorization
+     * code does.
+     *
+     * Reuses startConnection() unchanged as the precondition (creates
+     * the `Pending` FirmIntegration row, already validates
+     * `requested_capabilities` against `ProviderMetadata::resourceTypes` —
+     * fully provider-agnostic already, no Plaid-specific change needed).
+     */
+    public function initiateLinkTokenConnection(FirmIntegration $connection, int $currentUserId): LinkTokenInitiationResult
+    {
+        return (new TenantContextService)->runWithFirmContext(
+            $connection->firm_id,
+            function () use ($connection, $currentUserId) {
+                $actor = $this->resolveActingFirmUser($currentUserId, $connection->firm_id);
+
+                $this->entitlement->assertEnabled($actor->firm);
+                $this->accessPolicy->assertCanConnect($actor);
+
+                $provider = $this->resolveProvider($connection);
+
+                if (! $provider instanceof SupportsLinkTokenContract) {
+                    throw new RuntimeException(
+                        "ProviderConnectionService::initiateLinkTokenConnection() requires a provider implementing SupportsLinkTokenContract; connection {$connection->id}'s resolved provider does not."
+                    );
+                }
+
+                $result = $this->httpClient->execute(
+                    fn () => $provider->createLinkToken([
+                        'connection' => $connection,
+                        'requested_capabilities' => $connection->requested_capabilities_json ?? [],
+                    ]),
+                    'createLinkToken',
+                );
+
+                $this->events->record($connection->firm, 'integration_link_token.issued', $connection, $actor->user, [
+                    'firm_integration_id' => $connection->id,
+                ]);
+
+                return new LinkTokenInitiationResult((string) $result['link_token'], (string) $result['expiration']);
+            }
+        );
+    }
+
+    /**
+     * FirmsVault Live Integrations, Checkpoint 4 addition ("Plaid
+     * financial evidence add-on" §6 — the update-mode re-authentication
+     * entry point). Mirrors `initiateLinkTokenConnection()`'s shape
+     * closely — same actor resolution, same entitlement/access-policy
+     * gates, same `SupportsLinkTokenContract` requirement — but carries
+     * the connection's own decrypted `access_token` into
+     * `createLinkToken()`'s `update_access_token` context key instead of
+     * `requested_capabilities` (Plaid's update-mode Link flow re-uses the
+     * Item's EXISTING product grant; it never re-requests capabilities),
+     * a call shape `PlaidProviderLinkTokenTest.php` already proves
+     * `PlaidProvider::createLinkToken()` itself correctly handles.
+     *
+     * Deliberately does NOT require the connection to currently be
+     * `ReauthorizationRequired` — a firm may legitimately want to
+     * re-launch update-mode Link for an `Active` connection too (Plaid's
+     * own documented use case: adding accounts, or a user-initiated
+     * "reconnect" from the UI before any error webhook has even arrived)
+     * — the same latitude `initiateLinkTokenConnection()` itself already
+     * grants by never inspecting `$connection->status` beyond
+     * `startConnection()`'s own precondition.
+     */
+    public function initiateLinkTokenUpdateMode(FirmIntegration $connection, int $currentUserId): LinkTokenInitiationResult
+    {
+        return (new TenantContextService)->runWithFirmContext(
+            $connection->firm_id,
+            function () use ($connection, $currentUserId) {
+                $actor = $this->resolveActingFirmUser($currentUserId, $connection->firm_id);
+
+                $this->entitlement->assertEnabled($actor->firm);
+                $this->accessPolicy->assertCanConnect($actor);
+
+                $provider = $this->resolveProvider($connection);
+
+                if (! $provider instanceof SupportsLinkTokenContract) {
+                    throw new RuntimeException(
+                        "ProviderConnectionService::initiateLinkTokenUpdateMode() requires a provider implementing SupportsLinkTokenContract; connection {$connection->id}'s resolved provider does not."
+                    );
+                }
+
+                $credential = $this->credentialService->findActiveCredential($connection, CredentialType::ProviderAccessToken);
+
+                if ($credential === null) {
+                    throw new RuntimeException(
+                        "ProviderConnectionService::initiateLinkTokenUpdateMode() found no active access token for connection {$connection->id}."
+                    );
+                }
+
+                $accessToken = $this->credentialService->decryptForOperation(
+                    $connection,
+                    $credential,
+                    'plaid update-mode link token: connection '.$connection->id,
+                    'link_token_update_mode',
+                );
+
+                try {
+                    $result = $this->httpClient->execute(
+                        fn () => $provider->createLinkToken([
+                            'connection' => $connection,
+                            'update_access_token' => $accessToken,
+                        ]),
+                        'createLinkToken',
+                    );
+                } finally {
+                    unset($accessToken);
+                }
+
+                $this->events->record($connection->firm, 'integration_link_token.update_mode_issued', $connection, $actor->user, [
+                    'firm_integration_id' => $connection->id,
+                ]);
+
+                return new LinkTokenInitiationResult((string) $result['link_token'], (string) $result['expiration']);
+            }
+        );
+    }
+
+    /**
+     * FirmsVault Live Integrations, Checkpoint 4 addition ("Plaid
+     * financial evidence add-on" — checkpoint4-design-plaid-provider-core.md
+     * §5.2; checkpoint4-combined-design.md §6.3). Completes the
+     * Link-token two-phase flow, mirroring completeOAuthCallback()'s own
+     * shape (a thin public wrapper establishing firm context, delegating
+     * the real work to a private finishLinkTokenCallback()) but WITHOUT
+     * any `IntegrationOAuthState` consumption step — $connection is
+     * already known directly (no opaque `state` to resolve first), per
+     * this flow's own narrower threat model.
+     */
+    public function completeLinkTokenConnection(FirmIntegration $connection, string $publicToken, int $currentUserId): OAuthCallbackResult
+    {
+        return (new TenantContextService)->runWithFirmContext(
+            $connection->firm_id,
+            fn () => $this->finishLinkTokenCallback($connection, $publicToken, $currentUserId)
+        );
+    }
+
+    /**
+     * Deliberately its own method, not a parameterized generalization of
+     * finishCallback() — that method's signature is irreducibly
+     * OAuth-shaped (ConsumedOAuthState, an authorization code,
+     * redirect-URI re-validation, scope-satisfaction computation), and
+     * retrofitting it to also accept a $publicToken path would
+     * reintroduce exactly the "stretch one contract to fit two shapes"
+     * anti-pattern this checkpoint's own SupportsLinkTokenContract
+     * rejects. Mirrors finishCallback()'s structure closely wherever the
+     * mechanics are genuinely analogous: same lock discipline, same
+     * capture-if-null/hash_equals()-reject-on-mismatch pattern (reusing
+     * OAuthAccountMismatchException/OAuthTenantMismatchException
+     * verbatim — both already generic over "the specific account" vs.
+     * "the coarser tenant," not OAuth-specific in meaning), same
+     * enableWebhookRouting()/bootstrapWebhookSubscriptions() tail call.
+     *
+     * No scope-satisfaction concept exists for Plaid — a successfully
+     * exchanged public_token IS full consent for whichever `products`
+     * were requested at createLinkToken() time (Plaid has no partial-grant
+     * response to compare against the way an OAuth `scope` response can
+     * under-grant), so this method always transitions straight to
+     * ConnectionStatus::Active on success, never ScopeInsufficient.
+     */
+    private function finishLinkTokenCallback(FirmIntegration $connection, string $publicToken, int $currentUserId): OAuthCallbackResult
+    {
+        $fresh = FirmIntegration::query()
+            ->where('id', $connection->id)
+            ->where('firm_id', $connection->firm_id)
+            ->lockForUpdate()
+            ->firstOrFail();
+
+        if ($fresh->status === ConnectionStatus::Disconnected) {
+            throw new RuntimeException(
+                "Cannot complete Link-token callback for connection {$fresh->id}: it has already been disconnected."
+            );
+        }
+
+        $actor = $this->resolveActingFirmUser($currentUserId, $fresh->firm_id);
+        $this->accessPolicy->assertCanConnect($actor);
+
+        $provider = $this->resolveProvider($fresh);
+
+        if (! $provider instanceof SupportsLinkTokenContract) {
+            throw new RuntimeException(
+                "ProviderConnectionService::completeLinkTokenConnection() requires a provider implementing SupportsLinkTokenContract; connection {$fresh->id}'s resolved provider does not."
+            );
+        }
+
+        $exchange = $this->httpClient->execute(
+            fn () => $provider->exchangePublicToken($publicToken, ['connection' => $fresh]),
+            'exchangePublicToken',
+        );
+
+        $returnedItemId = $exchange['item_id'] ?? null;
+
+        if ($fresh->external_account_id !== null
+            && $returnedItemId !== null
+            && ! hash_equals((string) $fresh->external_account_id, (string) $returnedItemId)) {
+            throw new OAuthAccountMismatchException;
+        }
+
+        $returnedInstitutionId = $exchange['institution_id'] ?? null;
+
+        if ($fresh->external_tenant_id !== null
+            && $returnedInstitutionId !== null
+            && ! hash_equals((string) $fresh->external_tenant_id, (string) $returnedInstitutionId)) {
+            throw new OAuthTenantMismatchException;
+        }
+
+        $extra = [];
+
+        if ($fresh->external_account_id === null && $returnedItemId !== null) {
+            $extra['external_account_id'] = $returnedItemId;
+        }
+
+        if ($fresh->external_tenant_id === null && $returnedInstitutionId !== null) {
+            $extra['external_tenant_id'] = $returnedInstitutionId;
+        }
+
+        if ($fresh->connected_at === null) {
+            $extra['connected_at'] = now();
+        }
+
+        $fresh = $this->transitionStatus($fresh, ConnectionStatus::Active, null, $extra);
+
+        $this->credentialService->withRefreshLock(
+            $fresh,
+            function (FirmIntegration $locked) use ($exchange) {
+                $this->replaceOrStoreCredential(
+                    $locked,
+                    CredentialType::ProviderAccessToken,
+                    (string) $exchange['access_token'],
+                    ['label' => 'Plaid Item access token'],
+                    null, // Plaid access_token does not expire on its own
+                    true,
+                );
+
+                return null;
+            }
+        );
+
+        $this->events->record($fresh->firm, 'integration_link_token.exchange_succeeded', $fresh, $actor->user, [
+            'firm_integration_id' => $fresh->id,
+        ]);
+
+        if ($provider instanceof SupportsWebhooksContract) {
+            $this->enableWebhookRouting($fresh, $currentUserId);
+            // Anti-tautology (ProviderBillableCallPipeline's own class
+            // docblock, addition #0): this flow (unlike finishCallback()'s
+            // OAuth-state-derived $consumed->firmId) has no independent
+            // firm-identifying value beyond the connection itself — the
+            // ambient TenantContextService firm context that
+            // completeLinkTokenConnection() already established via
+            // runWithFirmContext() is the closest genuinely-separate
+            // source available, so it is read fresh here rather than
+            // reusing $fresh->firm.
+            $this->bootstrapWebhookSubscriptions(
+                $fresh,
+                $provider,
+                $currentUserId,
+                Firm::query()->findOrFail((new TenantContextService)->currentFirmId()),
+            );
+        }
+
+        return new OAuthCallbackResult($fresh, $fresh->status, true);
+    }
+
+    /**
+     * FirmsVault Live Integrations, Checkpoint 4 addition ("Plaid
+     * financial evidence add-on" §6 — "Item error-state handling and
+     * update-mode re-authentication"). Maps a Plaid Item error code onto
+     * `ConnectionStatus::ReauthorizationRequired` per the design's own
+     * binding table:
+     *
+     *   - Reauthorization required: ITEM_LOGIN_REQUIRED,
+     *     USER_PERMISSION_REVOKED, USER_ACCOUNT_REVOKED,
+     *     OAUTH_INVALID_TOKEN, OAUTH_CONSENT_EXPIRED, OAUTH_USER_REVOKED.
+     *   - Health-signal-only (connection remains genuinely Active/usable,
+     *     no status transition): PENDING_EXPIRATION, PENDING_DISCONNECT,
+     *     and any other/unrecognized code — never guessed into
+     *     ReauthorizationRequired.
+     *
+     * A no-op (returns the row unchanged) if the connection is already
+     * Disconnected — a terminal state a late-arriving/out-of-order
+     * webhook must never resurrect, mirroring
+     * `finishLinkTokenCallback()`'s own explicit Disconnected guard
+     * immediately above.
+     */
+    public function markItemErrorState(FirmIntegration $connection, string $plaidErrorCode): FirmIntegration
+    {
+        return (new TenantContextService)->runWithFirmContext(
+            $connection->firm_id,
+            function () use ($connection, $plaidErrorCode): FirmIntegration {
+                $fresh = FirmIntegration::query()
+                    ->where('id', $connection->id)
+                    ->where('firm_id', $connection->firm_id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                if ($fresh->status === ConnectionStatus::Disconnected) {
+                    return $fresh;
+                }
+
+                if (! in_array($plaidErrorCode, self::REAUTHORIZATION_REQUIRED_PLAID_ERROR_CODES, true)) {
+                    return $fresh;
+                }
+
+                $fresh = $this->transitionStatus($fresh, ConnectionStatus::ReauthorizationRequired, $plaidErrorCode);
+
+                $this->events->record($fresh->firm, 'integration_connection.item_error_state_applied', $fresh, null, [
+                    'firm_integration_id' => $fresh->id,
+                    'plaid_error_code' => $plaidErrorCode,
+                ], independentOfAmbientTransaction: true);
+
+                return $fresh;
+            }
+        );
+    }
+
+    /**
+     * FirmsVault Live Integrations, Checkpoint 4 addition — the symmetric
+     * counterpart to `markItemErrorState()`, driven by Plaid's
+     * `ITEM: LOGIN_REPAIRED` webhook. A no-op (returns the row unchanged)
+     * unless the connection is CURRENTLY `ReauthorizationRequired` —
+     * covers both an already-Active connection (the update-mode Link
+     * flow's own `completeLinkTokenConnection()`/`finishLinkTokenCallback()`
+     * call may already have transitioned it to Active before this
+     * confirmation webhook arrives — an expected, idempotent race, not an
+     * error) and a terminal Disconnected connection (never resurrected).
+     */
+    public function markItemLoginRepaired(FirmIntegration $connection): FirmIntegration
+    {
+        return (new TenantContextService)->runWithFirmContext(
+            $connection->firm_id,
+            function () use ($connection): FirmIntegration {
+                $fresh = FirmIntegration::query()
+                    ->where('id', $connection->id)
+                    ->where('firm_id', $connection->firm_id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                if ($fresh->status !== ConnectionStatus::ReauthorizationRequired) {
+                    return $fresh;
+                }
+
+                $fresh = $this->transitionStatus($fresh, ConnectionStatus::Active, null);
+
+                $this->events->record($fresh->firm, 'integration_connection.item_login_repaired', $fresh, null, [
+                    'firm_integration_id' => $fresh->id,
+                ], independentOfAmbientTransaction: true);
+
+                return $fresh;
+            }
+        );
     }
 
     /**
@@ -1209,6 +1611,20 @@ class ProviderConnectionService
                 // capability detection doesn't happen to match here.
                 $this->gmailMailboxRouting->unroute($fresh);
 
+                // FirmsVault Live Integrations, Checkpoint 4 addition
+                // ("Plaid financial evidence add-on" —
+                // checkpoint4-combined-design.md §1.1.1/§6.5/§11):
+                // clears any Plaid item_id-routing mapping in the SAME
+                // transaction as the two clears immediately above, so a
+                // disconnected Plaid connection can never leave a stale,
+                // forever-resolvable item_id-correlator row behind.
+                // Idempotent/cheap no-op for every non-Plaid connection
+                // (PlaidItemRoutingService::unroute()'s own documented
+                // contract) — unconditional, not provider-instanceof-gated,
+                // mirroring $gmailMailboxRouting->unroute()'s identical
+                // discipline immediately above.
+                $this->plaidItemRouting->unroute($fresh);
+
                 $this->events->record($fresh->firm, 'integration_oauth.disconnect', $fresh, $actorUser, array_merge([
                     'firm_integration_id' => $fresh->id,
                 ], $auditMetadataExtra));
@@ -1348,10 +1764,22 @@ class ProviderConnectionService
      * provider's response omits them, so this can never attempt to
      * persist a NULL into either column.
      */
+    /**
+     * FirmsVault Live Integrations, Checkpoint 4 cost-control wiring pass
+     * (checkpoint4-design-cost-control.md §2.1 call site #3, resolving
+     * Finding 1 of checkpoint4-security-review.md): the 4th, trailing,
+     * OPTIONAL `?Firm $firm` parameter. Both existing callers
+     * (finishCallback()/finishLinkTokenCallback()) now pass it — see each
+     * call site's own comment for its anti-tautology-safe source — so
+     * this stays additive/non-breaking for any other hypothetical caller
+     * this private method might gain in the future. Only used when the
+     * resolved `$provider` implements `RequiresBillableCallPipelineContract`.
+     */
     private function bootstrapWebhookSubscriptions(
         FirmIntegration $connection,
         IntegrationProviderContract $provider,
         int $currentUserId,
+        ?Firm $firm = null,
     ): void {
         if (! $provider instanceof SupportsPullSyncContract) {
             return;
@@ -1377,13 +1805,48 @@ class ProviderConnectionService
                 continue;
             }
 
-            $result = $this->httpClient->execute(
-                fn () => $provider->subscribe([
-                    'connection' => $connection,
-                    'resource_type' => $resourceType,
-                ]),
-                'subscribe',
-            );
+            // FirmsVault Live Integrations, Checkpoint 4 cost-control
+            // wiring pass (checkpoint4-design-cost-control.md §2.1 call
+            // site #3). Additive `instanceof` branch only — every other
+            // provider (Microsoft365Provider, GoogleWorkspaceProvider)
+            // does not implement RequiresBillableCallPipelineContract and
+            // falls straight through to the else branch below, which is
+            // the exact, byte-for-byte unchanged
+            // `$this->httpClient->execute(...)` call this method has
+            // always made.
+            if ($provider instanceof RequiresBillableCallPipelineContract && $firm !== null) {
+                $result = app(ProviderBillableCallPipeline::class)->execute(
+                    providerKey: $provider->key(),
+                    connection: $connection,
+                    firm: $firm,
+                    actor: $actor,
+                    product: 'webhook_subscribe',
+                    billingOperation: 'subscribe',
+                    environment: (new ProviderEnvironmentResolver)->modeFor($provider->key()),
+                    direction: SyncDirection::Outbound,
+                    resourceType: ResourceType::from($resourceType),
+                    providerCall: fn () => $this->httpClient->execute(
+                        fn () => $provider->subscribe([
+                            'connection' => $connection,
+                            'resource_type' => $resourceType,
+                        ]),
+                        'subscribe',
+                    ),
+                    usageIdempotencyKey: 'provider_webhook_subscribe:'.$connection->id.':'.$resourceType.':'.now()->format('YmdHi'),
+                    provider: $provider,
+                    requiredContractFqcn: SupportsWebhooksContract::class,
+                );
+
+                $result = $result->response;
+            } else {
+                $result = $this->httpClient->execute(
+                    fn () => $provider->subscribe([
+                        'connection' => $connection,
+                        'resource_type' => $resourceType,
+                    ]),
+                    'subscribe',
+                );
+            }
 
             [$providerSubscriptionId, $expiresAt] = $this->extractSubscriptionState($result);
 
@@ -1492,6 +1955,14 @@ class ProviderConnectionService
                 // entry for GmailMailboxRoutingService both name
                 // explicitly.
                 $this->gmailMailboxRouting->unroute($fresh);
+
+                // FirmsVault Live Integrations, Checkpoint 4 addition
+                // ("Plaid financial evidence add-on" —
+                // checkpoint4-combined-design.md §1.1.1/§6.5/§11) — see
+                // disconnect()'s identical addition for the full
+                // rationale; the sibling call site for
+                // PlaidItemRoutingService.
+                $this->plaidItemRouting->unroute($fresh);
             }
         );
     }

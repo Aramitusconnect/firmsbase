@@ -183,6 +183,34 @@ return Application::configure(basePath: dirname(__DIR__))
             at: '*',
             headers: Request::HEADER_X_FORWARDED_AWS_ELB,
         );
+
+        // Checkpoint 4 ("Plaid financial evidence add-on") test-gate fix.
+        // Laravel's own ApplicationBuilder::withMiddleware() unconditionally
+        // registers a default `redirectGuestsTo(fn () => route('login'))`
+        // (see vendor/laravel/framework/.../ApplicationBuilder.php) BEFORE
+        // this callback runs — and this app has no plain `login` named
+        // route anywhere; every guard authenticates through a
+        // Filament-scoped route (filament.admin.auth.login /
+        // filament.firm.auth.login / filament.client-portal.auth.login).
+        // Confirmed empirically: an unauthenticated POST to the Checkpoint
+        // 4 `portal/plaid/exchange` route (`auth:client` guard — see
+        // routes/web.php) throws RouteNotFoundException ("Route [login]
+        // not defined"), a 500, instead of a clean redirect. The same
+        // latent defect already existed for the Checkpoint 5 OAuth routes
+        // (`auth` middleware, routes/web.php) — never triggered/observed
+        // until this checkpoint's own test-writing pass hit it directly.
+        // Fixed at the shared root cause rather than with a route-specific
+        // workaround, since more than one panel now has a raw,
+        // guard-protected HTTP endpoint outside its own Filament panel
+        // middleware stack. Dispatches purely on request path prefix,
+        // matching each PanelProvider's own ->path() registration.
+        $middleware->redirectGuestsTo(function (Request $request): string {
+            return match (true) {
+                $request->is('admin', 'admin/*') => route('filament.admin.auth.login'),
+                $request->is('portal', 'portal/*') => route('filament.client-portal.auth.login'),
+                default => route('filament.firm.auth.login'),
+            };
+        });
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

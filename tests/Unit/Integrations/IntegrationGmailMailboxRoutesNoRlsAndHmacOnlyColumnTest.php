@@ -152,6 +152,15 @@ final class IntegrationGmailMailboxRoutesNoRlsAndHmacOnlyColumnTest extends Test
             // produce this value object — never itself queries the
             // table.
             'ResolvedGmailMailboxRoute.php',
+            // FirmsVault Live Integrations, Checkpoint 4 ("Plaid
+            // financial evidence add-on"): PlaidItemRoutingService mirrors
+            // GmailMailboxRoutingService's own keyed-lookup design and
+            // ResolvedPlaidItemRoute mirrors ResolvedGmailMailboxRoute —
+            // both reference `integration_gmail_mailbox_routes` only in
+            // docblock prose (design-precedent citations), never in an
+            // actual query against that table.
+            'PlaidItemRoutingService.php',
+            'ResolvedPlaidItemRoute.php',
         ];
 
         $violations = [];

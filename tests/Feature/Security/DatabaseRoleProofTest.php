@@ -79,10 +79,16 @@ class DatabaseRoleProofTest extends TestCase
      * against its own migration source (not re-run here, only
      * cross-referenced):
      *
-     *   - clients: a single, untouched Phase 2 preparation policy
+     *   - clients: the original, untouched Phase 2 preparation policy
      *     (database/migrations/2026_07_05_600024_extend_row_level_
-     *     security_to_phase_2_tenant_tables.php) — "clients_tenant_isolation".
-     *   - timeline_events: the same single-policy shape as clients —
+     *     security_to_phase_2_tenant_tables.php) — "clients_tenant_isolation"
+     *     — PLUS, as of Checkpoint 4 (FirmsVault Live Integrations, "Plaid
+     *     financial evidence add-on"), a separate, additive, FOR SELECT-only
+     *     self-lookup policy (2026_09_24_180006_add_self_lookup_clause_to_
+     *     clients_rls_policy.php, byte-for-byte the same shape/reasoning as
+     *     firm_users_self_lookup below) — "clients_self_lookup".
+     *   - timeline_events: the same single-policy shape clients used to
+     *     have (before Checkpoint 4) —
      *     its own FORCE migration (2026_08_25_930033_force_rls_on_
      *     timeline_events_table.php) deliberately issues no
      *     DROP POLICY/CREATE POLICY at all, per that migration's own
@@ -109,7 +115,13 @@ class DatabaseRoleProofTest extends TestCase
      * @var array<string, array<int, string>>
      */
     private const SAMPLE_TABLE_EXPECTED_POLICIES = [
-        'clients' => ['clients_tenant_isolation'],
+        // Narrowly updated by Checkpoint 4 (FirmsVault Live Integrations,
+        // "Plaid financial evidence add-on") -- `clients` now legitimately
+        // carries a SECOND policy, `clients_self_lookup`
+        // (2026_09_24_180006_add_self_lookup_clause_to_clients_rls_policy.php,
+        // mirroring the pre-existing firm_users_self_lookup precedent below)
+        // -- additive only, no existing assertion removed or weakened.
+        'clients' => ['clients_self_lookup', 'clients_tenant_isolation'],
         'timeline_events' => ['timeline_events_tenant_isolation'],
         'firm_users' => ['firm_users_self_lookup', 'firm_users_tenant_isolation'],
         'security_events' => ['security_events_platform_write', 'security_events_tenant_isolation'],

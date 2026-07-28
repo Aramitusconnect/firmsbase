@@ -116,6 +116,26 @@ class IntegrationExternalMappingsForceRlsActivationTest extends TestCase
         'database/migrations/2026_09_08_080002_prepare_row_level_security_and_force_rls_on_integration_usage_records_table.php',
     ];
 
+    /**
+     * POST-CHECKPOINT-4-PLAID UPDATE: Checkpoint 4's
+     * `2026_09_24_500002_create_provider_billable_call_reservations_table`
+     * migration adds a real (bare, single-column) FK `usage_record_id` ->
+     * integration_usage_records(id) (nullOnDelete()) — a bare FK still
+     * blocks dropping the referenced table in PostgreSQL exactly like the
+     * Checkpoint 9 composite one does, so provider_billable_call_reservations
+     * must now be rolled back BEFORE integration_usage_records itself (see
+     * CP9_USAGE_RECORDS_MIGRATION_PATHS above), or dropping THAT table
+     * fails with "cannot drop table ... because other objects depend on
+     * it". Reapplied LAST of all, after integration_usage_records is
+     * restored.
+     *
+     * @var list<string>
+     */
+    private const CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATION_PATHS = [
+        'database/migrations/2026_09_24_500002_create_provider_billable_call_reservations_table.php',
+        'database/migrations/2026_09_24_500003_prepare_row_level_security_and_force_rls_on_provider_billable_call_reservations_table.php',
+    ];
+
     // ------------------------------------------------------------
     // 1. Schema correctness
     // ------------------------------------------------------------
@@ -342,7 +362,7 @@ class IntegrationExternalMappingsForceRlsActivationTest extends TestCase
     {
         IntegrationExternalMapping::factory()->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(0, DB::table('integration_external_mappings')->count());
     }
@@ -352,7 +372,7 @@ class IntegrationExternalMappingsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
 
@@ -442,7 +462,7 @@ class IntegrationExternalMappingsForceRlsActivationTest extends TestCase
     public function test_tenant_context_clears_after_success(): void
     {
         $firm = Firm::factory()->create();
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->runWithFirmContext($firm, fn () => IntegrationExternalMapping::factory()->forFirmIntegration(FirmIntegration::factory()->forFirm($firm)->create())->create());
 
@@ -483,6 +503,16 @@ class IntegrationExternalMappingsForceRlsActivationTest extends TestCase
         // integration_sync_runs and integration_sync_items (see
         // CP9_USAGE_RECORDS_MIGRATION_PATHS docblock above) — it must be
         // rolled back FIRST, before this whole-wave rollback below.
+        // Checkpoint 4's provider_billable_call_reservations FK-references
+        // integration_usage_records (see
+        // CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATION_PATHS docblock above) —
+        // it must be rolled back first, before integration_usage_records itself.
+        foreach (array_reverse(self::CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 4 provider_billable_call_reservations) failed: ".Artisan::output());
+        }
+        $this->assertFalse(Schema::hasTable('provider_billable_call_reservations'), 'provider_billable_call_reservations must not survive its own rollback.');
+
         foreach (array_reverse(self::CP9_USAGE_RECORDS_MIGRATION_PATHS) as $path) {
             $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
             $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 9 integration_usage_records) failed: ".Artisan::output());
@@ -522,6 +552,14 @@ class IntegrationExternalMappingsForceRlsActivationTest extends TestCase
         }
         $this->assertTrue(Schema::hasTable('integration_usage_records'), 'integration_usage_records must be restored by its own reapplication.');
 
+        // Reapply Checkpoint 4's provider_billable_call_reservations LAST —
+        // after integration_usage_records already exists again.
+        foreach (self::CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATION_PATHS as $path) {
+            $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 4 provider_billable_call_reservations) failed: ".Artisan::output());
+        }
+        $this->assertTrue(Schema::hasTable('provider_billable_call_reservations'), 'provider_billable_call_reservations must be restored by its own reapplication.');
+
         // This file's own table: byte-identical restoration proof.
         $columns = Schema::getColumnListing('integration_external_mappings');
         sort($columns);
@@ -555,6 +593,18 @@ class IntegrationExternalMappingsForceRlsActivationTest extends TestCase
             static fn (string $path) => include base_path($path),
             self::CP9_USAGE_RECORDS_MIGRATION_PATHS,
         );
+        $providerBillableReservationsMigrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATION_PATHS,
+        );
+        // Checkpoint 4's provider_billable_call_reservations FK-references
+        // integration_usage_records — it must be rolled back first, before
+        // integration_usage_records itself.
+        foreach (array_reverse($providerBillableReservationsMigrations) as $migration) {
+            $migration->down();
+        }
+        $this->assertFalse(Schema::hasTable('provider_billable_call_reservations'));
+
         foreach (array_reverse($usageRecordsMigrations) as $migration) {
             $migration->down();
         }
@@ -583,6 +633,12 @@ class IntegrationExternalMappingsForceRlsActivationTest extends TestCase
         }
         $this->assertTrue(Schema::hasTable('integration_usage_records'));
 
+        // Reapply Checkpoint 4's provider_billable_call_reservations LAST —
+        // after integration_usage_records already exists again.
+        foreach ($providerBillableReservationsMigrations as $migration) {
+            $migration->up();
+        }
+        $this->assertTrue(Schema::hasTable('provider_billable_call_reservations'));
         $row = DB::selectOne("select relrowsecurity, relforcerowsecurity from pg_class where relname = 'integration_external_mappings'");
         $this->assertTrue((bool) $row->relrowsecurity);
         $this->assertTrue((bool) $row->relforcerowsecurity);
@@ -594,7 +650,7 @@ class IntegrationExternalMappingsForceRlsActivationTest extends TestCase
 
     public function test_model_table_resolves_correctly(): void
     {
-        $this->assertSame('integration_external_mappings', (new IntegrationExternalMapping())->getTable());
+        $this->assertSame('integration_external_mappings', (new IntegrationExternalMapping)->getTable());
     }
 
     public function test_model_uses_belongs_to_tenant_trait(): void

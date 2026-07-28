@@ -162,12 +162,24 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
         // pass's SyncFailureResource/WebhookEventResource/
         // DeadLetterQueueResource/ConflictResource), each legitimately
         // referencing the Integration domain by design.
+        // POST-CHECKPOINT-4-PLAID UPDATE (FirmsVault Live Integrations,
+        // Checkpoint 4, "Plaid financial evidence add-on"): two more —
+        // ProviderKillSwitchResource.php (the ONE place PlatformAdmin
+        // writes for Plaid cost control — see that class's own docblock)
+        // and PlaidItemOversightResource.php (cross-firm, redacted/
+        // summary-only Plaid Item oversight, per this checkpoint's own
+        // "PlatformAdmin must be redacted/summary-only" requirement).
+        // Both confirmed gated behind Auth::guard('platform_admin') +
+        // PlatformStaffAccessPolicyService, the same pattern every prior
+        // cascade entry here already establishes.
         $this->assertNoIntegrationDomainReferenceUnder($dir, allowedBasenames: [
             'ConnectionResource.php',
             'SyncFailureResource.php',
             'WebhookEventResource.php',
             'DeadLetterQueueResource.php',
             'ConflictResource.php',
+            'ProviderKillSwitchResource.php',
+            'PlaidItemOversightResource.php',
         ]);
     }
 
@@ -192,12 +204,18 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
         // this pass's own PlatformProviderHealthPage.php and a parallel
         // pass's PlatformIntegrationUsagePage.php — see this file's own
         // class docblock.
+        // POST-CHECKPOINT-4-PLAID UPDATE: two more — PlaidCostOversightPage.php
+        // and PlaidAnomalyOversightPage.php, both confirmed gated behind
+        // Auth::guard('platform_admin') + PlatformStaffAccessPolicyService,
+        // same pattern as every prior cascade entry here.
         $this->assertNoIntegrationDomainReferenceUnder($dir, allowedBasenames: [
             'PlatformIntegrationOverviewPage.php',
             'PlatformFirmIntegrationsPage.php',
             'PlatformFirmIntegrationDetailPage.php',
             'PlatformProviderHealthPage.php',
             'PlatformIntegrationUsagePage.php',
+            'PlaidCostOversightPage.php',
+            'PlaidAnomalyOversightPage.php',
         ]);
     }
 
@@ -590,7 +608,35 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ApplyFleetMigrationInstanceAction.php',
         ];
 
-        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles);
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid financial
+        // evidence add-on") — another cascade, same reasoning again. Two
+        // legitimately separate surfaces: (1) PlatformAdmin cross-firm
+        // Plaid oversight (redacted/summary-only per this checkpoint's
+        // own requirement — PlaidItemOversightResource, ProviderKillSwitchResource,
+        // PlaidCostOversightPage, PlaidAnomalyOversightPage, all
+        // confirmed gated behind Auth::guard('platform_admin') +
+        // PlatformStaffAccessPolicyService), and (2) the brand-new
+        // app/Filament/ClientPortal/** panel namespace this checkpoint
+        // introduces (see ClientPortalPanelProvider) — its own Plaid
+        // consent/connect flow pages, entirely separate from both the
+        // `admin` and `firm` panels, so (like the `admin`-panel cascades
+        // above) every file needs an explicit entry here since none of
+        // it starts with `Firm/`.
+        $checkpoint4PlaidAllowedRelativeFiles = [
+            'Resources'.DIRECTORY_SEPARATOR.'PlaidItemOversightResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PlaidItemOversightResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListPlaidItemOversight.php',
+            'Resources'.DIRECTORY_SEPARATOR.'ProviderKillSwitchResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'ProviderKillSwitchResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListProviderKillSwitches.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlaidCostOversightPage.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlaidAnomalyOversightPage.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'PlaidConsentPage.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'PlaidAccountSelectionPage.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'PlaidDateRangeConfirmationPage.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'PlaidUploadFallbackPage.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'PlaidRequestReviewPage.php',
+        ];
+
+        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles);
 
         $unauthorizedNonFirmFilamentFiles = [];
 

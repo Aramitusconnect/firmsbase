@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\ClientPortalUser;
 use App\Models\PlatformAdmin;
 use App\Models\User;
 
@@ -52,6 +53,17 @@ return [
             'driver' => 'session',
             'provider' => 'platform_admins',
         ],
+
+        // Checkpoint 4 ("Plaid financial evidence add-on") — Client
+        // Portal authentication foundation. Clients authenticate through
+        // a dedicated client_portal_users identity table (never the
+        // clients table itself, and never the firm-facing users table)
+        // — see app/Models/ClientPortalUser.php's own docblock for the
+        // full reasoning.
+        'client' => [
+            'driver' => 'session',
+            'provider' => 'client_portal_users',
+        ],
     ],
 
     /*
@@ -80,6 +92,11 @@ return [
         'platform_admins' => [
             'driver' => 'eloquent',
             'model' => PlatformAdmin::class,
+        ],
+
+        'client_portal_users' => [
+            'driver' => 'eloquent',
+            'model' => ClientPortalUser::class,
         ],
 
         // 'users' => [
@@ -111,6 +128,16 @@ return [
         'users' => [
             'provider' => 'users',
             'table' => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
+            'expire' => 60,
+            'throttle' => 60,
+        ],
+
+        // Checkpoint 4 ("Plaid financial evidence add-on") — the Client
+        // Portal panel's ->passwordReset() flow (ClientPortalPanelProvider)
+        // resolves against this broker.
+        'client_portal_users' => [
+            'provider' => 'client_portal_users',
+            'table' => 'client_portal_password_reset_tokens',
             'expire' => 60,
             'throttle' => 60,
         ],

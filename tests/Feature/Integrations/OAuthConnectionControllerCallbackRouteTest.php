@@ -20,6 +20,7 @@ use App\Integrations\Services\ProviderConnectionService;
 use App\Integrations\Support\GmailMailboxRoutingService;
 use App\Integrations\Support\OutboundProviderHttpClient;
 use App\Integrations\Support\PkceService;
+use App\Integrations\Support\PlaidItemRoutingService;
 use App\Integrations\Support\ProviderRedirectUrlValidator;
 use App\Models\Firm;
 use App\Models\FirmUser;
@@ -162,48 +163,36 @@ final class OAuthConnectionControllerCallbackRouteTest extends TestCase
         $this->assertSame(ConnectionStatus::Pending, $fresh->status, 'A rejected real HTTP callback must never activate the connection.');
     }
 
+    /**
+     * UPDATED (FirmsVault Live Integrations, Checkpoint 4 test-gate fix
+     * — see bootstrap/app.php's own `redirectGuestsTo()` docblock). This
+     * test previously documented a genuine, confirmed production defect
+     * as "current behavior": this application registers no plain `login`
+     * named route (only panel-scoped `filament.firm.auth.login`/
+     * `filament.admin.auth.login`/`filament.client-portal.auth.login`),
+     * so Laravel's own default `redirectGuestsTo(fn () => route('login'))`
+     * (registered unconditionally by `ApplicationBuilder::withMiddleware()`
+     * before the app's own middleware callback runs) threw
+     * `RouteNotFoundException`, surfacing as a 500, for EVERY guard in
+     * this application — not merely this one route. Checkpoint 4's own
+     * test-writing pass hit the identical symptom on the Client Portal
+     * Plaid exchange route and traced it to this shared root cause; fixed
+     * once, for every guard, via a guard-aware `redirectGuestsTo()`
+     * callback in bootstrap/app.php. Deliberately NO actingAs() below —
+     * the `auth` middleware on this route's group must intercept before
+     * the controller action (and therefore before any OAuth logic at
+     * all) ever runs; it now correctly redirects to the firm panel's own
+     * login page instead of throwing.
+     */
     public function test_the_callback_route_requires_authentication(): void
     {
         [$firm, $connection, $firmUser] = $this->firmConnectionAndActor();
         $flow = $this->initiateFlow($connection, $firmUser);
         $code = $this->mintCode($flow['codeChallenge']);
 
-        // Deliberately NO actingAs() — the `auth` middleware on this
-        // route's group must intercept before the controller action (and
-        // therefore before any OAuth logic at all) ever runs. Verified
-        // empirically: `php artisan route:list` shows this application
-        // registers no plain, unguarded `login` named route at all — only
-        // panel-scoped `filament.firm.auth.login`/`filament.admin.auth.login`
-        // — so Laravel's own default unauthenticated-redirect handler
-        // (which targets the bare `route('login')`) genuinely throws
-        // RouteNotFoundException for this specific, plain-`auth`-guarded
-        // route in THIS application, rather than issuing a redirect. This
-        // is real, current production behavior (not something this
-        // checkpoint's frozen F1-F6 allowlist authorizes changing) — the
-        // assertion below documents that reality rather than assuming a
-        // generic Laravel-skeleton redirect that does not actually apply
-        // here. Caught as a generic Throwable (rather than asserted via
-        // expectException()) because it is thrown from INSIDE the
-        // framework's own exception-rendering pipeline (building the
-        // AuthenticationException's redirect target) rather than from
-        // ordinary request handling, and is not reliably re-surfaced
-        // through PHPUnit's expectException() machinery in that
-        // position — empirically confirmed by exercising both paths.
         $response = $this->get(route('integrations.oauth.callback', ['state' => $flow['rawState'], 'code' => $code]));
 
-        // This application registers no plain `login` named route (only
-        // panel-scoped filament.firm.auth.login/filament.admin.auth.login
-        // — confirmed via `php artisan route:list`), so Laravel's default
-        // AuthenticationException handling — which tries to redirect an
-        // unauthenticated web request to route('login') — cannot resolve
-        // a target and the request fails server-side while rendering
-        // that response. This is real, current production behavior for
-        // this specific plain-`auth`-guarded route (not something this
-        // checkpoint's frozen F1-F6 allowlist authorizes changing); the
-        // assertion below documents that reality (a failed response,
-        // never a successful activation) rather than assuming a generic
-        // Laravel-skeleton redirect that does not actually apply here.
-        $response->assertStatus(500);
+        $response->assertRedirect(route('filament.firm.auth.login'));
 
         $freshConnection = $this->runWithFirmContext($firm, fn () => $connection->fresh());
         $this->assertSame(ConnectionStatus::Pending, $freshConnection->status, 'No activation could have happened for an unauthenticated request.');
@@ -265,6 +254,11 @@ final class OAuthConnectionControllerCallbackRouteTest extends TestCase
             // gained this 9th, required dependency -- every manual
             // construction site in this file must supply it.
             app(GmailMailboxRoutingService::class),
+            // Checkpoint 4 addition (FirmsVault Live Integrations, Plaid
+            // financial evidence add-on): ProviderConnectionService's
+            // constructor gained this 10th, required dependency -- every
+            // manual construction site in this file must supply it.
+            app(PlaidItemRoutingService::class),
         );
     }
 

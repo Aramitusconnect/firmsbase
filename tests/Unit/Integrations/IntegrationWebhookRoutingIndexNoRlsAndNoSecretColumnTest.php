@@ -159,6 +159,22 @@ final class IntegrationWebhookRoutingIndexNoRlsAndNoSecretColumnTest extends Tes
             'GmailMailboxRoutingService.php',
             'GoogleWorkspaceProvider.php',
             'ResolvedGmailMailboxRoute.php',
+            // FirmsVault Live Integrations, Checkpoint 4 ("Plaid
+            // financial evidence add-on") additions — both reference this
+            // table in docblock prose only:
+            // PlaidItemRoutingService::__construct()'s own docblock cites
+            // it as the design precedent its sibling
+            // integration_plaid_item_routes table mirrors;
+            // ProviderInvoiceReconciliationService's class docblock cites
+            // it (alongside integration_platform_overview_summaries) as
+            // an already-registered precedent for the "a genuine
+            // cross-firm platform aggregate is structurally impossible
+            // against a FORCE-RLS'd tenant table" pattern its own
+            // reconciliation sweep must itself avoid. Neither file ever
+            // queries, writes, or imports the IntegrationWebhookRoutingIndex
+            // model.
+            'PlaidItemRoutingService.php',
+            'ProviderInvoiceReconciliationService.php',
         ];
 
         $violations = [];

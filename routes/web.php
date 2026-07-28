@@ -1,6 +1,9 @@
 <?php
 
+use App\Http\Controllers\ClientPortal\PlaidExchangeController;
 use App\Http\Controllers\Integrations\OAuthConnectionController;
+use App\Http\Middleware\ApplyTenantDatabaseContext;
+use App\Http\Middleware\EstablishClientPortalTenantContext;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -42,3 +45,25 @@ Route::middleware(['auth'])->prefix('integrations/oauth')->name('integrations.oa
     Route::get('{firmIntegration}/initiate', [OAuthConnectionController::class, 'initiate'])->name('initiate');
     Route::get('callback', [OAuthConnectionController::class, 'callback'])->name('callback');
 });
+
+/*
+|--------------------------------------------------------------------------
+| Client Portal Plaid Link exchange (Checkpoint 4, "Plaid financial
+| evidence add-on")
+|--------------------------------------------------------------------------
+|
+| checkpoint4-design-workspace-and-admin-ui.md §4.3;
+| checkpoint4-combined-design.md §1.3 — the ONE new, hand-written,
+| non-Filament HTTP endpoint this checkpoint adds. Path is
+| `portal/plaid/exchange` (NOT `client-portal/plaid/exchange`, per §1.3's
+| found-and-fixed drift: the client-portal panel's Filament-internal id
+| is `client-portal`, but its actual mounted URL path is `portal` —
+| ClientPortalPanelProvider::panel()->path('portal')). Carries the same
+| `auth:client` guard check + `EstablishClientPortalTenantContext` +
+| `ApplyTenantDatabaseContext` stack every other authenticated Client
+| Portal action already has (EncryptCookies/StartSession/VerifyCsrfToken
+| are already applied to this whole file via the implicit `web` group).
+*/
+Route::middleware(['auth:client', EstablishClientPortalTenantContext::class, ApplyTenantDatabaseContext::class])
+    ->post('portal/plaid/exchange', [PlaidExchangeController::class, 'exchange'])
+    ->name('client-portal.plaid.exchange');

@@ -20,6 +20,7 @@ use App\Integrations\Services\ProviderConnectionService;
 use App\Integrations\Support\GmailMailboxRoutingService;
 use App\Integrations\Support\OutboundProviderHttpClient;
 use App\Integrations\Support\PkceService;
+use App\Integrations\Support\PlaidItemRoutingService;
 use App\Integrations\Support\ProviderRedirectUrlValidator;
 use App\Models\Firm;
 use App\Models\FirmUser;
@@ -209,6 +210,11 @@ final class InboundWebhookLifecycleRevalidationTest extends TestCase
             // gained this 9th, required dependency -- every manual
             // construction site in this file must supply it.
             app(GmailMailboxRoutingService::class),
+            // Checkpoint 4 addition (FirmsVault Live Integrations, Plaid
+            // financial evidence add-on): ProviderConnectionService's
+            // constructor gained this 10th, required dependency -- every
+            // manual construction site in this file must supply it.
+            app(PlaidItemRoutingService::class),
         );
     }
 

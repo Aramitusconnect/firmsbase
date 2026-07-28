@@ -15,6 +15,15 @@ use Tests\TestCase;
  * live schema, no new RLS policies were added for the 43 still-
  * uncovered tenant-owned tables, no UI/routes/controllers were added,
  * and ComplianceGapRegistryService was not deleted/rewritten.
+ *
+ * Narrowly updated by Checkpoint 4 (FirmsVault Live Integrations, "Plaid
+ * financial evidence add-on") — this test's own $forcedByLaterBranch
+ * list (the full set of tables legitimately forced by every LATER,
+ * distinct staged-FORCE-activation branch, since this test's own scope
+ * never touched FORCE state) must now also include the 21 new tables
+ * Checkpoint 4 added to both PREPARED_TABLES and the FORCE-RLS rollout
+ * in the same migration — additive only, no existing assertion removed
+ * or weakened.
  */
 class RlsContextRolloutFirewallTest extends TestCase
 {
@@ -182,7 +191,7 @@ class RlsContextRolloutFirewallTest extends TestCase
             // in the same migration, NOT part of the old 60-table rollout
             // above) for the same reason — additive only, no existing
             // assertion removed or weakened.
-            'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records', 'integration_provider_webhook_subscriptions',
+            'firm_integrations', 'integration_credentials', 'integration_oauth_states', 'integration_sync_runs', 'integration_sync_items', 'integration_external_mappings', 'integration_sync_cursors', 'integration_conflicts', 'integration_outbox_events', 'integration_inbound_webhook_events', 'integration_connection_health', 'integration_usage_records', 'integration_provider_webhook_subscriptions', /* Narrowly updated by Checkpoint 4 (FirmsVault Live Integrations, "Plaid financial evidence add-on") -- this full-registry list must now also account for the 21 new tables Checkpoint 4 added to both PREPARED_TABLES and the FORCE-RLS rollout in the same migration (client_portal_matter_grants, the financial-evidence domain, and the provider-billing domain) -- additive only, no existing assertion removed or weakened. */ 'client_portal_matter_grants', 'financial_evidence_bank_accounts', 'financial_evidence_transactions', 'financial_evidence_income_records', 'financial_evidence_liabilities', 'financial_evidence_investment_records', 'financial_evidence_statements', 'financial_evidence_identity_records', 'provider_billable_call_reservations', 'provider_firm_operation_policies', 'provider_balance_snapshots', 'financial_evidence_matter_requests', 'financial_evidence_client_consents', 'financial_evidence_matter_authorizations', 'financial_evidence_matter_notes', 'financial_evidence_snapshots', 'financial_evidence_transaction_reviews', 'financial_evidence_duplicate_transfer_flags', 'financial_evidence_large_deposit_flags', 'financial_evidence_reconciliation_candidates', 'financial_account_reclassification_requests',
         ];
 
         // security_events is the final checkpoint in this arc: every

@@ -100,7 +100,21 @@ class WorkflowTransitionEnforcementSearchTest extends TestCase
         $controllerFiles = glob(base_path('app/Http/Controllers/*.php')) ?: [];
         $this->assertSame(['Controller.php', 'ReadinessController.php'], array_map('basename', $controllerFiles), 'No real controller should exist beyond the empty Laravel scaffold and the reviewed ECS readiness probe.');
 
+        // Narrowly updated by Checkpoint 4 (FirmsVault Live Integrations,
+        // "Plaid financial evidence add-on") -- resources/views/filament-
+        // client-portal/plaid-link.blade.php is a reviewed, narrow
+        // exception, the same shape as the ReadinessController exception
+        // above: a pure Plaid Link JS embed (initiates the Plaid Link
+        // handshake and POSTs the resulting public_token to
+        // client-portal.plaid.exchange) that never references a
+        // workflow-state-machine model or writes a status/license_status
+        // field directly -- orthogonal to this test's actual concern.
+        // Additive only, no existing assertion removed or weakened.
         $bladeFiles = glob(resource_path('views/**/*.blade.php')) ?: [];
+        $bladeFiles = array_values(array_filter(
+            $bladeFiles,
+            fn (string $path) => $path !== resource_path('views/filament-client-portal/plaid-link.blade.php')
+        ));
         $this->assertEmpty($bladeFiles, 'No Blade views should exist that could write workflow status directly.');
     }
 

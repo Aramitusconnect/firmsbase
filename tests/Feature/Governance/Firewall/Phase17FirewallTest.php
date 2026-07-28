@@ -153,6 +153,16 @@ class Phase17FirewallTest extends TestCase
         'RequestDeletionApprovalAction.php',
         'SecondApproveDeletionAction.php',
         'SubmitDeletionRequestForApprovalAction.php',
+
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid financial
+        // evidence add-on") addition. The Financial Evidence Workspace's
+        // Access Expiration section legitimately displays a matter's
+        // legal-hold status (checkpoint4-combined-design.md, "Access
+        // Expiration... legal-hold override" requirement) — a genuine,
+        // read-only UI reference to the Phase 17 LegalHold concept,
+        // exactly the same class of legitimate exception this allowlist
+        // already grants FVACC Phase 4's own LegalHold UI above.
+        'FinancialEvidenceOverviewPanel.php',
     ];
 
     public function test_no_route_controller_filament_blade_or_livewire_file_was_added_for_phase_17(): void

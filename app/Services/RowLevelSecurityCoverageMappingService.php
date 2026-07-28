@@ -402,6 +402,116 @@ class RowLevelSecurityCoverageMappingService
         // This table was never in MISSING_PREPARED_TABLES — it is added
         // directly here since prepare and force happened together.
         'integration_provider_webhook_subscriptions',
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid financial
+        // evidence add-on") — client_portal_matter_grants, a brand-new
+        // genuine tenant-owned table (own NOT NULL firm_id column) — the
+        // explicit client-to-matter portal-visibility grant
+        // (checkpoint4-combined-design.md §5/§10;
+        // checkpoint4-design-matter-and-client-portal.md §2.6.3), with
+        // RLS prepared and FORCE-activated in the very same migration,
+        // following the identical combined prepare+force shape used
+        // throughout this rollout:
+        // 2026_09_24_180005_prepare_row_level_security_and_force_rls_on_client_portal_matter_grants_table.php.
+        // This table was never in MISSING_PREPARED_TABLES — it is added
+        // directly here since prepare and force happened together.
+        // NOTE: client_portal_users (the OTHER new table this checkpoint
+        // originally added as FORCE-RLS) is DELIBERATELY NOT added
+        // here, and never has been — it has no firm_id column of its
+        // own (isolation is transitive through client_id ->
+        // clients.firm_id). It was briefly classified InheritedTenant
+        // with real FORCE RLS in an earlier draft of this checkpoint;
+        // that draft is a confirmed defect (see
+        // ClientPortalAuthenticationTest's own docblock), since FORCING
+        // RLS on the credential/identity table Auth::attempt() must
+        // look up BY EMAIL with no context at all makes client login
+        // structurally impossible. It is now classified System instead
+        // (identical treatment to 'users' below) — see this table's own
+        // create-migration docblock's "WHY THIS TABLE HAS NO RLS"
+        // section for the full corrected reasoning.
+        'client_portal_matter_grants',
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid financial
+        // evidence add-on", cost-control/billing track) —
+        // provider_billable_call_reservations, provider_firm_operation_policies,
+        // and provider_balance_snapshots, three brand-new genuine
+        // tenant-owned tables (own NOT NULL firm_id column, plus a real
+        // composite FK to firm_integrations(firm_id, id) for the first
+        // and third), with RLS prepared and FORCE-activated in the very
+        // same migration each, following the identical combined
+        // prepare+force shape used throughout this rollout:
+        // 2026_09_24_500003_prepare_row_level_security_and_force_rls_on_provider_billable_call_reservations_table.php,
+        // 2026_09_24_500007_prepare_row_level_security_and_force_rls_on_provider_firm_operation_policies_table.php,
+        // 2026_09_24_500009_prepare_row_level_security_and_force_rls_on_provider_balance_snapshots_table.php.
+        // None of these three was ever in MISSING_PREPARED_TABLES — each
+        // is added directly here since prepare and force happened
+        // together. See EXEMPT_TABLES/EXEMPT_TABLE_METADATA below for
+        // this checkpoint's four sibling GLOBAL/no-RLS tables
+        // (provider_rate_card_entries, provider_kill_switches,
+        // provider_operation_default_policies,
+        // provider_invoice_reconciliations) — deliberately NOT listed
+        // here, since none carries a firm_id column
+        // (checkpoint4-combined-design.md §1.7/§1.8/§10).
+        'provider_billable_call_reservations', 'provider_firm_operation_policies',
+        'provider_balance_snapshots',
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid financial
+        // evidence add-on", Plaid provider-core track) — the seven new
+        // resource-materializer tables, each a brand-new genuine
+        // tenant-owned table (own NOT NULL firm_id column, plus a real
+        // composite FK to firm_integrations(firm_id, id)), with RLS
+        // prepared and FORCE-activated in the very same migration each,
+        // following the identical combined prepare+force shape used
+        // throughout this rollout (checkpoint4-design-workspace-and-admin-ui.md
+        // §1.2, schema authoritative source; checkpoint4-combined-design.md
+        // §1.1.3/§7, implementation ownership reassigned to this track):
+        // 2026_09_24_180004_prepare_row_level_security_and_force_rls_on_financial_evidence_bank_accounts_table.php,
+        // 2026_09_24_180006_prepare_row_level_security_and_force_rls_on_financial_evidence_transactions_table.php,
+        // 2026_09_24_180008_prepare_row_level_security_and_force_rls_on_financial_evidence_income_records_table.php,
+        // 2026_09_24_180010_prepare_row_level_security_and_force_rls_on_financial_evidence_liabilities_table.php,
+        // 2026_09_24_180012_prepare_row_level_security_and_force_rls_on_financial_evidence_investment_records_table.php,
+        // 2026_09_24_180014_prepare_row_level_security_and_force_rls_on_financial_evidence_statements_table.php,
+        // 2026_09_24_180016_prepare_row_level_security_and_force_rls_on_financial_evidence_identity_records_table.php.
+        // None of these seven was ever in MISSING_PREPARED_TABLES — each
+        // is added directly here since prepare and force happened
+        // together. See EXEMPT_TABLES/FULL_TABLE_INVENTORY_EXTRA below
+        // for this checkpoint's separate, Global/no-RLS
+        // integration_plaid_item_routes table — deliberately NOT listed
+        // here, since it must remain queryable before any tenant context
+        // exists.
+        'financial_evidence_bank_accounts', 'financial_evidence_transactions',
+        'financial_evidence_income_records', 'financial_evidence_liabilities',
+        'financial_evidence_investment_records', 'financial_evidence_statements',
+        'financial_evidence_identity_records',
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid financial
+        // evidence add-on", Financial Evidence Workspace/Firm-Admin/
+        // PlatformAdmin/Client-Portal UI track) — nine further brand-new
+        // genuine tenant-owned tables (own NOT NULL firm_id column),
+        // each with RLS prepared and FORCE-activated in the very same
+        // migration, following the identical combined prepare+force
+        // shape used throughout this rollout
+        // (checkpoint4-design-workspace-and-admin-ui.md §1.4/§1.6.1/§1.7/
+        // §1.8/§4.1/§4.6/§5; checkpoint4-combined-design.md §9.4/§10):
+        // 2026_09_25_190002_prepare_row_level_security_and_force_rls_on_financial_evidence_matter_requests_table.php,
+        // 2026_09_25_190004_prepare_row_level_security_and_force_rls_on_financial_evidence_client_consents_table.php,
+        // 2026_09_25_190006_prepare_row_level_security_and_force_rls_on_financial_evidence_matter_authorizations_table.php,
+        // 2026_09_25_190008_prepare_row_level_security_and_force_rls_on_financial_evidence_matter_notes_table.php,
+        // 2026_09_25_190010_prepare_row_level_security_and_force_rls_on_financial_evidence_snapshots_table.php,
+        // 2026_09_25_190012_prepare_row_level_security_and_force_rls_on_financial_evidence_transaction_reviews_table.php,
+        // 2026_09_25_190014_prepare_row_level_security_and_force_rls_on_financial_evidence_duplicate_transfer_flags_table.php,
+        // 2026_09_25_190016_prepare_row_level_security_and_force_rls_on_financial_evidence_large_deposit_flags_table.php,
+        // 2026_09_25_190019_prepare_row_level_security_and_force_rls_on_financial_evidence_reconciliation_candidates_table.php,
+        // 2026_09_25_190021_prepare_row_level_security_and_force_rls_on_financial_account_reclassification_requests_table.php.
+        // None of these nine was ever in MISSING_PREPARED_TABLES — each is
+        // added directly here since prepare and force happened together.
+        // `financial_evidence_large_deposit_thresholds` is DELIBERATELY
+        // NOT listed here — it carries no firm_id column at all (a
+        // Global, no-RLS table mirroring `provider_rate_card_entries`'s
+        // own platform_default/firm_override scope-precedence pattern,
+        // checkpoint4-combined-design.md §1.6) — see EXEMPT_TABLES/
+        // EXEMPT_TABLE_METADATA below.
+        'financial_evidence_matter_requests', 'financial_evidence_client_consents',
+        'financial_evidence_matter_authorizations', 'financial_evidence_matter_notes',
+        'financial_evidence_snapshots', 'financial_evidence_transaction_reviews',
+        'financial_evidence_duplicate_transfer_flags', 'financial_evidence_large_deposit_flags',
+        'financial_evidence_reconciliation_candidates', 'financial_account_reclassification_requests',
     ];
 
     /**
@@ -667,6 +777,45 @@ class RowLevelSecurityCoverageMappingService
         // independently-reviewed reason instead — see
         // EXEMPT_TABLE_METADATA below.
         'integration_gmail_mailbox_routes',
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid Financial
+        // Evidence add-on", cost-control/billing track) additions —
+        // checkpoint4-design-cost-control.md §1.1/§4.1/§6;
+        // checkpoint4-combined-design.md §1.7/§1.8/§10. All four are
+        // ordinary "no firm_id at all" exemptions (structurally
+        // identical to `integration_providers`/`module_catalog`) —
+        // platform-admin-authored reference/incident-response/
+        // reconciliation data, never firm-panel-writable. See
+        // EXEMPT_TABLE_METADATA below for each one's full reason/
+        // readers/writers.
+        'provider_rate_card_entries', 'provider_kill_switches',
+        'provider_operation_default_policies', 'provider_invoice_reconciliations',
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid financial
+        // evidence add-on", Plaid provider-core track) addition —
+        // integration_plaid_item_routes, checkpoint4-combined-design.md
+        // §1.1.1 (binding "Option B");
+        // checkpoint4-design-plaid-provider-core.md §11.2;
+        // checkpoint4-security-review.md Finding 7 (confirmed
+        // safe/sufficient). Has a real NOT NULL firm_id column (like
+        // integration_webhook_routing_index/integration_gmail_mailbox_routes,
+        // unlike every "no firm_id" entry above); exempted for a
+        // documented, structurally-identical reason instead — see
+        // EXEMPT_TABLE_METADATA below.
+        'integration_plaid_item_routes',
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid financial
+        // evidence add-on", Financial Evidence Workspace UI track)
+        // addition — financial_evidence_large_deposit_thresholds,
+        // checkpoint4-combined-design.md §1.6 (found-and-fixed RLS
+        // misclassification: the source doc's own blanket "all Direct
+        // BelongsToTenant + FORCE RLS" rule conflicted with its own
+        // explicit statement that this table's scope shape is identical
+        // to provider_rate_card_entries' platform_default/firm_override
+        // pattern; resolved by following the more-precedented Global/
+        // no-RLS option). An ordinary "no firm_id at all" exemption
+        // (structurally identical to provider_rate_card_entries) — its
+        // nullable scope_id merely POINTS AT a firm for firm_override
+        // rows without the row itself being tenant-owned. See
+        // EXEMPT_TABLE_METADATA below.
+        'financial_evidence_large_deposit_thresholds',
     ];
 
     /**
@@ -833,6 +982,17 @@ class RowLevelSecurityCoverageMappingService
             'notes' => 'Staffing/assignment history record (role, is_lead, assigned_at, '
                 .'removed_at) — no firm_id of its own; scoped transitively through matter_id.',
         ],
+        // client_portal_users was briefly classified InheritedTenant
+        // here, with a note describing real FORCE ROW LEVEL SECURITY —
+        // that was a confirmed defect (FORCING RLS on the credential
+        // table Auth::attempt() must look up BY EMAIL with no context
+        // at all makes client login structurally impossible; see
+        // ClientPortalAuthenticationTest's own docblock for the full
+        // empirical reproduction). It is now classified System instead,
+        // immediately alongside 'users' below (identical role, one
+        // level down) — see this table's own create-migration
+        // docblock's "WHY THIS TABLE HAS NO RLS" section for the full
+        // corrected reasoning.
         'payment_plan_installments' => [
             'classification' => TenantOwnershipClassification::InheritedTenant,
             'ownership_path' => 'payment_plan_id -> payment_plans.firm_id',
@@ -1272,6 +1432,61 @@ class RowLevelSecurityCoverageMappingService
                 .'2026_09_06_060001_create_integration_webhook_routing_index_table.php directly. See '
                 .'EXEMPT_TABLE_METADATA.',
         ],
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid Financial
+        // Evidence add-on", cost-control/billing track) additions —
+        // checkpoint4-design-cost-control.md §1.1/§4.1/§6;
+        // checkpoint4-combined-design.md §1.7/§1.8/§10. Unlike
+        // integration_webhook_routing_index/integration_gmail_mailbox_routes
+        // immediately above, all four of these ARE ordinary "no firm_id
+        // at all" exemptions — none carries a firm_id column of any
+        // kind, confirmed directly against each one's own create
+        // migration. Every one is platform-admin-authored reference/
+        // incident-response/reconciliation data, never firm-panel-
+        // writable — even a `provider_rate_card_entries` `firm_override`
+        // row's `scope_id` merely POINTS AT a firm; the row itself is
+        // platform reference data, mirroring `Plan`/`PlanModule`'s own
+        // "platform reference/commercial data, not owned by one firm"
+        // framing.
+        'provider_rate_card_entries' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Global, no RLS — platform-admin-authored rate-card reference data, effective-dated, '
+                .'three-tier scoped (platform_default/package_default/firm_override). No firm_id column exists '
+                .'(a nullable scope_id, which for firm_override rows POINTS AT a firm without the row itself '
+                .'being tenant-owned). Confirmed no firm_id/firm-referencing column by direct migration '
+                .'inspection (database/migrations/2026_09_24_500001_create_provider_rate_card_entries_table.php). '
+                .'Sole reader: App\\Integrations\\Billing\\ProviderRateCardResolver. See EXEMPT_TABLE_METADATA.',
+        ],
+        'provider_kill_switches' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Global, no RLS — the incident-response kill-switch surface, admin-panel-mutated only. '
+                .'No firm_id column exists (a nullable scope_id, used only for the platform-scope rows this '
+                .'pipeline actually reads — see database/migrations/2026_09_24_500004_create_provider_kill_switches_table.php '
+                .'for why a firm-scope row is never written/read by this checkpoint\'s own resolver). Must be '
+                .'checked on every pipeline run for every firm, so it cannot itself be firm-scoped. Sole reader: '
+                .'App\\Integrations\\Billing\\ProviderOperationPolicyResolver. See EXEMPT_TABLE_METADATA.',
+        ],
+        'provider_operation_default_policies' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Global, no RLS — the platform-default half of the coordinator-resolved two-table split '
+                .'(checkpoint4-combined-design.md §1.8); the firm-editable half, provider_firm_operation_policies, '
+                .'is Direct BelongsToTenant + FORCE RLS instead (see PREPARED_TABLES). No firm_id column exists '
+                .'by design — one row per (provider_key, product, environment), never per firm. Confirmed no '
+                .'firm_id/firm-referencing column by direct migration inspection '
+                .'(database/migrations/2026_09_24_500005_create_provider_operation_default_policies_table.php). '
+                .'Sole reader: App\\Integrations\\Billing\\ProviderOperationPolicyResolver. See EXEMPT_TABLE_METADATA.',
+        ],
+        'provider_invoice_reconciliations' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Global, no RLS — platform-scoped like Plan, modeled directly on TrustReconciliation\'s '
+                .'own shape but never firm-owned: a real provider invoice covers all firms\' aggregated usage. '
+                .'No firm_id column exists. Confirmed no firm_id/firm-referencing column by direct migration '
+                .'inspection (database/migrations/2026_09_24_500010_create_provider_invoice_reconciliations_table.php). '
+                .'Sole writer: App\\Services\\ProviderInvoiceReconciliationService::run(). See EXEMPT_TABLE_METADATA.',
+        ],
         'integration_webhook_receipts' => [
             'classification' => TenantOwnershipClassification::Global,
             'ownership_path' => null,
@@ -1367,6 +1582,22 @@ class RowLevelSecurityCoverageMappingService
             'ownership_path' => null,
             'notes' => 'Laravel default auth-scaffolding table.',
         ],
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid financial
+        // evidence add-on") addition — client_portal_password_reset_tokens,
+        // byte-for-byte the same shape as the stock password_reset_tokens
+        // table immediately above (email primary key, token, created_at
+        // only), backing the client guard's own password broker
+        // (config/auth.php `passwords.client_portal_users`). No firm_id,
+        // no RLS — looked up by email BEFORE any authentication (and
+        // therefore before any tenant context) can exist, the identical
+        // reasoning stock password_reset_tokens itself has no RLS.
+        'client_portal_password_reset_tokens' => [
+            'classification' => TenantOwnershipClassification::System,
+            'ownership_path' => null,
+            'notes' => 'Client Portal (client guard) password-reset-token table — same '
+                .'pre-tenant-context, no-RLS shape as the stock password_reset_tokens table '
+                .'immediately above.',
+        ],
         'users' => [
             'classification' => TenantOwnershipClassification::System,
             'ownership_path' => null,
@@ -1374,6 +1605,83 @@ class RowLevelSecurityCoverageMappingService
                 .'staff, platform admins, and other actors all reference users.id); '
                 .'firm-specific staff membership itself lives in firm_users, a '
                 .'DirectTenant table.',
+        ],
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid financial
+        // evidence add-on") reclassification — client_portal_users was
+        // originally shipped as InheritedTenant with real FORCE ROW
+        // LEVEL SECURITY (a subquery-shaped tenant-isolation policy plus
+        // a self-lookup policy); that design is a confirmed defect
+        // (see ClientPortalAuthenticationTest's own docblock for the
+        // full empirical reproduction: neither policy permits
+        // Auth::guard('client')->attempt()/Password::broker(...)'s
+        // retrieveByCredentials() to find a row BY EMAIL with no
+        // context at all, which is the unavoidable first step of any
+        // login or password reset). Corrected to System, identical
+        // treatment to 'users' immediately above — same role, one level
+        // down: a global credential/identity table, not a business-data
+        // table. The real tenant boundary lives one level below this
+        // table instead, in Client (already FORCE-RLS protected) and
+        // client_portal_matter_grants (already FORCE-RLS protected,
+        // DirectTenant, own firm_id column) — exactly how 'users' has
+        // no RLS while firm_users (the real tenant-scoped membership
+        // table) does. See this table's own create-migration
+        // (2026_09_24_180001_create_client_portal_users_table.php)
+        // docblock's "WHY THIS TABLE HAS NO RLS" section for the full
+        // corrected reasoning.
+        'client_portal_users' => [
+            'classification' => TenantOwnershipClassification::System,
+            'ownership_path' => null,
+            'notes' => 'Client Portal (client guard) credential/identity table — a global '
+                .'identity table exactly mirroring users\' own role, one level down: no '
+                .'firm_id, no RLS. The real tenant boundary lives in Client and '
+                .'client_portal_matter_grants (both still FORCE-RLS protected), not here — '
+                .'same split as users (no RLS) versus firm_users (RLS, real membership).',
+        ],
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid financial
+        // evidence add-on", Plaid provider-core track) addition —
+        // checkpoint4-combined-design.md §1.1.1 (binding "Option B");
+        // checkpoint4-design-plaid-provider-core.md §11.2. Same
+        // DISCLAIMER category as integration_webhook_routing_index/
+        // integration_gmail_mailbox_routes above: genuinely carries a
+        // NOT NULL firm_id column, exempted anyway for a documented
+        // reason — see EXEMPT_TABLE_METADATA.
+        'integration_plaid_item_routes' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'DISCLAIMER: Global, no RLS — but NOT a "no firm_id" exemption either: this table '
+                .'genuinely carries a NOT NULL firm_id column (plus firm_integration_id), by deliberate design, '
+                .'and is exempted from RLS anyway (see EXEMPT_TABLE_METADATA). Structural sibling of '
+                .'integration_webhook_routing_index/integration_gmail_mailbox_routes, for the identical reason: '
+                .'it must be readable before any tenant context exists at all, to bootstrap Plaid inbound-webhook '
+                .'item_id-to-connection routing (App\\Integrations\\Support\\PlaidItemRoutingService::resolveByItemId()). '
+                .'Carries no secret material — only a keyed HMAC-SHA256 lookup digest of a Plaid item_id and an '
+                .'already-encrypted display-value ciphertext, never a plaintext item_id. Written only by '
+                .'App\\Integrations\\Support\\PlaidItemRoutingService::route()/unroute(). See '
+                .'database/migrations/2026_09_24_180001_create_integration_plaid_item_routes_table.php for the '
+                .'full "WHY THIS TABLE HAS NO RLS" reasoning. See EXEMPT_TABLE_METADATA.',
+        ],
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid financial
+        // evidence add-on", Financial Evidence Workspace UI track)
+        // addition — checkpoint4-combined-design.md §1.6 (found-and-
+        // fixed RLS misclassification). UNLIKE integration_plaid_item_routes
+        // immediately above, this IS an ordinary "no firm_id at all"
+        // exemption — direct migration inspection confirms no firm_id
+        // column exists (only a nullable scope_id, which for
+        // firm_override rows POINTS AT a firm without the row itself
+        // being tenant-owned).
+        'financial_evidence_large_deposit_thresholds' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Global, no RLS — mirrors provider_rate_card_entries\' own platform_default -> '
+                .'firm_override scope-precedence pattern exactly (checkpoint4-combined-design.md §1.6\'s binding '
+                .'reconciliation: the source doc\'s own blanket "all Direct BelongsToTenant + FORCE RLS" rule '
+                .'conflicted with its own explicit statement that this table\'s scope shape is identical to '
+                .'provider_rate_card_entries; resolved by following the more-precedented Global/no-RLS option, '
+                .'since a plain FORCE RLS policy structurally cannot represent a firm-agnostic platform_default '
+                .'row). No firm_id column exists — confirmed by direct migration inspection '
+                .'(database/migrations/2026_09_25_190017_create_financial_evidence_large_deposit_thresholds_table.php). '
+                .'Sole reader: App\\Integrations\\Services\\FinancialEvidenceLargeDepositDetectionService. See '
+                .'EXEMPT_TABLE_METADATA.',
         ],
     ];
 
@@ -1642,6 +1950,132 @@ class RowLevelSecurityCoverageMappingService
             ],
             'authorized_writers' => [
                 'App\\Integrations\\Support\\GmailMailboxRoutingService::route()/unroute() — route() is the sole writer (delete-before-insert, never updateOrCreate()); unroute() is the sole deleter, per checkpoint3-combined-design.md §4.7 intended to be called from ProviderConnectionService::disconnect()/disableWebhookRouting() in the same transaction as those methods\' existing firm_integrations/integration_webhook_routing_index cleanup',
+            ],
+        ],
+        'provider_rate_card_entries' => [
+            'reason' => 'FirmsVault Live Integrations, Checkpoint 4 (Plaid cost-control track): platform-admin-authored '
+                .'rate-card reference data (checkpoint4-design-cost-control.md §1.1). Carries no firm_id column at all — '
+                .'a firm_override row\'s nullable scope_id POINTS AT a firm without the row itself being tenant-owned, '
+                .'mirroring firm_entitlements\' opposite (tenant-owned) relationship being explicitly rejected in the '
+                .'design\'s own reasoning: only a platform admin can grant a firm a different price/allowance than its '
+                .'package, a firm can never self-serve a discount, so this belongs in admin-panel-owned reference data, '
+                .'never RLS-forced tenant data. Confirmed no firm_id/firm-referencing column by direct migration '
+                .'inspection (database/migrations/2026_09_24_500001_create_provider_rate_card_entries_table.php).',
+            'expected_readers' => [
+                'App\\Integrations\\Billing\\ProviderRateCardResolver::resolve() — the sole reader, resolving the highest-precedence matching row for a given (provider_key, product, billing_operation, environment, firm) as of a point in time',
+            ],
+            'authorized_writers' => [
+                'platform-admin-only Filament action (not built by this checkpoint\'s cost-control track — a later admin-UI concern), never firm-panel-writable — no runtime create/update path exists anywhere in this checkpoint\'s own file set',
+            ],
+        ],
+        'provider_kill_switches' => [
+            'reason' => 'FirmsVault Live Integrations, Checkpoint 4 (Plaid cost-control track): the incident-response '
+                .'kill-switch surface (checkpoint4-design-cost-control.md §4.1/§4.2; checkpoint4-combined-design.md '
+                .'§1.7, filled in by direct analogy to provider_rate_card_entries\' own stated reasoning, since the '
+                .'source doc left this table\'s RLS classification unstated). A scope_type=\'platform\' row has no '
+                .'owning firm and must be visible/checked on every pipeline run for every firm; this table is '
+                .'admin-panel-mutated only ("a platform admin can suspend a firm\'s optional operation via the '
+                .'kill-switch mechanism... a firm cannot self-serve this" — design §4.2), an incident-response tool '
+                .'requiring the operational tempo of a DB-row toggle, not a deploy. Confirmed no firm_id/firm-referencing '
+                .'column by direct migration inspection (database/migrations/2026_09_24_500004_create_provider_kill_switches_table.php).',
+            'expected_readers' => [
+                'App\\Integrations\\Billing\\ProviderOperationPolicyResolver::resolve() — checked broad-to-narrow (product -> endpoint_category -> operation), platform scope only, on every pipeline run',
+            ],
+            'authorized_writers' => [
+                'ProviderKillSwitchResource (a later checkpoint\'s PlatformAdmin Filament UI concern, per checkpoint4-combined-design.md §9.4 — "the one place PlatformAdmin writes, by design") — not built by this checkpoint\'s cost-control track',
+            ],
+        ],
+        'provider_operation_default_policies' => [
+            'reason' => 'FirmsVault Live Integrations, Checkpoint 4 (Plaid cost-control track): the GLOBAL half of the '
+                .'coordinator-resolved two-table split for the firm-operation-policy concept (checkpoint4-combined-design.md '
+                .'§1.8) — "a provider_operation_default_policies table (Global, no RLS, admin-authored, one row per '
+                .'product/environment, the platform-default fallback only)". The firm-editable half, '
+                .'provider_firm_operation_policies, is a SEPARATE, Direct BelongsToTenant + FORCE RLS table (see '
+                .'PREPARED_TABLES) — deliberately never merged into one bespoke-policy table, per the coordinator\'s own '
+                .'stated reasoning against introducing a second novel RLS-plumbing pattern in the same checkpoint '
+                .'alongside the Client Portal\'s two-hop self-lookup. Confirmed no firm_id/firm-referencing column by '
+                .'direct migration inspection (database/migrations/2026_09_24_500005_create_provider_operation_default_policies_table.php).',
+            'expected_readers' => [
+                'App\\Integrations\\Billing\\ProviderOperationPolicyResolver::resolve() — read as the per-field fallback when the firm-scoped provider_firm_operation_policies row is absent or has a null field',
+            ],
+            'authorized_writers' => [
+                'platform-admin-only Filament action (not built by this checkpoint\'s cost-control track), never firm-panel-writable',
+            ],
+        ],
+        'provider_invoice_reconciliations' => [
+            'reason' => 'FirmsVault Live Integrations, Checkpoint 4 (Plaid cost-control track): monthly provider '
+                .'invoice reconciliation, modeled directly on TrustReconciliation\'s own shape but PLATFORM-scoped, not '
+                .'per-firm (checkpoint4-design-cost-control.md §6) — a real Plaid invoice covers all firms\' aggregated '
+                .'usage, the same relationship BillingAccount/PlatformBillingEvent already have to the platform as a '
+                .'whole, never to one firm. Confirmed no firm_id/firm-referencing column by direct migration inspection '
+                .'(database/migrations/2026_09_24_500010_create_provider_invoice_reconciliations_table.php).',
+            'expected_readers' => [
+                'PlaidCostOversightPage (a later checkpoint\'s PlatformAdmin Filament UI concern, per checkpoint4-combined-design.md §9.4) — not built by this checkpoint\'s cost-control track',
+            ],
+            'authorized_writers' => [
+                'App\\Services\\ProviderInvoiceReconciliationService::run() — the sole writer, human-entered, comparison-only, never auto-correcting',
+            ],
+        ],
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid financial
+        // evidence add-on", Plaid provider-core track) addition —
+        // checkpoint4-combined-design.md §1.1.1 (binding "Option B");
+        // checkpoint4-design-plaid-provider-core.md §11.2;
+        // checkpoint4-security-review.md Finding 7, confirmed
+        // safe/sufficient.
+        'integration_plaid_item_routes' => [
+            'reason' => 'FirmsVault Live Integrations, Checkpoint 4 (Plaid provider-core track): like '
+                .'integration_webhook_routing_index/integration_gmail_mailbox_routes, this table genuinely carries '
+                .'a NOT NULL firm_id column ($table->foreignId(\'firm_id\')->constrained(\'firms\')->cascadeOnDelete(), '
+                .'per database/migrations/2026_09_24_180001_create_integration_plaid_item_routes_table.php) — it '
+                .'is exempt from RLS despite that, not because it lacks it. Reviewed and approved as a deliberate, '
+                .'narrow exception, for the identical three-reason structure both sibling tables\' own exemptions '
+                .'already established: (1) it holds no secret or credential material of any kind — only {firm_id, '
+                .'firm_integration_id, integration_provider_id, item_lookup_hmac, item_display_ciphertext, '
+                .'item_display_encryption_key_id}, where item_lookup_hmac is a KEYED HMAC-SHA256 digest (not a '
+                .'plain hash — Plaid does not officially document a guaranteed entropy floor for item_id, so it is '
+                .'treated with the same conservative caution the Gmail mailbox-address case required; the HMAC key '
+                .'is a dedicated, platform-wide secret, never APP_KEY, never a per-firm key) and '
+                .'item_display_ciphertext is already-encrypted, never plaintext; (2) it MUST be queryable in a '
+                .'genuinely pre-tenant-context bootstrap step — an inbound Plaid webhook delivery carries only an '
+                .'item_id, with no firm identity established yet, and app.current_firm_id cannot be SET LOCAL '
+                .'before this exact lookup resolves which firm/connection the item_id belongs to — a FORCE RLS '
+                .'policy here would make PlaidItemRoutingService::resolveByItemId() structurally impossible for '
+                .'the identical reason both sibling tables\' own exemptions give; and (3) the firm_id read back '
+                .'from this table is never treated as authoritative on its own — every subsequent step '
+                .'re-establishes and re-verifies real tenant context via the ordinary, unmodified '
+                .'TenantContextService::runWithFirmContext() before anything RLS-protected is touched, so this '
+                .'table\'s firm_id is a non-authoritative routing pointer only, not a security boundary. See '
+                .'database/migrations/2026_09_24_180001_create_integration_plaid_item_routes_table.php\'s own '
+                .'"WHY THIS TABLE HAS NO RLS" class docblock for the full reasoning.',
+            'expected_readers' => [
+                'App\\Integrations\\Support\\PlaidItemRoutingService::resolveByItemId() — the sole pre-tenant-context read, returning only a resolved {firm_id, firm_integration_id, integration_provider_id} tuple (or null), never a secret or hydrated model',
+                'App\\Integrations\\Providers\\Plaid\\PlaidProvider::verifyInboundSignature() — a second, narrow, same-request read used only to attribute the webhook-verification-key JWK fetch to a real FirmIntegration (see that method\'s own docblock)',
+            ],
+            'authorized_writers' => [
+                'App\\Integrations\\Support\\PlaidItemRoutingService::route()/unroute() — route() is the sole writer (delete-before-insert, never updateOrCreate()); unroute() is the sole deleter, called from PlaidProvider::subscribe() and ProviderConnectionService::disconnect()/disableWebhookRouting()',
+            ],
+        ],
+        // FirmsVault Live Integrations, Checkpoint 4 ("Plaid financial
+        // evidence add-on", Financial Evidence Workspace UI track)
+        // addition — checkpoint4-combined-design.md §1.6.
+        'financial_evidence_large_deposit_thresholds' => [
+            'reason' => 'FirmsVault Live Integrations, Checkpoint 4 (Financial Evidence Workspace UI track): the '
+                .'Unexplained Large Deposits detection threshold, platform_default -> firm_override scope-'
+                .'precedence, mirroring provider_rate_card_entries\' own reasoning exactly (checkpoint4-combined-design.md '
+                .'§1.6). No firm_id column exists at all — a nullable scope_id POINTS AT a firm for firm_override '
+                .'rows without the row itself being tenant-owned. A firm may request its own firm_override row '
+                .'(FinancialIntegrationAccessPolicyService::canRequest()-gated, via the Review Queues panel — this '
+                .'is a detection-tuning preference, not commercial/pricing data, so it is the one exception to '
+                .'"platform-admin-authored only" this table\'s sibling Global tables otherwise share); the '
+                .'platform_default row is admin-authored only. Confirmed no firm_id/firm-referencing column by '
+                .'direct migration inspection '
+                .'(database/migrations/2026_09_25_190017_create_financial_evidence_large_deposit_thresholds_table.php).',
+            'expected_readers' => [
+                'App\\Integrations\\Services\\FinancialEvidenceLargeDepositDetectionService::resolveThresholdCents() — resolves the firm-scoped row first, falls back to the platform_default row, then to config(\'financial_evidence.large_deposit_default_threshold_cents\')',
+            ],
+            'authorized_writers' => [
+                'A firm\'s own FirmOwner/Attorney/BillingStaff (FinancialIntegrationAccessPolicyService::canRequest()-gated) may write ONLY their own firm\'s firm_override row (scope_id = their own firm_id) — never the platform_default row',
+                'platform-admin-only Filament action (not built by this checkpoint) writes the platform_default row',
             ],
         ],
     ];

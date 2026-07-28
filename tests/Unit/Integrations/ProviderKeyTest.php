@@ -38,24 +38,21 @@ final class ProviderKeyTest extends TestCase
     }
 
     /**
-     * RENAMED AGAIN (FirmsVault Live Integrations Checkpoint 3, Google
-     * Workspace provider — checkpoint3-combined-design.md §1.1/§6 item
-     * 1): was test_it_has_exactly_the_expected_two_cases(), asserting a
-     * count of 2. ProviderKey now registers a third case,
-     * GoogleWorkspace, so the old "two cases" name became actively
-     * misleading (not merely imprecise) — renamed to reflect the new,
-     * exact expected count. This is the SECOND, anticipated occurrence
-     * of the same rename pattern this test already went through once,
-     * from "single case" to "two cases", when Checkpoint 2 added
-     * Microsoft365 — mirrors this codebase's own RlsForceRollout
-     * convention of encoding the exact expected count in a test's name
-     * and renaming it whenever that count legitimately changes.
+     * RENAMED AGAIN (FirmsVault Live Integrations Checkpoint 4, "Plaid
+     * financial evidence add-on"): was
+     * test_it_has_exactly_the_expected_three_cases(), asserting a count
+     * of 3. ProviderKey now registers a fourth case, Plaid, so the old
+     * "three cases" name became actively misleading (not merely
+     * imprecise) — renamed to reflect the new, exact expected count.
+     * Mirrors this codebase's own RlsForceRollout convention of encoding
+     * the exact expected count in a test's name and renaming it whenever
+     * that count legitimately changes.
      */
-    public function test_it_has_exactly_the_expected_three_cases(): void
+    public function test_it_has_exactly_the_expected_four_cases(): void
     {
         $cases = ProviderKey::cases();
 
-        $this->assertCount(3, $cases, 'ProviderKey must register exactly three cases as of FirmsVault Live Integrations Checkpoint 3.');
+        $this->assertCount(4, $cases, 'ProviderKey must register exactly four cases as of FirmsVault Live Integrations Checkpoint 4.');
         $this->assertSame('Test', $cases[0]->name);
         $this->assertSame(ProviderKey::Test, $cases[0]);
         $this->assertSame('Microsoft365', $cases[1]->name);
@@ -63,6 +60,9 @@ final class ProviderKeyTest extends TestCase
         $this->assertSame('GoogleWorkspace', $cases[2]->name);
         $this->assertSame(ProviderKey::GoogleWorkspace, $cases[2]);
         $this->assertSame('googleworkspace', $cases[2]->value);
+        $this->assertSame('Plaid', $cases[3]->name);
+        $this->assertSame(ProviderKey::Plaid, $cases[3]);
+        $this->assertSame('plaid', $cases[3]->value);
     }
 
     public function test_backed_value_is_lowercase(): void

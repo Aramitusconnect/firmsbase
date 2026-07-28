@@ -63,6 +63,25 @@ final class Checkpoint7RollbackReapplicationTest extends TestCase
         '2026_09_08_080002_prepare_row_level_security_and_force_rls_on_integration_usage_records_table',
     ];
 
+    /**
+     * POST-CHECKPOINT-4-PLAID UPDATE: Checkpoint 4's
+     * `create_provider_billable_call_reservations_table` migration adds
+     * a real (bare, single-column) FK `usage_record_id` ->
+     * integration_usage_records(id) (nullOnDelete()) — a bare FK still
+     * blocks dropping the referenced table in PostgreSQL exactly like
+     * Checkpoint 9's own composite FK does, so
+     * provider_billable_call_reservations must now be rolled back FIRST,
+     * before CP9_USAGE_RECORDS_MIGRATIONS above tears down
+     * integration_usage_records. Reapplied LAST, after
+     * integration_usage_records is rebuilt.
+     *
+     * @var string[]
+     */
+    private const CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATIONS = [
+        '2026_09_24_500002_create_provider_billable_call_reservations_table',
+        '2026_09_24_500003_prepare_row_level_security_and_force_rls_on_provider_billable_call_reservations_table',
+    ];
+
     public function test_all_five_migrations_exist_on_disk(): void
     {
         foreach (self::MIGRATIONS as $migration) {
@@ -111,6 +130,21 @@ final class Checkpoint7RollbackReapplicationTest extends TestCase
         foreach (self::CP9_USAGE_RECORDS_MIGRATIONS as $migration) {
             $usageRecordsInstances[$migration] = include base_path("database/migrations/{$migration}.php");
         }
+
+        // Checkpoint 4's provider_billable_call_reservations FK-references
+        // integration_usage_records (see
+        // CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATIONS docblock above) —
+        // it must be rolled back first, before integration_usage_records
+        // itself.
+        $providerBillableReservationsInstances = [];
+        foreach (self::CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATIONS as $migration) {
+            $providerBillableReservationsInstances[$migration] = include base_path("database/migrations/{$migration}.php");
+        }
+        foreach (array_reverse(self::CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATIONS) as $migration) {
+            $providerBillableReservationsInstances[$migration]->down();
+        }
+        $this->assertFalse(Schema::hasTable('provider_billable_call_reservations'));
+
         foreach (array_reverse(self::CP9_USAGE_RECORDS_MIGRATIONS) as $migration) {
             $usageRecordsInstances[$migration]->down();
         }
@@ -145,6 +179,13 @@ final class Checkpoint7RollbackReapplicationTest extends TestCase
             $usageRecordsInstances[$migration]->up();
         }
         $this->assertTrue(Schema::hasTable('integration_usage_records'));
+
+        // Rebuild Checkpoint 4's provider_billable_call_reservations LAST
+        // of all — after integration_usage_records already exists again.
+        foreach (self::CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATIONS as $migration) {
+            $providerBillableReservationsInstances[$migration]->up();
+        }
+        $this->assertTrue(Schema::hasTable('provider_billable_call_reservations'));
 
         $this->assertTrue(Schema::hasTable('integration_webhook_routing_index'));
         $this->assertTrue(Schema::hasTable('integration_webhook_receipts'));
@@ -184,6 +225,18 @@ final class Checkpoint7RollbackReapplicationTest extends TestCase
         // CP9_USAGE_RECORDS_MIGRATIONS docblock above) — it must be rolled
         // back FIRST, before this whole-wave rollback drops that table
         // below.
+        // Checkpoint 4's provider_billable_call_reservations FK-references
+        // integration_usage_records — it must be rolled back first,
+        // before integration_usage_records itself.
+        foreach (array_reverse(self::CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATIONS) as $migration) {
+            $exit = Artisan::call('migrate:rollback', [
+                '--path' => "database/migrations/{$migration}.php",
+                '--force' => true,
+            ]);
+            $this->assertSame(0, $exit, "Rollback of {$migration} (Checkpoint 4 provider_billable_call_reservations) failed: ".Artisan::output());
+        }
+        $this->assertFalse(Schema::hasTable('provider_billable_call_reservations'));
+
         foreach (array_reverse(self::CP9_USAGE_RECORDS_MIGRATIONS) as $migration) {
             $exit = Artisan::call('migrate:rollback', [
                 '--path' => "database/migrations/{$migration}.php",
@@ -228,6 +281,17 @@ final class Checkpoint7RollbackReapplicationTest extends TestCase
         }
         $this->assertTrue(Schema::hasTable('integration_usage_records'));
 
+        // Reapply Checkpoint 4's provider_billable_call_reservations LAST
+        // of all — after integration_usage_records already exists again.
+        foreach (self::CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATIONS as $migration) {
+            $exit = Artisan::call('migrate', [
+                '--path' => "database/migrations/{$migration}.php",
+                '--force' => true,
+            ]);
+            $this->assertSame(0, $exit, "Reapplying {$migration} (Checkpoint 4 provider_billable_call_reservations) failed: ".Artisan::output());
+        }
+        $this->assertTrue(Schema::hasTable('provider_billable_call_reservations'));
+
         $this->assertTrue(Schema::hasTable('integration_webhook_routing_index'));
         $this->assertTrue(Schema::hasTable('integration_webhook_receipts'));
         $this->assertTrue(Schema::hasTable('integration_inbound_webhook_events'));
@@ -265,7 +329,18 @@ final class Checkpoint7RollbackReapplicationTest extends TestCase
             self::CP9_USAGE_RECORDS_MIGRATIONS,
         );
 
+        // Checkpoint 4's provider_billable_call_reservations FK-references
+        // integration_usage_records — it must be torn down FIRST, before
+        // $usageRecordsMigrations below drops that table.
+        $providerBillableReservationsMigrations = array_map(
+            static fn (string $migration) => include base_path("database/migrations/{$migration}.php"),
+            self::CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATIONS,
+        );
+
         $syncRunsMigration->down();
+        foreach (array_reverse($providerBillableReservationsMigrations) as $migration) {
+            $migration->down();
+        }
         foreach (array_reverse($usageRecordsMigrations) as $migration) {
             $migration->down();
         }
@@ -275,6 +350,9 @@ final class Checkpoint7RollbackReapplicationTest extends TestCase
         $eventsMigration->up();
         $rlsMigration->up();
         foreach ($usageRecordsMigrations as $migration) {
+            $migration->up();
+        }
+        foreach ($providerBillableReservationsMigrations as $migration) {
             $migration->up();
         }
         $syncRunsMigration->up();

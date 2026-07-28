@@ -240,6 +240,122 @@ class IntegrationProviderTest extends TestCase
     ];
 
     /**
+     * POST-CHECKPOINT-4-PLAID UPDATE: Checkpoint 4 ("Plaid financial
+     * evidence add-on") added an EIGHTH independent dependency chain
+     * reaching firm_integrations — provider_billable_call_reservations
+     * carries a real (bare, single-column) FK `usage_record_id` ->
+     * integration_usage_records(id) (nullOnDelete()), and several more
+     * Checkpoint 4 tables (integration_plaid_item_routes,
+     * financial_evidence_bank_accounts,
+     * financial_evidence_client_consents,
+     * financial_evidence_matter_authorizations, and
+     * provider_balance_snapshots among them) carry their own real
+     * composite FKs directly into firm_integrations — confirmed
+     * empirically: rolling back only the two
+     * provider_billable_call_reservations migrations was NOT sufficient
+     * to unblock a firm_integrations drop; the FULL Checkpoint 4
+     * migration wave (every migration dated 2026_09_24/2026_09_25 for
+     * this checkpoint) must be rolled back as one unit FIRST — before
+     * the CP9 whole-wave block above, since Checkpoint 4 is the newest
+     * layer — or that rollback fails with "cannot drop table ... because
+     * other objects depend on it". Reapplied LAST of all, after the CP9
+     * whole-wave block, in forward (creation) order. Mirrors every other
+     * whole-wave precedent in this file exactly.
+     *
+     * @var list<string>
+     */
+    private const CP4_WHOLE_WAVE_MIGRATION_PATHS = [
+        'database/migrations/2026_09_24_180001_create_client_portal_users_table.php',
+        'database/migrations/2026_09_24_180001_create_integration_plaid_item_routes_table.php',
+        'database/migrations/2026_09_24_180002_seed_plaid_integration_provider_catalog_entry.php',
+        'database/migrations/2026_09_24_180003_create_client_portal_password_reset_tokens_table.php',
+        'database/migrations/2026_09_24_180003_create_financial_evidence_bank_accounts_table.php',
+        'database/migrations/2026_09_24_180004_create_client_portal_matter_grants_table.php',
+        'database/migrations/2026_09_24_180004_prepare_row_level_security_and_force_rls_on_financial_evidence_bank_accounts_table.php',
+        'database/migrations/2026_09_24_180005_create_financial_evidence_transactions_table.php',
+        'database/migrations/2026_09_24_180005_prepare_row_level_security_and_force_rls_on_client_portal_matter_grants_table.php',
+        'database/migrations/2026_09_24_180006_add_self_lookup_clause_to_clients_rls_policy.php',
+        'database/migrations/2026_09_24_180006_prepare_row_level_security_and_force_rls_on_financial_evidence_transactions_table.php',
+        'database/migrations/2026_09_24_180007_create_financial_evidence_income_records_table.php',
+        'database/migrations/2026_09_24_180008_prepare_row_level_security_and_force_rls_on_financial_evidence_income_records_table.php',
+        'database/migrations/2026_09_24_180009_create_financial_evidence_liabilities_table.php',
+        'database/migrations/2026_09_24_180010_prepare_row_level_security_and_force_rls_on_financial_evidence_liabilities_table.php',
+        'database/migrations/2026_09_24_180011_create_financial_evidence_investment_records_table.php',
+        'database/migrations/2026_09_24_180012_prepare_row_level_security_and_force_rls_on_financial_evidence_investment_records_table.php',
+        'database/migrations/2026_09_24_180013_create_financial_evidence_statements_table.php',
+        'database/migrations/2026_09_24_180014_prepare_row_level_security_and_force_rls_on_financial_evidence_statements_table.php',
+        'database/migrations/2026_09_24_180015_create_financial_evidence_identity_records_table.php',
+        'database/migrations/2026_09_24_180016_prepare_row_level_security_and_force_rls_on_financial_evidence_identity_records_table.php',
+        'database/migrations/2026_09_24_500001_create_provider_rate_card_entries_table.php',
+        'database/migrations/2026_09_24_500002_create_provider_billable_call_reservations_table.php',
+        'database/migrations/2026_09_24_500003_prepare_row_level_security_and_force_rls_on_provider_billable_call_reservations_table.php',
+        'database/migrations/2026_09_24_500004_create_provider_kill_switches_table.php',
+        'database/migrations/2026_09_24_500005_create_provider_operation_default_policies_table.php',
+        'database/migrations/2026_09_24_500006_create_provider_firm_operation_policies_table.php',
+        'database/migrations/2026_09_24_500007_prepare_row_level_security_and_force_rls_on_provider_firm_operation_policies_table.php',
+        'database/migrations/2026_09_24_500008_create_provider_balance_snapshots_table.php',
+        'database/migrations/2026_09_24_500009_prepare_row_level_security_and_force_rls_on_provider_balance_snapshots_table.php',
+        'database/migrations/2026_09_24_500010_create_provider_invoice_reconciliations_table.php',
+        'database/migrations/2026_09_24_500011_seed_plaid_module_catalog_entry.php',
+        'database/migrations/2026_09_25_190001_create_financial_evidence_matter_requests_table.php',
+        'database/migrations/2026_09_25_190002_prepare_row_level_security_and_force_rls_on_financial_evidence_matter_requests_table.php',
+        'database/migrations/2026_09_25_190003_create_financial_evidence_client_consents_table.php',
+        'database/migrations/2026_09_25_190004_prepare_row_level_security_and_force_rls_on_financial_evidence_client_consents_table.php',
+        'database/migrations/2026_09_25_190005_create_financial_evidence_matter_authorizations_table.php',
+        'database/migrations/2026_09_25_190006_prepare_row_level_security_and_force_rls_on_financial_evidence_matter_authorizations_table.php',
+        'database/migrations/2026_09_25_190007_create_financial_evidence_matter_notes_table.php',
+        'database/migrations/2026_09_25_190008_prepare_row_level_security_and_force_rls_on_financial_evidence_matter_notes_table.php',
+        'database/migrations/2026_09_25_190009_create_financial_evidence_snapshots_table.php',
+        'database/migrations/2026_09_25_190010_prepare_row_level_security_and_force_rls_on_financial_evidence_snapshots_table.php',
+        'database/migrations/2026_09_25_190011_create_financial_evidence_transaction_reviews_table.php',
+        'database/migrations/2026_09_25_190012_prepare_row_level_security_and_force_rls_on_financial_evidence_transaction_reviews_table.php',
+        'database/migrations/2026_09_25_190013_create_financial_evidence_duplicate_transfer_flags_table.php',
+        'database/migrations/2026_09_25_190014_prepare_row_level_security_and_force_rls_on_financial_evidence_duplicate_transfer_flags_table.php',
+        'database/migrations/2026_09_25_190015_create_financial_evidence_large_deposit_flags_table.php',
+        'database/migrations/2026_09_25_190016_prepare_row_level_security_and_force_rls_on_financial_evidence_large_deposit_flags_table.php',
+        'database/migrations/2026_09_25_190017_create_financial_evidence_large_deposit_thresholds_table.php',
+        'database/migrations/2026_09_25_190018_create_financial_evidence_reconciliation_candidates_table.php',
+        'database/migrations/2026_09_25_190019_prepare_row_level_security_and_force_rls_on_financial_evidence_reconciliation_candidates_table.php',
+        'database/migrations/2026_09_25_190020_create_financial_account_reclassification_requests_table.php',
+        'database/migrations/2026_09_25_190021_prepare_row_level_security_and_force_rls_on_financial_account_reclassification_requests_table.php',
+    ];
+
+    /**
+     * @var list<string>
+     */
+    private const CP4_WHOLE_WAVE_TABLES = [
+        'client_portal_users',
+        'integration_plaid_item_routes',
+        'client_portal_password_reset_tokens',
+        'financial_evidence_bank_accounts',
+        'client_portal_matter_grants',
+        'financial_evidence_transactions',
+        'financial_evidence_income_records',
+        'financial_evidence_liabilities',
+        'financial_evidence_investment_records',
+        'financial_evidence_statements',
+        'financial_evidence_identity_records',
+        'provider_rate_card_entries',
+        'provider_billable_call_reservations',
+        'provider_kill_switches',
+        'provider_operation_default_policies',
+        'provider_firm_operation_policies',
+        'provider_balance_snapshots',
+        'provider_invoice_reconciliations',
+        'financial_evidence_matter_requests',
+        'financial_evidence_client_consents',
+        'financial_evidence_matter_authorizations',
+        'financial_evidence_matter_notes',
+        'financial_evidence_snapshots',
+        'financial_evidence_transaction_reviews',
+        'financial_evidence_duplicate_transfer_flags',
+        'financial_evidence_large_deposit_flags',
+        'financial_evidence_large_deposit_thresholds',
+        'financial_evidence_reconciliation_candidates',
+        'financial_account_reclassification_requests',
+    ];
+
+    /**
      * FirmsVault Live Integrations, Checkpoint 2 (Microsoft 365 provider)
      * UPDATE: Checkpoint 2 added a SEVENTH independent dependency chain
      * reaching all the way back to firm_integrations (transitively,
@@ -393,31 +509,29 @@ class IntegrationProviderTest extends TestCase
     // ------------------------------------------------------------
 
     /**
-     * FirmsVault Live Integrations, Checkpoint 3 (Google Workspace
-     * provider — checkpoint3-combined-design.md §6 item 2) RENAME AGAIN:
-     * this method was previously named
-     * test_exactly_two_rows_are_seeded_after_migration and asserted a
-     * count of 2 (itself a rename of the original
-     * test_exactly_one_row_is_seeded_after_migration, count 1, when
-     * Checkpoint 2 added Microsoft 365). The new
-     * 2026_09_23_170002_seed_googleworkspace_integration_provider_catalog_entry.php
-     * migration seeds a third, independent catalog row (`googleworkspace`)
-     * alongside `test` and `microsoft365`, so the old name became
-     * actively misleading (not merely imprecise) — mirrors this
-     * codebase's own RlsForceRollout convention of encoding the exact
-     * expected count in the test name and renaming it whenever that
-     * count legitimately changes (e.g. "Fix stale forced-table counts
-     * after RLS Wave 10").
+     * FirmsVault Live Integrations, Checkpoint 4 (Plaid financial
+     * evidence add-on) RENAME AGAIN: this method was previously named
+     * test_exactly_three_rows_are_seeded_after_migration and asserted a
+     * count of 3 (itself a rename of test_exactly_two_rows_are_seeded_after_migration,
+     * before that test_exactly_one_row_is_seeded_after_migration — see
+     * this method's own prior docblock in git history for the full
+     * lineage). The new
+     * 2026_09_24_500011_seed_plaid_module_catalog_entry.php migration
+     * seeds a fourth, independent catalog row (`plaid`) alongside `test`,
+     * `microsoft365`, and `googleworkspace` — mirrors this codebase's own
+     * RlsForceRollout convention of encoding the exact expected count in
+     * the test name and renaming it whenever that count legitimately
+     * changes.
      */
-    public function test_exactly_three_rows_are_seeded_after_migration(): void
+    public function test_exactly_four_rows_are_seeded_after_migration(): void
     {
-        $this->assertSame(3, DB::table('integration_providers')->count());
+        $this->assertSame(4, DB::table('integration_providers')->count());
     }
 
     /**
      * FirmsVault Live Integrations, Checkpoint 2 UPDATE: now that a
      * second catalog row (`microsoft365`) is seeded alongside `test`
-     * (see test_exactly_three_rows_are_seeded_after_migration() above),
+     * (see test_exactly_four_rows_are_seeded_after_migration() above),
      * bare ->first() with no ORDER BY is no longer a safe way to locate
      * the `test` row specifically — SQL gives no ordering guarantee
      * without an explicit ORDER BY once more than one row exists. This
@@ -432,22 +546,29 @@ class IntegrationProviderTest extends TestCase
         $this->assertSame(ProviderKey::Test->value, $row->code);
     }
 
-    public function test_no_row_exists_for_any_real_provider_code(): void
+    /**
+     * FirmsVault Live Integrations, Checkpoint 4 UPDATE: `plaid` is now a
+     * genuine, real, in-scope provider (the "Plaid financial evidence
+     * add-on") — deliberately REMOVED from this list, not an oversight.
+     * Every other entry remains a real provider this mission has NOT
+     * built (still correctly asserted absent).
+     */
+    public function test_no_row_exists_for_any_real_provider_code_not_yet_built_by_this_mission(): void
     {
-        $realProviderCodes = [
+        $realProviderCodesNotYetBuilt = [
             'google', 'microsoft', 'stripe', 'quickbooks', 'lawpay',
-            'clio', 'plaid', 'zoom', 'dropbox', 'xero', 'docusign',
+            'clio', 'zoom', 'dropbox', 'xero', 'docusign',
         ];
 
         $existing = DB::table('integration_providers')
-            ->whereIn('code', $realProviderCodes)
+            ->whereIn('code', $realProviderCodesNotYetBuilt)
             ->pluck('code')
             ->all();
 
         $this->assertSame(
             [],
             $existing,
-            'No real provider (google/microsoft/stripe/etc.) is registered in this mission — seeding a catalog row for one would be out of scope.'
+            'No real provider outside this mission\'s own built scope (google/microsoft/stripe/etc.) may be registered — seeding a catalog row for one would be out of scope.'
         );
     }
 
@@ -734,6 +855,19 @@ class IntegrationProviderTest extends TestCase
             $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must not survive its whole-wave rollback.");
         }
 
+        // 1a-pre-pre-pre. Roll back Checkpoint 4's
+        // provider_billable_call_reservations FK-dependent FIRST — before
+        // the Checkpoint 9 whole-wave block below drops
+        // integration_usage_records itself (see
+        // CP4_WHOLE_WAVE_MIGRATION_PATHS docblock).
+        foreach (array_reverse(self::CP4_WHOLE_WAVE_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 4 provider_billable_call_reservations) failed: ".Artisan::output());
+        }
+        foreach (self::CP4_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 4) must not survive its rollback.");
+        }
+
         // 1a-pre-pre. Roll back the Checkpoint 9 whole-wave dependency
         // chain FIRST — before the Checkpoint 8 whole-wave block below,
         // since Checkpoint 9 is the newest layer (see
@@ -980,6 +1114,18 @@ class IntegrationProviderTest extends TestCase
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 9) must be restored by the whole-wave reapplication.");
         }
 
+        // 6e-bis. Reapply Checkpoint 4's provider_billable_call_reservations
+        // LAST of all — after integration_usage_records already exists
+        // again (see CP4_WHOLE_WAVE_MIGRATION_PATHS
+        // docblock).
+        foreach (self::CP4_WHOLE_WAVE_MIGRATION_PATHS as $path) {
+            $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 4 provider_billable_call_reservations) failed: ".Artisan::output());
+        }
+        foreach (self::CP4_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 4) must be restored by reapplication.");
+        }
+
         // 6f. Reapply the Checkpoint 2 webhook-subscriptions whole-wave
         // dependency chain LAST — after the Checkpoint 9 whole-wave block,
         // since this wave is the newest layer other than Checkpoint 3, and
@@ -1023,7 +1169,17 @@ class IntegrationProviderTest extends TestCase
             'Reapplying the migration must restore exactly the documented column set.'
         );
 
-        $this->assertSame(1, DB::table('integration_providers')->count());
+        // POST-CHECKPOINT-4-PLAID UPDATE: was assertSame(1, ...) — the
+        // Microsoft365/GoogleWorkspace seed migrations are NOT part of
+        // any whole-wave list this test rolls back/reapplies, so their
+        // seed rows are wiped by integration_providers' own drop-and-
+        // recreate above and never reappear. Checkpoint 4's own seed
+        // migration (2026_09_24_500011_seed_plaid_module_catalog_entry.php)
+        // IS part of CP4_WHOLE_WAVE_MIGRATION_PATHS, explicitly rolled
+        // back and reapplied by this same test — so its 'plaid' row IS
+        // genuinely re-seeded, making 2 (test + plaid) the correct
+        // post-round-trip count, not 1.
+        $this->assertSame(2, DB::table('integration_providers')->count());
 
         $after = DB::table('integration_providers')->where('code', 'test')->first();
         $this->assertNotNull($after);
@@ -1311,6 +1467,16 @@ class IntegrationProviderTest extends TestCase
             self::CP9_WHOLE_WAVE_MIGRATION_PATHS,
         );
 
+        // Checkpoint 4 (FirmsVault Live Integrations, "Plaid financial
+        // evidence add-on") provider_billable_call_reservations migration
+        // objects, in creation order — the newest layer of all, FK-
+        // dependent on integration_usage_records (see
+        // CP4_WHOLE_WAVE_MIGRATION_PATHS docblock).
+        $cp4ProviderBillableReservationsMigrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::CP4_WHOLE_WAVE_MIGRATION_PATHS,
+        );
+
         // Checkpoint 2 (FirmsVault Live Integrations, Microsoft 365
         // provider) webhook-subscriptions whole-wave migration objects, in
         // creation order.
@@ -1352,6 +1518,16 @@ class IntegrationProviderTest extends TestCase
         }
         foreach (self::CP2_WEBHOOK_SUBSCRIPTIONS_WHOLE_WAVE_TABLES as $table) {
             $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 2 webhook subscriptions) must be fully dropped before the Checkpoint 9 whole-wave teardown can succeed.");
+        }
+
+        // Tear down Checkpoint 4's provider_billable_call_reservations
+        // FIRST — before the Checkpoint 9 whole-wave teardown below drops
+        // integration_usage_records itself.
+        foreach (array_reverse($cp4ProviderBillableReservationsMigrations) as $migration) {
+            $migration->down();
+        }
+        foreach (self::CP4_WHOLE_WAVE_TABLES as $table) {
+            $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 4) must be fully dropped before the Checkpoint 9 whole-wave teardown can succeed.");
         }
 
         // Tear down the Checkpoint 9 whole-wave dependency chain FIRST —
@@ -1588,6 +1764,15 @@ class IntegrationProviderTest extends TestCase
         }
         foreach (self::CP9_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 9) must be fully restored after up().");
+        }
+
+        // Rebuild Checkpoint 4's provider_billable_call_reservations LAST
+        // of all — after integration_usage_records already exists again.
+        foreach ($cp4ProviderBillableReservationsMigrations as $migration) {
+            $migration->up();
+        }
+        foreach (self::CP4_WHOLE_WAVE_TABLES as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 4) must be fully restored after up().");
         }
 
         // Rebuild the Checkpoint 2 webhook-subscriptions whole-wave

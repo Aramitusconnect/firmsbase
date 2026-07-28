@@ -117,6 +117,26 @@ class IntegrationSyncItemsForceRlsActivationTest extends TestCase
     ];
 
     /**
+     * POST-CHECKPOINT-4-PLAID UPDATE: Checkpoint 4's
+     * `2026_09_24_500002_create_provider_billable_call_reservations_table`
+     * migration adds a real (bare, single-column) FK `usage_record_id` ->
+     * integration_usage_records(id) (nullOnDelete()) — a bare FK still
+     * blocks dropping the referenced table in PostgreSQL exactly like the
+     * Checkpoint 9 composite one does, so provider_billable_call_reservations
+     * must now be rolled back BEFORE integration_usage_records itself (see
+     * CP9_USAGE_RECORDS_MIGRATION_PATHS above), or dropping THAT table
+     * fails with "cannot drop table ... because other objects depend on
+     * it". Reapplied LAST of all, after integration_usage_records is
+     * restored.
+     *
+     * @var list<string>
+     */
+    private const CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATION_PATHS = [
+        'database/migrations/2026_09_24_500002_create_provider_billable_call_reservations_table.php',
+        'database/migrations/2026_09_24_500003_prepare_row_level_security_and_force_rls_on_provider_billable_call_reservations_table.php',
+    ];
+
+    /**
      * POST-CHECKPOINT-9 UPDATE (part 2): Checkpoint 9's
      * `2026_09_08_081001_add_requeue_columns_to_integration_outbox_events_and_integration_sync_items_table`
      * migration ALTERs THIS table directly (adds requeue_count/
@@ -295,7 +315,7 @@ class IntegrationSyncItemsForceRlsActivationTest extends TestCase
     {
         IntegrationSyncItem::factory()->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(0, DB::table('integration_sync_items')->count());
     }
@@ -305,7 +325,7 @@ class IntegrationSyncItemsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $run = IntegrationSyncRun::factory()->forFirmIntegration(FirmIntegration::factory()->forFirm($firm)->create())->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
 
@@ -395,7 +415,7 @@ class IntegrationSyncItemsForceRlsActivationTest extends TestCase
     public function test_tenant_context_clears_after_success(): void
     {
         $firm = Firm::factory()->create();
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->runWithFirmContext($firm, function () use ($firm) {
             $run = IntegrationSyncRun::factory()->forFirmIntegration(FirmIntegration::factory()->forFirm($firm)->create())->create();
@@ -443,6 +463,17 @@ class IntegrationSyncItemsForceRlsActivationTest extends TestCase
         $requeueRollbackExit = Artisan::call('migrate:rollback', ['--path' => self::REQUEUE_COLUMNS_MIGRATION_PATH, '--force' => true]);
         $this->assertSame(0, $requeueRollbackExit, 'migrate:rollback of the Checkpoint 9 requeue-columns migration failed: '.Artisan::output());
 
+        // Checkpoint 4's provider_billable_call_reservations FK-references
+        // integration_usage_records (see
+        // CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATION_PATHS docblock
+        // above) — it must be rolled back first, before
+        // integration_usage_records itself.
+        foreach (array_reverse(self::CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (Checkpoint 4 provider_billable_call_reservations) failed: ".Artisan::output());
+        }
+        $this->assertFalse(Schema::hasTable('provider_billable_call_reservations'), 'provider_billable_call_reservations must not survive its own rollback.');
+
         // Checkpoint 9's integration_usage_records now FK-references both
         // integration_sync_runs and integration_sync_items (see
         // CP9_USAGE_RECORDS_MIGRATION_PATHS docblock above) — it must be
@@ -485,6 +516,14 @@ class IntegrationSyncItemsForceRlsActivationTest extends TestCase
             $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 9 integration_usage_records) failed: ".Artisan::output());
         }
         $this->assertTrue(Schema::hasTable('integration_usage_records'), 'integration_usage_records must be restored by its own reapplication.');
+
+        // Reapply Checkpoint 4's provider_billable_call_reservations LAST
+        // of all — after integration_usage_records already exists again.
+        foreach (self::CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATION_PATHS as $path) {
+            $exit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate of {$path} (Checkpoint 4 provider_billable_call_reservations) failed: ".Artisan::output());
+        }
+        $this->assertTrue(Schema::hasTable('provider_billable_call_reservations'), 'provider_billable_call_reservations must be restored by its own reapplication.');
 
         // Reapply Checkpoint 9's requeue-columns migration LAST — after
         // integration_usage_records above.
@@ -531,6 +570,18 @@ class IntegrationSyncItemsForceRlsActivationTest extends TestCase
             static fn (string $path) => include base_path($path),
             self::CP9_USAGE_RECORDS_MIGRATION_PATHS,
         );
+        $providerBillableReservationsMigrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::CP4_PROVIDER_BILLABLE_RESERVATIONS_MIGRATION_PATHS,
+        );
+        // Checkpoint 4's provider_billable_call_reservations FK-references
+        // integration_usage_records — it must be rolled back first, before
+        // integration_usage_records itself.
+        foreach (array_reverse($providerBillableReservationsMigrations) as $migration) {
+            $migration->down();
+        }
+        $this->assertFalse(Schema::hasTable('provider_billable_call_reservations'));
+
         foreach (array_reverse($usageRecordsMigrations) as $migration) {
             $migration->down();
         }
@@ -559,6 +610,13 @@ class IntegrationSyncItemsForceRlsActivationTest extends TestCase
         }
         $this->assertTrue(Schema::hasTable('integration_usage_records'));
 
+        // Rebuild Checkpoint 4's provider_billable_call_reservations LAST
+        // of all — after integration_usage_records already exists again.
+        foreach ($providerBillableReservationsMigrations as $migration) {
+            $migration->up();
+        }
+        $this->assertTrue(Schema::hasTable('provider_billable_call_reservations'));
+
         // Rebuild Checkpoint 9's requeue-columns migration LAST — after
         // integration_usage_records above.
         $requeueMigration->up();
@@ -574,7 +632,7 @@ class IntegrationSyncItemsForceRlsActivationTest extends TestCase
 
     public function test_model_table_resolves_correctly(): void
     {
-        $this->assertSame('integration_sync_items', (new IntegrationSyncItem())->getTable());
+        $this->assertSame('integration_sync_items', (new IntegrationSyncItem)->getTable());
     }
 
     public function test_model_uses_belongs_to_tenant_trait(): void

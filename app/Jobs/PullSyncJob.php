@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
+use App\Integrations\Billing\ProviderBillableCallPipeline;
+use App\Integrations\Contracts\RequiresBillableCallPipelineContract;
 use App\Integrations\Contracts\SupportsPullSyncContract;
 use App\Integrations\Core\ProviderRegistry;
 use App\Integrations\Data\SanitizedHealthDiagnostic;
@@ -11,6 +13,7 @@ use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
 use App\Integrations\Enums\CursorStatus;
 use App\Integrations\Enums\ProviderKey;
+use App\Integrations\Enums\ResourceType;
 use App\Integrations\Enums\SyncDirection;
 use App\Integrations\Enums\SyncItemStatus;
 use App\Integrations\Enums\SyncRunStatus;
@@ -29,7 +32,10 @@ use App\Integrations\Services\IntegrationExternalMappingService;
 use App\Integrations\Services\SyncCursorService;
 use App\Integrations\Services\SyncItemService;
 use App\Integrations\Services\SyncRunService;
+use App\Integrations\Support\FinancialEvidenceMaterializerService;
 use App\Integrations\Support\OutboundProviderHttpClient;
+use App\Integrations\Support\ProviderEnvironmentResolver;
+use App\Models\Firm;
 use App\Support\TenantAwareJobContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -55,6 +61,40 @@ final class PullSyncJob implements ShouldQueue
     public int $tries = 1;
 
     public int $timeout = 300;
+
+    /**
+     * FirmsVault Live Integrations, Checkpoint 4 cost-control wiring pass
+     * (checkpoint4-design-cost-control.md §2.1 call site #1, resolving
+     * Finding 1 of checkpoint4-security-review.md). Translates this
+     * framework's provider-neutral `ResourceType` value (this job's own
+     * `$resourceType` constructor property) into
+     * `App\Integrations\Billing\ProviderBillingClassifier`'s governed
+     * `product` vocabulary — a DELIBERATELY SEPARATE axis from Plaid's
+     * own `/link/token/create` `products` strings
+     * (`PlaidProvider::translateCapabilitiesToProducts()`, e.g.
+     * `income_verification`) and from `ResourceType`'s own value strings
+     * (e.g. `bank_account`, `liability`) — neither of those two
+     * vocabularies is what `ProviderBillingClassifier::classify()` (and,
+     * downstream, `provider_rate_card_entries.product`/
+     * `provider_kill_switches.target`) actually key on. Only entries for
+     * the resource types `PlaidProvider::pullableResourceTypes()` /
+     * `pull()` actually dispatches are listed; any resource type not
+     * listed here falls back to its own raw `ResourceType` value (never
+     * thrown), which only matters for a future non-Plaid
+     * `RequiresBillableCallPipelineContract` implementer this map was
+     * not written for.
+     *
+     * @var array<string, string>
+     */
+    private const PLAID_BILLING_PRODUCT_MAP = [
+        ResourceType::BankAccount->value => 'auth',
+        ResourceType::Transaction->value => 'transactions',
+        ResourceType::Income->value => 'income',
+        ResourceType::Liability->value => 'liabilities',
+        ResourceType::Investment->value => 'investments',
+        ResourceType::Statement->value => 'statements',
+        ResourceType::Identity->value => 'identity',
+    ];
 
     public function __construct(
         public readonly int $firmIntegrationId,
@@ -111,8 +151,16 @@ final class PullSyncJob implements ShouldQueue
         // two services on the equivalent failure path.
         $credentials = app(IntegrationCredentialService::class);
         $healthState = app(HealthStateService::class);
+        // FirmsVault Live Integrations, Checkpoint 4 addition ("Plaid
+        // financial evidence add-on" — checkpoint4-combined-design.md
+        // §1.1.3/§7). Resolved via the container, mirroring
+        // $credentials/$healthState's own identical convention
+        // immediately above, rather than widening this class's own
+        // constructor (which must stay scalar-ID-only) or handle()'s
+        // already-large injected-parameter list further.
+        $materializer = app(FinancialEvidenceMaterializerService::class);
 
-        $this->runInFirmContext($this->firmId, function () use ($runs, $items, $cursors, $mappings, $conflicts, $registry, $httpClient, $credentials, $healthState) {
+        $this->runInFirmContext($this->firmId, function () use ($runs, $items, $cursors, $mappings, $conflicts, $registry, $httpClient, $credentials, $healthState, $materializer) {
             // Requirement 2: re-verify fresh, past-dispatch-time —
             // never trust anything carried in the job payload itself.
             // ->lockForUpdate() here does double duty: fresh-read
@@ -179,7 +227,7 @@ final class PullSyncJob implements ShouldQueue
                 return;
             }
 
-            $this->runBatchLoop($run, $claimedCursor, $connection, $runs, $items, $cursors, $mappings, $conflicts, $registry, $httpClient, $credentials, $healthState);
+            $this->runBatchLoop($run, $claimedCursor, $connection, $runs, $items, $cursors, $mappings, $conflicts, $registry, $httpClient, $credentials, $healthState, $materializer);
         });
     }
 
@@ -196,6 +244,7 @@ final class PullSyncJob implements ShouldQueue
         OutboundProviderHttpClient $httpClient,
         IntegrationCredentialService $credentials,
         HealthStateService $healthState,
+        FinancialEvidenceMaterializerService $materializer,
     ): void {
         $run = $runs->transitionStatus($run, SyncRunStatus::Running);
 
@@ -231,11 +280,44 @@ final class PullSyncJob implements ShouldQueue
             ->whereIn('credential_type', [
                 CredentialType::OauthAccessToken->value,
                 CredentialType::OauthRefreshToken->value,
+                // FirmsVault Live Integrations, Checkpoint 4 addition
+                // ("Plaid financial evidence add-on" —
+                // checkpoint4-combined-design.md §1.1.2, binding;
+                // checkpoint4-design-plaid-provider-core.md §13/§15 item
+                // 2). Plaid's access_token is stored under the new,
+                // semantically-distinct CredentialType::ProviderAccessToken
+                // case (never OauthAccessToken — see that enum case's
+                // own docblock), so without this addition a Plaid
+                // connection's credential-liveness safety net below
+                // would never fire: a Plaid connection whose credential
+                // was revoked/rotated away but whose `status` column has
+                // not yet caught up would incorrectly be treated as
+                // having "no provisioned OAuth-shaped credential at
+                // all" and skip straight past the check that exists
+                // specifically to catch that case.
+                CredentialType::ProviderAccessToken->value,
             ])
             ->exists();
 
-        if ($hasProvisionedOauthCredential
-            && $credentials->findActiveCredential($connection, CredentialType::OauthAccessToken) === null) {
+        // FirmsVault Live Integrations, Checkpoint 4 addition ("Plaid
+        // financial evidence add-on" — checkpoint4-combined-design.md
+        // §1.1.2, binding): the safety net's OWN liveness check must be
+        // widened alongside the whereIn() list immediately above, not
+        // just that list by itself — a Plaid connection never has an
+        // Active CredentialType::OauthAccessToken row (its primary
+        // credential is always ProviderAccessToken), so checking only
+        // for OauthAccessToken here would make every Plaid connection
+        // fail this safety net unconditionally, even a perfectly healthy
+        // one. Checks for an Active credential of EITHER shape — exactly
+        // one of the two is ever relevant for any given connection's
+        // provider, so this cannot mask a genuine credential-liveness
+        // gap for Microsoft/Google (whichever of the two is irrelevant
+        // for a given provider is simply always null for it, changing
+        // nothing about that provider's existing behavior).
+        $hasActivePrimaryCredential = $credentials->findActiveCredential($connection, CredentialType::OauthAccessToken) !== null
+            || $credentials->findActiveCredential($connection, CredentialType::ProviderAccessToken) !== null;
+
+        if ($hasProvisionedOauthCredential && ! $hasActivePrimaryCredential) {
             // Fail safe: no provider call is ever attempted, the cursor
             // is left un-advanced (markFailed(), never advance()), and
             // the sanitized category reused here is 8E's own closed
@@ -312,7 +394,52 @@ final class PullSyncJob implements ShouldQueue
 
         do {
             try {
-                $page = $httpClient->execute(fn () => $provider->pull($providerContext, $this->resourceType, $pageCursor), 'pull');
+                // FirmsVault Live Integrations, Checkpoint 4 cost-control
+                // wiring pass (checkpoint4-design-cost-control.md §2.1
+                // call site #1, resolving Finding 1 of
+                // checkpoint4-security-review.md). Additive `instanceof`
+                // branch only — every other provider
+                // (Microsoft365Provider, GoogleWorkspaceProvider,
+                // TestProvider) does not implement
+                // RequiresBillableCallPipelineContract and falls straight
+                // through to the else branch below, which is the exact,
+                // byte-for-byte unchanged `$httpClient->execute(...)`
+                // call this file has always made.
+                if ($provider instanceof RequiresBillableCallPipelineContract) {
+                    $billingProduct = self::PLAID_BILLING_PRODUCT_MAP[$this->resourceType] ?? $this->resourceType;
+
+                    $result = app(ProviderBillableCallPipeline::class)->execute(
+                        providerKey: $provider->key(),
+                        connection: $connection,
+                        // Anti-tautology (ProviderBillableCallPipeline's
+                        // own class docblock, addition #0): $firm is
+                        // resolved from this job's own scalar
+                        // $firmId constructor property — the job's
+                        // independently-dispatched firm context — never
+                        // from $connection->firm, which would make step
+                        // 2's ownership check tautological.
+                        firm: Firm::query()->findOrFail($this->firmId),
+                        // System/job-triggered call — pipeline step 1's
+                        // own documented branch. $connection->status has
+                        // already been re-verified Active earlier in
+                        // handle(), before this job ever reaches
+                        // runBatchLoop().
+                        actor: null,
+                        product: $billingProduct,
+                        billingOperation: 'sync',
+                        environment: (new ProviderEnvironmentResolver)->modeFor($provider->key()),
+                        direction: SyncDirection::Inbound,
+                        resourceType: ResourceType::from($this->resourceType),
+                        providerCall: fn () => $httpClient->execute(fn () => $provider->pull($providerContext, $this->resourceType, $pageCursor), 'pull'),
+                        usageIdempotencyKey: 'plaid_pull:'.$connection->id.':'.$this->resourceType.':'.($pageCursor ?? 'initial').':'.now()->format('YmdHi'),
+                        provider: $provider,
+                        requiredContractFqcn: SupportsPullSyncContract::class,
+                    );
+
+                    $page = $result->response;
+                } else {
+                    $page = $httpClient->execute(fn () => $provider->pull($providerContext, $this->resourceType, $pageCursor), 'pull');
+                }
             } catch (SanitizedProviderHttpException $e) {
                 // Checkpoint 2 addition (checkpoint2-design-sync-webhooks.md
                 // §1.4; checkpoint2-combined-design.md §2 P-15c): a
@@ -366,13 +493,56 @@ final class PullSyncJob implements ShouldQueue
                     ->first();
 
                 if ($mapping === null) {
-                    // No FirmsBase-side local record exists for this
-                    // external object yet. Creating one is resource-
-                    // type-specific business logic this provider-neutral
-                    // framework layer does not own (no generic hook
-                    // exists in this codebase for it yet) — recorded
-                    // Skipped, never a silently-invented local record.
-                    $status = SyncItemStatus::Skipped;
+                    // FirmsVault Live Integrations, Checkpoint 4 addition
+                    // ("Plaid financial evidence add-on" —
+                    // checkpoint4-combined-design.md §1.1.3/§7,
+                    // implementation ownership reassigned to the Plaid
+                    // provider-core phase). A narrow, disclosed,
+                    // Plaid-only widening: for every other provider (and
+                    // for any Plaid resource type this materializer does
+                    // not handle, or a `_removed`-marked Transaction item
+                    // with no prior local mapping to remove), this branch
+                    // is COMPLETELY UNCHANGED — falls straight through to
+                    // the exact same Skipped outcome as before.
+                    $materializableType = $connection->providerKey() === ProviderKey::Plaid
+                        ? ResourceType::tryFrom($this->resourceType)
+                        : null;
+
+                    $isRemovedMarker = is_array($externalItem['raw'] ?? null)
+                        && ($externalItem['raw']['_removed'] ?? false) === true;
+
+                    if ($materializableType !== null && ! $isRemovedMarker && $externalId !== '') {
+                        // Materializes a brand-new local
+                        // financial_evidence_* row (this materializer
+                        // only ever INSERTs — every table it writes to
+                        // is immutable, append-only) and records the
+                        // durable local<->external identity bridge in
+                        // the SAME pass, so this run's own
+                        // recordAttempt() call below has a real
+                        // local_type/local_id to attribute this item to.
+                        $materialized = $materializer->materialize($connection, $materializableType, $externalItem);
+
+                        $mapping = $mappings->recordMapping(
+                            $connection,
+                            $this->resourceType,
+                            $materialized['local_type'],
+                            $materialized['local_id'],
+                            $externalId,
+                            SyncDirection::Inbound,
+                            $versionToken,
+                            null,
+                        );
+
+                        $status = SyncItemStatus::Succeeded;
+                    } else {
+                        // No FirmsBase-side local record exists for this
+                        // external object yet. Creating one is resource-
+                        // type-specific business logic this provider-neutral
+                        // framework layer does not own (no generic hook
+                        // exists in this codebase for it yet) — recorded
+                        // Skipped, never a silently-invented local record.
+                        $status = SyncItemStatus::Skipped;
+                    }
                 } elseif ($mapping->external_version_token !== null && $mapping->external_version_token !== $versionToken) {
                     // The remote object has moved since we last saw it —
                     // explicit conflict, never a silent overwrite.

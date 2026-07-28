@@ -3,6 +3,10 @@
 namespace Tests\Feature\Governance\CrossCutting;
 
 use App\Services\AccessibilityCoverageMappingService;
+use App\Services\BillingAccessibilityReadinessService;
+use App\Services\ClientPortalAccessibilityReadinessService;
+use App\Services\FormAccessibilityReadinessService;
+use App\Services\SignatureAccessibilityReadinessService;
 use Tests\TestCase;
 
 class AccessibilityCoverageMappingServiceTest extends TestCase
@@ -20,7 +24,7 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new AccessibilityCoverageMappingService();
+        $this->service = new AccessibilityCoverageMappingService;
     }
 
     public function test_all_five_surfaces_are_declared(): void
@@ -39,7 +43,7 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
     public function test_client_portal_maps_to_client_portal_accessibility_readiness_service(): void
     {
         $this->assertSame(
-            \App\Services\ClientPortalAccessibilityReadinessService::class,
+            ClientPortalAccessibilityReadinessService::class,
             $this->service->bySurface('client_portal')->owning_class,
         );
     }
@@ -47,11 +51,11 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
     public function test_payment_and_payment_plan_surfaces_map_to_billing_accessibility_readiness_service(): void
     {
         $this->assertSame(
-            \App\Services\BillingAccessibilityReadinessService::class,
+            BillingAccessibilityReadinessService::class,
             $this->service->bySurface('payment_flows')->owning_class,
         );
         $this->assertSame(
-            \App\Services\BillingAccessibilityReadinessService::class,
+            BillingAccessibilityReadinessService::class,
             $this->service->bySurface('payment_plan_flows')->owning_class,
         );
     }
@@ -59,7 +63,7 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
     public function test_legal_forms_map_to_form_accessibility_readiness_service(): void
     {
         $this->assertSame(
-            \App\Services\FormAccessibilityReadinessService::class,
+            FormAccessibilityReadinessService::class,
             $this->service->bySurface('legal_form_workflows')->owning_class,
         );
     }
@@ -67,7 +71,7 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
     public function test_e_signature_maps_to_signature_accessibility_readiness_service(): void
     {
         $this->assertSame(
-            \App\Services\SignatureAccessibilityReadinessService::class,
+            SignatureAccessibilityReadinessService::class,
             $this->service->bySurface('e_signature_screens')->owning_class,
         );
     }
@@ -106,6 +110,37 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
         $this->assertSame([], $this->service->missingSurfaces());
     }
 
+    /**
+     * FirmsVault Live Integrations, Checkpoint 4 ("Plaid financial
+     * evidence add-on") addition: the Financial Evidence Workspace is
+     * the first legitimate, sanctioned build-out of the `client_portal`
+     * surface this test's own REQUIRED_SURFACES list has named since
+     * before Checkpoint 10 (see this class's own disclosed compliance-
+     * tracking-gap comment above) — real custom Livewire components,
+     * needing real `.blade.php` views for the first time in this
+     * codebase's history (every prior Filament resource/page was fully
+     * schema-driven, no custom view required). This is not an
+     * overlooked allowlist gap; it is the expected, eventual transition
+     * this test's own required-surface list anticipated. Named
+     * explicitly, narrowly, rather than weakening the assertion's
+     * general "no unreviewed frontend surface" intent for anything not
+     * on this list.
+     */
+    private const CHECKPOINT_4_ALLOWED_BLADE_BASENAMES = [
+        'overview-panel.blade.php',
+        'notes-panel.blade.php',
+        'summary-panel.blade.php',
+        'review-queues-panel.blade.php',
+        'snapshots-panel.blade.php',
+        'reports-panel.blade.php',
+        'transaction-search-panel.blade.php',
+        'duplicate-transfers-queue-panel.blade.php',
+        'large-deposits-queue-panel.blade.php',
+        'reconciliation-candidates-queue-panel.blade.php',
+        'plaid-link.blade.php',
+        'snapshot-pdf.blade.php',
+    ];
+
     public function test_no_blade_filament_livewire_frontend_or_browser_accessibility_files_exist(): void
     {
         $bladeFiles = [];
@@ -123,10 +158,13 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
             }
         }
 
-        // Only the default Laravel scaffold welcome view may exist.
+        // Only the default Laravel scaffold welcome view, plus
+        // Checkpoint 4's explicitly-named Financial Evidence Workspace
+        // views (see the class constant above), may exist.
         $nonDefaultBladeFiles = array_values(array_filter(
             $bladeFiles,
-            fn (string $path) => basename($path) !== 'welcome.blade.php',
+            fn (string $path) => basename($path) !== 'welcome.blade.php'
+                && ! in_array(basename($path), self::CHECKPOINT_4_ALLOWED_BLADE_BASENAMES, true),
         ));
 
         $this->assertEmpty($nonDefaultBladeFiles, 'Found unexpected Blade files: '.implode(', ', $nonDefaultBladeFiles));

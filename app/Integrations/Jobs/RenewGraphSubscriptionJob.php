@@ -4,16 +4,23 @@ declare(strict_types=1);
 
 namespace App\Integrations\Jobs;
 
+use App\Integrations\Billing\ProviderBillableCallPipeline;
+use App\Integrations\Contracts\RequiresBillableCallPipelineContract;
 use App\Integrations\Contracts\SupportsWebhooksContract;
 use App\Integrations\Core\ProviderRegistry;
 use App\Integrations\Data\SanitizedHealthDiagnostic;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Enums\ProviderWebhookSubscriptionStatus;
+use App\Integrations\Enums\ResourceType;
+use App\Integrations\Enums\SyncDirection;
 use App\Integrations\Exceptions\SanitizedProviderHttpException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationProviderWebhookSubscription;
 use App\Integrations\Services\HealthStateService;
+use App\Integrations\Support\OutboundProviderHttpClient;
+use App\Integrations\Support\ProviderEnvironmentResolver;
+use App\Models\Firm;
 use App\Support\TenantAwareJobContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -152,11 +159,65 @@ final class RenewGraphSubscriptionJob implements ShouldQueue
                 return;
             }
 
+            // FirmsVault Live Integrations, Checkpoint 4 cost-control
+            // wiring pass (checkpoint4-design-cost-control.md §2.1 call
+            // site #4, resolving Finding 1 of checkpoint4-security-review.md).
+            // Additive `instanceof` branch only — Microsoft365Provider/
+            // GoogleWorkspaceProvider (the only two real
+            // SupportsWebhooksContract implementers besides Plaid) do not
+            // implement RequiresBillableCallPipelineContract and fall
+            // straight through to the else branch, the exact,
+            // byte-for-byte unchanged direct `$provider->renewSubscription(...)`/
+            // `$provider->subscribe(...)` calls this job has always made
+            // (this job's own docblock already discloses that neither
+            // call was ever wrapped in OutboundProviderHttpClient at all
+            // — a pre-existing gap this pass does not fix for non-Plaid
+            // providers, only routes Plaid's own call through the
+            // pipeline, which supplies its own inline
+            // OutboundProviderHttpClient::execute() wrapping per
+            // checkpoint4-design-cost-control.md §2.1 call site #4's own
+            // instruction).
+            $requiresPipeline = $provider instanceof RequiresBillableCallPipelineContract;
+            $pipelineFirm = $requiresPipeline ? Firm::query()->findOrFail($this->firmId) : null;
+            $pipelineEnvironment = $requiresPipeline ? (new ProviderEnvironmentResolver)->modeFor($provider->key()) : null;
+            $pipelineResourceType = ResourceType::tryFrom($subscription->resource_type);
+
             try {
-                $result = $provider->renewSubscription([
-                    'connection' => $connection,
-                    'subscription' => $subscription,
-                ]);
+                if ($requiresPipeline) {
+                    $renewResult = app(ProviderBillableCallPipeline::class)->execute(
+                        providerKey: $provider->key(),
+                        connection: $connection,
+                        // Anti-tautology (ProviderBillableCallPipeline's
+                        // own class docblock, addition #0): $this->firmId
+                        // is this job's own independently-dispatched
+                        // scalar constructor property, never derived from
+                        // $connection->firm.
+                        firm: $pipelineFirm,
+                        actor: null,
+                        product: 'webhook_subscribe',
+                        billingOperation: 'renew',
+                        environment: $pipelineEnvironment,
+                        direction: SyncDirection::Outbound,
+                        resourceType: $pipelineResourceType,
+                        providerCall: fn () => app(OutboundProviderHttpClient::class)->execute(
+                            fn () => $provider->renewSubscription([
+                                'connection' => $connection,
+                                'subscription' => $subscription,
+                            ]),
+                            'renewSubscription',
+                        ),
+                        usageIdempotencyKey: 'provider_webhook_renew:'.$connection->id.':'.$subscription->id.':'.now()->format('YmdHi'),
+                        provider: $provider,
+                        requiredContractFqcn: SupportsWebhooksContract::class,
+                    );
+
+                    $result = $renewResult->response;
+                } else {
+                    $result = $provider->renewSubscription([
+                        'connection' => $connection,
+                        'subscription' => $subscription,
+                    ]);
+                }
             } catch (SanitizedProviderHttpException $e) {
                 // Design §3.3: a genuine 404 (subscription already gone
                 // at the provider — deleted after expiry, or never
@@ -173,12 +234,40 @@ final class RenewGraphSubscriptionJob implements ShouldQueue
                 // rethrows unchanged, letting this job's own $tries/
                 // backoff() retry it as an ordinary renewal.
                 if ($e->category() === SanitizedProviderHttpException::CATEGORY_PROVIDER_REJECTED && $e->statusCode() === 404) {
-                    $result = $provider->subscribe([
-                        'connection' => $connection,
-                        'resource_type' => $subscription->resource_type,
-                        'provider_resource' => $subscription->provider_resource,
-                        'provider_change_type' => $subscription->provider_change_type,
-                    ]);
+                    if ($requiresPipeline) {
+                        $subscribeResult = app(ProviderBillableCallPipeline::class)->execute(
+                            providerKey: $provider->key(),
+                            connection: $connection,
+                            firm: $pipelineFirm,
+                            actor: null,
+                            product: 'webhook_subscribe',
+                            billingOperation: 'subscribe',
+                            environment: $pipelineEnvironment,
+                            direction: SyncDirection::Outbound,
+                            resourceType: $pipelineResourceType,
+                            providerCall: fn () => app(OutboundProviderHttpClient::class)->execute(
+                                fn () => $provider->subscribe([
+                                    'connection' => $connection,
+                                    'resource_type' => $subscription->resource_type,
+                                    'provider_resource' => $subscription->provider_resource,
+                                    'provider_change_type' => $subscription->provider_change_type,
+                                ]),
+                                'subscribe',
+                            ),
+                            usageIdempotencyKey: 'provider_webhook_subscribe:'.$connection->id.':'.$subscription->resource_type.':'.now()->format('YmdHi'),
+                            provider: $provider,
+                            requiredContractFqcn: SupportsWebhooksContract::class,
+                        );
+
+                        $result = $subscribeResult->response;
+                    } else {
+                        $result = $provider->subscribe([
+                            'connection' => $connection,
+                            'resource_type' => $subscription->resource_type,
+                            'provider_resource' => $subscription->provider_resource,
+                            'provider_change_type' => $subscription->provider_change_type,
+                        ]);
+                    }
                 } else {
                     throw $e;
                 }

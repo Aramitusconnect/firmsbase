@@ -11,6 +11,7 @@ use App\Integrations\Data\ResolvedWebhookConnection;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Enums\WebhookVerificationOutcome;
 use App\Integrations\Jobs\RecordWebhookVerificationFailureJob;
+use App\Integrations\Listeners\DispatchPlaidItemLifecycleTransitionOnVerifiedWebhookEvent;
 use App\Integrations\Listeners\DispatchPullSyncOnVerifiedWebhookEvent;
 use App\Integrations\Models\IntegrationInboundWebhookEvent;
 use App\Integrations\Services\InboundWebhookAuditLogger;
@@ -377,6 +378,24 @@ final class InboundWebhookController extends Controller
             // why: recordVerifiedEvent() writes via a raw DB::table()
             // insert, which never fires Eloquent's `created` event).
             DispatchPullSyncOnVerifiedWebhookEvent::dispatch(
+                $resolved->firmIntegrationId,
+                $resolved->firmId,
+                $provider,
+                $result['event']->event_type,
+                (int) $result['event']->id,
+            );
+
+            // FirmsVault Live Integrations, Checkpoint 4 ("Plaid
+            // financial evidence add-on" §6) — closes the "verified
+            // lifecycle:item_* webhook event never applies an Item
+            // status transition" gap
+            // (PlaidItemErrorStateLifecycleGapTest.php). Same
+            // duplicate-guard, same direct-dispatch reasoning as
+            // DispatchPullSyncOnVerifiedWebhookEvent immediately above —
+            // see that listener's own docblock for why it is
+            // Plaid-specific rather than folded into the provider-
+            // agnostic sync dispatch.
+            DispatchPlaidItemLifecycleTransitionOnVerifiedWebhookEvent::dispatch(
                 $resolved->firmIntegrationId,
                 $resolved->firmId,
                 $provider,

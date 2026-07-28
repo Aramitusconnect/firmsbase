@@ -65,9 +65,28 @@ class TenantContextService
      */
     private const USER_SESSION_SETTING_NAME = 'app.current_user_id';
 
+    /**
+     * Checkpoint 4 ("Plaid financial evidence add-on"), Client Portal
+     * authentication foundation — the one remaining RLS bootstrap hop.
+     * An earlier draft of this checkpoint also had a first hop (Set
+     * ONLY from `Auth::guard('client')->id()`, read by a
+     * `client_portal_users_self_lookup` policy) — `client_portal_users`
+     * has since been reclassified System (no RLS at all, identical
+     * treatment to `users`; see that table's own create-migration
+     * docblock), so that first hop's session setting
+     * (CLIENT_PORTAL_SESSION_SETTING_NAME/withClientPortalUserContext())
+     * no longer has any policy to satisfy and was removed. `clients`
+     * remains BelongsToTenant + FORCE-RLS protected, so this one hop is
+     * still genuinely required. Set ONLY from an already-resolved
+     * `ClientPortalUser.client_id` value, read via an ordinary,
+     * unwrapped query (no RLS to satisfy on that table) — never from
+     * arbitrary request input.
+     */
+    private const CLIENT_SELF_LOOKUP_SESSION_SETTING_NAME = 'app.current_client_id';
+
     public function setFirmContext(Firm|int|string $firm): void
     {
-        (new TenantContextResolver())->activateForFirm($this->resolveFirm($firm));
+        (new TenantContextResolver)->activateForFirm($this->resolveFirm($firm));
     }
 
     public function clearFirmContext(): void
@@ -263,6 +282,38 @@ class TenantContextService
             });
         } finally {
             DB::select('select set_config(?, ?, ?)', [self::USER_SESSION_SETTING_NAME, '', $this->isLocalScoped()]);
+        }
+    }
+
+    /**
+     * Checkpoint 4 ("Plaid financial evidence add-on"), Client Portal
+     * authentication foundation — the one remaining RLS bootstrap hop
+     * (the fix Finding 2 of checkpoint4-security-review.md required).
+     * Activates ONLY the narrow app.current_client_id session setting
+     * the clients_self_lookup RLS policy reads, runs the callback, and
+     * always clears it afterward. Never touches app.current_firm_id or
+     * PHP-memory firm context.
+     *
+     * An earlier draft of this checkpoint had a preceding hop
+     * (withClientPortalUserContext(), reading `client_portal_users` via
+     * a self-lookup RLS policy) — `client_portal_users` has since been
+     * reclassified System (no RLS at all, identical treatment to
+     * `users`), so that method was removed entirely; there is nothing
+     * left for it to unlock. $clientId is now resolved via an ordinary,
+     * unwrapped query against `client_portal_users` (no RLS to satisfy
+     * on that table), never from request input, query string, or
+     * header — this is what keeps the chain attacker-proof end to end.
+     */
+    public function withClientSelfLookupContext(int $clientId, callable $callback): mixed
+    {
+        try {
+            return DB::transaction(function () use ($clientId, $callback) {
+                DB::select('select set_config(?, ?, ?)', [self::CLIENT_SELF_LOOKUP_SESSION_SETTING_NAME, (string) $clientId, $this->isLocalScoped()]);
+
+                return $callback();
+            });
+        } finally {
+            DB::select('select set_config(?, ?, ?)', [self::CLIENT_SELF_LOOKUP_SESSION_SETTING_NAME, '', $this->isLocalScoped()]);
         }
     }
 

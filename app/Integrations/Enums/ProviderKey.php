@@ -54,10 +54,21 @@ namespace App\Integrations\Enums;
  * is built as a parallel, disjoint change in this same checkpoint — see
  * `config('integrations.providers')`'s identical class-existence-tolerant
  * registration comment.
+ *
+ * FirmsVault Live Integrations, Checkpoint 4 addition
+ * (checkpoint4-combined-design.md §1.2/§6.1, confirmed identically
+ * across all four Checkpoint 4 source docs): `Plaid`. Value `'plaid'` —
+ * lowercase, zero separator, matching `'microsoft365'`/`'googleworkspace'`'s
+ * own established convention exactly. The class implementing this key
+ * (`App\Integrations\Providers\Plaid\PlaidProvider`) is a parallel,
+ * disjoint change in this same checkpoint — see
+ * `config('integrations.providers')`'s identical class-existence-tolerant
+ * registration comment.
  */
 enum ProviderKey: string
 {
     case Test = 'test';
     case Microsoft365 = 'microsoft365';
     case GoogleWorkspace = 'googleworkspace';
+    case Plaid = 'plaid';
 }

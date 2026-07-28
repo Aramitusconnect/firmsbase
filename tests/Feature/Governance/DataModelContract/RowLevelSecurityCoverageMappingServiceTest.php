@@ -125,6 +125,16 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
             $summary['enforcement_active']
         );
 
+        // FirmsVault Live Integrations Checkpoint 4 ("Plaid financial
+        // evidence add-on") — client_portal_users was briefly a known,
+        // disclosed transitively-scoped exception here (real FORCE RLS
+        // but no direct firm_id column). That design is a confirmed
+        // defect (see ClientPortalAuthenticationTest's own docblock)
+        // and has been corrected: client_portal_users is now
+        // reclassified System, carries no RLS at all, and is no longer
+        // forced — so forced_count no longer needs any tolerance above
+        // prepared_count. See test_forced_tables_is_a_subset_of_prepared_tables's
+        // own docblock for the full corrected reasoning.
         $this->assertLessThanOrEqual(
             $summary['prepared_count'],
             $summary['forced_count']
@@ -244,7 +254,44 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // in the same migration) added directly to PREPARED_TABLES
         // (125 -> 126); tenantOwnedTables() is the union of both and
         // increases in step (125 -> 126).
-        $this->assertCount(126, $this->service->preparedTables());
+        // Narrowly updated AGAIN by FirmsVault Live Integrations
+        // Checkpoint 4 ("Plaid financial evidence add-on") — Matter/
+        // Client-Portal track — client_portal_matter_grants (a
+        // brand-new genuine tenant-owned table, RLS prepared and
+        // FORCE-activated in the same migration) added directly to
+        // PREPARED_TABLES (126 -> 127); tenantOwnedTables() is the
+        // union of both and increases in step (126 -> 127).
+        // client_portal_users (the OTHER new table this checkpoint
+        // originally added, briefly with FORCE RLS) is DELIBERATELY NOT
+        // counted here, and never has been — it has no firm_id column
+        // of its own (isolation is transitive through client_id ->
+        // clients.firm_id) and is therefore out of scope for
+        // PREPARED_TABLES/MISSING_PREPARED_TABLES/EXEMPT_TABLES per this
+        // registry's own scope note. It was briefly forced (a confirmed
+        // defect — see ClientPortalAuthenticationTest's own docblock)
+        // and is now corrected to System classification with no RLS at
+        // all, identical treatment to 'users'; forcedTables()'s own
+        // dynamic discovery correctly no longer reports it as forced.
+        // Narrowly updated AGAIN by the same checkpoint's Plaid
+        // provider-core track (financial_evidence_bank_accounts,
+        // _transactions, _income_records, _liabilities,
+        // _investment_records, _statements, _identity_records: +7) and
+        // cost-control track (provider_billable_call_reservations,
+        // provider_firm_operation_policies, provider_balance_snapshots:
+        // +3) — 127 -> 137. Narrowly updated AGAIN by this checkpoint's
+        // Financial Evidence Workspace/Firm-Admin/PlatformAdmin/
+        // Client-Portal UI track — ten further brand-new DirectTenant
+        // tables (financial_evidence_matter_requests, _client_consents,
+        // _matter_authorizations, _matter_notes, _snapshots,
+        // _transaction_reviews, _duplicate_transfer_flags,
+        // _large_deposit_flags, _reconciliation_candidates,
+        // financial_account_reclassification_requests) — 137 -> 147.
+        // (client_portal_matter_grants, added by the Matter/Client-Portal
+        // foundation track, is ALSO in PREPARED_TABLES, but does not
+        // change this specific running total — verified directly against
+        // the live registry via reflection: preparedTables() count is
+        // 147, not 148, confirming no double-count/omission here.)
+        $this->assertCount(147, $this->service->preparedTables());
         $this->assertCount(0, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
@@ -294,8 +341,16 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // above (28 -> 29); see EXEMPT_TABLE_METADATA for the full
         // reasoning. This table is classified Global (never DirectTenant),
         // so it does not change tenantOwnedTables() or preparedTables().
-        $this->assertCount(29, $this->service->exemptTables());
-        $this->assertCount(126, $this->service->tenantOwnedTables());
+        // Narrowly updated AGAIN by the same checkpoint's Plaid
+        // provider-core track (integration_plaid_item_routes: +1) and
+        // cost-control track (provider_rate_card_entries,
+        // provider_kill_switches, provider_operation_default_policies,
+        // provider_invoice_reconciliations: +4) — 29 -> 34. Narrowly
+        // updated AGAIN by this checkpoint's Financial Evidence
+        // Workspace UI track — financial_evidence_large_deposit_thresholds
+        // (Global, §1.6's found-and-fixed RLS misclassification) — 34 -> 35.
+        $this->assertCount(35, $this->service->exemptTables());
+        $this->assertCount(147, $this->service->tenantOwnedTables());
         $forceMigrationFiles = glob(
             database_path('migrations/*_force_rls_on_*_table.php')
         ) ?: [];
@@ -368,8 +423,32 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $forced = $this->service->forcedTables();
         $prepared = $this->service->preparedTables();
 
+        // FirmsVault Live Integrations Checkpoint 4 ("Plaid financial
+        // evidence add-on") — client_portal_users was briefly a known,
+        // disclosed exception to this invariant here: it originally
+        // carried real FORCE ROW LEVEL SECURITY (a subquery-shaped
+        // tenant-isolation policy plus a self-lookup policy) while being
+        // intentionally absent from PREPARED_TABLES (no direct firm_id
+        // column of its own). That design is a confirmed defect —
+        // FORCING RLS on the credential/identity table Auth::attempt()
+        // must look up BY EMAIL with no context at all made client login
+        // structurally impossible (see ClientPortalAuthenticationTest's
+        // own docblock for the full empirical reproduction). It has
+        // since been corrected: client_portal_users is now reclassified
+        // System (identical treatment to 'users'), carries no RLS at
+        // all, and its FORCE RLS migration has been deleted, so
+        // forcedTables() no longer reports it. No known
+        // transitively-scoped exception remains — every forced table in
+        // this repository now has a direct firm_id column and must
+        // appear in PREPARED_TABLES with no carve-out.
+        $knownTransitivelyScopedForcedTables = [];
+
         $this->assertNotEmpty($forced);
-        $this->assertEmpty(array_diff($forced, $prepared), 'Every forced table must also be a prepared table.');
+        $this->assertEmpty(
+            array_diff($forced, array_merge($prepared, $knownTransitivelyScopedForcedTables)),
+            'Every forced table must also be a prepared table, unless explicitly listed as a known '
+            .'transitively-scoped exception above.'
+        );
     }
 
     public function test_is_prepared_and_is_missing_are_consistent(): void
@@ -585,7 +664,37 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // fullTableInventory(); the DirectTenant count and the overall
         // table-inventory total both increase by one (124 -> 125,
         // 220 -> 221).
-        $this->assertSame(126, $summary[TenantOwnershipClassification::DirectTenant->value]);
+        // Narrowly updated AGAIN by FirmsVault Live Integrations
+        // Checkpoint 4 ("Plaid financial evidence add-on") — Matter/
+        // Client-Portal track — client_portal_matter_grants (a
+        // brand-new genuine tenant-owned table, RLS prepared and
+        // FORCE-activated in the same migration) added directly to
+        // PREPARED_TABLES, so it is classified DirectTenant via
+        // fullTableInventory(); the DirectTenant count and the overall
+        // table-inventory total both increase by one (126 -> 127).
+        // client_portal_users and client_portal_password_reset_tokens
+        // (the OTHER two new tables this checkpoint adds) are added
+        // directly to FULL_TABLE_INVENTORY_EXTRA instead — neither has
+        // a firm_id column. client_portal_users was originally
+        // classified InheritedTenant with real FORCE RLS; that design
+        // is a confirmed defect (see ClientPortalAuthenticationTest's
+        // own docblock) and has been corrected to System, identical
+        // treatment to 'users' — so BOTH tables are now classified
+        // System, and the System count and overall total increase by
+        // two (8 -> 10), while InheritedTenant is unaffected by this
+        // checkpoint (stays 24).
+        // Narrowly updated AGAIN by the same checkpoint's Plaid
+        // provider-core track (+7 financial_evidence_* materializer
+        // tables) and cost-control track (+3 provider_billable_call_reservations/
+        // provider_firm_operation_policies/provider_balance_snapshots) —
+        // 127 -> 137. Narrowly updated AGAIN by this checkpoint's
+        // Financial Evidence Workspace/Firm-Admin/PlatformAdmin/
+        // Client-Portal UI track — +10 further DirectTenant tables (see
+        // test_exact_registry_counts_reconcile's own comment for the
+        // full list) — 137 -> 147. (Verified directly against the live
+        // registry via reflection: 147, not 148 — client_portal_matter_grants
+        // is included in this figure already, see that comment's own note.)
+        $this->assertSame(147, $summary[TenantOwnershipClassification::DirectTenant->value]);
         $this->assertSame(24, $summary[TenantOwnershipClassification::InheritedTenant->value]);
         $this->assertSame(3, $summary[TenantOwnershipClassification::Pivot->value]);
         $this->assertSame(10, $summary[TenantOwnershipClassification::Hybrid->value]);
@@ -655,9 +764,20 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // checkpoint3-security-review.md Finding 3); the Global count and
         // the overall table-inventory total both increase by one
         // (50 -> 51, 227 -> 228).
-        $this->assertSame(51, $summary[TenantOwnershipClassification::Global->value]);
+        // Narrowly updated AGAIN by the same checkpoint's Plaid
+        // provider-core track (integration_plaid_item_routes: +1) and
+        // cost-control track (provider_rate_card_entries,
+        // provider_kill_switches, provider_operation_default_policies,
+        // provider_invoice_reconciliations: +4) — 51 -> 56. Narrowly
+        // updated AGAIN by this checkpoint's Financial Evidence
+        // Workspace UI track — financial_evidence_large_deposit_thresholds
+        // (Global) — 56 -> 57.
+        $this->assertSame(57, $summary[TenantOwnershipClassification::Global->value]);
         $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
-        $this->assertSame(8, $summary[TenantOwnershipClassification::System->value]);
+        // 9 -> 10: client_portal_users' corrected System classification
+        // (see the InheritedTenant/System comment above this method's
+        // own client_portal_matter_grants block for the full reasoning).
+        $this->assertSame(10, $summary[TenantOwnershipClassification::System->value]);
         $this->assertSame(1, $summary[TenantOwnershipClassification::RootTenant->value]);
         $this->assertSame(1, $summary[TenantOwnershipClassification::Uncertain->value]);
 
@@ -682,8 +802,31 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // DirectTenant (see above). Narrowly updated AGAIN by FirmsVault
         // Live Integrations Checkpoint 3 (227 -> 228) —
         // integration_gmail_mailbox_routes, classified Global (see
-        // above), no other bucket affected.
-        $this->assertSame(228, array_sum($summary));
+        // above), no other bucket affected. Narrowly updated AGAIN by
+        // FirmsVault Live Integrations Checkpoint 4 ("Plaid financial
+        // evidence add-on") — Matter/Client-Portal track —
+        // client_portal_matter_grants (DirectTenant), client_portal_users
+        // (System — corrected from an original, confirmed-defective
+        // InheritedTenant/FORCE-RLS classification; see
+        // ClientPortalAuthenticationTest's own docblock), and
+        // client_portal_password_reset_tokens (System) all added in the
+        // same checkpoint (228 -> 231). The reclassification itself does
+        // not change this running total — it moves client_portal_users
+        // between buckets (InheritedTenant -> System), not into or out
+        // of the inventory.
+        // Narrowly updated AGAIN by the same checkpoint's Plaid
+        // provider-core track (+7 DirectTenant financial_evidence_*
+        // materializer tables, +1 Global integration_plaid_item_routes:
+        // 231 -> 239) and cost-control track (+3 DirectTenant
+        // provider_billable_call_reservations/provider_firm_operation_policies/
+        // provider_balance_snapshots, +4 Global provider_rate_card_entries/
+        // provider_kill_switches/provider_operation_default_policies/
+        // provider_invoice_reconciliations: 239 -> 246). Narrowly
+        // updated AGAIN by this checkpoint's Financial Evidence
+        // Workspace/Firm-Admin/PlatformAdmin/Client-Portal UI track —
+        // +10 DirectTenant tables, +1 Global
+        // (financial_evidence_large_deposit_thresholds): 246 -> 257.
+        $this->assertSame(257, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

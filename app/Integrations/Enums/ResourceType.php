@@ -23,6 +23,20 @@ namespace App\Integrations\Enums;
  * specific cases), chosen to be broad enough to exercise the whole
  * framework via TestProvider without implying preparation for any
  * particular real-provider integration.
+ *
+ * FirmsVault Live Integrations, Checkpoint 4 addition
+ * (checkpoint4-design-plaid-provider-core.md §9.1;
+ * checkpoint4-combined-design.md §6.6): seven new cases for Plaid's
+ * pullable financial-data products. Deliberately generic,
+ * provider-neutral vocabulary ("bank account," "transaction," "income
+ * record"), consistent with this enum's own documented design intent —
+ * the same discipline Checkpoints 2/3 followed by reusing
+ * `Message`/`CalendarEvent`/`Document` rather than inventing
+ * Google/Microsoft-specific names. `Balance` is deliberately NOT a case
+ * here — Plaid's own documented guidance is against a polling/scheduled
+ * cadence for it (real-time, tightly rate-limited, billed per-request);
+ * it is exposed only via `PlaidProvider::fetchBalance()`, an on-demand
+ * method entirely outside `SupportsPullSyncContract`.
  */
 enum ResourceType: string
 {
@@ -33,4 +47,11 @@ enum ResourceType: string
     case Message = 'message';
     case Invoice = 'invoice';
     case Payment = 'payment';
+    case BankAccount = 'bank_account';
+    case Transaction = 'transaction';
+    case Income = 'income';
+    case Liability = 'liability';
+    case Investment = 'investment';
+    case Statement = 'statement';
+    case Identity = 'identity';
 }

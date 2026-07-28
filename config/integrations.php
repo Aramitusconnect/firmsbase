@@ -3,6 +3,7 @@
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Providers\GoogleWorkspace\GoogleWorkspaceProvider;
 use App\Integrations\Providers\Microsoft365\Microsoft365Provider;
+use App\Integrations\Providers\Plaid\PlaidProvider;
 use App\Integrations\Providers\TestProvider\TestProvider;
 
 /*
@@ -80,6 +81,19 @@ return [
         // this map entry resolves to null until explicitly enabled.
         ProviderKey::GoogleWorkspace->value => env('INTEGRATIONS_GOOGLEWORKSPACE_ENABLED', false)
             ? GoogleWorkspaceProvider::class
+            : null,
+
+        // FirmsVault Live Integrations, Checkpoint 4 addition
+        // ("Plaid financial evidence add-on" —
+        // checkpoint4-design-plaid-provider-core.md §1;
+        // checkpoint4-combined-design.md §6.1). Same production-capable
+        // shape as every other real provider above (no
+        // `! app()->environment('production')` term) — the env flag
+        // alone is the gate; PlaidProvider::isConfigured() independently
+        // re-checks that oauth_apps.plaid's platform credentials are
+        // actually present.
+        ProviderKey::Plaid->value => env('INTEGRATIONS_PLAID_ENABLED', false)
+            ? PlaidProvider::class
             : null,
 
     ],
@@ -276,8 +290,32 @@ return [
                 'window_seconds' => env('INTEGRATIONS_RATE_LIMIT_GOOGLEWORKSPACE_WINDOW_SECONDS', 60),
             ],
 
-            // Checkpoints 4-5 each add one entry here, e.g.:
-            // ProviderKey::Plaid->value => ['max_attempts_per_window' => 600, 'window_seconds' => 60],
+            // FirmsVault Live Integrations, Checkpoint 4 addition
+            // (checkpoint4-design-plaid-provider-core.md §1). PLACEHOLDER
+            // / CONSERVATIVE VALUE ONLY — Plaid's real, documented,
+            // per-endpoint rate limits are sharply non-uniform (e.g.
+            // `/link/token/create`: 20,000/min per client;
+            // `/accounts/balance/get`: 5/min & 30/hr per Item;
+            // `/transactions/refresh`: 2/min per Item) and
+            // `ProviderRequestExecutor` only supports one flat
+            // per-provider ceiling, not a per-operation-type budget — a
+            // genuine, disclosed framework gap
+            // (checkpoint4-design-plaid-provider-core.md §1/§15 item 7),
+            // not resolved here. The value below is the tightest
+            // documented per-Item ceiling actually exercised by a
+            // scheduled/automatic call path (Balance's 5/min) — used as
+            // a conservative default even though Balance itself is
+            // deliberately excluded from the periodic pull scheduler
+            // (see PlaidProvider::fetchBalance()'s own docblock). 30/60s
+            // is the exact conservative default the source design's own
+            // code sample settles on — a compromise, not Balance's own
+            // stricter 5/min figure (which would throttle every other
+            // Plaid operation type sharing this same connection-level
+            // budget far too aggressively).
+            ProviderKey::Plaid->value => [
+                'max_attempts_per_window' => env('INTEGRATIONS_RATE_LIMIT_PLAID_MAX_ATTEMPTS', 30),
+                'window_seconds' => env('INTEGRATIONS_RATE_LIMIT_PLAID_WINDOW_SECONDS', 60),
+            ],
         ],
     ],
 
@@ -360,6 +398,29 @@ return [
             ],
         ],
 
+        // FirmsVault Live Integrations, Checkpoint 4 addition ("Plaid
+        // financial evidence add-on" — checkpoint4-design-plaid-provider-core.md
+        // §1; checkpoint4-combined-design.md §6.1). The bare
+        // `'default'`-key shape, not a purpose-keyed split —
+        // `ProviderEnvironmentResolver`'s own class docblock already
+        // names Plaid by example as "a provider with a genuinely
+        // single-host shape." Unlike Microsoft 365 (whose sandbox/live
+        // hosts are identical — a tenant-identity distinction, not a
+        // host distinction), Plaid's Sandbox and Production hosts are
+        // genuinely different per environment, so this `mode` distinction
+        // is a real host swap. Every PlaidProvider call to
+        // ProviderRequestExecutor::send() omits `urlPurpose` entirely
+        // (defaults to `'default'`), matching this shape.
+        ProviderKey::Plaid->value => [
+            'mode' => env('INTEGRATIONS_PLAID_MODE', 'sandbox'),
+            'sandbox_base_urls' => [
+                'default' => env('INTEGRATIONS_PLAID_SANDBOX_BASE_URL', 'https://sandbox.plaid.com'),
+            ],
+            'live_base_urls' => [
+                'default' => env('INTEGRATIONS_PLAID_LIVE_BASE_URL', 'https://production.plaid.com'),
+            ],
+        ],
+
     ],
 
     /*
@@ -380,6 +441,32 @@ return [
     | §1.2).
     |
     */
+
+    /*
+    |----------------------------------------------------------------
+    | FirmsVault Live Integrations, Checkpoint 4 — cost-control /
+    | billing / usage-limit pipeline
+    |----------------------------------------------------------------
+    |
+    | Backs App\Integrations\Billing\ProviderBillableCallPipeline and
+    | its supporting services (checkpoint4-design-cost-control.md
+    | §3.3/§7/§9 item 5). Every key here is a pure OPERATIONAL constant
+    | (a timeout/threshold/period), never a dollar figure — dollar
+    | figures live exclusively in provider_rate_card_entries, per that
+    | table's own migration docblock. `reservation_ttl_seconds` (120)
+    | and the two anomaly thresholds are this design's own reasonable
+    | ILLUSTRATIVE defaults, explicitly NOT researched Plaid-specific
+    | values (design §9 item 5) — revisit before enabling against real
+    | production traffic.
+    |
+    */
+
+    'provider_billing' => [
+        'reservation_ttl_seconds' => env('INTEGRATIONS_PROVIDER_BILLING_RESERVATION_TTL_SECONDS', 120),
+        'default_cooldown_seconds' => env('INTEGRATIONS_PROVIDER_BILLING_DEFAULT_COOLDOWN_SECONDS', 0),
+        'anomaly_multiplier' => env('INTEGRATIONS_PROVIDER_BILLING_ANOMALY_MULTIPLIER', 3),
+        'anomaly_cold_start_ceiling' => env('INTEGRATIONS_PROVIDER_BILLING_ANOMALY_COLD_START_CEILING', 200),
+    ],
 
     'oauth_apps' => [
 
@@ -429,6 +516,33 @@ return [
             'pubsub_push_service_account_email' => env('INTEGRATIONS_GOOGLEWORKSPACE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL'),
             'gmail_mailbox_routing_hmac_key' => env('INTEGRATIONS_GOOGLEWORKSPACE_GMAIL_MAILBOX_ROUTING_HMAC_KEY'),
             'gmail_pubsub_topic_name' => env('INTEGRATIONS_GOOGLEWORKSPACE_GMAIL_PUBSUB_TOPIC_NAME'),
+        ],
+
+        // FirmsVault Live Integrations, Checkpoint 4 addition ("Plaid
+        // financial evidence add-on" — checkpoint4-design-plaid-provider-core.md
+        // §1; checkpoint4-combined-design.md §6.1). Despite this
+        // section's name (a Checkpoint 2 naming artifact — this key
+        // holds platform-level provider credentials generically, not
+        // OAuth-specific), holds Plaid's own `client_id`/`secret`
+        // terminology (not an OAuth client secret) plus the new
+        // webhook-trust-boundary keys PlaidProvider/PlaidItemRoutingService
+        // need:
+        //   - `item_routing_hmac_key`: a NEW, DEDICATED, platform-wide
+        //     secret (generated once via random_bytes(32), the same
+        //     CSPRNG discipline gmail_mailbox_routing_hmac_key already
+        //     uses), the HMAC key PlaidItemRoutingService uses to
+        //     compute integration_plaid_item_routes.item_lookup_hmac.
+        //     Deliberately NEVER derived from APP_KEY and NEVER a
+        //     per-firm EmailBodyEncryptionService key.
+        //   - `webhook_url`: the platform's own webhook receiver URL,
+        //     sent as the `webhook` parameter on every
+        //     /link/token/create and (defensively) /item/webhook/update
+        //     call — see PlaidProvider::createLinkToken()/subscribe().
+        ProviderKey::Plaid->value => [
+            'client_id' => env('INTEGRATIONS_PLAID_CLIENT_ID'),
+            'secret' => env('INTEGRATIONS_PLAID_SECRET'),
+            'item_routing_hmac_key' => env('INTEGRATIONS_PLAID_ITEM_ROUTING_HMAC_KEY'),
+            'webhook_url' => env('INTEGRATIONS_PLAID_WEBHOOK_URL'),
         ],
 
     ],
