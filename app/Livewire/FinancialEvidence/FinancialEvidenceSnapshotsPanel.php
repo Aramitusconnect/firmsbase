@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Livewire\FinancialEvidence;
 
+use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Services\FinancialEvidenceMatterScopeService;
-use App\Integrations\Services\FinancialIntegrationAccessPolicyService;
 use App\Livewire\FinancialEvidence\Concerns\GatesFinancialEvidenceMatterAccess;
 use App\Models\FinancialEvidenceBankAccount;
 use App\Models\FinancialEvidenceClientConsent;
@@ -32,8 +32,8 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
+use RuntimeException;
 
 /**
  * FinancialEvidenceSnapshotsPanel — FirmsVault Live Integrations,
@@ -43,6 +43,17 @@ use Livewire\Component;
  * wizard action (mirrors `ConnectProviderAction`'s `Action::steps()`
  * shape) with an explicit review step before the irreversible
  * "Generate" submit.
+ *
+ * H3 remediation: the wizard's CheckboxList options are scoped to
+ * `FinancialEvidenceMatterScopeService::connectedBankAccountIds()` for
+ * DISPLAY, but display scoping is not authorization — the SUBMITTED
+ * `bank_account_ids` are attacker-controlled (a tampered Livewire
+ * payload, or the public property set directly). `generateSnapshot()`
+ * therefore RE-DERIVES the allowlist server-side at submit time and
+ * rejects the whole request if any submitted id falls outside it, so a
+ * user with only Matter A access can never bake Matter B's (or another
+ * firm's, or another client's) accounts into an immutable, exportable
+ * snapshot.
  */
 class FinancialEvidenceSnapshotsPanel extends Component implements HasActions, HasSchemas, HasTable
 {
@@ -57,10 +68,13 @@ class FinancialEvidenceSnapshotsPanel extends Component implements HasActions, H
     public function mount(int $matterId): void
     {
         $this->gateMatterAccess($matterId);
+        $this->gateFinancialTierAccess($this->matter());
     }
 
     public function content(Schema $schema): Schema
     {
+        $this->gatedMatter();
+
         return $schema->components([
             SchemaActions::make([$this->createSnapshotAction()]),
             EmbeddedTable::make(),
@@ -88,9 +102,13 @@ class FinancialEvidenceSnapshotsPanel extends Component implements HasActions, H
                         CheckboxList::make('bank_account_ids')
                             ->label('Accounts to include')
                             ->options(function (): array {
-                                $bankAccountIds = app(FinancialEvidenceMatterScopeService::class)->connectedBankAccountIds($this->matter());
+                                // DISPLAY scoping only — never relied on as
+                                // authorization; generateSnapshot() re-derives
+                                // this exact allowlist at submit time.
+                                $matter = $this->gatedMatter();
+                                $bankAccountIds = app(FinancialEvidenceMatterScopeService::class)->connectedBankAccountIds($matter);
 
-                                return (new TenantContextService)->runWithFirmContext($this->matter()->firm_id, fn () => FinancialEvidenceBankAccount::query()
+                                return (new TenantContextService)->runWithFirmContext($matter->firm_id, fn () => FinancialEvidenceBankAccount::query()
                                     ->whereIn('id', $bankAccountIds)
                                     ->get()
                                     ->mapWithKeys(fn (FinancialEvidenceBankAccount $a) => [$a->id => $a->account_name ?? "Account #{$a->id}"])
@@ -117,42 +135,138 @@ class FinancialEvidenceSnapshotsPanel extends Component implements HasActions, H
 
     private function generateSnapshot(array $data): void
     {
-        $matter = $this->matter();
-        $firmUser = Auth::user()?->activeFirmUser();
-
-        if ($firmUser === null) {
-            return;
-        }
-
-        app(FinancialIntegrationAccessPolicyService::class)->assertCanView($firmUser);
+        [$matter, $firmUser] = $this->gatedFinancialEvidenceContext();
 
         (new TenantContextService)->runWithFirmContext($matter->firm_id, function () use ($matter, $firmUser, $data) {
-            $bankAccountIds = array_map('intval', $data['bank_account_ids'] ?? []);
+            // ------------------------------------------------------------
+            // H3 — authorize the SUBMITTED account set, server-side.
+            // ------------------------------------------------------------
+            $submittedBankAccountIds = array_values(array_unique(
+                array_map('intval', $data['bank_account_ids'] ?? [])
+            ));
 
+            // Re-derived HERE, at submit time — never the set that was
+            // rendered into the wizard, which the client controls.
+            $authorizedBankAccountIds = array_map(
+                'intval',
+                app(FinancialEvidenceMatterScopeService::class)->connectedBankAccountIds($matter)
+            );
+
+            $bankAccountIds = array_values(array_intersect($submittedBankAccountIds, $authorizedBankAccountIds));
+
+            // Reject the WHOLE request on any unauthorized id — never
+            // silently drop it and still report success. Whole-request
+            // rejection matches this codebase's existing convention
+            // (FinancialEvidenceReportsPanel::loadSnapshotOrFail()
+            // refuses the entire export rather than exporting a partial
+            // one).
+            $rejected = array_values(array_diff($submittedBankAccountIds, $authorizedBankAccountIds));
+
+            if ($rejected !== []) {
+                throw new RuntimeException(
+                    'One or more selected accounts are not authorized for this matter: '
+                    .implode(', ', $rejected).'. No snapshot was generated.'
+                );
+            }
+
+            // Accounts are a required part of the snapshot (the wizard
+            // marks the CheckboxList ->required()); an empty resulting
+            // set is a rejection, not an empty snapshot.
+            if ($bankAccountIds === []) {
+                throw new RuntimeException(
+                    'At least one authorized account must be selected — no snapshot was generated.'
+                );
+            }
+
+            // ------------------------------------------------------------
+            // H3 — the authorization/consent chain must still be live.
+            // ------------------------------------------------------------
             $authorization = FinancialEvidenceMatterAuthorization::query()
+                ->where('firm_id', $matter->firm_id)
                 ->where('matter_id', $matter->id)
                 ->whereNull('superseded_at')
                 ->latest('id')
                 ->first();
 
-            $consent = $authorization?->consent_id !== null
-                ? FinancialEvidenceClientConsent::query()->find($authorization->consent_id)
+            if ($authorization === null) {
+                throw new RuntimeException(
+                    'This matter has no current (non-superseded) financial-evidence authorization — no snapshot was generated.'
+                );
+            }
+
+            // The existing consent concept (FinancialEvidenceClientConsent:
+            // granted_at set / declined_at null — see its own isGranted()/
+            // isDeclined()); no new consent concept is introduced here.
+            // Constrained to this firm and matter so a consent row can
+            // never be borrowed across matters.
+            $consent = $authorization->consent_id !== null
+                ? FinancialEvidenceClientConsent::query()
+                    ->where('firm_id', $matter->firm_id)
+                    ->where('matter_id', $matter->id)
+                    ->where('id', $authorization->consent_id)
+                    ->first()
                 : null;
 
-            $bankAccounts = FinancialEvidenceBankAccount::query()->whereIn('id', $bankAccountIds)->get();
+            if ($consent !== null && ($consent->isDeclined() || ! $consent->isGranted())) {
+                throw new RuntimeException(
+                    'The client consent backing this matter\'s financial evidence is declined or not granted — no snapshot was generated.'
+                );
+            }
+
+            // Every authorized account must still hang off a connection
+            // that is actually usable — a disconnected/reauthorization-
+            // required connection must not be re-baked into a new
+            // immutable snapshot.
+            $bankAccounts = FinancialEvidenceBankAccount::query()
+                ->where('firm_id', $matter->firm_id)
+                ->whereIn('id', $bankAccountIds)
+                ->with('firmIntegration')
+                ->get();
+
+            if ($bankAccounts->count() !== count($bankAccountIds)) {
+                throw new RuntimeException(
+                    'One or more selected accounts could not be resolved within this firm — no snapshot was generated.'
+                );
+            }
+
+            $inactive = $bankAccounts
+                ->filter(fn (FinancialEvidenceBankAccount $a): bool => $a->firmIntegration?->status !== ConnectionStatus::Active)
+                ->pluck('id')
+                ->all();
+
+            if ($inactive !== []) {
+                throw new RuntimeException(
+                    'The connection backing one or more selected accounts is no longer active: '
+                    .implode(', ', $inactive).'. No snapshot was generated.'
+                );
+            }
+
             $firmIntegrationIds = $bankAccounts->pluck('firm_integration_id')->unique();
 
-            $transactionRefs = FinancialEvidenceTransaction::query()
+            // ------------------------------------------------------------
+            // Data pull — from the POST-INTERSECTION set only.
+            // ------------------------------------------------------------
+            $transactionQuery = fn () => FinancialEvidenceTransaction::query()
+                ->where('firm_id', $matter->firm_id)
                 ->whereIn('bank_account_id', $bankAccountIds)
+                ->when(
+                    $authorization->authorized_date_range_start !== null,
+                    fn ($q) => $q->whereDate('transaction_date', '>=', $authorization->authorized_date_range_start)
+                )
+                ->when(
+                    $authorization->authorized_date_range_end !== null,
+                    fn ($q) => $q->whereDate('transaction_date', '<=', $authorization->authorized_date_range_end)
+                );
+
+            $transactionRefs = $transactionQuery()
                 ->pluck('id')
                 ->map(fn (int $id): array => ['type' => 'financial_evidence_transactions', 'id' => $id])
                 ->all();
 
-            $latestRetrievedAt = FinancialEvidenceTransaction::query()
-                ->whereIn('bank_account_id', $bankAccountIds)
-                ->max('provider_retrieved_at');
+            $latestRetrievedAt = $transactionQuery()->max('provider_retrieved_at');
 
             $lastReportVersion = (int) FinancialEvidenceSnapshot::query()
+                ->where('firm_id', $matter->firm_id)
                 ->where('matter_id', $matter->id)
                 ->max('report_version');
 
@@ -163,10 +277,12 @@ class FinancialEvidenceSnapshotsPanel extends Component implements HasActions, H
                 'matter_id' => $matter->id,
                 'generated_by_firm_user_id' => $firmUser->id,
                 'consent_id' => $consent?->id,
+                // Provenance records the VERIFIED, post-intersection set
+                // — never the raw submitted set.
                 'authorized_source_json' => ['firm_integration_ids' => $firmIntegrationIds->values()->all()],
                 'authorized_account_ids_json' => $bankAccountIds,
-                'date_range_start' => $authorization?->authorized_date_range_start,
-                'date_range_end' => $authorization?->authorized_date_range_end,
+                'date_range_start' => $authorization->authorized_date_range_start,
+                'date_range_end' => $authorization->authorized_date_range_end,
                 'retrieved_record_refs_json' => $transactionRefs,
                 'provider_retrieved_at' => $latestRetrievedAt,
                 'redacted_request_reference' => null,
@@ -184,9 +300,14 @@ class FinancialEvidenceSnapshotsPanel extends Component implements HasActions, H
 
     public function table(Table $table): Table
     {
+        // NOTE: the gate deliberately lives in the data-producing
+        // closure below (and in generateSnapshot()), not in this
+        // builder body — `table()` is invoked during schema
+        // construction, before any tenant context exists, and produces
+        // no rows itself.
         return $table
             ->records(function (): Collection {
-                $matter = $this->matter();
+                $matter = $this->gatedMatter();
 
                 return (new TenantContextService)->runWithFirmContext($matter->firm_id, fn () => FinancialEvidenceSnapshot::query()
                     ->where('matter_id', $matter->id)
@@ -218,6 +339,8 @@ class FinancialEvidenceSnapshotsPanel extends Component implements HasActions, H
 
     public function render()
     {
+        $this->gatedMatter();
+
         return view('livewire.financial-evidence.snapshots-panel');
     }
 }
