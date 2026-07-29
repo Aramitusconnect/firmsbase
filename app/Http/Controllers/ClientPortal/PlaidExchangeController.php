@@ -49,6 +49,17 @@ use RuntimeException;
  * client-supplied `firm_integration_id` is still validated as present
  * (wire-format compatibility with the existing Link-flow JS) but is now
  * cross-checked against, never substituted for, the server's own value.
+ *
+ * FOUND AND FIXED (Checkpoint 7, surfaced by a full-suite-only flake in
+ * this controller's own new regression test): `completeLinkTokenConnection()`
+ * requires a real `users.id` — `requested_by_firm_user_id` is a
+ * `firm_users.id` (the column name says exactly what it is). Passing it
+ * straight through made `ProviderConnectionService::resolveActingFirmUser()`
+ * throw for any row where the two independent id sequences don't
+ * coincidentally match, i.e. the overwhelming majority of rows in any
+ * real database — see `PlaidAccountSelectionPage`'s own docblock for
+ * the full analysis (the identical defect existed at two more call
+ * sites there). Fixed by resolving `requestedBy->user_id`.
  */
 class PlaidExchangeController extends Controller
 {
@@ -102,7 +113,7 @@ class PlaidExchangeController extends Controller
             $result = app(ProviderConnectionService::class)->completeLinkTokenConnection(
                 $connection,
                 $validated['public_token'],
-                $request2->requested_by_firm_user_id,
+                $request2->requestedBy->user_id,
             );
 
             if (! $result->successful) {

@@ -9,6 +9,7 @@ use App\Integrations\Models\IntegrationProvider;
 use App\Integrations\Services\ProviderConnectionService;
 use App\Models\ClientPortalUser;
 use App\Models\FinancialEvidenceMatterRequest;
+use App\Models\FirmUser;
 use App\Models\Matter;
 use App\Services\ClientPortalMatterAccessPolicyService;
 use App\Services\TenantContextService;
@@ -36,16 +37,39 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  * selected accounts at connect time, so this is a confirmation of what
  * was selected, never a server-side re-selection UI.
  *
- * ATTRIBUTION JUDGMENT CALL (disclosed): `initiateLinkTokenConnection()`/
- * `completeLinkTokenConnection()` (provider-core, unmodified) require an
- * int `$currentUserId` that resolves to a `firm_users` row — no
+ * ATTRIBUTION JUDGMENT CALL (disclosed): `startConnection()`/
+ * `initiateLinkTokenConnection()`/`completeLinkTokenConnection()`
+ * (provider-core, unmodified) require an int `$currentUserId` — no
  * ClientPortalUser-shaped actor concept exists in that service's
  * current signature, and this track's scope explicitly excludes
  * modifying `ProviderConnectionService`. This page attributes the
- * client-initiated connection to the ORIGINATING `FinancialEvidenceMatterRequest.requested_by_firm_user_id`
+ * client-initiated connection to the ORIGINATING
+ * `FinancialEvidenceMatterRequest.requested_by_firm_user_id`'s firm user
  * (the firm staff member who asked for this connection) — the firm
  * requested it, the client completes it — rather than inventing a new
  * actor concept unilaterally.
+ *
+ * FOUND AND FIXED (Checkpoint 7 authorization review, item 19 —
+ * surfaced by a full-suite-only flake in the exchange controller's own
+ * regression test): `$currentUserId` above resolves against
+ * `FirmUser.user_id` (`ProviderConnectionService::resolveActingFirmUser()`
+ * — a real `users.id`), never `FirmUser.id` directly. This page's
+ * original code passed `requested_by_firm_user_id` — the column name
+ * says exactly what it is, a `firm_users.id` (confirmed by both the
+ * owning migration's `constrained('firm_users')` and this model's own
+ * `requestedBy(): BelongsTo(FirmUser::class, ...)`) — straight through
+ * as `$currentUserId`, which the ORIGINAL docblock above incorrectly
+ * described as itself resolving "to a firm_users row." Whenever a
+ * `FirmUser.id` differs from its own `user_id` (the overwhelming
+ * majority of rows in any real multi-user database — the two id
+ * sequences are independent), `resolveActingFirmUser()` throws
+ * "User {id} has no active FirmUser membership in firm {id}," making
+ * the entire Client-Portal-initiated Plaid connection flow — this
+ * checkpoint's core feature — non-functional. Silently masked in
+ * every existing test because a fresh, isolated test database's two
+ * independent id sequences frequently coincide at small values. Fixed
+ * by resolving the request's own `requestedBy` relation and passing
+ * ITS `user_id`, at all three affected call sites below.
  */
 class PlaidAccountSelectionPage extends Page
 {
@@ -83,10 +107,16 @@ class PlaidAccountSelectionPage extends Page
         }
 
         $connection = (new TenantContextService)->runWithFirmContext($matterModel->firm_id, function () use ($matterModel, $provider, $request) {
+            // requestingUserId() resolves the real users.id — see this
+            // class's own docblock for why the raw
+            // requested_by_firm_user_id column (a firm_users.id) must
+            // never be passed to ProviderConnectionService directly.
+            $requestingUserId = $this->requestingUserId($request);
+
             $connection = app(ProviderConnectionService::class)->startConnection(
                 $matterModel->firm_id,
                 $provider->id,
-                $request->requested_by_firm_user_id,
+                $requestingUserId,
                 requestedCapabilities: $request->requested_products_json,
             );
 
@@ -98,13 +128,13 @@ class PlaidAccountSelectionPage extends Page
             // never a client-supplied firm_integration_id.
             $request->update(['firm_integration_id' => $connection->id]);
 
+            $result = app(ProviderConnectionService::class)->initiateLinkTokenConnection($connection, $requestingUserId);
+            $this->linkToken = $result->linkToken;
+
             return $connection;
         });
 
         $this->firmIntegrationId = $connection->id;
-
-        $result = app(ProviderConnectionService::class)->initiateLinkTokenConnection($connection, $request->requested_by_firm_user_id);
-        $this->linkToken = $result->linkToken;
     }
 
     public function content(Schema $schema): Schema
@@ -116,6 +146,19 @@ class PlaidAccountSelectionPage extends Page
                     Text::make('Once connected, you will confirm the date range and consent on the next screen.'),
                 ]),
         ]);
+    }
+
+    /**
+     * Resolves the real `users.id` `ProviderConnectionService` requires
+     * — never the raw `requested_by_firm_user_id` column value (a
+     * `firm_users.id`) directly. See this class's own docblock for the
+     * defect this closes.
+     */
+    private function requestingUserId(FinancialEvidenceMatterRequest $request): int
+    {
+        $requestingFirmUser = $request->requestedBy ?? FirmUser::query()->findOrFail($request->requested_by_firm_user_id);
+
+        return $requestingFirmUser->user_id;
     }
 
     private function resolveMatterOrFail(): Matter
