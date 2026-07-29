@@ -31,6 +31,13 @@ use Livewire\Component;
  * checkpoint4-design-workspace-and-admin-ui.md §1.4). Connected
  * Financial Sources, Date-Range Authorization, and the Access
  * Expiration banner — the Financial Evidence Workspace's "Overview" tab.
+ *
+ * Gated by BOTH GatesFinancialEvidenceMatterAccess (matter access) and
+ * FinancialIntegrationAccessPolicyService::assertCanView() (financial
+ * tier) — see GatesFinancialEvidenceMatterAccess::gateFinancialTierAccess().
+ * Institution names, account names and masks are financial-tier data;
+ * matter assignment alone never entitles a Paralegal/LegalAssistant/
+ * Receptionist to them.
  */
 class FinancialEvidenceOverviewPanel extends Component implements HasSchemas, HasTable
 {
@@ -41,10 +48,16 @@ class FinancialEvidenceOverviewPanel extends Component implements HasSchemas, Ha
     public function mount(int $matterId): void
     {
         $this->gateMatterAccess($matterId);
+        $this->gateFinancialTierAccess($this->matter());
     }
 
     public function content(Schema $schema): Schema
     {
+        // C2 remediation — the financial tier is re-asserted on every
+        // render, not only at mount, so a mid-session role change takes
+        // effect on the very next request.
+        $this->gatedMatter();
+
         return $schema->components([
             $this->dateRangeAuthorizationSection(),
             $this->accessExpirationCallout(),
@@ -54,7 +67,7 @@ class FinancialEvidenceOverviewPanel extends Component implements HasSchemas, Ha
 
     private function dateRangeAuthorizationSection(): Section
     {
-        $matter = $this->matter();
+        $matter = $this->gatedMatter();
 
         $authorization = (new TenantContextService)->runWithFirmContext($matter->firm_id, fn () => FinancialEvidenceMatterAuthorization::query()
             ->where('matter_id', $matter->id)
@@ -82,7 +95,7 @@ class FinancialEvidenceOverviewPanel extends Component implements HasSchemas, Ha
 
     private function accessExpirationCallout(): Callout
     {
-        $matter = $this->matter();
+        $matter = $this->gatedMatter();
 
         $hasHold = app(LegalHoldService::class)->hasActiveHold($matter->firm, LegalHoldScope::Matter, $matter->id);
 
@@ -127,7 +140,7 @@ class FinancialEvidenceOverviewPanel extends Component implements HasSchemas, Ha
     {
         return $table
             ->records(function (): Collection {
-                $matter = $this->matter();
+                $matter = $this->gatedMatter();
                 $firmIntegrationIds = (new TenantContextService)->runWithFirmContext($matter->firm_id, fn () => FinancialEvidenceMatterAuthorization::query()
                     ->where('matter_id', $matter->id)
                     ->whereNull('superseded_at')
@@ -181,6 +194,8 @@ class FinancialEvidenceOverviewPanel extends Component implements HasSchemas, Ha
 
     public function render()
     {
+        $this->gatedMatter();
+
         return view('livewire.financial-evidence.overview-panel');
     }
 }

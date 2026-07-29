@@ -24,7 +24,6 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
 
 /**
@@ -47,15 +46,18 @@ class FinancialEvidenceNotesPanel extends Component implements HasActions, HasSc
     {
         $this->gateMatterAccess($matterId);
 
-        $firmUser = Auth::user()?->activeFirmUser();
-
-        if ($firmUser !== null) {
-            app(FinancialIntegrationAccessPolicyService::class)->assertCanView($firmUser);
-        }
+        // Was `if ($firmUser !== null) { assertCanView(...) }` — a null
+        // acting FirmUser silently SKIPPED the tier check. The shared
+        // helper fails closed instead, and resolves the FirmUser within
+        // the matter's own firm rather than taking whichever active
+        // membership happened to come first.
+        $this->gateFinancialTierAccess($this->matter());
     }
 
     public function content(Schema $schema): Schema
     {
+        $this->gatedMatter();
+
         return $schema->components([
             SchemaActions::make([$this->addNoteAction()]),
             EmbeddedTable::make(),
@@ -70,12 +72,9 @@ class FinancialEvidenceNotesPanel extends Component implements HasActions, HasSc
                 Textarea::make('body')->label('Note')->required()->rows(4),
             ])
             ->action(function (array $data): void {
-                $matter = $this->matter();
-                $firmUser = Auth::user()?->activeFirmUser();
-
-                if ($firmUser === null) {
-                    return;
-                }
+                // Both gates re-run independently for the mutation, then
+                // the (narrower-in-intent) request tier on top.
+                [$matter, $firmUser] = $this->gatedFinancialEvidenceContext();
 
                 app(FinancialIntegrationAccessPolicyService::class)->assertCanRequest($firmUser);
 
@@ -93,9 +92,15 @@ class FinancialEvidenceNotesPanel extends Component implements HasActions, HasSc
 
     public function table(Table $table): Table
     {
+        // NOTE: the gate deliberately lives in the data-producing
+        // closures below (and in every record action), not in this
+        // builder body — `table()` is invoked during schema
+        // construction, before any tenant context exists, and produces
+        // no rows itself. Every path that actually READS or WRITES a
+        // row re-runs both gates.
         return $table
             ->records(function (): Collection {
-                $matter = $this->matter();
+                $matter = $this->gatedMatter();
 
                 return (new TenantContextService)->runWithFirmContext($matter->firm_id, fn () => FinancialEvidenceMatterNote::query()
                     ->where('matter_id', $matter->id)
@@ -125,6 +130,8 @@ class FinancialEvidenceNotesPanel extends Component implements HasActions, HasSc
 
     public function render()
     {
+        $this->gatedMatter();
+
         return view('livewire.financial-evidence.notes-panel');
     }
 }

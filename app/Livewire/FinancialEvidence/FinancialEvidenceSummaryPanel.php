@@ -27,6 +27,11 @@ use Livewire\Component;
  * Recurring Obligations, Liability Summary, Investment Summary — four
  * `Section`-composed sub-panes, mirroring `ViewFirmIntegration`'s own
  * `Section::make(...)->columns(2)` Infolist idiom.
+ *
+ * Gated by BOTH GatesFinancialEvidenceMatterAccess (matter access) and
+ * FinancialIntegrationAccessPolicyService::assertCanView() (financial
+ * tier) — see GatesFinancialEvidenceMatterAccess::gateFinancialTierAccess().
+ * Income, liabilities and investment holdings are financial-tier data.
  */
 class FinancialEvidenceSummaryPanel extends Component implements HasSchemas
 {
@@ -36,10 +41,14 @@ class FinancialEvidenceSummaryPanel extends Component implements HasSchemas
     public function mount(int $matterId): void
     {
         $this->gateMatterAccess($matterId);
+        $this->gateFinancialTierAccess($this->matter());
     }
 
     public function content(Schema $schema): Schema
     {
+        // C2 remediation — re-asserted on every render, not only at mount.
+        $this->gatedMatter();
+
         return $schema->components([
             $this->incomeSection(),
             $this->recurringObligationsSection(),
@@ -50,7 +59,7 @@ class FinancialEvidenceSummaryPanel extends Component implements HasSchemas
 
     private function incomeSection(): Section
     {
-        $matter = $this->matter();
+        $matter = $this->gatedMatter();
         $firmIntegrationIds = app(FinancialEvidenceMatterScopeService::class)->connectedFirmIntegrationIds($matter);
 
         $records = $firmIntegrationIds === []
@@ -81,7 +90,7 @@ class FinancialEvidenceSummaryPanel extends Component implements HasSchemas
 
     private function recurringObligationsSection(): Section
     {
-        $matter = $this->matter();
+        $matter = $this->gatedMatter();
         $obligations = app(FinancialEvidenceRecurringObligationDetectionService::class)->detect($matter);
 
         return Section::make('Recurring Obligations')
@@ -110,7 +119,7 @@ class FinancialEvidenceSummaryPanel extends Component implements HasSchemas
 
     private function liabilitySection(): Section
     {
-        $matter = $this->matter();
+        $matter = $this->gatedMatter();
         $firmIntegrationIds = app(FinancialEvidenceMatterScopeService::class)->connectedFirmIntegrationIds($matter);
 
         $liabilities = $firmIntegrationIds === []
@@ -139,7 +148,7 @@ class FinancialEvidenceSummaryPanel extends Component implements HasSchemas
 
     private function investmentSection(): Section
     {
-        $matter = $this->matter();
+        $matter = $this->gatedMatter();
         $firmIntegrationIds = app(FinancialEvidenceMatterScopeService::class)->connectedFirmIntegrationIds($matter);
 
         $holdings = $firmIntegrationIds === []
@@ -169,6 +178,8 @@ class FinancialEvidenceSummaryPanel extends Component implements HasSchemas
 
     public function render()
     {
+        $this->gatedMatter();
+
         return view('livewire.financial-evidence.summary-panel');
     }
 }

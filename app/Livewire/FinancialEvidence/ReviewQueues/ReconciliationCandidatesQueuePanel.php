@@ -37,6 +37,16 @@ use Livewire\Component;
  * or calls any `Trust*` SERVICE. The one action here ("Confirm as
  * ledger match") is attorney-only and writes ONLY to
  * `financial_evidence_reconciliation_candidates.status`.
+ *
+ * Gated by BOTH GatesFinancialEvidenceMatterAccess (matter access) and
+ * FinancialIntegrationAccessPolicyService::assertCanView() (financial
+ * tier) — see GatesFinancialEvidenceMatterAccess::gateFinancialTierAccess().
+ * The attorney-only restriction on "Confirm as ledger match" is an
+ * ADDITIONAL narrowing on top of the financial tier, never a substitute
+ * for it (a Paralegal must not be able to reject a candidate either).
+ * `decide()` re-runs both gates independently and resolves the
+ * submitted candidate id through a firm_id + matter_id constrained
+ * query (never `::find($id)`).
  */
 class ReconciliationCandidatesQueuePanel extends Component implements HasActions, HasSchemas, HasTable
 {
@@ -48,18 +58,26 @@ class ReconciliationCandidatesQueuePanel extends Component implements HasActions
     public function mount(int $matterId): void
     {
         $this->gateMatterAccess($matterId);
+        $this->gateFinancialTierAccess($this->matter());
     }
 
     public function content(Schema $schema): Schema
     {
+        // C2 remediation — re-asserted on every render, not only at mount.
+        $this->gatedMatter();
+
         return $schema->components([EmbeddedTable::make()]);
     }
 
     public function table(Table $table): Table
     {
+        // NOTE: the gate deliberately lives in the data-producing
+        // closure below (and in decide()), not in this builder body —
+        // `table()` is invoked during schema construction, before any
+        // tenant context exists, and produces no rows itself.
         return $table
             ->records(function (): Collection {
-                $matter = $this->matter();
+                $matter = $this->gatedMatter();
 
                 return (new TenantContextService)->runWithFirmContext($matter->firm_id, function () use ($matter) {
                     $candidates = FinancialEvidenceReconciliationCandidate::query()
@@ -115,14 +133,18 @@ class ReconciliationCandidatesQueuePanel extends Component implements HasActions
             ->paginated(false);
     }
 
+    /**
+     * C2 + H2 remediation. Every mutation re-runs the matter-access AND
+     * financial-tier gates itself, then resolves the submitted id
+     * through a firm_id + matter_id constrained query — never
+     * `::find($candidateId)` followed by an authorization check that
+     * only covers the page's own matter (which let an attorney
+     * authorized for Matter A tamper with the id and decide Matter B's
+     * candidate).
+     */
     private function decide(int $candidateId, string $status): void
     {
-        $matter = $this->matter();
-        $firmUser = Auth::user()?->activeFirmUser();
-
-        if ($firmUser === null) {
-            return;
-        }
+        [$matter, $firmUser] = $this->gatedFinancialEvidenceContext();
 
         if ($status === 'confirmed_match' && $firmUser->role !== FirmUserRole::Attorney) {
             Notification::make()->title('Only an Attorney may confirm a ledger match')->danger()->send();
@@ -130,12 +152,12 @@ class ReconciliationCandidatesQueuePanel extends Component implements HasActions
             return;
         }
 
-        (new TenantContextService)->runWithFirmContext($matter->firm_id, function () use ($candidateId, $status, $firmUser) {
-            $candidate = FinancialEvidenceReconciliationCandidate::query()->find($candidateId);
-
-            if ($candidate === null) {
-                return;
-            }
+        (new TenantContextService)->runWithFirmContext($matter->firm_id, function () use ($matter, $candidateId, $status, $firmUser) {
+            $candidate = FinancialEvidenceReconciliationCandidate::query()
+                ->where('firm_id', $matter->firm_id)
+                ->where('matter_id', $matter->id)
+                ->where('id', $candidateId)
+                ->firstOrFail();
 
             // Writes ONLY to this table — never trust_ledger_entries or
             // any Trust* table.
@@ -151,6 +173,8 @@ class ReconciliationCandidatesQueuePanel extends Component implements HasActions
 
     public function render()
     {
+        $this->gatedMatter();
+
         return view('livewire.financial-evidence.review-queues.reconciliation-candidates-queue-panel');
     }
 }

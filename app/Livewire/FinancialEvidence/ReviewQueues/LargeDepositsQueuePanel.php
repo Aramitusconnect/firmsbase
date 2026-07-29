@@ -21,7 +21,6 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
 
 /**
@@ -29,6 +28,15 @@ use Livewire\Component;
  * ("Plaid financial evidence add-on";
  * checkpoint4-design-workspace-and-admin-ui.md §1.7). Display-only,
  * FirmsVaultObservation provenance.
+ *
+ * Gated by BOTH GatesFinancialEvidenceMatterAccess (matter access) and
+ * FinancialIntegrationAccessPolicyService::assertCanView() (financial
+ * tier) — see GatesFinancialEvidenceMatterAccess::gateFinancialTierAccess().
+ * `resolveFlag()` re-runs both gates independently rather than trusting
+ * that the page was reachable, and resolves the submitted flag id
+ * through a firm_id + matter_id constrained query (never
+ * `::find($id)`), so a client-supplied id can never reach another
+ * matter's or another firm's row.
  */
 class LargeDepositsQueuePanel extends Component implements HasActions, HasSchemas, HasTable
 {
@@ -40,18 +48,27 @@ class LargeDepositsQueuePanel extends Component implements HasActions, HasSchema
     public function mount(int $matterId): void
     {
         $this->gateMatterAccess($matterId);
+        $this->gateFinancialTierAccess($this->matter());
     }
 
     public function content(Schema $schema): Schema
     {
+        // C2 remediation — re-asserted on every render, not only at mount.
+        $this->gatedMatter();
+
         return $schema->components([EmbeddedTable::make()]);
     }
 
     public function table(Table $table): Table
     {
+        // NOTE: the gate deliberately lives in the data-producing
+        // closure below (and in resolveFlag()), not in this builder
+        // body — `table()` is invoked during schema construction,
+        // before any tenant context exists, and produces no rows
+        // itself.
         return $table
             ->records(function (): Collection {
-                $matter = $this->matter();
+                $matter = $this->gatedMatter();
 
                 return (new TenantContextService)->runWithFirmContext($matter->firm_id, fn () => FinancialEvidenceLargeDepositFlag::query()
                     ->where('matter_id', $matter->id)
@@ -89,21 +106,24 @@ class LargeDepositsQueuePanel extends Component implements HasActions, HasSchema
             ->paginated(false);
     }
 
+    /**
+     * C2 + H2 remediation. Every mutation re-runs the matter-access AND
+     * financial-tier gates itself, then resolves the submitted id
+     * through a firm_id + matter_id constrained query — never
+     * `::find($flagId)` followed by an authorization check that only
+     * covers the page's own matter (which let an attorney authorized
+     * for Matter A tamper with the id and resolve Matter B's flag).
+     */
     private function resolveFlag(int $flagId, bool $dismissed): void
     {
-        $matter = $this->matter();
-        $firmUser = Auth::user()?->activeFirmUser();
+        [$matter, $firmUser] = $this->gatedFinancialEvidenceContext();
 
-        if ($firmUser === null) {
-            return;
-        }
-
-        (new TenantContextService)->runWithFirmContext($matter->firm_id, function () use ($flagId, $dismissed, $firmUser) {
-            $flag = FinancialEvidenceLargeDepositFlag::query()->find($flagId);
-
-            if ($flag === null) {
-                return;
-            }
+        (new TenantContextService)->runWithFirmContext($matter->firm_id, function () use ($matter, $flagId, $dismissed, $firmUser) {
+            $flag = FinancialEvidenceLargeDepositFlag::query()
+                ->where('firm_id', $matter->firm_id)
+                ->where('matter_id', $matter->id)
+                ->where('id', $flagId)
+                ->firstOrFail();
 
             $flag->update($dismissed
                 ? ['dismissed_at' => now(), 'dismissed_by_firm_user_id' => $firmUser->id]
@@ -115,6 +135,8 @@ class LargeDepositsQueuePanel extends Component implements HasActions, HasSchema
 
     public function render()
     {
+        $this->gatedMatter();
+
         return view('livewire.financial-evidence.review-queues.large-deposits-queue-panel');
     }
 }

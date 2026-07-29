@@ -6,7 +6,6 @@ namespace App\Livewire\FinancialEvidence;
 
 use App\Integrations\Enums\FinancialEvidenceProvenance;
 use App\Integrations\Services\FinancialEvidenceMatterScopeService;
-use App\Integrations\Services\FinancialIntegrationAccessPolicyService;
 use App\Livewire\FinancialEvidence\Concerns\GatesFinancialEvidenceMatterAccess;
 use App\Models\FinancialEvidenceBankAccount;
 use App\Models\FinancialEvidenceTransaction;
@@ -30,8 +29,8 @@ use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
+use RuntimeException;
 
 /**
  * FinancialEvidenceTransactionSearchPanel — FirmsVault Live
@@ -53,10 +52,13 @@ class FinancialEvidenceTransactionSearchPanel extends Component implements HasAc
     public function mount(int $matterId): void
     {
         $this->gateMatterAccess($matterId);
+        $this->gateFinancialTierAccess($this->matter());
     }
 
     public function content(Schema $schema): Schema
     {
+        $this->gatedMatter();
+
         return $schema->components([
             EmbeddedTable::make(),
         ]);
@@ -64,9 +66,18 @@ class FinancialEvidenceTransactionSearchPanel extends Component implements HasAc
 
     public function table(Table $table): Table
     {
+        // NOTE: the gate deliberately lives in the data-producing
+        // closures below (and in recordReview()), not in this builder
+        // body — `table()` is invoked during schema construction,
+        // before any tenant context exists, and produces no rows
+        // itself. Every path that actually READS or WRITES a row
+        // re-runs both gates.
         return $table
             ->records(function (?array $filters, ?string $search): Collection {
-                $matter = $this->matter();
+                // Transaction rows are financial-tier data: the tier is
+                // re-asserted here (not only in recordReview()), so a
+                // role below the tier can never read them.
+                $matter = $this->gatedMatter();
                 $bankAccountIds = app(FinancialEvidenceMatterScopeService::class)->connectedBankAccountIds($matter);
 
                 if ($bankAccountIds === []) {
@@ -154,9 +165,10 @@ class FinancialEvidenceTransactionSearchPanel extends Component implements HasAc
                 SelectFilter::make('bank_account_id')
                     ->label('Account')
                     ->options(function (): array {
-                        $bankAccountIds = app(FinancialEvidenceMatterScopeService::class)->connectedBankAccountIds($this->matter());
+                        $matter = $this->gatedMatter();
+                        $bankAccountIds = app(FinancialEvidenceMatterScopeService::class)->connectedBankAccountIds($matter);
 
-                        return (new TenantContextService)->runWithFirmContext($this->matter()->firm_id, fn () => FinancialEvidenceBankAccount::query()
+                        return (new TenantContextService)->runWithFirmContext($matter->firm_id, fn () => FinancialEvidenceBankAccount::query()
                             ->whereIn('id', $bankAccountIds)
                             ->get()
                             ->mapWithKeys(fn (FinancialEvidenceBankAccount $a) => [$a->id => $a->account_name ?? "Account #{$a->id}"])
@@ -182,21 +194,41 @@ class FinancialEvidenceTransactionSearchPanel extends Component implements HasAc
             ->paginated([25, 50, 100]);
     }
 
+    /**
+     * H2 remediation. `financial_evidence_transactions` carries no
+     * `matter_id` of its own — a transaction belongs to this matter
+     * only transitively, through a bank account reachable from one of
+     * the matter's currently-authorized connections. Previously the
+     * submitted `$transactionId` was written straight into a review row
+     * after validating only the CURRENT matter, so an attorney
+     * authorized for Matter A could tamper with the id and record a
+     * review against Matter B's (or another firm's) transaction.
+     *
+     * Now the id is resolved through a query constrained by firm_id AND
+     * the matter's own authorized bank-account allowlist (re-derived
+     * server-side here, never trusted from the rendered page) — never
+     * `::find($id)`.
+     */
     private function recordReview(int $transactionId, array $data): void
     {
-        $matter = $this->matter();
-        $firmUser = Auth::user()?->activeFirmUser();
+        [$matter, $firmUser] = $this->gatedFinancialEvidenceContext();
 
-        if ($firmUser === null) {
-            return;
-        }
+        (new TenantContextService)->runWithFirmContext($matter->firm_id, function () use ($matter, $transactionId, $data, $firmUser) {
+            $bankAccountIds = app(FinancialEvidenceMatterScopeService::class)->connectedBankAccountIds($matter);
 
-        app(FinancialIntegrationAccessPolicyService::class)->assertCanView($firmUser);
+            if ($bankAccountIds === []) {
+                throw new RuntimeException('This matter has no currently-authorized financial connection.');
+            }
 
-        (new TenantContextService)->runWithFirmContext($matter->firm_id, function () use ($transactionId, $data, $firmUser) {
+            $transaction = FinancialEvidenceTransaction::query()
+                ->where('firm_id', $matter->firm_id)
+                ->whereIn('bank_account_id', $bankAccountIds)
+                ->where('id', $transactionId)
+                ->firstOrFail();
+
             FinancialEvidenceTransactionReview::query()->create([
-                'firm_id' => $firmUser->firm_id,
-                'transaction_id' => $transactionId,
+                'firm_id' => $matter->firm_id,
+                'transaction_id' => $transaction->id,
                 'reviewed_by_firm_user_id' => $firmUser->id,
                 'reviewed_at' => now(),
                 'flagged' => (bool) ($data['flagged'] ?? false),
@@ -210,6 +242,8 @@ class FinancialEvidenceTransactionSearchPanel extends Component implements HasAc
 
     public function render()
     {
+        $this->gatedMatter();
+
         return view('livewire.financial-evidence.transaction-search-panel');
     }
 }

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Livewire\FinancialEvidence;
 
-use App\Integrations\Services\FinancialIntegrationAccessPolicyService;
 use App\Livewire\FinancialEvidence\Concerns\GatesFinancialEvidenceMatterAccess;
 use App\Models\FinancialEvidenceSnapshot;
 use App\Models\FinancialEvidenceTransactionReview;
@@ -23,7 +22,6 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Auth;
 use League\Csv\Writer;
 use Livewire\Component;
 use RuntimeException;
@@ -55,10 +53,13 @@ class FinancialEvidenceReportsPanel extends Component implements HasActions, Has
     public function mount(int $matterId): void
     {
         $this->gateMatterAccess($matterId);
+        $this->gateFinancialTierAccess($this->matter());
     }
 
     public function content(Schema $schema): Schema
     {
+        $this->gatedMatter();
+
         return $schema->components([
             EmbeddedTable::make(),
         ]);
@@ -66,9 +67,16 @@ class FinancialEvidenceReportsPanel extends Component implements HasActions, Has
 
     public function table(Table $table): Table
     {
+        // NOTE: the gate deliberately lives in the data-producing
+        // closure below (and in loadSnapshotOrFail()), not in this
+        // builder body — `table()` is invoked during schema
+        // construction, before any tenant context exists, and produces
+        // no rows itself.
         return $table
             ->records(function (): Collection {
-                $matter = $this->matter();
+                // C2 consistency — the snapshot LISTING is financial-tier
+                // data too, not only the export action below.
+                $matter = $this->gatedMatter();
 
                 return (new TenantContextService)->runWithFirmContext($matter->firm_id, fn () => FinancialEvidenceSnapshot::query()
                     ->where('matter_id', $matter->id)
@@ -102,17 +110,15 @@ class FinancialEvidenceReportsPanel extends Component implements HasActions, Has
 
     private function loadSnapshotOrFail(int $snapshotId): FinancialEvidenceSnapshot
     {
-        $matter = $this->matter();
-        $firmUser = Auth::user()?->activeFirmUser();
-
-        if ($firmUser === null) {
-            throw new RuntimeException('No active firm membership.');
-        }
-
-        app(FinancialIntegrationAccessPolicyService::class)->assertCanView($firmUser);
+        // Both gates, re-run independently for this export. Note
+        // AccessDeniedHttpException (thrown by the matter gate) extends
+        // \RuntimeException, so exportPdf()/exportCsv()'s existing
+        // catch below already covers it — unchanged behavior.
+        $matter = $this->gatedMatter();
 
         return (new TenantContextService)->runWithFirmContext($matter->firm_id, function () use ($matter, $snapshotId) {
             $snapshot = FinancialEvidenceSnapshot::query()
+                ->where('firm_id', $matter->firm_id)
                 ->where('matter_id', $matter->id)
                 ->where('id', $snapshotId)
                 ->first();
@@ -225,6 +231,8 @@ class FinancialEvidenceReportsPanel extends Component implements HasActions, Has
 
     public function render()
     {
+        $this->gatedMatter();
+
         return view('livewire.financial-evidence.reports-panel');
     }
 }

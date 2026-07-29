@@ -27,6 +27,13 @@ use Livewire\Component;
  * uses, one level deeper — each pane its own independent, embedded
  * Livewire sub-panel (each with its own `HasTable`, since one
  * `HasTable` class can bind only one `table()` definition).
+ *
+ * Gated by BOTH GatesFinancialEvidenceMatterAccess (matter access) and
+ * FinancialIntegrationAccessPolicyService::assertCanView() (financial
+ * tier) — see GatesFinancialEvidenceMatterAccess::gateFinancialTierAccess().
+ * Each embedded sub-panel re-runs both gates independently in its own
+ * mount()/table()/mutation methods; this outer gate never substitutes
+ * for theirs.
  */
 class FinancialEvidenceReviewQueuesPanel extends Component implements HasSchemas
 {
@@ -36,10 +43,14 @@ class FinancialEvidenceReviewQueuesPanel extends Component implements HasSchemas
     public function mount(int $matterId): void
     {
         $this->gateMatterAccess($matterId);
+        $this->gateFinancialTierAccess($this->matter());
     }
 
     public function content(Schema $schema): Schema
     {
+        // C2 remediation — re-asserted on every render, not only at mount.
+        $this->gatedMatter();
+
         return $schema->components([
             Tabs::make('financial_evidence_review_queues')
                 ->tabs([
@@ -55,6 +66,8 @@ class FinancialEvidenceReviewQueuesPanel extends Component implements HasSchemas
 
     public function render()
     {
+        $this->gatedMatter();
+
         return view('livewire.financial-evidence.review-queues-panel');
     }
 }
