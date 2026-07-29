@@ -190,6 +190,18 @@ class FinancialEvidenceClientPortalConsentFlowTest extends TestCase
             $matterRequest = FinancialEvidenceMatterRequest::query()->create([
                 'firm_id' => $firm->id,
                 'matter_id' => $matter->id,
+                // Release-candidate remediation (defect H1): the consent
+                // page no longer accepts a client-supplied
+                // firm_integration_id as the binding source — it resolves
+                // the connection from THIS server-authoritative column,
+                // exactly as PlaidExchangeController already does (see
+                // PlaidExchangeControllerAuthorizationTest's identical
+                // fixture). The pre-fix fixture left this null, which is
+                // a state PlaidAccountSelectionPage::mount() never
+                // actually produces once a connection exists for a
+                // request; setting it makes the fixture match production,
+                // it does not relax any assertion below.
+                'firm_integration_id' => $connection->id,
                 'requested_by_firm_user_id' => $requestedBy->id,
                 'purpose' => 'Verify income for support calculation.',
                 'requested_products_json' => ['bank_account', 'transaction'],
