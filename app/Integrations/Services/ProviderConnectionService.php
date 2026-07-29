@@ -1530,6 +1530,26 @@ class ProviderConnectionService
                             'status_code' => $e->statusCode(),
                         ], $auditMetadataExtra));
                     }
+                } else {
+                    // Checkpoint 6 addition (cross-provider security/ops
+                    // review, audit-trail finding): a provider that does
+                    // not implement SupportsDisconnectContract at all
+                    // (Microsoft 365 — Graph delegated OAuth permissions
+                    // cannot be revoked by the app itself; a tenant admin
+                    // must revoke separately via the Entra admin center,
+                    // per Microsoft365Provider's own class docblock)
+                    // previously left NO trace in the timeline: the same
+                    // `credential_revoked` + `disconnect` events fired as
+                    // for a provider that genuinely revoked at the remote
+                    // side, so nothing distinguished "we revoked at the
+                    // provider" from "we never even tried." This event
+                    // closes that operator-visibility gap without
+                    // changing disconnect()'s own best-effort behavior —
+                    // local teardown still proceeds identically either
+                    // way.
+                    $this->events->record($fresh->firm, 'integration_oauth.provider_revocation_not_supported', $fresh, $actorUser, array_merge([
+                        'firm_integration_id' => $fresh->id,
+                    ], $auditMetadataExtra));
                 }
 
                 foreach (IntegrationCredential::query()

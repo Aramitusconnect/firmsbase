@@ -16,14 +16,17 @@ use Illuminate\Support\Collection;
  * security-review.md §6, §12; agent-10h-architecture-security-review.md
  * §5). Read-only. NOT a writer of `integration_usage_records` — that
  * remains exclusively `IntegrationUsageRecorderService::recordOnce()`
- * (Checkpoint 9), whose write-path wiring into the sync/outbox/webhook
- * pipeline is explicitly OUT of Checkpoint 10 scope (frozen design §6):
- * this service only aggregates whatever rows already exist, which is
- * genuinely zero in every environment today. `IntegrationUsagePage`
- * (the standalone Filament page this service backs) must render an
- * honest empty state ("No usage has been recorded for this connection
- * yet") rather than "$0 used," which would imply a real zero rather
- * than an absence of measurement.
+ * (Checkpoint 9). That write path was out of Checkpoint 10's own scope,
+ * but is live today (see `IntegrationUsageRecorderService`'s own
+ * docblock, corrected during Checkpoint 6's cross-provider ops review):
+ * `ProviderRequestExecutor::send()` calls it for every provider call, so
+ * this service now aggregates real rows for firms with any recorded
+ * integration activity. `IntegrationUsagePage` (the standalone Filament
+ * page this service backs) still renders an honest empty state ("No
+ * usage has been recorded for this connection yet") rather than "$0
+ * used" for a firm/connection with genuinely no activity — that
+ * distinction remains correct regardless of whether the write path as a
+ * whole is wired up.
  *
  * Mirrors `HealthStateService::summariesForFirm()`'s exact convention:
  * an explicit `runWithFirmContext()` wrap even though ambient tenant
@@ -37,7 +40,7 @@ final class IntegrationUsageSummaryService
      */
     public function summariesForFirm(int $firmId): Collection
     {
-        return (new TenantContextService())->runWithFirmContext($firmId, function () use ($firmId) {
+        return (new TenantContextService)->runWithFirmContext($firmId, function () use ($firmId) {
             $rows = IntegrationUsageRecord::query()
                 ->selectRaw(
                     'firm_integration_id, provider_key, capability, operation_type, direction, unit, '.

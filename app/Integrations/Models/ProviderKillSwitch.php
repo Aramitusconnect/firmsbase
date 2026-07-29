@@ -29,6 +29,21 @@ class ProviderKillSwitch extends Model
 
     public const LEVEL_OPERATION = 'operation';
 
+    /**
+     * Checkpoint 6 addition (cross-provider security/ops review): a
+     * fourth, coarser, provider-agnostic level — "the entire provider is
+     * disabled," `target` set to the provider key itself. Unlike
+     * PRODUCT/ENDPOINT_CATEGORY/OPERATION (Plaid-billing-specific
+     * granularity, checked only by ProviderOperationPolicyResolver via
+     * the billing pipeline), this level is checked by
+     * ProviderRequestExecutor::send() — the shared outbound path every
+     * provider (Microsoft 365, Google Workspace, Plaid) routes through —
+     * so it is the one kill-switch granularity that works uniformly for
+     * every provider, including the two that have no billing-pipeline
+     * concept at all.
+     */
+    public const LEVEL_PROVIDER = 'provider';
+
     public const SCOPE_PLATFORM = 'platform';
 
     public const SCOPE_FIRM = 'firm';

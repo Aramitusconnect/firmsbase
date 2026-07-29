@@ -40,12 +40,13 @@ use Illuminate\Support\Str;
  * mirroring the `oauth_states.unconsumed_expired_retention_hours`
  * precedent, never inventing a value here.
  *
- * No caller in this checkpoint's own file allowlist invokes this
- * service yet (frozen design explicitly scopes wiring it into
- * sync/webhook/outbox call sites to a later checkpoint) — this class
- * is required, reviewed infrastructure, not dead code: it is the sole
- * legal write path the moment a future checkpoint starts recording
- * usage evidence.
+ * UPDATED (found stale during Checkpoint 6's cross-provider ops
+ * review): this docblock used to say no caller invoked this service
+ * yet. That is no longer true —
+ * `App\Integrations\Support\ProviderRequestExecutor::send()` calls
+ * `recordOnce()` for every provider call (Microsoft 365, Google
+ * Workspace, Plaid alike), so this is the live write path, not
+ * dormant infrastructure awaiting a future checkpoint.
  */
 final class IntegrationUsageRecorderService
 {

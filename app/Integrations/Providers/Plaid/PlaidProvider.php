@@ -104,15 +104,7 @@ use Throwable;
  * convention removes an unnecessary plaintext-credential exposure
  * across a method boundary, not just a signature-compatibility fix.
  */
-final class PlaidProvider implements
-    IntegrationProviderContract,
-    SupportsLinkTokenContract,
-    SupportsDisconnectContract,
-    SupportsPullSyncContract,
-    SupportsIncrementalSyncContract,
-    SupportsWebhooksContract,
-    SupportsBalanceContract,
-    RequiresBillableCallPipelineContract
+final class PlaidProvider implements IntegrationProviderContract, RequiresBillableCallPipelineContract, SupportsBalanceContract, SupportsDisconnectContract, SupportsIncrementalSyncContract, SupportsLinkTokenContract, SupportsPullSyncContract, SupportsWebhooksContract
 {
     public function __construct(
         private readonly ProviderRequestExecutor $executor,
@@ -1292,14 +1284,35 @@ final class PlaidProvider implements
         // Plaid webhooks carry no stable per-delivery id field of their
         // own — a content-fingerprint id, the same category of synthesis
         // Microsoft365Provider::parseInboundEvent() already uses for
-        // Graph's own id-less batched notifications. A timestamp is
-        // folded in (unlike Graph's deterministic fingerprint) because
-        // Plaid CAN legitimately redeliver the identical
-        // (webhook_type, webhook_code, item_id) tuple for two genuinely
-        // different events in quick succession.
+        // Graph's own id-less batched notifications.
+        //
+        // CORRECTED (found during Checkpoint 6's cross-provider webhook
+        // idempotency review): an earlier version folded in
+        // now()->getTimestampMs() specifically because Plaid CAN
+        // legitimately redeliver the identical (webhook_type,
+        // webhook_code, item_id) tuple for two genuinely different
+        // events in quick succession (e.g. two separate
+        // SYNC_UPDATES_AVAILABLE firings). That reasoning was correct,
+        // but the fix was wrong in the other direction: a timestamp
+        // guarantees every event_id is unique, so
+        // InboundWebhookEventService::recordVerifiedEvent()'s own
+        // UNIQUE(firm_integration_id, provider_key, provider_event_id)
+        // dedup constraint could NEVER recognize a genuine Plaid
+        // redelivery (identical raw body, resent because the original
+        // response wasn't a timely 2xx) as a duplicate — every retry
+        // re-dispatched DispatchPullSyncOnVerifiedWebhookEvent and
+        // DispatchPlaidItemLifecycleTransitionOnVerifiedWebhookEvent.
+        // Hashing the full raw body instead solves both halves at once:
+        // a byte-identical redelivery (the actual shape of a Plaid
+        // retry) now produces the same event_id and is correctly
+        // deduped, while two genuinely different events — which will
+        // differ in body content even when the (webhook_type,
+        // webhook_code, item_id) tuple repeats — still produce distinct
+        // event_ids, exactly the same "same bytes = same delivery"
+        // notion InboundWebhookReceiptService's own body_hash dedup
+        // already uses for this identical purpose.
         $eventId = hash('sha256', implode('|', [
-            (string) $itemId, (string) $webhookType, (string) $webhookCode,
-            (string) ($decoded['new_transactions'] ?? ''), (string) now()->getTimestampMs(),
+            (string) $itemId, (string) $webhookType, (string) $webhookCode, $rawBody,
         ]));
 
         $eventType = match (true) {

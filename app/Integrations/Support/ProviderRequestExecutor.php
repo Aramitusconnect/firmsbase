@@ -12,8 +12,10 @@ use App\Integrations\Enums\ResourceType;
 use App\Integrations\Enums\SyncDirection;
 use App\Integrations\Events\ProviderOutboundRequestCompleted;
 use App\Integrations\Exceptions\ProviderEnvironmentMisconfiguredException;
+use App\Integrations\Exceptions\ProviderKillSwitchActiveException;
 use App\Integrations\Exceptions\SanitizedProviderHttpException;
 use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Models\ProviderKillSwitch;
 use App\Integrations\Services\HealthStateService;
 use App\Integrations\Services\IntegrationUsageRecorderService;
 use Closure;
@@ -158,6 +160,7 @@ final class ProviderRequestExecutor
      *
      * @throws SanitizedProviderHttpException on any failure (rate-limit rejection, network error, non-2xx response)
      * @throws ProviderEnvironmentMisconfiguredException on a config/URL-guard failure
+     * @throws ProviderKillSwitchActiveException on a platform-admin-authored LEVEL_PROVIDER kill switch
      */
     public function send(
         FirmIntegration $connection,
@@ -185,6 +188,42 @@ final class ProviderRequestExecutor
         }
 
         $correlationId ??= (string) Str::uuid7();
+
+        // STEP 0 — provider-level kill switch. Checkpoint 6 addition
+        // (cross-provider security/ops review): before this, the ONLY
+        // code that ever checked `provider_kill_switches` was
+        // ProviderOperationPolicyResolver, reached only via
+        // ProviderBillableCallPipeline — which only Plaid routes
+        // through. Microsoft 365 and Google Workspace had no
+        // admin-triggerable emergency disable at all. This check runs
+        // here, in the ONE outbound path every provider adapter shares,
+        // so a LEVEL_PROVIDER switch stops calls for any provider
+        // uniformly. Runs first, before the environment/URL guard and
+        // the rate limiter, so a killed provider never consumes budget
+        // or attempts a call. Deliberately uncaught here — mirrors
+        // ProviderBillableCallPipeline's own "no further step runs
+        // after this throws" contract for the identical exception type;
+        // Plaid's existing product/endpoint-category/operation-level
+        // switches are untouched and still checked separately by the
+        // billing pipeline (this is an additional, coarser gate, not a
+        // replacement).
+        $providerKilled = ProviderKillSwitch::query()
+            ->where('provider_key', $providerKey->value)
+            ->where('scope_type', ProviderKillSwitch::SCOPE_PLATFORM)
+            ->whereNull('scope_id')
+            ->where('level', ProviderKillSwitch::LEVEL_PROVIDER)
+            ->where('target', $providerKey->value)
+            ->where('suspended', true)
+            ->first();
+
+        if ($providerKilled !== null) {
+            throw new ProviderKillSwitchActiveException(
+                $providerKey->value,
+                ProviderKillSwitch::LEVEL_PROVIDER,
+                $providerKey->value,
+                $providerKilled->reason,
+            );
+        }
 
         // STEP 1 — environment/URL guard. Runs first, before the rate
         // limiter, so a misconfigured URL never consumes rate-limit

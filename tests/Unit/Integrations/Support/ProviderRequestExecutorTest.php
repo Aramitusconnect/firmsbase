@@ -8,11 +8,13 @@ use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Enums\ResourceType;
 use App\Integrations\Enums\SyncDirection;
 use App\Integrations\Exceptions\ProviderEnvironmentMisconfiguredException;
+use App\Integrations\Exceptions\ProviderKillSwitchActiveException;
 use App\Integrations\Exceptions\SanitizedProviderHttpException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationConnectionHealth;
 use App\Integrations\Models\IntegrationProvider;
 use App\Integrations\Models\IntegrationUsageRecord;
+use App\Integrations\Models\ProviderKillSwitch;
 use App\Integrations\Support\ProviderRequestExecutor;
 use App\Models\Firm;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -61,6 +63,118 @@ final class ProviderRequestExecutorTest extends TestCase
     {
         Cache::flush();
         parent::tearDown();
+    }
+
+    // ------------------------------------------------------------
+    // STEP 0 — provider-level kill switch (Checkpoint 6 addition,
+    // cross-provider security/ops review). Before this, the ONLY code
+    // that checked provider_kill_switches was ProviderOperationPolicyResolver,
+    // reached only via ProviderBillableCallPipeline — which only Plaid
+    // routes through. Microsoft 365 and Google Workspace had no
+    // admin-triggerable emergency disable at all. This is the shared
+    // path every provider adapter routes through, so these tests use
+    // the generic ProviderKey::Test fixture provider — the exact same
+    // check applies uniformly to microsoft365/googleworkspace/plaid.
+    // ------------------------------------------------------------
+
+    public function test_a_suspended_level_provider_kill_switch_blocks_the_call_before_any_http_request_is_attempted(): void
+    {
+        Http::fake(); // any real call would now throw StrayRequestException
+
+        [$firm, $connection] = $this->makeConnection();
+
+        ProviderKillSwitch::query()->create([
+            'provider_key' => ProviderKey::Test->value,
+            'scope_type' => ProviderKillSwitch::SCOPE_PLATFORM,
+            'scope_id' => null,
+            'level' => ProviderKillSwitch::LEVEL_PROVIDER,
+            'target' => ProviderKey::Test->value,
+            'suspended' => true,
+            'reason' => 'Incident response — simulated.',
+        ]);
+
+        $this->expectException(ProviderKillSwitchActiveException::class);
+
+        $this->runWithFirmContext($firm, fn () => $this->executor()->send(
+            connection: $connection,
+            providerKey: ProviderKey::Test,
+            method: 'POST',
+            url: self::SANDBOX_BASE_URL.'/resource',
+            capability: 'SupportsPushSyncContract',
+            operationType: 'push',
+            direction: SyncDirection::Outbound,
+            resourceType: ResourceType::Contact,
+            authInjector: fn ($r) => $r->withToken('fake-token'),
+            usageIdempotencyKey: 'push_operation:kill-switch-1',
+        ));
+    }
+
+    public function test_a_kill_switch_row_for_a_different_provider_never_blocks_this_providers_own_call(): void
+    {
+        Http::fake([
+            self::SANDBOX_BASE_URL.'/resource' => Http::response(['id' => 'abc-123'], 200),
+        ]);
+
+        [$firm, $connection] = $this->makeConnection();
+
+        ProviderKillSwitch::query()->create([
+            'provider_key' => ProviderKey::Plaid->value,
+            'scope_type' => ProviderKillSwitch::SCOPE_PLATFORM,
+            'scope_id' => null,
+            'level' => ProviderKillSwitch::LEVEL_PROVIDER,
+            'target' => ProviderKey::Plaid->value,
+            'suspended' => true,
+            'reason' => 'Unrelated provider — simulated.',
+        ]);
+
+        $response = $this->runWithFirmContext($firm, fn () => $this->executor()->send(
+            connection: $connection,
+            providerKey: ProviderKey::Test,
+            method: 'POST',
+            url: self::SANDBOX_BASE_URL.'/resource',
+            capability: 'SupportsPushSyncContract',
+            operationType: 'push',
+            direction: SyncDirection::Outbound,
+            resourceType: ResourceType::Contact,
+            authInjector: fn ($r) => $r->withToken('fake-token'),
+            usageIdempotencyKey: 'push_operation:kill-switch-2',
+        ));
+
+        $this->assertSame(200, $response->status);
+    }
+
+    public function test_a_non_suspended_level_provider_kill_switch_row_never_blocks_the_call(): void
+    {
+        Http::fake([
+            self::SANDBOX_BASE_URL.'/resource' => Http::response(['id' => 'abc-123'], 200),
+        ]);
+
+        [$firm, $connection] = $this->makeConnection();
+
+        ProviderKillSwitch::query()->create([
+            'provider_key' => ProviderKey::Test->value,
+            'scope_type' => ProviderKillSwitch::SCOPE_PLATFORM,
+            'scope_id' => null,
+            'level' => ProviderKillSwitch::LEVEL_PROVIDER,
+            'target' => ProviderKey::Test->value,
+            'suspended' => false,
+            'reason' => 'Previously suspended, now resumed — simulated.',
+        ]);
+
+        $response = $this->runWithFirmContext($firm, fn () => $this->executor()->send(
+            connection: $connection,
+            providerKey: ProviderKey::Test,
+            method: 'POST',
+            url: self::SANDBOX_BASE_URL.'/resource',
+            capability: 'SupportsPushSyncContract',
+            operationType: 'push',
+            direction: SyncDirection::Outbound,
+            resourceType: ResourceType::Contact,
+            authInjector: fn ($r) => $r->withToken('fake-token'),
+            usageIdempotencyKey: 'push_operation:kill-switch-3',
+        ));
+
+        $this->assertSame(200, $response->status);
     }
 
     // ------------------------------------------------------------

@@ -21,25 +21,24 @@ use RuntimeException;
  * PlatformIntegrationUsagePage — Phase 2 (FirmsVault Platform Admin
  * Control Center, "Integration Operations Center").
  *
- * HONESTY-OVER-COMPLETENESS DISCLOSURE (this is the whole point of this
- * page's design, read before changing it): the architecture
- * investigation found — and this was independently re-verified directly
- * against the current source, not trusted blindly — that
- * `integration_usage_records` has exactly ONE would-be writer,
- * `App\Integrations\Services\IntegrationUsageRecorderService::recordOnce()`,
- * and that method has ZERO real call sites anywhere in this codebase
- * outside its own file and doc-comment references (confirmed by a
- * direct grep of app/ for `IntegrationUsageRecorderService`). No
- * usage-metering system is actually wired up. This page does NOT
- * fabricate usage numbers or build a chart against data that does not
- * exist — its primary content is an honest, clearly-labeled
- * not-yet-available notice.
+ * CORRECTED during Checkpoint 6's cross-provider ops review: an earlier
+ * version of this page disclosed that `integration_usage_records` had
+ * zero real writers and rendered an honest "not yet available" notice
+ * instead of fabricating numbers — a correct call at the time. That
+ * disclosure has since gone stale: `ProviderRequestExecutor::send()`
+ * (the shared outbound HTTP path every provider — Microsoft 365, Google
+ * Workspace, Plaid — routes through) now calls
+ * `IntegrationUsageRecorderService::recordOnce()` for every provider
+ * call, so real rows exist today. This page now surfaces a genuine
+ * summary via
+ * `IntegrationPlatformOversightReadService::usageRecordSummaryAcrossFirms()`
+ * (see that method's own docblock for the per-firm-loop, RLS-safe read
+ * pattern) instead of the stale banner.
  *
- * The one legitimate, already-existing, already-reviewed signal this
- * page DOES surface — clearly labeled "Sync Volume", never "Usage",
- * because that is genuinely what it is — is a small aggregate rollup
- * computed from `integration_platform_overview_summaries` via the
- * existing, unmodified
+ * The other signal this page surfaces — clearly labeled "Sync Volume",
+ * never "Usage", because that is genuinely what it is — is a small
+ * aggregate rollup computed from `integration_platform_overview_summaries`
+ * via the existing, unmodified
  * IntegrationPlatformOversightReadService::overviewSummaries() (the
  * SAME no-RLS, pre-computed, bounded snapshot table
  * PlatformIntegrationOverviewPage's own per-firm list already reads —
@@ -89,23 +88,43 @@ class PlatformIntegrationUsagePage extends Page
         }
 
         return $schema->components([
-            $this->usageNotAvailableSection(),
+            $this->usageMeteringSection($admin),
             $this->syncVolumeSnapshotSection($admin),
         ]);
     }
 
-    private function usageNotAvailableSection(): Section
+    private function usageMeteringSection(PlatformAdmin $admin): Section
     {
         return Section::make('Usage Metering')
-            ->icon(Heroicon::OutlinedExclamationCircle)
-            ->description('No usage-metering data is available.')
+            ->icon(Heroicon::OutlinedChartBar)
+            ->description('A cross-firm rollup of recorded integration usage — call volume by provider, sanitized quantity/unit aggregates only, never a cost figure or raw provider payload.')
             ->schema([
-                Text::make(
-                    'integration_usage_records exists in the schema, but its only writer '.
-                    '(IntegrationUsageRecorderService::recordOnce()) has no call sites anywhere in this '.
-                    'codebase — no usage-metering system is actually wired up yet. This page deliberately '.
-                    'does not fabricate usage figures or chart against empty data.'
-                ),
+                UnorderedList::make(function () use ($admin): array {
+                    try {
+                        $summary = app(IntegrationPlatformOversightReadService::class)->usageRecordSummaryAcrossFirms($admin);
+                    } catch (RuntimeException $e) {
+                        return [$e->getMessage()];
+                    }
+
+                    if ($summary['total_records'] === 0) {
+                        return ['No usage has been recorded yet.'];
+                    }
+
+                    $lines = [
+                        sprintf('Total recorded usage units: %d', $summary['total_records']),
+                        sprintf('Firms with recorded usage: %d', $summary['firms_with_usage']),
+                    ];
+
+                    foreach ($summary['by_provider'] as $providerKey => $quantity) {
+                        $lines[] = sprintf('%s: %d', $providerKey, $quantity);
+                    }
+
+                    if ($summary['earliest_occurred_at'] !== null && $summary['latest_occurred_at'] !== null) {
+                        $lines[] = sprintf('Recorded between %s and %s.', $summary['earliest_occurred_at'], $summary['latest_occurred_at']);
+                    }
+
+                    return $lines;
+                }),
             ]);
     }
 

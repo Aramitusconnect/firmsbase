@@ -289,6 +289,61 @@ final class PlaidProviderWebhookTest extends TestCase
         $this->assertSame('SYNC_UPDATES_AVAILABLE', $result['payload']['webhook_code']);
     }
 
+    /**
+     * FOUND AND FIXED during Checkpoint 6's cross-provider webhook
+     * idempotency review: an earlier version folded now()->getTimestampMs()
+     * into the event_id hash, so a genuine Plaid redelivery (identical
+     * raw body, resent because the original response wasn't a timely
+     * 2xx) always produced a distinct event_id — InboundWebhookEventService::
+     * recordVerifiedEvent()'s own UNIQUE(firm_integration_id, provider_key,
+     * provider_event_id) dedup constraint could never recognize it as a
+     * duplicate, so every retry re-dispatched DispatchPullSyncOnVerifiedWebhookEvent
+     * and DispatchPlaidItemLifecycleTransitionOnVerifiedWebhookEvent.
+     * Proves the fix: two calls with byte-identical raw bodies now
+     * produce the identical event_id, matching Microsoft365Provider's
+     * and GoogleWorkspaceProvider's own deterministic-fingerprint
+     * behavior for the exact same scenario.
+     */
+    public function test_parse_inbound_event_produces_the_same_event_id_for_a_byte_identical_redelivery(): void
+    {
+        $rawBody = json_encode([
+            'webhook_type' => 'TRANSACTIONS',
+            'webhook_code' => 'SYNC_UPDATES_AVAILABLE',
+            'item_id' => 'item-sandbox-fixture-id',
+        ]);
+
+        $first = $this->provider()->parseInboundEvent($rawBody, []);
+        $retry = $this->provider()->parseInboundEvent($rawBody, []);
+
+        $this->assertSame($first['event_id'], $retry['event_id'], 'A byte-identical redelivery must produce the same event_id so it is correctly deduped.');
+    }
+
+    /**
+     * The companion proof: two GENUINELY different deliveries — same
+     * (webhook_type, webhook_code, item_id) tuple (the exact scenario
+     * the original timestamp-based design was trying to protect
+     * against), but different body content — must still produce
+     * distinct event_ids. The fix must not regress this.
+     */
+    public function test_parse_inbound_event_produces_different_event_ids_for_two_genuinely_different_deliveries_with_the_same_tuple(): void
+    {
+        $first = $this->provider()->parseInboundEvent(json_encode([
+            'webhook_type' => 'TRANSACTIONS',
+            'webhook_code' => 'SYNC_UPDATES_AVAILABLE',
+            'item_id' => 'item-sandbox-fixture-id',
+            'new_transactions' => 1,
+        ]), []);
+
+        $second = $this->provider()->parseInboundEvent(json_encode([
+            'webhook_type' => 'TRANSACTIONS',
+            'webhook_code' => 'SYNC_UPDATES_AVAILABLE',
+            'item_id' => 'item-sandbox-fixture-id',
+            'new_transactions' => 2,
+        ]), []);
+
+        $this->assertNotSame($first['event_id'], $second['event_id'], 'Two genuinely different deliveries must never collapse into the same event_id.');
+    }
+
     // ------------------------------------------------------------
     // subscribe() / renewSubscription() — item-routing table write
     // ------------------------------------------------------------

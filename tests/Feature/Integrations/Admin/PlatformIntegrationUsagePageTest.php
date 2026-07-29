@@ -6,7 +6,15 @@ namespace Tests\Feature\Integrations\Admin;
 
 use App\Enums\PlatformRoleCode;
 use App\Filament\Pages\PlatformIntegrationUsagePage;
+use App\Integrations\Data\SanitizedUsageMetadataReference;
+use App\Integrations\Enums\ProviderKey;
+use App\Integrations\Enums\SyncDirection;
+use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Models\IntegrationProvider;
+use App\Integrations\Services\IntegrationUsageRecorderService;
+use App\Models\Firm;
 use App\Models\PlatformAdmin;
+use App\Services\IntegrationPlatformOverviewSummaryService;
 use App\Services\PlatformRoleService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -14,11 +22,17 @@ use Tests\TestCase;
 
 /**
  * PlatformIntegrationUsagePageTest — Phase 2 (FirmsVault Platform Admin
- * Control Center, "Integration Operations Center"). Route-level
- * authorization plus the honest-empty-state proof this page's whole
- * design exists for: no fabricated usage numbers, a clear "not
- * available" notice, and the "Sync Volume" section correctly labeled as
- * NOT usage.
+ * Control Center, "Integration Operations Center").
+ *
+ * CORRECTED during Checkpoint 6's cross-provider ops review: this
+ * class's own original "honest empty state" proof is still real and
+ * still tested below (genuinely no usage recorded yet), but the page no
+ * longer ALWAYS renders that state — `ProviderRequestExecutor::send()`
+ * now calls `IntegrationUsageRecorderService::recordOnce()` for every
+ * provider call, so real rows exist once any provider call has ever
+ * been made. This file now also proves the page surfaces genuine
+ * recorded usage when it exists (see
+ * test_a_super_admin_sees_real_recorded_usage_when_it_exists below).
  */
 final class PlatformIntegrationUsagePageTest extends TestCase
 {
@@ -93,12 +107,59 @@ final class PlatformIntegrationUsagePageTest extends TestCase
         $response = $this->get(PlatformIntegrationUsagePage::getUrl());
         $response->assertOk();
 
-        // The honest "not available" notice — no fabricated usage number.
-        $response->assertSee('No usage-metering data is available');
-        $response->assertSee('IntegrationUsageRecorderService');
+        // Genuinely no usage recorded in this test's fresh database — an
+        // honest empty state, not a fabricated "$0".
+        $response->assertSee('No usage has been recorded yet');
 
         // The proxy section is clearly labeled as NOT usage.
         $response->assertSee('Sync Volume Snapshot (not usage)');
+    }
+
+    /**
+     * CORRECTED during Checkpoint 6's cross-provider ops review: proves
+     * the page surfaces genuine recorded usage — via
+     * IntegrationPlatformOversightReadService::usageRecordSummaryAcrossFirms() —
+     * once ProviderRequestExecutor::send() has actually recorded a row,
+     * closing the gap where this page always showed a "not wired up"
+     * banner regardless of real data.
+     */
+    public function test_a_super_admin_sees_real_recorded_usage_when_it_exists(): void
+    {
+        $firm = Firm::factory()->create();
+        app(IntegrationPlatformOverviewSummaryService::class)->refreshForFirm($firm);
+
+        $provider = IntegrationProvider::query()->where('code', ProviderKey::Test->value)->first()
+            ?? IntegrationProvider::factory()->create(['code' => ProviderKey::Test->value]);
+
+        $connection = $this->createWithFirmContext($firm, fn () => FirmIntegration::factory()
+            ->forFirm($firm)
+            ->forProvider($provider)
+            ->create(['external_account_id' => null]));
+
+        $this->runWithFirmContext($firm, fn () => app(IntegrationUsageRecorderService::class)->recordOnce(
+            firmId: $firm->id,
+            firmIntegrationId: $connection->id,
+            providerKey: ProviderKey::Test->value,
+            capability: 'SupportsPushSyncContract',
+            operationType: 'push',
+            direction: SyncDirection::Outbound,
+            resourceType: null,
+            unit: 'call',
+            outcome: 'success',
+            idempotencyKey: 'push_operation:usage-page-test-1',
+            metadata: new SanitizedUsageMetadataReference([]),
+        ));
+
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $response = $this->get(PlatformIntegrationUsagePage::getUrl());
+        $response->assertOk();
+
+        $response->assertSee('Total recorded usage units: 1');
+        $response->assertSee('Firms with recorded usage: 1');
+        $response->assertSee(ProviderKey::Test->value);
+        $response->assertDontSee('No usage has been recorded yet');
     }
 
     public function test_the_page_never_fabricates_a_usage_figure_or_labels_the_proxy_as_usage(): void

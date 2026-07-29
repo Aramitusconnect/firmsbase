@@ -137,6 +137,14 @@ class IntegrationAuditEventTypeTest extends TestCase
         // or newly-capability-widened SupportsWebhooksContract
         // provider connection.
         'integration_oauth.webhook_subscription_bootstrapped',
+        // FirmsVault Live Integrations Checkpoint 6 addition
+        // (cross-provider security/ops review, audit-trail finding):
+        // fired by ProviderConnectionService::disconnect() for a
+        // provider that does not implement SupportsDisconnectContract
+        // at all (Microsoft 365) — closes the operator-visibility gap
+        // where nothing in the timeline previously distinguished "we
+        // revoked at the provider" from "we never even tried."
+        'integration_oauth.provider_revocation_not_supported',
     ];
 
     /**
@@ -178,10 +186,10 @@ class IntegrationAuditEventTypeTest extends TestCase
         'integration_oauth.required_scope_missing',
     ];
 
-    public function test_the_closed_taxonomy_has_exactly_twenty_one_distinct_event_names(): void
+    public function test_the_closed_taxonomy_has_exactly_twenty_two_distinct_event_names(): void
     {
-        $this->assertCount(21, self::CLOSED_TAXONOMY);
-        $this->assertCount(21, array_unique(self::CLOSED_TAXONOMY), 'No duplicate event names in the closed taxonomy.');
+        $this->assertCount(22, self::CLOSED_TAXONOMY);
+        $this->assertCount(22, array_unique(self::CLOSED_TAXONOMY), 'No duplicate event names in the closed taxonomy.');
     }
 
     /**

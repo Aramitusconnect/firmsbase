@@ -1119,6 +1119,82 @@ class ProviderConnectionServiceOAuthTest extends TestCase
         $this->assertStringNotContainsString('Simulated fixture failure', $metadataJson);
     }
 
+    /**
+     * CHECKPOINT 6 addition (cross-provider security/ops review,
+     * audit-trail finding): a provider that does not implement
+     * SupportsDisconnectContract at all (Microsoft 365 — Graph
+     * delegated OAuth permissions cannot be revoked by the app itself)
+     * previously left NO trace distinguishing "we revoked at the
+     * provider" from "we never even tried" — the same
+     * `credential_revoked`/`disconnect` events fired either way.
+     * `integration_oauth.provider_revocation_not_supported` closes that
+     * gap. Genuine TestProvider implements SupportsDisconnectContract,
+     * so — mirroring the immediately-preceding test's own established
+     * technique — a small, deterministic fake provider that
+     * deliberately does NOT implement it is swapped in for the
+     * disconnect() step only.
+     */
+    public function test_disconnect_records_a_provider_revocation_not_supported_audit_event_when_the_provider_has_no_disconnect_support(): void
+    {
+        [$firm, $connection, $firmUser] = $this->firmConnectionAndActor();
+        $this->completeSuccessfulConnect($firm, $connection, $firmUser);
+
+        $noDisconnectProvider = new class implements IntegrationProviderContract
+        {
+            public function key(): ProviderKey
+            {
+                return ProviderKey::Test;
+            }
+
+            public function displayName(): string
+            {
+                return 'Fake No-Disconnect-Support Provider';
+            }
+
+            public function description(): string
+            {
+                return 'Deterministic test fixture provider — simulates a provider (Microsoft 365-shaped) that never implements SupportsDisconnectContract at all.';
+            }
+
+            public function isConfigured(): bool
+            {
+                return true;
+            }
+
+            public function supportedAuthMethods(): array
+            {
+                return [AuthMethod::OAuth2];
+            }
+        };
+
+        $class = get_class($noDisconnectProvider);
+        app()->instance($class, $noDisconnectProvider);
+        config(['integrations.providers' => [ProviderKey::Test->value => $class]]);
+
+        $fresh = $this->runWithFirmContext($firm, fn () => $connection->fresh());
+        $this->service()->disconnect($fresh, $firmUser->user_id);
+
+        $event = $this->runWithFirmContext($firm, fn () => TimelineEvent::query()
+            ->where('event_type', 'integration_oauth.provider_revocation_not_supported')
+            ->where('subject_type', FirmIntegration::class)
+            ->where('subject_id', $connection->id)
+            ->latest('id')
+            ->first());
+
+        $this->assertNotNull($event, 'Disconnecting a provider with no remote-revocation support must be recorded as an audit event, never silently indistinguishable from a genuine revoke.');
+        $this->assertSame($connection->id, $event->metadata_json['firm_integration_id'] ?? null);
+
+        $revocationFailedEvent = $this->runWithFirmContext($firm, fn () => TimelineEvent::query()
+            ->where('event_type', 'integration_oauth.provider_revocation_failed')
+            ->where('subject_type', FirmIntegration::class)
+            ->where('subject_id', $connection->id)
+            ->first());
+        $this->assertNull($revocationFailedEvent, 'A provider with no disconnect support at all must never also fire the "revocation failed" event — those are two distinct signals.');
+
+        $stillDisconnected = $this->runWithFirmContext($firm, fn () => $connection->fresh());
+        $this->assertSame(ConnectionStatus::Disconnected, $stillDisconnected->status, 'Local teardown must complete identically regardless of provider disconnect support.');
+    }
+
     public function test_disconnect_revokes_rather_than_deletes_the_underlying_rows(): void
     {
         [$firm, $connection, $firmUser] = $this->firmConnectionAndActor();

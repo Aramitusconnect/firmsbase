@@ -148,6 +148,74 @@ final class IntegrationPlatformOversightReadService
     }
 
     /**
+     * Platform-wide, ALWAYS-VISIBLE (same coarse gate as
+     * overviewSummaries() — no support-access grant required) usage-record
+     * summary. Added during Checkpoint 6's cross-provider ops review:
+     * `ProviderRequestExecutor::send()` now calls
+     * `IntegrationUsageRecorderService::recordOnce()` for every provider
+     * call, which made `PlatformIntegrationUsagePage`'s "no usage-metering
+     * system is wired up" disclosure stale — real rows exist today.
+     *
+     * Loops over every firm with recorded integration activity (the same
+     * firm set `overviewSummaries()` itself already surfaces from the
+     * no-RLS snapshot table), calling the existing, already-tenant-
+     * context-wrapped `IntegrationUsageSummaryService::summariesForFirm()`
+     * once per firm — never a new cross-firm query against the FORCE-RLS
+     * `integration_usage_records` table, mirroring
+     * `PlatformFirmUserDirectoryService::countAll()`'s own established
+     * per-firm-loop idiom for exactly this class of problem.
+     *
+     * `IntegrationUsageSummary` carries no billing/cost figure and no raw
+     * provider payload (see `usageForFirm()`'s own docblock above) — this
+     * summary is strictly sanitized quantity/unit/timestamp aggregates.
+     *
+     * @return array{total_records: int, firms_with_usage: int, by_provider: array<string, int>, earliest_occurred_at: ?string, latest_occurred_at: ?string}
+     */
+    public function usageRecordSummaryAcrossFirms(PlatformAdmin $admin): array
+    {
+        $this->boundedAccess->assertCanAccessOversight($admin);
+
+        $firmIds = DB::table('integration_platform_overview_summaries')->pluck('firm_id');
+
+        $totalRecords = 0;
+        $firmsWithUsage = 0;
+        $byProvider = [];
+        $earliest = null;
+        $latest = null;
+
+        foreach ($firmIds as $firmId) {
+            $summaries = $this->usageSummary->summariesForFirm((int) $firmId);
+
+            if ($summaries->isEmpty()) {
+                continue;
+            }
+
+            $firmsWithUsage++;
+
+            foreach ($summaries as $summary) {
+                $totalRecords += $summary->totalQuantity;
+                $byProvider[$summary->providerKey] = ($byProvider[$summary->providerKey] ?? 0) + $summary->totalQuantity;
+
+                if ($summary->firstOccurredAt !== null && ($earliest === null || $summary->firstOccurredAt->lt($earliest))) {
+                    $earliest = $summary->firstOccurredAt;
+                }
+
+                if ($summary->lastOccurredAt !== null && ($latest === null || $summary->lastOccurredAt->gt($latest))) {
+                    $latest = $summary->lastOccurredAt;
+                }
+            }
+        }
+
+        return [
+            'total_records' => $totalRecords,
+            'firms_with_usage' => $firmsWithUsage,
+            'by_provider' => $byProvider,
+            'earliest_occurred_at' => $earliest?->toDateTimeString(),
+            'latest_occurred_at' => $latest?->toDateTimeString(),
+        ];
+    }
+
+    /**
      * Phase 2 UI-building pass. The fix for overviewSummaries()'s own
      * "KNOWN, DEFERRED GAP" docblock above — but added as a NEW,
      * separate, additive method rather than a change to
