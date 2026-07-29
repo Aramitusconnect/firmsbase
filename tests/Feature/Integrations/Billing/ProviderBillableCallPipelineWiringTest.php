@@ -74,16 +74,53 @@ class ProviderBillableCallPipelineWiringTest extends TestCase
      * it must be created for real via
      * Firm::factory()->connection('pgsql_audit')->create() instead,
      * mirroring IntegrationAccessPolicyServiceTest's own established
-     * technique. Deliberately no matching cleanup here — this writer's
-     * own test run always targets a fully disposable database destroyed
-     * in its entirety immediately afterward.
+     * technique.
+     *
+     * CORRECTED: an earlier draft of this helper skipped cleanup on the
+     * assumption that this file's own disposable database is always
+     * destroyed immediately afterward — false whenever this class runs
+     * as part of a larger combined suite (every full-suite run, and any
+     * `php artisan test` invocation naming more than this one file), in
+     * which case the un-cleaned-up Firm and its durable timeline_events
+     * row persist for the rest of that run and silently pollute any
+     * later test asserting an exact platform-wide firm/event count
+     * (found and fixed during Checkpoint 4's own post-commit full-suite
+     * verification — see AuditLogResourceTest, PlatformExecutiveDashboardServiceTest,
+     * PlatformTimelineEventDirectoryServiceTest). Cleanup is registered
+     * via beforeApplicationDestroyed() — see
+     * cleanUpDurableFirmAuditTrailAfterRollback()'s own docblock for why
+     * an inline finally deadlocks here.
      */
     private function firmWithEntitlement(): Firm
     {
         $firm = Firm::factory()->connection('pgsql_audit')->create();
+        $this->cleanUpDurableFirmAuditTrailAfterRollback($firm);
+
         app(EntitlementService::class)->setForSource($firm, 'plaid', EntitlementSource::AdminOverride, true);
 
         return $firm;
+    }
+
+    /**
+     * Mirrors IntegrationAccessPolicyServiceTest::cleanUpDurableFirmAuditTrailAfterRollback()
+     * exactly (see that method's own docblock for the full deadlock
+     * reasoning) — registered via beforeApplicationDestroyed() so it
+     * runs after RefreshDatabase's own rollback has already released
+     * the FOR KEY SHARE lock the default-connection fixtures hold on
+     * this Firm row.
+     */
+    private function cleanUpDurableFirmAuditTrailAfterRollback(Firm $firm): void
+    {
+        $this->beforeApplicationDestroyed(function () use ($firm) {
+            $connection = DB::connection('pgsql_audit');
+
+            $connection->transaction(function () use ($connection, $firm) {
+                $connection->statement('select set_config(?, ?, ?)', ['app.current_firm_id', (string) $firm->id, true]);
+                TimelineEvent::on('pgsql_audit')->where('firm_id', $firm->id)->delete();
+            });
+
+            Firm::on('pgsql_audit')->where('id', $firm->id)->delete();
+        });
     }
 
     /**
@@ -106,7 +143,7 @@ class ProviderBillableCallPipelineWiringTest extends TestCase
 
     private function makeBillablePipelineFake(ProviderKey $key): object
     {
-        return new class($key) implements IntegrationProviderContract, SupportsPullSyncContract, RequiresBillableCallPipelineContract
+        return new class($key) implements IntegrationProviderContract, RequiresBillableCallPipelineContract, SupportsPullSyncContract
         {
             public function __construct(private readonly ProviderKey $providerKey) {}
 

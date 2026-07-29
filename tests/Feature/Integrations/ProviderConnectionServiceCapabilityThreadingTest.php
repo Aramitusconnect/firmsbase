@@ -36,6 +36,7 @@ use App\Services\EntitlementService;
 use App\Services\IntegrationEntitlementPolicyService;
 use App\Services\TimelineEventRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
@@ -238,7 +239,19 @@ final class ProviderConnectionServiceCapabilityThreadingTest extends TestCase
      */
     public function test_update_requested_capabilities_re_checks_authorization_and_denies_a_role_below_the_configure_ceiling(): void
     {
-        [$firm, $connection, $firmUser] = $this->firmConnectionWithCapabilities([ResourceType::Contact->value], FirmUserRole::Paralegal);
+        // Durable Firm required: updateRequestedCapabilities()'s
+        // assertCanConfigure() denial writes
+        // integration_governance.action_denied on the independent
+        // 'pgsql_audit' connection (IntegrationAccessPolicyService::
+        // recordDenied() -> TimelineEventRecorder::recordOnIndependentConnection()),
+        // which cannot see a Firm still uncommitted inside this test's
+        // RefreshDatabase transaction — same shape as
+        // IntegrationAuditEventTypeTest::test_governance_action_denied_fires_on_a_policy_denial().
+        // Found and fixed during FirmsVault Live Integrations Checkpoint
+        // 4's post-commit full-suite verification (pre-existing since
+        // Checkpoint 9's own introduction of the durable-write pattern;
+        // this file's own denial tests were never updated for it).
+        [$firm, $connection, $firmUser] = $this->firmConnectionWithCapabilitiesDurable([ResourceType::Contact->value], FirmUserRole::Paralegal);
 
         $this->expectException(RuntimeException::class);
 
@@ -247,7 +260,9 @@ final class ProviderConnectionServiceCapabilityThreadingTest extends TestCase
 
     public function test_update_requested_capabilities_leaves_the_column_unchanged_when_authorization_is_denied(): void
     {
-        [$firm, $connection, $firmUser] = $this->firmConnectionWithCapabilities([ResourceType::Contact->value], FirmUserRole::Paralegal);
+        // Durable Firm required — see the previous test's own comment
+        // for the full reasoning.
+        [$firm, $connection, $firmUser] = $this->firmConnectionWithCapabilitiesDurable([ResourceType::Contact->value], FirmUserRole::Paralegal);
 
         try {
             $this->service()->updateRequestedCapabilities($connection, [ResourceType::Task->value], $firmUser->user_id);
@@ -384,6 +399,63 @@ final class ProviderConnectionServiceCapabilityThreadingTest extends TestCase
         $firmUser = $this->firmUserFor($firm, $role);
 
         return [$firm, $connection, $firmUser];
+    }
+
+    /**
+     * Same shape as firmConnectionWithCapabilities(), except the Firm is
+     * created via Firm::factory()->connection('pgsql_audit')->create()
+     * — a real, immediate commit visible to the separate 'pgsql_audit'
+     * session TimelineEventRecorder::recordOnIndependentConnection()
+     * uses for assertCanConfigure()'s denial-path audit write. Required
+     * only by the two authorization-denial tests above; every other
+     * test using firmConnectionWithCapabilities() never reaches that
+     * code path.
+     *
+     * @return array{0: Firm, 1: FirmIntegration, 2: FirmUser}
+     */
+    private function firmConnectionWithCapabilitiesDurable(?array $capabilities, FirmUserRole $role = FirmUserRole::Attorney): array
+    {
+        $firm = Firm::factory()->connection('pgsql_audit')->create();
+        $this->cleanUpDurableFirmAuditTrailAfterRollback($firm);
+
+        $key = $this->runWithFirmContext($firm, fn () => TenantEncryptionKey::factory()->forFirm($firm)->create());
+        $this->encryptionKeyIds[$firm->id] = $key->id;
+
+        app(EntitlementService::class)->setForSource($firm, 'integration', EntitlementSource::AdminOverride, true);
+
+        $connection = $this->runWithFirmContext($firm, fn () => FirmIntegration::factory()
+            ->forFirm($firm)
+            ->pending()
+            ->create([
+                'external_account_id' => null,
+                'requested_capabilities_json' => $capabilities,
+                'webhook_routing_token' => null,
+            ]));
+        $firmUser = $this->firmUserFor($firm, $role);
+
+        return [$firm, $connection, $firmUser];
+    }
+
+    /**
+     * Mirrors IntegrationAuditEventTypeTest::cleanUpDurableFirmAuditTrailAfterRollback()
+     * exactly (see that method's own docblock for the full deadlock
+     * reasoning) — registered via beforeApplicationDestroyed() so it
+     * runs after RefreshDatabase's own rollback has already released
+     * the FOR KEY SHARE lock the default-connection fixtures hold on
+     * this Firm row.
+     */
+    private function cleanUpDurableFirmAuditTrailAfterRollback(Firm $firm): void
+    {
+        $this->beforeApplicationDestroyed(function () use ($firm) {
+            $connection = DB::connection('pgsql_audit');
+
+            $connection->transaction(function () use ($connection, $firm) {
+                $connection->statement('select set_config(?, ?, ?)', ['app.current_firm_id', (string) $firm->id, true]);
+                TimelineEvent::on('pgsql_audit')->where('firm_id', $firm->id)->delete();
+            });
+
+            Firm::on('pgsql_audit')->where('id', $firm->id)->delete();
+        });
     }
 
     private function firmWithActiveKey(): Firm

@@ -145,7 +145,13 @@ class FinancialAccountReclassificationServiceTest extends TestCase
 
     public function test_a_request_cannot_be_created_by_one_role_tier_and_first_approved_by_an_unauthorized_role(): void
     {
-        [$firm, $account, $requester] = $this->makeFirmAccountAndUser();
+        // Durable Firm required: approve()'s assertCanApprove() denial
+        // (BillingStaff is below the approve ceiling) routes through
+        // FinancialIntegrationAccessPolicyService::recordDenied(), which
+        // ALSO uses the independent 'pgsql_audit' connection — same
+        // shape as makeDurableFirmAccountAndUser()'s own docblock
+        // describes for assertDistinctApprovers()'s violation path.
+        [$firm, $account, $requester] = $this->makeDurableFirmAccountAndUser();
 
         $request = $this->runWithFirmContext($firm, fn () => $this->service->request(
             $firm, $account, $requester, FinancialAccountClassification::TrustIolta, 'Reason.'
@@ -456,11 +462,13 @@ class FinancialAccountReclassificationServiceTest extends TestCase
      * — a real, immediate commit visible to the separate 'pgsql_audit'
      * session TimelineEventRecorder::recordOnIndependentConnection()
      * uses for assertDistinctApprovers()'s violation-path audit write.
-     * Required only by the two self-approval tests above; every other
-     * test in this file never reaches that code path (a single, valid
-     * approve() call records `distinct_approvers_confirmed`, but only
-     * the same-actor VIOLATION path uses the independent connection —
-     * see FinancialIntegrationAccessPolicyService::assertDistinctApprovers()).
+     * Required by the two self-approval tests above (assertDistinctApprovers()'s
+     * violation path) and by
+     * test_a_request_cannot_be_created_by_one_role_tier_and_first_approved_by_an_unauthorized_role()
+     * (assertCanApprove()'s denial path, same recordDenied() sink) — any
+     * other test in this file that never reaches a denial/violation
+     * branch of FinancialIntegrationAccessPolicyService can keep using
+     * the plain, non-durable makeFirmAccountAndUser() above.
      *
      * @return array{0: Firm, 1: FinancialEvidenceBankAccount, 2: FirmUser}
      */

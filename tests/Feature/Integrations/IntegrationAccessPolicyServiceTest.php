@@ -45,7 +45,7 @@ class IntegrationAccessPolicyServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new IntegrationAccessPolicyService(new TimelineEventRecorder());
+        $this->service = new IntegrationAccessPolicyService(new TimelineEventRecorder);
     }
 
     /**
@@ -102,11 +102,12 @@ class IntegrationAccessPolicyServiceTest extends TestCase
     {
         foreach (self::ALL_ROLES as $role) {
             if (in_array($role, $allowedRoles, true)) {
-                $firm = \App\Models\Firm::factory()->create();
+                $firm = Firm::factory()->create();
                 $actor = FirmUser::factory()->role($role)->create(['firm_id' => $firm->id]);
 
                 $this->runWithFirmContext($firm, fn () => $this->service->{$method}($actor));
                 $this->addToAssertionCount(1); // no exception == pass
+
                 continue;
             }
 
@@ -127,7 +128,7 @@ class IntegrationAccessPolicyServiceTest extends TestCase
 
             $actor = FirmUser::factory()->role($role)->create(['firm_id' => $firm->id]);
 
-            $this->runWithFirmContext($firm, function () use ($actor, $method, $expectedAction, $firm) {
+            $this->runWithFirmContext($firm, function () use ($actor, $method, $expectedAction) {
                 $threw = false;
                 try {
                     $this->service->{$method}($actor);
@@ -218,7 +219,21 @@ class IntegrationAccessPolicyServiceTest extends TestCase
 
     public function test_receptionist_never_passes_any_assert_can_check(): void
     {
-        $firm = \App\Models\Firm::factory()->create();
+        // Durable Firm required: the loop below calls expectException()
+        // then immediately invokes a denying assertCan*() — the very
+        // first iteration (assertCanView()) throws and propagates out of
+        // the test method entirely (expectException() does not wrap in
+        // a try/catch; PHPUnit only checks the expectation once the
+        // exception has already unwound the stack), so exactly one
+        // recordDenied() durable write happens per test run. That write
+        // uses the independent 'pgsql_audit' connection, which cannot
+        // see a Firm still uncommitted inside this test's RefreshDatabase
+        // transaction — same shape as
+        // test_assert_can_method_is_a_noop_for_allowed_roles_and_throws_for_every_other_role()'s
+        // own denial branch above.
+        $firm = Firm::factory()->connection('pgsql_audit')->create();
+        $this->cleanUpDurableFirmAuditTrailAfterRollback($firm);
+
         $receptionist = FirmUser::factory()->role(FirmUserRole::Receptionist)->create(['firm_id' => $firm->id]);
 
         foreach (['assertCanView', 'assertCanConnect', 'assertCanConfigure', 'assertCanDisconnect', 'assertCanViewUsage', 'assertCanSync'] as $method) {

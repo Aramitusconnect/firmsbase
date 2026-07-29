@@ -20,7 +20,9 @@ use App\Integrations\Services\SyncCursorService;
 use App\Jobs\PullSyncJob;
 use App\Models\Firm;
 use App\Models\TenantEncryptionKey;
+use App\Models\TimelineEvent;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 use Throwable;
@@ -202,11 +204,25 @@ final class PullSyncJobPlaidCredentialLivenessTest extends TestCase
     }
 
     /**
+     * Durable Firm required: both tests above dispatch a real
+     * PullSyncJob run for a Plaid ResourceType::Transaction connection
+     * with no billing pipeline configured, and explicitly document (see
+     * each test's own try/catch comment) that execution may legitimately
+     * reach `ProviderBillableCallPipeline::execute()` before throwing.
+     * Every one of that pipeline's steps — success AND denial alike —
+     * writes via `TimelineEventRecorder::recordOnIndependentConnection()`
+     * (independentOfAmbientTransaction: true), which cannot see a Firm
+     * still uncommitted inside this test's RefreshDatabase transaction —
+     * same shape as ProviderBillableCallPipelineTest's own
+     * firmWithEntitlement() helper.
+     *
      * @return array{0: Firm, 1: FirmIntegration}
      */
     private function makeConnection(): array
     {
-        $firm = Firm::factory()->create();
+        $firm = Firm::factory()->connection('pgsql_audit')->create();
+        $this->cleanUpDurableFirmAuditTrailAfterRollback($firm);
+
         $this->runWithFirmContext($firm, fn () => TenantEncryptionKey::factory()->forFirm($firm)->create());
 
         $connection = $this->runWithFirmContext($firm, fn () => FirmIntegration::factory()
@@ -215,5 +231,27 @@ final class PullSyncJobPlaidCredentialLivenessTest extends TestCase
             ->create(['status' => ConnectionStatus::Active->value, 'external_account_id' => 'item-sandbox-fixture-id']));
 
         return [$firm, $connection];
+    }
+
+    /**
+     * Mirrors IntegrationAuditEventTypeTest::cleanUpDurableFirmAuditTrailAfterRollback()
+     * exactly (see that method's own docblock for the full deadlock
+     * reasoning) — registered via beforeApplicationDestroyed() so it
+     * runs after RefreshDatabase's own rollback has already released
+     * the FOR KEY SHARE lock the default-connection fixtures hold on
+     * this Firm row.
+     */
+    private function cleanUpDurableFirmAuditTrailAfterRollback(Firm $firm): void
+    {
+        $this->beforeApplicationDestroyed(function () use ($firm) {
+            $connection = DB::connection('pgsql_audit');
+
+            $connection->transaction(function () use ($connection, $firm) {
+                $connection->statement('select set_config(?, ?, ?)', ['app.current_firm_id', (string) $firm->id, true]);
+                TimelineEvent::on('pgsql_audit')->where('firm_id', $firm->id)->delete();
+            });
+
+            Firm::on('pgsql_audit')->where('id', $firm->id)->delete();
+        });
     }
 }

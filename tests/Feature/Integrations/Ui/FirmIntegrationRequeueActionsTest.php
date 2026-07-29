@@ -25,6 +25,7 @@ use App\Integrations\Services\SyncItemService;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\TenantEncryptionKey;
+use App\Models\TimelineEvent;
 use App\Models\User;
 use App\Services\EntitlementService;
 use App\Services\IntegrationEntitlementPolicyService;
@@ -178,7 +179,17 @@ final class FirmIntegrationRequeueActionsTest extends TestCase
 
     public function test_requeue_outbox_event_action_is_denied_below_the_configure_ceiling(): void
     {
-        $firm = $this->entitledFirm();
+        // Durable Firm required: requeueOutboxEvent()'s assertCanConfigure()
+        // denial writes integration_governance.action_denied on the
+        // independent 'pgsql_audit' connection (IntegrationAccessPolicyService::
+        // recordDenied() -> TimelineEventRecorder::recordOnIndependentConnection()),
+        // which cannot see a Firm still uncommitted inside this test's
+        // RefreshDatabase transaction — same shape as
+        // IntegrationAuditEventTypeTest::test_governance_action_denied_fires_on_a_policy_denial().
+        // Found and fixed during FirmsVault Live Integrations Checkpoint
+        // 4's post-commit full-suite verification (pre-existing since
+        // Checkpoint 9's own introduction of the durable-write pattern).
+        $firm = $this->entitledDurableFirm();
         $connection = $this->activeConnectionWithCredential($firm);
         $firmUser = $this->actingAsRole($firm, FirmUserRole::LegalAssistant);
 
@@ -328,7 +339,11 @@ final class FirmIntegrationRequeueActionsTest extends TestCase
 
     public function test_requeue_sync_item_action_is_denied_below_the_configure_ceiling(): void
     {
-        $firm = $this->entitledFirm();
+        // Durable Firm required — see
+        // test_requeue_outbox_event_action_is_denied_below_the_configure_ceiling()'s
+        // own comment for the full reasoning (requeueSyncItem() reaches
+        // the identical assertCanConfigure() denial sink).
+        $firm = $this->entitledDurableFirm();
         $connection = $this->activeConnectionWithCredential($firm);
         $run = $this->createWithFirmContext($firm, fn () => IntegrationSyncRun::factory()->forFirmIntegration($connection)->create());
         $item = $this->createWithFirmContext($firm, fn () => IntegrationSyncItem::factory()->forSyncRun($run)->failedPermanent()->create());
@@ -494,6 +509,47 @@ final class FirmIntegrationRequeueActionsTest extends TestCase
             $firm,
             fn () => app(SyncItemService::class)->requeueFromFailedPermanent($itemId, $firm->id, 'manual_retry_after_provider_fix', $firmUser->id)
         );
+    }
+
+    /**
+     * Same shape as entitledFirm(), except the Firm is created via
+     * Firm::factory()->connection('pgsql_audit')->create() — a real,
+     * immediate commit visible to the separate 'pgsql_audit' session
+     * TimelineEventRecorder::recordOnIndependentConnection() uses for
+     * assertCanConfigure()'s denial-path audit write. Required only by
+     * the two authorization-denial tests above; every other test using
+     * entitledFirm() never reaches that code path.
+     */
+    private function entitledDurableFirm(): Firm
+    {
+        $firm = Firm::factory()->connection('pgsql_audit')->create();
+        $this->cleanUpDurableFirmAuditTrailAfterRollback($firm);
+
+        app(EntitlementService::class)->setForSource($firm, 'integration', EntitlementSource::AdminOverride, true);
+
+        return $firm;
+    }
+
+    /**
+     * Mirrors IntegrationAuditEventTypeTest::cleanUpDurableFirmAuditTrailAfterRollback()
+     * exactly (see that method's own docblock for the full deadlock
+     * reasoning) — registered via beforeApplicationDestroyed() so it
+     * runs after RefreshDatabase's own rollback has already released
+     * the FOR KEY SHARE lock the default-connection fixtures hold on
+     * this Firm row.
+     */
+    private function cleanUpDurableFirmAuditTrailAfterRollback(Firm $firm): void
+    {
+        $this->beforeApplicationDestroyed(function () use ($firm) {
+            $connection = DB::connection('pgsql_audit');
+
+            $connection->transaction(function () use ($connection, $firm) {
+                $connection->statement('select set_config(?, ?, ?)', ['app.current_firm_id', (string) $firm->id, true]);
+                TimelineEvent::on('pgsql_audit')->where('firm_id', $firm->id)->delete();
+            });
+
+            Firm::on('pgsql_audit')->where('id', $firm->id)->delete();
+        });
     }
 
     private function entitledFirm(): Firm

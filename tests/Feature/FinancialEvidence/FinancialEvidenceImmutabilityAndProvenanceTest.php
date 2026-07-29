@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Feature\FinancialEvidence;
 
+use App\Enums\FirmUserRole;
 use App\Integrations\Enums\FinancialEvidenceProvenance;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Services\FinancialIntegrationAccessPolicyService;
-use App\Enums\FirmUserRole;
 use App\Models\FinancialEvidenceBankAccount;
 use App\Models\FinancialEvidenceMatterNote;
 use App\Models\FinancialEvidenceSnapshot;
@@ -16,7 +16,9 @@ use App\Models\FinancialEvidenceTransactionReview;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\Matter;
+use App\Models\TimelineEvent;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use LogicException;
 use RuntimeException;
@@ -218,7 +220,21 @@ class FinancialEvidenceImmutabilityAndProvenanceTest extends TestCase
 
     public function test_a_paralegal_may_not_write_a_note_billing_staff_may(): void
     {
-        [$firm, $matter, $paralegal] = $this->makeMatterAndFirmUser(FirmUserRole::Paralegal);
+        // Durable Firm required: assertCanRequest()'s denial writes
+        // integration_governance.action_denied on the independent
+        // 'pgsql_audit' connection (FinancialIntegrationAccessPolicyService::
+        // recordDenied() -> TimelineEventRecorder::recordOnIndependentConnection()),
+        // which cannot see a Firm still uncommitted inside this test's
+        // RefreshDatabase transaction — same shape as
+        // IntegrationAccessPolicyServiceTest::test_governance_action_denied_fires_on_a_policy_denial().
+        // Cleanup is registered via beforeApplicationDestroyed() rather
+        // than an inline finally block — see
+        // cleanUpDurableFirmAuditTrailAfterRollback()'s own docblock for
+        // why an inline finally deadlocks here.
+        $firm = Firm::factory()->connection('pgsql_audit')->create();
+        $this->cleanUpDurableFirmAuditTrailAfterRollback($firm);
+
+        $paralegal = $this->runWithFirmContext($firm, fn () => FirmUser::factory()->role(FirmUserRole::Paralegal)->create(['firm_id' => $firm->id]));
 
         $this->expectException(RuntimeException::class);
 
@@ -339,5 +355,28 @@ class FinancialEvidenceImmutabilityAndProvenanceTest extends TestCase
             'limitations_text' => 'Historical data limited by the retrieval window.',
             'created_at' => now(),
         ]);
+    }
+
+    /**
+     * Copied verbatim from IntegrationAccessPolicyServiceTest's own
+     * private helper of the same name — see that copy's docblock for
+     * the full "why beforeApplicationDestroyed(), not an inline
+     * finally" reasoning. timeline_events has permanent FORCE ROW
+     * LEVEL SECURITY, so the DELETE must run with app.current_firm_id
+     * set to this firm's id on the SAME 'pgsql_audit' connection
+     * performing it.
+     */
+    private function cleanUpDurableFirmAuditTrailAfterRollback(Firm $firm): void
+    {
+        $this->beforeApplicationDestroyed(function () use ($firm) {
+            $connection = DB::connection('pgsql_audit');
+
+            $connection->transaction(function () use ($connection, $firm) {
+                $connection->statement('select set_config(?, ?, ?)', ['app.current_firm_id', (string) $firm->id, true]);
+                TimelineEvent::on('pgsql_audit')->where('firm_id', $firm->id)->delete();
+            });
+
+            Firm::on('pgsql_audit')->where('id', $firm->id)->delete();
+        });
     }
 }
