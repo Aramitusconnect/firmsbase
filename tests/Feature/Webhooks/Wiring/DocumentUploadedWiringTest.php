@@ -187,8 +187,8 @@ class DocumentUploadedWiringTest extends TestCase
             'size_bytes' => 1024,
         ]]);
         $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
-        $service->confirmBatch($batch->fresh());
-        $service->apply($batch->fresh());
+        $service->confirmBatch($this->runWithFirmContext($firm, fn () => $batch->fresh()));
+        $service->apply($this->runWithFirmContext($firm, fn () => $batch->fresh()));
 
         $this->assertDatabaseCount('webhook_events', 1);
         $this->assertDatabaseHas('webhook_events', ['event_type' => WebhookEventType::DocumentUploaded->value]);

@@ -33,7 +33,16 @@ class OffboardingExportServiceTest extends TestCase
 
         $this->assertNotEmpty($export->package_manifest_json);
         $this->assertSame(OffboardingExportStatus::Generated, $export->status);
-        $this->assertDatabaseHas('export_jobs', ['id' => $export->export_job_id]);
+        // export_jobs is tenant-owned but not yet RLS-prepared (listed
+        // in RowLevelSecurityCoverageMappingService::MISSING_PREPARED_TABLES
+        // as of this commit — no RLS policy exists on it yet, so this
+        // wrapping has no effect on today's behavior). Wrapped
+        // defensively now, ahead of that table's eventual RLS
+        // activation, using this codebase's established
+        // runWithFirmContext() pattern — matches how every other
+        // FORCE-RLS-activation wave in this repo's history wires tests
+        // in advance of/alongside the activating migration.
+        $this->runWithFirmContext($firm, fn () => $this->assertDatabaseHas('export_jobs', ['id' => $export->export_job_id]));
         // simulated_storage_path is metadata only — assert the linked
         // export_files convention is untouched (no real file write API
         // was called; ExportJobService/ExportFile own that guarantee).
