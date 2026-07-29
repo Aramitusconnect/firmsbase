@@ -111,6 +111,30 @@ final class PlaidWebhookJwtVerificationTest extends TestCase
     {
         parent::setUp();
 
+        // FOUND AND FIXED (Checkpoint 7 baseline hardening): self::KID is
+        // a fixed constant reused by every test in this file, but each
+        // test's own generateEs256KeyPair() call below generates a BRAND
+        // NEW keypair every time. The cache read the verification path
+        // consults (PlaidProvider::resolveVerificationKeyWithAttribution()'s
+        // "read cache first" branch) is keyed only on
+        // "plaid_webhook_jwk:{kid}" — never per-test — so if an EARLIER
+        // test in this same PHPUnit process populated that cache key
+        // (e.g. test_a_cached_jwk_is_used_without_a_second_network_call's
+        // own Cache::forever() call), a LATER test's freshly-signed JWT
+        // (signed with THIS test's own, different private key) would be
+        // verified against the STALE cached public key from a different
+        // keypair entirely, causing a legitimately valid signature to
+        // fail verification. Confirmed reproducing only when this file
+        // runs as part of a larger batch/full-suite run (order-dependent
+        // on which test happens to populate the cache first) and passing
+        // reliably in isolation — exactly the "cache-under-load flake"
+        // already disclosed as a known limitation in the Checkpoint 4
+        // report. Flushing the cache here gives every test in this file
+        // a clean slate, matching ProviderRequestExecutorTest's own
+        // established Cache::flush()-in-setUp() convention for the
+        // identical class of problem.
+        Cache::flush();
+
         config([
             'integrations.oauth_apps.plaid.client_id' => 'unit-test-plaid-client-id',
             'integrations.oauth_apps.plaid.secret' => 'unit-test-plaid-secret',
