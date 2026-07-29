@@ -58,6 +58,25 @@ final class InboundWebhookReplayProtectionTest extends TestCase
         config(['integrations.providers' => [ProviderKey::Test->value => TestProvider::class]]);
     }
 
+    /**
+     * FOUND AND FIXED (Checkpoint 7 three-run full-suite verification):
+     * four tests below freeze Carbon to a fixed calendar instant
+     * (Carbon::setTestNow(Carbon::parse('2026-07-01 12:00:00'))) with no
+     * tearDown() to restore it — Carbon::$testNow is a plain static
+     * property on the Carbon class itself, entirely independent of
+     * Laravel's per-test fresh Application container, so a frozen value
+     * here silently persists into every subsequent test in the same
+     * PHPUnit process. Restoring real time after every test closes the
+     * leak, matching IntegrationOutboxTimestampPrecisionTest's own
+     * established tearDown()-based convention for the identical class of
+     * problem.
+     */
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
+    }
+
     public function test_a_current_valid_timestamp_is_accepted(): void
     {
         $fixture = $this->activeConnectionWithWebhookSecret();

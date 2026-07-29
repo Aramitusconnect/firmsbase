@@ -23,6 +23,28 @@ final class InboundWebhookSignatureVerifierTest extends TestCase
 {
     private const SECRET = 'unit-test-webhook-signing-secret-value';
 
+    /**
+     * FOUND AND FIXED (Checkpoint 7 three-run full-suite verification):
+     * four tests below freeze Carbon to a fixed calendar instant
+     * (Carbon::setTestNow(Carbon::parse('2026-07-01 12:00:00'))) with no
+     * tearDown() to restore it — Carbon::$testNow is a plain static
+     * property on the Carbon class itself, entirely independent of
+     * Laravel's per-test fresh Application container, so a frozen value
+     * here silently persists into every subsequent test in the same
+     * PHPUnit process (this file's tests run in the "Unit" testsuite
+     * phase, same phase as PlaidWebhookJwtVerificationTest, which mixes
+     * Carbon's now() with raw time() and was intermittently failing
+     * its freshness check as a direct result). Restoring real time after
+     * every test closes the leak, matching
+     * IntegrationOutboxTimestampPrecisionTest's own established
+     * tearDown()-based convention for the identical class of problem.
+     */
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
+    }
+
     private function verifier(): InboundWebhookSignatureVerifier
     {
         return new InboundWebhookSignatureVerifier();
