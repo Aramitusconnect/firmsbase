@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Firm\Pages;
 
+use App\Integrations\Services\IntegrationAccessPolicyService;
 use App\Models\TimelineEvent;
 use App\Services\PlaidEntitlementPolicyService;
 use BackedEnum;
@@ -25,6 +26,13 @@ use Illuminate\Support\Facades\Auth;
  * rows filtered `event_type LIKE 'provider_billing.%'` for this firm —
  * the same hand-built `HasMany`-shaped read as the Matter/Client-Portal
  * track's own Activity tab.
+ *
+ * FOUND AND FIXED (Checkpoint 7 authorization review, item 19): billing
+ * alert data is exactly the usage/billing-impact ceiling
+ * `IntegrationAccessPolicyService::canViewUsage()` exists to gate
+ * (FirmOwner, BillingStaff) — no role check was present at all before
+ * this fix, only the "has this firm purchased Plaid" entitlement check.
+ * Same ceiling and reasoning as `PlaidUsagePage`'s identical fix.
  */
 class PlaidCostAlertsPage extends Page implements HasTable
 {
@@ -44,7 +52,9 @@ class PlaidCostAlertsPage extends Page implements HasTable
     {
         $firmUser = Auth::user()?->activeFirmUser();
 
-        return $firmUser !== null && app(PlaidEntitlementPolicyService::class)->isEnabled($firmUser->firm);
+        return $firmUser !== null
+            && app(PlaidEntitlementPolicyService::class)->isEnabled($firmUser->firm)
+            && app(IntegrationAccessPolicyService::class)->canViewUsage($firmUser->role);
     }
 
     public static function shouldRegisterNavigation(): bool
@@ -63,7 +73,7 @@ class PlaidCostAlertsPage extends Page implements HasTable
             ->records(function (): Collection {
                 $firmUser = Auth::user()?->activeFirmUser();
 
-                if ($firmUser === null) {
+                if ($firmUser === null || ! app(IntegrationAccessPolicyService::class)->canViewUsage($firmUser->role)) {
                     return collect();
                 }
 

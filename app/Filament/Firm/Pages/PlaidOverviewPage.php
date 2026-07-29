@@ -7,6 +7,7 @@ namespace App\Filament\Firm\Pages;
 use App\Filament\Firm\Widgets\PlaidFirmOverviewSummaryCardsWidget;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Services\FinancialIntegrationAccessPolicyService;
 use App\Services\IntegrationEntitlementPolicyService;
 use App\Services\PlaidEntitlementPolicyService;
 use BackedEnum;
@@ -31,6 +32,18 @@ use Illuminate\Support\Facades\Auth;
  * (the new `module_code = 'plaid'` add-on gate), mirroring
  * `FirmIntegrationResource::isFirmEntitled()`'s existing two-clause `&&`
  * shape.
+ *
+ * FOUND AND FIXED (Checkpoint 7 authorization review, item 19): the
+ * entitlement checks above answer "has this firm purchased Plaid," not
+ * "may this firm user view Plaid connection health/status" — no role
+ * check was present at all, so any active firm user of any role
+ * (including Receptionist) could reach this page. This is a
+ * financial-tier connection view, covered by
+ * `FinancialIntegrationAccessPolicyService::canView()`'s documented
+ * ceiling (FirmOwner, Attorney, BillingStaff ONLY — narrower than the
+ * non-financial tier), never `IntegrationAccessPolicyService`'s wider
+ * one. Added here, matching `IntegrationUsagePage::canAccess()`'s
+ * established shape.
  */
 class PlaidOverviewPage extends Page implements HasTable
 {
@@ -55,7 +68,8 @@ class PlaidOverviewPage extends Page implements HasTable
         }
 
         return app(IntegrationEntitlementPolicyService::class)->isEnabled($firmUser->firm)
-            && app(PlaidEntitlementPolicyService::class)->isEnabled($firmUser->firm);
+            && app(PlaidEntitlementPolicyService::class)->isEnabled($firmUser->firm)
+            && app(FinancialIntegrationAccessPolicyService::class)->canView($firmUser->role);
     }
 
     public static function shouldRegisterNavigation(): bool
@@ -83,7 +97,7 @@ class PlaidOverviewPage extends Page implements HasTable
             ->records(function (): Collection {
                 $firmUser = Auth::user()?->activeFirmUser();
 
-                if ($firmUser === null) {
+                if ($firmUser === null || ! app(FinancialIntegrationAccessPolicyService::class)->canView($firmUser->role)) {
                     return collect();
                 }
 

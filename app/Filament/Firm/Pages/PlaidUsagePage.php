@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Firm\Pages;
 
+use App\Integrations\Services\IntegrationAccessPolicyService;
 use App\Integrations\Services\PlaidFirmUsageCostSummaryService;
 use App\Services\PlaidEntitlementPolicyService;
 use BackedEnum;
@@ -24,6 +25,19 @@ use Illuminate\Support\Facades\Auth;
  * §2). `IntegrationUsagePage`'s exact shape, reading
  * `PlaidFirmUsageCostSummaryService`, honoring the "null cost is
  * 'unknown,' never coalesced to $0" discipline.
+ *
+ * FOUND AND FIXED (Checkpoint 7 authorization review, item 19): the
+ * entitlement check answered only "has this firm purchased Plaid," not
+ * "may this firm user view estimated cost/billing impact" — this page
+ * renders per-product dollar cost estimates, exactly the
+ * usage/billing-impact ceiling `IntegrationAccessPolicyService::canViewUsage()`
+ * exists to gate (FirmOwner, BillingStaff — deliberately narrower than
+ * the health/activity ceiling, no Attorney; identical to the
+ * non-financial tier per `FinancialIntegrationAccessPolicyService`'s own
+ * docblock, so the non-financial service is reused here rather than
+ * duplicated). Matches `IntegrationUsagePage::canAccess()`'s established
+ * shape — this page's own docblock already claimed to be that page's
+ * "exact shape" but omitted exactly this check.
  */
 class PlaidUsagePage extends Page implements HasTable
 {
@@ -43,7 +57,9 @@ class PlaidUsagePage extends Page implements HasTable
     {
         $firmUser = Auth::user()?->activeFirmUser();
 
-        return $firmUser !== null && app(PlaidEntitlementPolicyService::class)->isEnabled($firmUser->firm);
+        return $firmUser !== null
+            && app(PlaidEntitlementPolicyService::class)->isEnabled($firmUser->firm)
+            && app(IntegrationAccessPolicyService::class)->canViewUsage($firmUser->role);
     }
 
     public static function shouldRegisterNavigation(): bool
@@ -62,7 +78,7 @@ class PlaidUsagePage extends Page implements HasTable
             ->records(function (): Collection {
                 $firmUser = Auth::user()?->activeFirmUser();
 
-                if ($firmUser === null) {
+                if ($firmUser === null || ! app(IntegrationAccessPolicyService::class)->canViewUsage($firmUser->role)) {
                     return collect();
                 }
 

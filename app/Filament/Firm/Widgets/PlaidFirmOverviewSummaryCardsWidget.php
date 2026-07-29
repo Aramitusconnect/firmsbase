@@ -6,6 +6,7 @@ namespace App\Filament\Firm\Widgets;
 
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Services\FinancialIntegrationAccessPolicyService;
 use App\Services\PlaidEntitlementPolicyService;
 use Filament\Support\Icons\Heroicon;
 use Filament\Widgets\StatsOverviewWidget;
@@ -25,6 +26,13 @@ class PlaidFirmOverviewSummaryCardsWidget extends StatsOverviewWidget
 
     protected ?string $pollingInterval = null;
 
+    /**
+     * FOUND AND FIXED (Checkpoint 7 authorization review, item 19): this
+     * embedded widget shared PlaidOverviewPage's original gap — no role
+     * check, only "has this firm purchased Plaid." Same fix, same
+     * ceiling: FinancialIntegrationAccessPolicyService::canView()
+     * (FirmOwner, Attorney, BillingStaff ONLY).
+     */
     public static function canView(): bool
     {
         $firmUser = Auth::user()?->activeFirmUser();
@@ -33,14 +41,15 @@ class PlaidFirmOverviewSummaryCardsWidget extends StatsOverviewWidget
             return false;
         }
 
-        return app(PlaidEntitlementPolicyService::class)->isEnabled($firmUser->firm);
+        return app(PlaidEntitlementPolicyService::class)->isEnabled($firmUser->firm)
+            && app(FinancialIntegrationAccessPolicyService::class)->canView($firmUser->role);
     }
 
     protected function getStats(): array
     {
         $firmUser = Auth::user()?->activeFirmUser();
 
-        if ($firmUser === null) {
+        if ($firmUser === null || ! app(FinancialIntegrationAccessPolicyService::class)->canView($firmUser->role)) {
             return [];
         }
 
