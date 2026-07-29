@@ -1825,6 +1825,30 @@ class ProviderConnectionService
                 continue;
             }
 
+            // DETERMINISTIC SUBSCRIBE-CYCLE IDENTITY (double-billing
+            // remediation). The idempotency key below used to end in
+            // `now()->format('YmdHi')`, which made a re-entry of this
+            // bootstrap that crossed a minute boundary reserve a brand
+            // new row and bill a second real subscribe() call. Lower
+            // severity than the job call sites (this path is connect-flow
+            // driven, not queue-auto-retried, and the $alreadyActive
+            // guard above already suppresses the common case) but fixed
+            // for the same reason.
+            //
+            // A FULLY static key would be wrong in the other direction:
+            // it would wedge every legitimate future re-subscribe of the
+            // same (connection, resourceType) behind one permanently
+            // terminal reservation. The highest subscription-row id this
+            // connection/resource has ever reached is the durable
+            // discriminator that already exists — it is stable across
+            // re-entries of one failed bootstrap (no row is written until
+            // subscribe() succeeds) and advances exactly once a real
+            // subscription is created.
+            $subscribeCycle = (int) (IntegrationProviderWebhookSubscription::query()
+                ->where('firm_integration_id', $connection->id)
+                ->where('resource_type', $resourceType)
+                ->max('id') ?? 0);
+
             // FirmsVault Live Integrations, Checkpoint 4 cost-control
             // wiring pass (checkpoint4-design-cost-control.md §2.1 call
             // site #3). Additive `instanceof` branch only — every other
@@ -1852,7 +1876,7 @@ class ProviderConnectionService
                         ]),
                         'subscribe',
                     ),
-                    usageIdempotencyKey: 'provider_webhook_subscribe:'.$connection->id.':'.$resourceType.':'.now()->format('YmdHi'),
+                    usageIdempotencyKey: 'provider_webhook_subscribe:'.$connection->id.':'.$resourceType.':cycle'.$subscribeCycle,
                     provider: $provider,
                     requiredContractFqcn: SupportsWebhooksContract::class,
                 );

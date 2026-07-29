@@ -51,6 +51,7 @@ class ProviderBillableCallReservation extends Model
         'correlation_id',
         'usage_record_id',
         'reserved_at',
+        'provider_call_started_at',
         'expires_at',
         'finalized_at',
         'reserved_by_firm_user_id',
@@ -63,6 +64,7 @@ class ProviderBillableCallReservation extends Model
             'estimated_customer_price_cents' => 'integer',
             'quantity' => 'integer',
             'reserved_at' => 'datetime',
+            'provider_call_started_at' => 'datetime',
             'expires_at' => 'datetime',
             'finalized_at' => 'datetime',
         ];
@@ -96,5 +98,31 @@ class ProviderBillableCallReservation extends Model
     public function isReserved(): bool
     {
         return $this->status === self::STATUS_RESERVED;
+    }
+
+    /**
+     * True once the reservation's outbound provider call has provably
+     * been handed to `$providerCall()` — see the
+     * `provider_call_started_at` migration's own docblock for the two
+     * crash windows this distinguishes. A NULL here on an abandoned
+     * reservation is the ONLY positive evidence this system ever has
+     * that the provider was never contacted.
+     */
+    public function providerCallStarted(): bool
+    {
+        return $this->provider_call_started_at !== null;
+    }
+
+    /**
+     * True for a `reserved` row whose TTL has elapsed without anything
+     * finalizing it — i.e. a row `ExpireStaleProviderReservationsJob`
+     * WOULD sweep to `expired` but has not swept yet (that job runs on a
+     * coarse schedule with `WithoutOverlapping`, so it offers no
+     * "swept before the next retry" guarantee and must never be relied
+     * on as one).
+     */
+    public function isPastTtl(): bool
+    {
+        return $this->expires_at !== null && $this->expires_at->isPast();
     }
 }

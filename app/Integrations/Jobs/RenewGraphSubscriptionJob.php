@@ -182,6 +182,35 @@ final class RenewGraphSubscriptionJob implements ShouldQueue
             $pipelineEnvironment = $requiresPipeline ? (new ProviderEnvironmentResolver)->modeFor($provider->key()) : null;
             $pipelineResourceType = ResourceType::tryFrom($subscription->resource_type);
 
+            // DETERMINISTIC RENEWAL-CYCLE IDENTITY (double-billing
+            // remediation). Both idempotency keys below used to end in
+            // `now()->format('YmdHi')`. With $tries = 5 and
+            // backoff() = [30, 60, 120, 240], every retry after the first
+            // is overwhelmingly likely to land in a DIFFERENT wall-clock
+            // minute than the attempt it is retrying — so the key
+            // changed, ProviderUsageReservationService::reserve() saw no
+            // conflict at all, INSERTed a brand-new reservation, and the
+            // pipeline made a second REAL, separately-billed outbound
+            // call for one logical renewal (up to five per renewal).
+            //
+            // The replacement identifies the RENEWAL CYCLE, not the
+            // moment of the attempt: the subscription row's CURRENT
+            // provider-side identity and expiry, both re-read fresh from
+            // the database at the top of every attempt and both rewritten
+            // (below) only once a renewal actually SUCCEEDS. So all five
+            // attempts at one renewal share a key, while the next genuine
+            // renewal of the same subscription — and any other
+            // subscription — gets a different one. No new column is
+            // needed: `expires_at` already IS the durable "this specific
+            // renewal still needs doing" marker. Hashed in the same
+            // shape PushSyncJob's own deterministic key already uses.
+            $renewalCycleToken = hash('sha256', implode('|', [
+                (string) $connection->id,
+                (string) $subscription->id,
+                (string) ($subscription->provider_subscription_id ?? ''),
+                $subscription->expires_at?->toIso8601String() ?? 'no_expiry',
+            ]));
+
             try {
                 if ($requiresPipeline) {
                     $renewResult = app(ProviderBillableCallPipeline::class)->execute(
@@ -206,7 +235,7 @@ final class RenewGraphSubscriptionJob implements ShouldQueue
                             ]),
                             'renewSubscription',
                         ),
-                        usageIdempotencyKey: 'provider_webhook_renew:'.$connection->id.':'.$subscription->id.':'.now()->format('YmdHi'),
+                        usageIdempotencyKey: 'provider_webhook_renew:'.$connection->id.':'.$subscription->id.':'.$renewalCycleToken,
                         provider: $provider,
                         requiredContractFqcn: SupportsWebhooksContract::class,
                     );
@@ -254,7 +283,13 @@ final class RenewGraphSubscriptionJob implements ShouldQueue
                                 ]),
                                 'subscribe',
                             ),
-                            usageIdempotencyKey: 'provider_webhook_subscribe:'.$connection->id.':'.$subscription->resource_type.':'.now()->format('YmdHi'),
+                            // Same deterministic cycle token as the renew
+                            // branch above (a distinct key PREFIX keeps
+                            // the two billable operations separate): the
+                            // 404-fallback subscribe is part of the SAME
+                            // logical renewal, so every retry of it must
+                            // collapse onto one reservation too.
+                            usageIdempotencyKey: 'provider_webhook_subscribe:'.$connection->id.':'.$subscription->resource_type.':'.$renewalCycleToken,
                             provider: $provider,
                             requiredContractFqcn: SupportsWebhooksContract::class,
                         );

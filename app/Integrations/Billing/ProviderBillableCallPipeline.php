@@ -14,8 +14,8 @@ use App\Integrations\Exceptions\ProviderDuplicateRequestInFlightException;
 use App\Integrations\Exceptions\ProviderHardLimitExceededException;
 use App\Integrations\Exceptions\ProviderKillSwitchActiveException;
 use App\Integrations\Exceptions\ProviderOptionalOperationSuspendedException;
-use App\Integrations\Exceptions\SanitizedProviderHttpException;
 use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Models\ProviderBillableCallReservation;
 use App\Integrations\Services\FinancialIntegrationAccessPolicyService;
 use App\Integrations\Services\ProviderTenantSafePolicyService;
 use App\Models\Firm;
@@ -24,6 +24,7 @@ use App\Services\PlaidEntitlementPolicyService;
 use App\Services\TimelineEventRecorder;
 use Closure;
 use RuntimeException;
+use Throwable;
 
 /**
  * ProviderBillableCallPipeline — the single, provider-agnostic entry
@@ -90,6 +91,27 @@ use RuntimeException;
  * from a real call — a cache hit returns a `ProviderBillableCallResult`
  * with `reservation: null` and a `servedFromCache()` outcome, so a
  * caller can always tell the two apart.
+ *
+ * RESERVATION-STATE GATE (steps 12b/12c, double-billing remediation —
+ * additive, the 17-step structure is unchanged). Step 12's `reserve()`
+ * has always been idempotent for the ledger ROW, but step 13 used to
+ * fire the REAL outbound call unconditionally, including when `reserve()`
+ * had merely SELECT-fallen-back onto a reservation an earlier attempt
+ * created. Combined with wall-clock-minute idempotency keys at the job
+ * call sites (now deterministic), a retried job could bill the same
+ * logical operation more than once. Step 12b now branches on whether
+ * `reserve()` INSERTed the row (`wasRecentlyCreated`) and, when it did
+ * not, on the existing row's status and `provider_call_started_at` —
+ * see `gateExistingReservation()` for the full decision table. A gated
+ * call returns a `ProviderBillableCallResult` carrying the EXISTING
+ * reservation and a `servedFromExistingReservation()` outcome, mirroring
+ * the cache-hit path's own distinguishability contract exactly (with
+ * `response: null`, because a reservation records what a call cost, never
+ * what it returned).
+ *
+ * Untouched by that remediation, deliberately: PerConnectionRateLimiter,
+ * the step 7 kill-switch/suspension checks, the step 10 cooldown, and the
+ * step 11 soft/hard usage limits are separate, already-correct layers.
  */
 final class ProviderBillableCallPipeline
 {
@@ -263,10 +285,53 @@ final class ProviderBillableCallPipeline
                 reservationReason: $confirmationReason,
             );
 
+            // STEP 12b — RESERVATION-STATE GATE (double-billing
+            // remediation; see this class's docblock, "Reservation-state
+            // gate"). `reserve()` is idempotent bookkeeping for the
+            // ledger ROW, but nothing here used to inspect whether it had
+            // INSERTed a fresh row or SELECT-fallen-back onto an existing
+            // one — so step 13 re-fired the REAL outbound call for a
+            // logical operation an earlier attempt may already have made
+            // and been billed for.
+            if (! $reservation->wasRecentlyCreated) {
+                $reservation = $this->gateExistingReservation(
+                    $firm, $connection, $actor, $providerKey, $classification,
+                    $reservation, $reservationTtlSeconds, $direction, $resourceType, $quantity,
+                );
+
+                if ($reservation->status !== ProviderBillableCallReservation::STATUS_RESERVED) {
+                    // (c)/(b-with-call-in-flight): a terminal or
+                    // genuinely-ambiguous prior outcome. Serve the
+                    // EXISTING outcome — never a fabricated fresh one —
+                    // and never call the provider again. Distinguishable
+                    // by the caller exactly the way step 8's cache hit
+                    // already is.
+                    $this->events->record($firm, 'provider_billing.call_served_from_existing_reservation', $reservation, $actor?->user, [
+                        'provider_key' => $providerKey->value,
+                        'capability' => $classification->capability(),
+                        'existing_status' => $reservation->status,
+                    ], independentOfAmbientTransaction: true);
+
+                    return new ProviderBillableCallResult(
+                        response: null,
+                        reservation: $reservation,
+                        outcome: ProviderNormalizedOutcome::servedFromExistingReservation(),
+                        softLimitExceeded: $softLimitExceeded,
+                    );
+                }
+            }
+
             $this->events->record($firm, 'provider_billing.call_reserved', $reservation, $actor?->user, [
                 'provider_key' => $providerKey->value,
                 'capability' => $classification->capability(),
             ], independentOfAmbientTransaction: true);
+
+            // STEP 12c — durably record outbound-call INTENT before the
+            // call can leave this process, so a crash from here onward is
+            // distinguishable (by a later attempt reaching step 12b) from
+            // a crash between step 12 and here. See the
+            // `provider_call_started_at` migration's docblock.
+            $reservation = $this->reservationService->markProviderCallStarted($firm, $reservation);
 
             // STEP 13 — execute through OutboundProviderHttpClient ->
             // ProviderRequestExecutor. $providerCall() is always,
@@ -274,12 +339,28 @@ final class ProviderBillableCallPipeline
             // boundary — this pipeline never calls Http:: or duplicates
             // anything that layer or the executor beneath it already
             // does.
+            //
+            // WIDENED (double-billing remediation): this catch used to be
+            // `catch (SanitizedProviderHttpException)` only, so ANY other
+            // throwable escaping $providerCall() propagated straight out
+            // of execute(), skipping steps 14-17 entirely and stranding
+            // the reservation in `reserved` until its TTL with no usage
+            // record ever written. Every Throwable is now captured so
+            // finalize() always runs; the ORIGINAL throwable is rethrown
+            // unchanged below (step 17), so a caller's own
+            // category-branching and its queue worker's retry eligibility
+            // are both preserved exactly as before — nothing is swallowed
+            // and nothing transient is converted into a permanent
+            // failure. Classification lives in
+            // ProviderCallOutcomeNormalizer (extended, not replaced),
+            // which decides purely from the exception's class and never
+            // reads its message, so redaction is preserved.
             $response = null;
             $caughtException = null;
 
             try {
                 $response = $providerCall();
-            } catch (SanitizedProviderHttpException $e) {
+            } catch (Throwable $e) {
                 $caughtException = $e;
             }
 
@@ -335,6 +416,131 @@ final class ProviderBillableCallPipeline
         } finally {
             $lock->release();
         }
+    }
+
+    /**
+     * STEP 12b's decision table for a reservation `reserve()` did NOT
+     * create — i.e. some earlier attempt already reserved this exact
+     * logical operation under the same (now deterministic) idempotency
+     * key. Returns a reservation in `reserved` status when, and only
+     * when, it is safe for the caller to proceed to step 13; returns it
+     * in its existing terminal status when the real call must NOT be
+     * re-fired; throws when another attempt may be live right now.
+     *
+     *   (a) freshly INSERTed              -> never reaches this method.
+     *   (b) `reserved`, TTL NOT elapsed   -> another worker is very
+     *       likely mid-call for this exact operation right now. No
+     *       ownership/leasing column exists that could prove otherwise,
+     *       and inventing one would not help (a lease token cannot
+     *       distinguish "my own crashed attempt" from "a peer's live
+     *       attempt" any better than the TTL already does). SAFEST
+     *       POLICY: refuse, by throwing the existing
+     *       ProviderDuplicateRequestInFlightException — the same signal
+     *       step 9 already raises for a concurrent duplicate. This does
+     *       NOT strand the operation: the caller's own retry/backoff
+     *       re-enters later, by which time the row is either finalized
+     *       (case c) or stale (case b-stale/d).
+     *   (b-stale) `reserved`, TTL elapsed, `provider_call_started_at`
+     *       NULL -> crashed between reserve and the call; the provider
+     *       provably was never contacted. Re-claim and proceed.
+     *   (b-stale) `reserved`, TTL elapsed, call HAD started -> genuinely
+     *       ambiguous. Park it terminally as `finalized_uncertain` (so it
+     *       stops sitting in `reserved` forever, and so the anomaly/
+     *       reconciliation surface sees it) and refuse to re-fire.
+     *   (c) `finalized_billable` / `finalized_uncertain` -> the provider
+     *       either definitely did, or may have done, the billable work.
+     *       NEVER re-fire; serve the existing outcome.
+     *   (c') `finalized_non_billable` -> DELIBERATE, DISCLOSED
+     *       REFINEMENT of "no terminal status may re-fire". This status
+     *       is positive knowledge that the provider REJECTED the request
+     *       before doing any billable work (authentication_failed,
+     *       validation_failed, rate_limited, a 5xx provider_rejected,
+     *       ...) and that no `integration_usage_records` row was written.
+     *       Re-firing therefore cannot double-charge, while refusing
+     *       would permanently swallow exactly the transient failures a
+     *       queue retry exists to recover from — a regression the
+     *       deterministic-key change would otherwise introduce, since the
+     *       unique index forbids simply reserving again. Re-claim and
+     *       proceed.
+     *   (d) `expired` -> same two sub-cases as (b-stale), decided by
+     *       `provider_call_started_at`. Note this pipeline decides
+     *       staleness from `expires_at` itself and never waits for
+     *       ExpireStaleProviderReservationsJob: that job is a coarse,
+     *       WithoutOverlapping-guarded sweep with no "runs before the
+     *       next retry" guarantee, so a `reserved`-but-past-TTL row must
+     *       be treated as effectively expired here.
+     *
+     * Every re-claim goes through the single-winner compare-and-set in
+     * ProviderUsageReservationService::reclaim(); losing that race is
+     * treated exactly like case (b).
+     */
+    private function gateExistingReservation(
+        Firm $firm,
+        FirmIntegration $connection,
+        ?FirmUser $actor,
+        ProviderKey $providerKey,
+        ProviderBillingClassification $classification,
+        ProviderBillableCallReservation $reservation,
+        int $reservationTtlSeconds,
+        SyncDirection $direction,
+        ?ResourceType $resourceType,
+        int $quantity,
+    ): ProviderBillableCallReservation {
+        $status = (string) $reservation->status;
+
+        // (b) — a live reservation held by someone else.
+        if ($status === ProviderBillableCallReservation::STATUS_RESERVED && ! $reservation->isPastTtl()) {
+            $this->auditDenied($firm, $actor, 'provider_billing.reservation_in_flight_denied', $classification, [
+                'provider_key' => $providerKey->value,
+                'firm_integration_id' => $connection->id,
+            ]);
+
+            throw new ProviderDuplicateRequestInFlightException;
+        }
+
+        $reclaimable = match ($status) {
+            ProviderBillableCallReservation::STATUS_RESERVED,
+            ProviderBillableCallReservation::STATUS_EXPIRED => ! $reservation->providerCallStarted(),
+            ProviderBillableCallReservation::STATUS_FINALIZED_NON_BILLABLE => true,
+            default => false,
+        };
+
+        if ($reclaimable) {
+            $reclaimed = $this->reservationService->reclaim($firm, $reservation, $reservationTtlSeconds);
+
+            if ($reclaimed === null) {
+                $this->auditDenied($firm, $actor, 'provider_billing.reservation_in_flight_denied', $classification, [
+                    'provider_key' => $providerKey->value,
+                    'firm_integration_id' => $connection->id,
+                    'lost_reclaim_race_from_status' => $status,
+                ]);
+
+                throw new ProviderDuplicateRequestInFlightException;
+            }
+
+            $this->events->record($firm, 'provider_billing.reservation_reclaimed', $reclaimed, $actor?->user, [
+                'provider_key' => $providerKey->value,
+                'capability' => $classification->capability(),
+                'previous_status' => $status,
+            ], independentOfAmbientTransaction: true);
+
+            return $reclaimed;
+        }
+
+        if ($status === ProviderBillableCallReservation::STATUS_RESERVED) {
+            // (b-stale) with a call that had already started — park it
+            // terminally rather than leaving it stuck in `reserved`.
+            return $this->reservationService->finalize(
+                $firm,
+                $reservation,
+                ProviderNormalizedOutcome::uncertain('abandoned_attempt'),
+                $direction,
+                $resourceType,
+                $quantity,
+            );
+        }
+
+        return $reservation;
     }
 
     /**

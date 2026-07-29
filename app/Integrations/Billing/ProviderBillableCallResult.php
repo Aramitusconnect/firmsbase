@@ -16,7 +16,19 @@ use App\Integrations\Models\ProviderBillableCallReservation;
  *
  * `$reservation` is null only for a served-from-cache response (pipeline
  * step 8 short-circuit) — no reservation is ever created for a call that
- * never reached the provider. `$softLimitExceeded` mirrors step 11's own
+ * never reached the provider.
+ *
+ * `$response` is null for BOTH short-circuits that never reached the
+ * provider — the step 8 cache hit and the step 12b
+ * served-from-existing-reservation gate (double-billing remediation).
+ * Callers distinguish "null because nothing was called" from "null
+ * because the provider returned null" via
+ * `$outcome->servedWithoutProviderCall()`; for the reservation gate
+ * specifically, `$reservation->status` carries the EXISTING recorded
+ * outcome (`finalized_billable`, `finalized_uncertain`, `expired`) — no
+ * fresh outcome is ever fabricated to stand in for a prior attempt's.
+ *
+ * `$softLimitExceeded` mirrors step 11's own
  * "proceeds, but flags" behavior — a soft-limit breach never blocks the
  * call, it only surfaces here for the caller's own audit/UI purposes.
  *

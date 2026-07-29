@@ -431,7 +431,32 @@ final class PullSyncJob implements ShouldQueue
                         direction: SyncDirection::Inbound,
                         resourceType: ResourceType::from($this->resourceType),
                         providerCall: fn () => $httpClient->execute(fn () => $provider->pull($providerContext, $this->resourceType, $pageCursor), 'pull'),
-                        usageIdempotencyKey: 'plaid_pull:'.$connection->id.':'.$this->resourceType.':'.($pageCursor ?? 'initial').':'.now()->format('YmdHi'),
+                        // DETERMINISTIC (double-billing remediation).
+                        // This used to end in `now()->format('YmdHi')`,
+                        // so a re-execution of the same logical page
+                        // fetch that crossed a minute boundary produced a
+                        // DIFFERENT key, reserved a brand-new row rather
+                        // than colliding, and billed the provider call
+                        // twice. Lower-severity than
+                        // RenewGraphSubscriptionJob's identical weakness
+                        // (this job is $tries = 1, so Laravel never
+                        // auto-retries it) but fixed for the same reason:
+                        // a crashed/redelivered job, or any future
+                        // increase of $tries, hits it.
+                        //
+                        // The replacement identifies THIS specific page
+                        // of THIS specific sync attempt from durable
+                        // state that already exists: the sync run's id,
+                        // the cursor's current version (bumped by
+                        // SyncCursorService::invalidate(), so a post-410
+                        // repair run is correctly a different logical
+                        // operation), and the page cursor being
+                        // requested. No wall clock, no new column.
+                        usageIdempotencyKey: 'plaid_pull:'.$connection->id.':'.$this->resourceType.':'.hash('sha256', implode('|', [
+                            (string) $run->id,
+                            (string) $cursor->cursor_version,
+                            (string) ($pageCursor ?? 'initial'),
+                        ])),
                         provider: $provider,
                         requiredContractFqcn: SupportsPullSyncContract::class,
                     );
