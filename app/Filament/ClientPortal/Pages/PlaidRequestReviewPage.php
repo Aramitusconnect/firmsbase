@@ -19,6 +19,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 
 /**
@@ -52,7 +53,7 @@ class PlaidRequestReviewPage extends Page implements HasTable
     public function table(Table $table): Table
     {
         return $table
-            ->records(function (): \Illuminate\Support\Collection {
+            ->records(function (): Collection {
                 /** @var ClientPortalUser|null $portalUser */
                 $portalUser = Auth::guard('client')->user();
 

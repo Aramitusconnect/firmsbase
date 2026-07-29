@@ -74,7 +74,7 @@ final class ProviderUsageLimitEnforcementService
     ): int {
         $windowStart = now()->subSeconds($policy->limitWindowSeconds);
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $connection, $providerKey, $classification, $windowStart) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $connection, $providerKey, $classification, $windowStart) {
             $finalizedTotal = (int) DB::table('integration_usage_records')
                 ->where('firm_id', $firm->id)
                 ->where('firm_integration_id', $connection->id)

@@ -7,15 +7,14 @@ namespace Tests\Feature\FinancialEvidence;
 use App\Enums\FirmUserRole;
 use App\Integrations\Models\FirmIntegration;
 use App\Livewire\FinancialEvidence\FinancialEvidenceReportsPanel;
+use App\Models\Client;
 use App\Models\FinancialEvidenceClientConsent;
 use App\Models\FinancialEvidenceSnapshot;
-use App\Models\FinancialEvidenceTransaction;
-use App\Models\FinancialEvidenceTransactionReview;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\Matter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Tests\TestCase;
 
 /**
@@ -189,7 +188,7 @@ class FinancialEvidenceReportsPanelExportTest extends TestCase
             $connection = FirmIntegration::factory()->forFirm($firm)->create();
             $firmUser = FirmUser::factory()->role(FirmUserRole::Attorney)->create(['firm_id' => $firm->id]);
 
-            $client = \App\Models\Client::factory()->forFirm($firm)->create();
+            $client = Client::factory()->forFirm($firm)->create();
 
             $consent = FinancialEvidenceClientConsent::query()->create([
                 'firm_id' => $firm->id,
@@ -234,7 +233,7 @@ class FinancialEvidenceReportsPanelExportTest extends TestCase
 
     private function streamedContent(mixed $response): string
     {
-        $this->assertInstanceOf(\Symfony\Component\HttpFoundation\StreamedResponse::class, $response);
+        $this->assertInstanceOf(StreamedResponse::class, $response);
 
         ob_start();
         $response->sendContent();

@@ -36,8 +36,8 @@ class ProviderRateCardResolverTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->resolver = new ProviderRateCardResolver();
-        $this->classifier = new ProviderBillingClassifier();
+        $this->resolver = new ProviderRateCardResolver;
+        $this->classifier = new ProviderBillingClassifier;
     }
 
     private function rateCardRow(array $overrides = []): ProviderRateCardEntry

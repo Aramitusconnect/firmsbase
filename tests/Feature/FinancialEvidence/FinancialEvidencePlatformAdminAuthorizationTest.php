@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\FinancialEvidence;
 
 use App\Enums\PlatformRoleCode;
-use App\Filament\Resources\PlaidItemOversightResource\Pages\ListPlaidItemOversight;
+use App\Filament\Resources\ProviderKillSwitchResource;
 use App\Filament\Resources\ProviderKillSwitchResource\Pages\ListProviderKillSwitches;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\FirmIntegration;
@@ -133,7 +133,7 @@ class FinancialEvidencePlatformAdminAuthorizationTest extends TestCase
         app(PlatformRoleService::class)->grant($admin, PlatformRoleCode::ReadOnlyAuditor);
         $this->actingAs($admin, 'platform_admin');
 
-        $this->assertFalse(\App\Filament\Resources\ProviderKillSwitchResource::canAccess());
+        $this->assertFalse(ProviderKillSwitchResource::canAccess());
     }
 
     // ------------------------------------------------------------
@@ -167,10 +167,10 @@ class FinancialEvidencePlatformAdminAuthorizationTest extends TestCase
         // Filament class + both oversight read services for a direct
         // reference to any financial_evidence_* fact/snapshot table.
         $files = array_merge(
-            glob(app_path('Filament/Resources')."/PlaidItemOversightResource.php") ?: [],
-            glob(app_path('Filament/Resources/PlaidItemOversightResource')."/**/*.php") ?: [],
-            glob(app_path('Filament/Pages')."/Plaid*.php") ?: [],
-            glob(app_path('Integrations/Services')."/PlatformPlaid*.php") ?: [],
+            glob(app_path('Filament/Resources').'/PlaidItemOversightResource.php') ?: [],
+            glob(app_path('Filament/Resources/PlaidItemOversightResource').'/**/*.php') ?: [],
+            glob(app_path('Filament/Pages').'/Plaid*.php') ?: [],
+            glob(app_path('Integrations/Services').'/PlatformPlaid*.php') ?: [],
         );
 
         $this->assertNotEmpty($files);

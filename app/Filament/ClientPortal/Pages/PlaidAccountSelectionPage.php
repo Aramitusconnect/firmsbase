@@ -4,24 +4,20 @@ declare(strict_types=1);
 
 namespace App\Filament\ClientPortal\Pages;
 
-use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\ProviderKey;
-use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationProvider;
 use App\Integrations\Services\ProviderConnectionService;
 use App\Models\ClientPortalUser;
-use App\Models\FinancialEvidenceBankAccount;
 use App\Models\FinancialEvidenceMatterRequest;
 use App\Models\Matter;
 use App\Services\ClientPortalMatterAccessPolicyService;
 use App\Services\TenantContextService;
 use BackedEnum;
-use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Text;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
+use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Url;
 use RuntimeException;
@@ -129,7 +125,7 @@ class PlaidAccountSelectionPage extends Page
         return $matterModel;
     }
 
-    public function render(): \Illuminate\Contracts\View\View
+    public function render(): View
     {
         return view('filament-client-portal.plaid-link', [
             'linkToken' => $this->linkToken,

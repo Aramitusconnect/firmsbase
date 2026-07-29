@@ -12,6 +12,7 @@ use App\Integrations\Enums\ResourceType;
 use App\Integrations\Enums\SyncDirection;
 use App\Integrations\Exceptions\SanitizedProviderHttpException;
 use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Models\IntegrationUsageRecord;
 use App\Integrations\Models\ProviderBillableCallReservation;
 use App\Integrations\Models\ProviderRateCardEntry;
 use App\Integrations\Services\IntegrationUsageRecorderService;
@@ -43,9 +44,9 @@ class ProviderUsageReservationServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->reservations = new ProviderUsageReservationService(new IntegrationUsageRecorderService());
-        $this->classifier = new ProviderBillingClassifier();
-        $this->normalizer = new ProviderCallOutcomeNormalizer();
+        $this->reservations = new ProviderUsageReservationService(new IntegrationUsageRecorderService);
+        $this->classifier = new ProviderBillingClassifier;
+        $this->normalizer = new ProviderCallOutcomeNormalizer;
     }
 
     private function connection(Firm $firm): FirmIntegration
@@ -138,7 +139,7 @@ class ProviderUsageReservationServiceTest extends TestCase
         $this->assertNotNull($finalized->finalized_at);
         $this->assertNotNull($finalized->usage_record_id);
 
-        $usageRowExists = $this->runWithFirmContext($firm, fn () => \App\Integrations\Models\IntegrationUsageRecord::query()
+        $usageRowExists = $this->runWithFirmContext($firm, fn () => IntegrationUsageRecord::query()
             ->where('id', $finalized->usage_record_id)->exists());
         $this->assertTrue($usageRowExists);
     }

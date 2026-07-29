@@ -22,6 +22,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
 
@@ -57,7 +58,7 @@ class ReconciliationCandidatesQueuePanel extends Component implements HasActions
     public function table(Table $table): Table
     {
         return $table
-            ->records(function (): \Illuminate\Support\Collection {
+            ->records(function (): Collection {
                 $matter = $this->matter();
 
                 return (new TenantContextService)->runWithFirmContext($matter->firm_id, function () use ($matter) {

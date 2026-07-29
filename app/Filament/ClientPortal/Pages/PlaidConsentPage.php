@@ -17,6 +17,7 @@ use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\UnorderedList;
 use Filament\Schemas\Schema;
@@ -81,7 +82,7 @@ class PlaidConsentPage extends Page
                 ->schema([
                     UnorderedList::make($labels === [] ? ['No specific products listed'] : $labels),
                 ]),
-            \Filament\Schemas\Components\Actions::make([
+            Actions::make([
                 Action::make('consent')->label('I Consent')->color('success')->action('grantConsent'),
                 Action::make('decline')->label('Decline')->color('danger')->requiresConfirmation()->action('declineConsent'),
             ]),

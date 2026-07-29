@@ -31,7 +31,7 @@ class ProviderBillingClassifierTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->classifier = new ProviderBillingClassifier();
+        $this->classifier = new ProviderBillingClassifier;
     }
 
     public function test_classify_returns_a_billing_classification_value_object(): void

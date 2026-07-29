@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Feature\FinancialEvidence;
 
+use App\Enums\TrustLedgerEntryType;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Services\FinancialEvidenceDuplicateTransferDetectionService;
 use App\Integrations\Services\FinancialEvidenceLargeDepositDetectionService;
-use App\Integrations\Services\FinancialEvidenceMatterScopeService;
 use App\Integrations\Services\FinancialEvidenceReconciliationCandidateDetectionService;
 use App\Integrations\Services\FinancialEvidenceRecurringObligationDetectionService;
 use App\Models\FinancialEvidenceBankAccount;
@@ -19,10 +19,11 @@ use App\Models\FinancialEvidenceReconciliationCandidate;
 use App\Models\FinancialEvidenceTransaction;
 use App\Models\Firm;
 use App\Models\Matter;
-use App\Models\TrustLedgerEntry;
-use App\Models\TrustLedger;
 use App\Models\TrustAccount;
+use App\Models\TrustLedger;
+use App\Models\TrustLedgerEntry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -183,7 +184,7 @@ class FinancialEvidenceDetectionServicesTest extends TestCase
             'firm_id' => $firm->id,
             'trust_ledger_id' => $ledger->id,
             'matter_id' => $matter->id,
-            'entry_type' => \App\Enums\TrustLedgerEntryType::Deposit,
+            'entry_type' => TrustLedgerEntryType::Deposit,
             'amount_cents' => 42_000,
             'posted_at' => now(),
         ]));
@@ -318,7 +319,7 @@ class FinancialEvidenceDetectionServicesTest extends TestCase
         });
     }
 
-    private function makeTransaction(Firm $firm, FinancialEvidenceBankAccount $account, int $amountCents, \Illuminate\Support\Carbon $date, ?string $merchant = null): FinancialEvidenceTransaction
+    private function makeTransaction(Firm $firm, FinancialEvidenceBankAccount $account, int $amountCents, Carbon $date, ?string $merchant = null): FinancialEvidenceTransaction
     {
         return FinancialEvidenceTransaction::query()->create([
             'firm_id' => $firm->id,

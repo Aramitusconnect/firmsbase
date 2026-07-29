@@ -5,10 +5,9 @@ declare(strict_types=1);
 namespace App\Filament\Firm\Resources\PlaidItemResource\RelationManagers;
 
 use App\Integrations\Enums\FinancialAccountClassification;
+use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Services\FinancialAccountReclassificationService;
-use App\Integrations\Services\FinancialIntegrationAccessPolicyService;
 use App\Models\FinancialEvidenceBankAccount;
-use App\Services\TenantContextService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -17,7 +16,6 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Auth;
@@ -42,7 +40,7 @@ class AccountsRelationManager extends RelationManager
 
     public function getRelationship(): Relation|Builder
     {
-        /** @var \App\Integrations\Models\FirmIntegration $owner */
+        /** @var FirmIntegration $owner */
         $owner = $this->getOwnerRecord();
 
         return new HasMany(

@@ -39,8 +39,8 @@ class ProviderRequestDeduplicationServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->dedup = new ProviderRequestDeduplicationService();
-        $this->classifier = new ProviderBillingClassifier();
+        $this->dedup = new ProviderRequestDeduplicationService;
+        $this->classifier = new ProviderBillingClassifier;
         Cache::flush();
     }
 

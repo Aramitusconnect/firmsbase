@@ -47,7 +47,7 @@ final class InboundWebhookSignatureVerifierTest extends TestCase
 
     private function verifier(): InboundWebhookSignatureVerifier
     {
-        return new InboundWebhookSignatureVerifier();
+        return new InboundWebhookSignatureVerifier;
     }
 
     private function sign(string $secret, string $timestamp, string $body): string

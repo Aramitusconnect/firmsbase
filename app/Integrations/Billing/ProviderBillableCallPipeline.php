@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Integrations\Billing;
 
+use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Enums\ResourceType;
 use App\Integrations\Enums\SyncDirection;
@@ -14,7 +15,6 @@ use App\Integrations\Exceptions\ProviderHardLimitExceededException;
 use App\Integrations\Exceptions\ProviderKillSwitchActiveException;
 use App\Integrations\Exceptions\ProviderOptionalOperationSuspendedException;
 use App\Integrations\Exceptions\SanitizedProviderHttpException;
-use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Services\FinancialIntegrationAccessPolicyService;
 use App\Integrations\Services\ProviderTenantSafePolicyService;
@@ -147,7 +147,7 @@ final class ProviderBillableCallPipeline
         if ($provider !== null && $requiredContractFqcn !== null && interface_exists($requiredContractFqcn)) {
             if (! $provider instanceof $requiredContractFqcn) {
                 throw new RuntimeException(
-                    "Provider [".$provider::class."] does not implement the required capability contract [{$requiredContractFqcn}]."
+                    'Provider ['.$provider::class."] does not implement the required capability contract [{$requiredContractFqcn}]."
                 );
             }
         }

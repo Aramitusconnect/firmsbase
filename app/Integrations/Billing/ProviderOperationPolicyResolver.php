@@ -46,7 +46,7 @@ final class ProviderOperationPolicyResolver
     ): ProviderOperationPolicy {
         $this->assertNoPlatformKillSwitchActive($providerKey, $classification);
 
-        [$firmPolicy, $defaultPolicy] = (new TenantContextService())->runWithFirmContext($firm, function () use ($providerKey, $classification, $environment, $firm) {
+        [$firmPolicy, $defaultPolicy] = (new TenantContextService)->runWithFirmContext($firm, function () use ($providerKey, $classification, $environment, $firm) {
             $firmPolicy = ProviderFirmOperationPolicy::query()
                 ->where('firm_id', $firm->id)
                 ->where('provider_key', $providerKey->value)

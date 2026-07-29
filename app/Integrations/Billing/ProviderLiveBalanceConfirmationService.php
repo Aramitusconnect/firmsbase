@@ -6,7 +6,6 @@ namespace App\Integrations\Billing;
 
 use App\Integrations\Contracts\SupportsBalanceContract;
 use App\Integrations\Enums\ProviderKey;
-use App\Integrations\Enums\ResourceType;
 use App\Integrations\Enums\SyncDirection;
 use App\Integrations\Exceptions\ProviderInvalidOrExpiredConfirmationTokenException;
 use App\Integrations\Models\FirmIntegration;
@@ -181,7 +180,7 @@ final class ProviderLiveBalanceConfirmationService
      */
     private function persistBalanceSnapshot(Firm $firm, FirmIntegration $connection, string $accountId, array $balancePayload): void
     {
-        (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $connection, $accountId, $balancePayload) {
+        (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $connection, $accountId, $balancePayload) {
             ProviderBalanceSnapshot::query()->updateOrCreate(
                 [
                     'firm_integration_id' => $connection->id,
@@ -200,7 +199,7 @@ final class ProviderLiveBalanceConfirmationService
 
     private function latestSnapshot(Firm $firm, FirmIntegration $connection, string $accountId): ?ProviderBalanceSnapshot
     {
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($connection, $accountId) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($connection, $accountId) {
             return ProviderBalanceSnapshot::query()
                 ->where('firm_integration_id', $connection->id)
                 ->where('account_id', $accountId)

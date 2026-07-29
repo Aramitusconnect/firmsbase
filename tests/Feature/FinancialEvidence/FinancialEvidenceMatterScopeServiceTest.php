@@ -90,7 +90,7 @@ class FinancialEvidenceMatterScopeServiceTest extends TestCase
 
         $connectionNew = $this->runWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
 
-        $this->runWithFirmContext($firm, function () use ($firm, $matter, $connectionOld, $authorizationOld, $connectionNew) {
+        $this->runWithFirmContext($firm, function () use ($firm, $matter, $authorizationOld, $connectionNew) {
             $authorizationOld->update(['superseded_at' => now()]);
 
             FinancialEvidenceMatterAuthorization::query()->create([

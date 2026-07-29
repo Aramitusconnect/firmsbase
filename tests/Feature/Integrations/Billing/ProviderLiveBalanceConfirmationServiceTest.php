@@ -12,6 +12,7 @@ use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Exceptions\ProviderInvalidOrExpiredConfirmationTokenException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\ProviderBalanceSnapshot;
+use App\Integrations\Models\ProviderBillableCallReservation;
 use App\Integrations\Models\ProviderOperationDefaultPolicy;
 use App\Integrations\Models\ProviderRateCardEntry;
 use App\Models\Firm;
@@ -110,7 +111,8 @@ class ProviderLiveBalanceConfirmationServiceTest extends TestCase
 
     private function fakeBalanceProvider(array $payload = ['available_cents' => 15000, 'current_cents' => 15500, 'iso_currency_code' => 'usd']): SupportsBalanceContract
     {
-        return new class($payload) implements SupportsBalanceContract {
+        return new class($payload) implements SupportsBalanceContract
+        {
             public function __construct(private readonly array $payload) {}
 
             public function fetchBalance(FirmIntegration $connection, string $accountId, array $context): array
@@ -221,7 +223,7 @@ class ProviderLiveBalanceConfirmationServiceTest extends TestCase
 
         $this->service->prepare(ProviderKey::Plaid, $connection, $firm, 'account-1', 'production', $actor);
 
-        $reservationCount = $this->runWithFirmContext($firm, fn () => \App\Integrations\Models\ProviderBillableCallReservation::query()->count());
+        $reservationCount = $this->runWithFirmContext($firm, fn () => ProviderBillableCallReservation::query()->count());
         $this->assertSame(0, $reservationCount);
     }
 

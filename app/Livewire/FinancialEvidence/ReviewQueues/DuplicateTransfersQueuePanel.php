@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Livewire\FinancialEvidence\ReviewQueues;
 
 use App\Integrations\Enums\FinancialEvidenceProvenance;
-use App\Integrations\Services\FinancialEvidenceDuplicateTransferDetectionService;
 use App\Livewire\FinancialEvidence\Concerns\GatesFinancialEvidenceMatterAccess;
 use App\Models\FinancialEvidenceDuplicateTransferFlag;
 use App\Services\TenantContextService;
@@ -21,6 +20,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
 
@@ -50,7 +50,7 @@ class DuplicateTransfersQueuePanel extends Component implements HasActions, HasS
     public function table(Table $table): Table
     {
         return $table
-            ->records(function (): \Illuminate\Support\Collection {
+            ->records(function (): Collection {
                 $matter = $this->matter();
 
                 return (new TenantContextService)->runWithFirmContext($matter->firm_id, fn () => FinancialEvidenceDuplicateTransferFlag::query()

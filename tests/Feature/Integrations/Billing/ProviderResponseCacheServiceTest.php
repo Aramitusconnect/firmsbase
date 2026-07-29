@@ -32,8 +32,8 @@ class ProviderResponseCacheServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->cache = new ProviderResponseCacheService();
-        $this->classifier = new ProviderBillingClassifier();
+        $this->cache = new ProviderResponseCacheService;
+        $this->classifier = new ProviderBillingClassifier;
         Cache::flush();
     }
 

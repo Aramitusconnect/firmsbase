@@ -40,11 +40,11 @@ class FinancialEvidenceTrustLedgerFirewallTest extends TestCase
     private function financialEvidenceApplicationFiles(): array
     {
         return array_merge(
-            glob(app_path('Integrations/Services')."/FinancialEvidence*.php") ?: [],
-            glob(app_path('Integrations/Services')."/FinancialAccountReclassificationService.php") ?: [],
-            glob(app_path('Livewire/FinancialEvidence')."/*.php") ?: [],
-            glob(app_path('Livewire/FinancialEvidence/ReviewQueues')."/*.php") ?: [],
-            glob(app_path('Livewire/FinancialEvidence/Concerns')."/*.php") ?: [],
+            glob(app_path('Integrations/Services').'/FinancialEvidence*.php') ?: [],
+            glob(app_path('Integrations/Services').'/FinancialAccountReclassificationService.php') ?: [],
+            glob(app_path('Livewire/FinancialEvidence').'/*.php') ?: [],
+            glob(app_path('Livewire/FinancialEvidence/ReviewQueues').'/*.php') ?: [],
+            glob(app_path('Livewire/FinancialEvidence/Concerns').'/*.php') ?: [],
         );
     }
 

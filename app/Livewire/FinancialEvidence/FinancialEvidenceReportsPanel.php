@@ -22,6 +22,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use League\Csv\Writer;
 use Livewire\Component;
@@ -66,7 +67,7 @@ class FinancialEvidenceReportsPanel extends Component implements HasActions, Has
     public function table(Table $table): Table
     {
         return $table
-            ->records(function (): \Illuminate\Support\Collection {
+            ->records(function (): Collection {
                 $matter = $this->matter();
 
                 return (new TenantContextService)->runWithFirmContext($matter->firm_id, fn () => FinancialEvidenceSnapshot::query()

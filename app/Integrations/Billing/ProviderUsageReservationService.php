@@ -54,7 +54,7 @@ final class ProviderUsageReservationService
         ?string $correlationId = null,
         ?string $reservationReason = null,
     ): ProviderBillableCallReservation {
-        return (new TenantContextService())->runWithFirmContext($firm, function () use (
+        return (new TenantContextService)->runWithFirmContext($firm, function () use (
             $firm, $connection, $providerKey, $classification, $environment, $rate, $idempotencyKey,
             $quantity, $reservationTtlSeconds, $reservedBy, $correlationId, $reservationReason,
         ) {
@@ -104,7 +104,7 @@ final class ProviderUsageReservationService
         ?ResourceType $resourceType,
         int $usageQuantity = 1,
     ): ProviderBillableCallReservation {
-        return (new TenantContextService())->runWithFirmContext($firm, function () use (
+        return (new TenantContextService)->runWithFirmContext($firm, function () use (
             $firm, $reservation, $outcome, $direction, $resourceType, $usageQuantity,
         ) {
             $status = match (true) {

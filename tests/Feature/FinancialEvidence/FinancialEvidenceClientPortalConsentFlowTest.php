@@ -14,6 +14,7 @@ use App\Models\ClientPortalUser;
 use App\Models\FinancialEvidenceClientConsent;
 use App\Models\FinancialEvidenceMatterRequest;
 use App\Models\Firm;
+use App\Models\FirmUser;
 use App\Models\Matter;
 use App\Services\ClientPortalMatterAccessPolicyService;
 use Filament\Facades\Filament;
@@ -184,7 +185,7 @@ class FinancialEvidenceClientPortalConsentFlowTest extends TestCase
             $plaidProvider = IntegrationProvider::query()->where('code', ProviderKey::Plaid->value)->first();
             $connection = FirmIntegration::factory()->forFirm($firm)->forProvider($plaidProvider)->create();
 
-            $requestedBy = \App\Models\FirmUser::factory()->create(['firm_id' => $firm->id]);
+            $requestedBy = FirmUser::factory()->create(['firm_id' => $firm->id]);
 
             $matterRequest = FinancialEvidenceMatterRequest::query()->create([
                 'firm_id' => $firm->id,

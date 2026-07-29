@@ -39,8 +39,8 @@ class ProviderUsageLimitEnforcementServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new ProviderUsageLimitEnforcementService();
-        $this->classifier = new ProviderBillingClassifier();
+        $this->service = new ProviderUsageLimitEnforcementService;
+        $this->classifier = new ProviderBillingClassifier;
     }
 
     private function connection(Firm $firm): FirmIntegration
@@ -69,7 +69,7 @@ class ProviderUsageLimitEnforcementServiceTest extends TestCase
 
     private function finalizedUsage(Firm $firm, FirmIntegration $connection, int $quantity = 1): void
     {
-        $this->createWithFirmContext($firm, fn () => (new IntegrationUsageRecorderService())->recordOnce(
+        $this->createWithFirmContext($firm, fn () => (new IntegrationUsageRecorderService)->recordOnce(
             firmId: $firm->id,
             firmIntegrationId: $connection->id,
             providerKey: ProviderKey::Plaid->value,
@@ -174,7 +174,7 @@ class ProviderUsageLimitEnforcementServiceTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $connection = $this->connection($firm);
-        $this->createWithFirmContext($firm, fn () => (new IntegrationUsageRecorderService())->recordOnce(
+        $this->createWithFirmContext($firm, fn () => (new IntegrationUsageRecorderService)->recordOnce(
             firmId: $firm->id,
             firmIntegrationId: $connection->id,
             providerKey: ProviderKey::Plaid->value,
@@ -217,7 +217,7 @@ class ProviderUsageLimitEnforcementServiceTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $connection = $this->connection($firm);
-        $this->createWithFirmContext($firm, fn () => (new IntegrationUsageRecorderService())->recordOnce(
+        $this->createWithFirmContext($firm, fn () => (new IntegrationUsageRecorderService)->recordOnce(
             firmId: $firm->id,
             firmIntegrationId: $connection->id,
             providerKey: ProviderKey::Plaid->value,

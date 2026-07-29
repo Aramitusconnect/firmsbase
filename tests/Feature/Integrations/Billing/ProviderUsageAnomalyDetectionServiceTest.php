@@ -15,7 +15,9 @@ use App\Integrations\Services\ProviderUsageAnomalyDetectionService;
 use App\Jobs\DetectProviderUsageAnomaliesJob;
 use App\Models\Firm;
 use App\Models\TimelineEvent;
+use App\Services\TimelineEventRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -41,7 +43,7 @@ class ProviderUsageAnomalyDetectionServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new ProviderUsageAnomalyDetectionService();
+        $this->service = new ProviderUsageAnomalyDetectionService;
     }
 
     /**
@@ -102,7 +104,7 @@ class ProviderUsageAnomalyDetectionServiceTest extends TestCase
 
     private function recordUsage(Firm $firm, FirmIntegration $connection, \DateTimeInterface $occurredAt, int $quantity = 1): void
     {
-        $this->createWithFirmContext($firm, fn () => (new IntegrationUsageRecorderService())->recordOnce(
+        $this->createWithFirmContext($firm, fn () => (new IntegrationUsageRecorderService)->recordOnce(
             firmId: $firm->id,
             firmIntegrationId: $connection->id,
             providerKey: ProviderKey::Plaid->value,
@@ -113,7 +115,7 @@ class ProviderUsageAnomalyDetectionServiceTest extends TestCase
             unit: 'request',
             outcome: 'success',
             idempotencyKey: (string) Str::uuid7(),
-            occurredAt: \Illuminate\Support\Carbon::instance($occurredAt),
+            occurredAt: Carbon::instance($occurredAt),
             quantity: $quantity,
         ));
     }
@@ -200,7 +202,7 @@ class ProviderUsageAnomalyDetectionServiceTest extends TestCase
         $connection = $this->connection($firm);
         $windowEnd = now();
 
-        $this->createWithFirmContext($firm, fn () => (new IntegrationUsageRecorderService())->recordOnce(
+        $this->createWithFirmContext($firm, fn () => (new IntegrationUsageRecorderService)->recordOnce(
             firmId: $firm->id,
             firmIntegrationId: $connection->id,
             providerKey: ProviderKey::Plaid->value,
@@ -235,9 +237,9 @@ class ProviderUsageAnomalyDetectionServiceTest extends TestCase
         }
         $this->recordUsage($firm, $connection, $windowEnd->clone()->subHours(2), 20);
 
-        (new DetectProviderUsageAnomaliesJob())->handle(
+        (new DetectProviderUsageAnomaliesJob)->handle(
             $this->service,
-            app(\App\Services\TimelineEventRecorder::class),
+            app(TimelineEventRecorder::class),
         );
 
         $event = $this->runWithFirmContext($firm, fn () => TimelineEvent::query()
@@ -252,9 +254,9 @@ class ProviderUsageAnomalyDetectionServiceTest extends TestCase
     {
         $firm = Firm::factory()->create();
 
-        (new DetectProviderUsageAnomaliesJob())->handle(
+        (new DetectProviderUsageAnomaliesJob)->handle(
             $this->service,
-            app(\App\Services\TimelineEventRecorder::class),
+            app(TimelineEventRecorder::class),
         );
 
         $eventCount = $this->runWithFirmContext($firm, fn () => TimelineEvent::query()

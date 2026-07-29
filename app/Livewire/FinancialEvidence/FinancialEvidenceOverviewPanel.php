@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Livewire\FinancialEvidence;
 
+use App\Enums\LegalHoldScope;
 use App\Integrations\Enums\FinancialEvidenceProvenance;
 use App\Livewire\FinancialEvidence\Concerns\GatesFinancialEvidenceMatterAccess;
 use App\Models\FinancialEvidenceBankAccount;
 use App\Models\FinancialEvidenceMatterAuthorization;
-use App\Enums\LegalHoldScope;
 use App\Services\LegalHoldService;
 use App\Services\TenantContextService;
 use Filament\Infolists\Components\TextEntry;
@@ -22,6 +22,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Support\Collection;
 use Livewire\Component;
 
 /**
@@ -125,7 +126,7 @@ class FinancialEvidenceOverviewPanel extends Component implements HasSchemas, Ha
     public function table(Table $table): Table
     {
         return $table
-            ->records(function (): \Illuminate\Support\Collection {
+            ->records(function (): Collection {
                 $matter = $this->matter();
                 $firmIntegrationIds = (new TenantContextService)->runWithFirmContext($matter->firm_id, fn () => FinancialEvidenceMatterAuthorization::query()
                     ->where('matter_id', $matter->id)

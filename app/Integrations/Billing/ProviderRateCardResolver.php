@@ -91,7 +91,7 @@ final class ProviderRateCardResolver
 
     private function resolveFirmPlanId(Firm $firm): ?int
     {
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm) {
             return DB::table('firm_licenses')
                 ->where('firm_id', $firm->id)
                 ->whereNotNull('plan_id')

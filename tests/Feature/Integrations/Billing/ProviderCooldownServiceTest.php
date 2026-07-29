@@ -6,6 +6,7 @@ namespace Tests\Feature\Integrations\Billing;
 
 use App\Integrations\Billing\ProviderBillingClassifier;
 use App\Integrations\Billing\ProviderCooldownService;
+use App\Integrations\Billing\ProviderOperationPolicy;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Exceptions\ProviderCooldownActiveException;
 use App\Integrations\Models\FirmIntegration;
@@ -32,8 +33,8 @@ class ProviderCooldownServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->cooldown = new ProviderCooldownService();
-        $this->classifier = new ProviderBillingClassifier();
+        $this->cooldown = new ProviderCooldownService;
+        $this->classifier = new ProviderBillingClassifier;
         Cache::flush();
     }
 
@@ -106,8 +107,8 @@ class ProviderCooldownServiceTest extends TestCase
         $this->assertSame(0, $this->cooldown->remainingSeconds($connectionB, $classification, null));
     }
 
-    private function fakePolicy(): \App\Integrations\Billing\ProviderOperationPolicy
+    private function fakePolicy(): ProviderOperationPolicy
     {
-        return new \App\Integrations\Billing\ProviderOperationPolicy(null, null, 86400, 60, null);
+        return new ProviderOperationPolicy(null, null, 86400, 60, null);
     }
 }

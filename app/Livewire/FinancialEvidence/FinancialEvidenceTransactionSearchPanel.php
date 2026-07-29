@@ -16,8 +16,6 @@ use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
 use Filament\Forms\Components\DatePicker;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -31,6 +29,7 @@ use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
 
@@ -66,7 +65,7 @@ class FinancialEvidenceTransactionSearchPanel extends Component implements HasAc
     public function table(Table $table): Table
     {
         return $table
-            ->records(function (?array $filters, ?string $search): \Illuminate\Support\Collection {
+            ->records(function (?array $filters, ?string $search): Collection {
                 $matter = $this->matter();
                 $bankAccountIds = app(FinancialEvidenceMatterScopeService::class)->connectedBankAccountIds($matter);
 

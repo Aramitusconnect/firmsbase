@@ -30,7 +30,7 @@ class ProviderCallOutcomeNormalizerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->normalizer = new ProviderCallOutcomeNormalizer();
+        $this->normalizer = new ProviderCallOutcomeNormalizer;
     }
 
     public function test_a_successful_response_with_no_exception_is_certain_and_billable(): void

@@ -45,8 +45,8 @@ class ProviderOperationPolicyResolverTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->resolver = new ProviderOperationPolicyResolver();
-        $this->classifier = new ProviderBillingClassifier();
+        $this->resolver = new ProviderOperationPolicyResolver;
+        $this->classifier = new ProviderBillingClassifier;
     }
 
     private function defaultPolicy(array $overrides = []): ProviderOperationDefaultPolicy

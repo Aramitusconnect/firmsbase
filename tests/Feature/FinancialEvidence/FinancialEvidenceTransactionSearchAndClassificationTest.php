@@ -15,7 +15,12 @@ use App\Models\FinancialEvidenceTransactionReview;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\Matter;
+use Filament\Tables\Table;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -78,7 +83,7 @@ class FinancialEvidenceTransactionSearchAndClassificationTest extends TestCase
     {
         [$firm, $matter, $accountA, $connection] = $this->makeAuthorizedMatter();
 
-        $accountB = $this->runWithFirmContext($firm, function () use ($firm, $connection, $matter) {
+        $accountB = $this->runWithFirmContext($firm, function () use ($firm, $connection) {
             $account = FinancialEvidenceBankAccount::query()->create([
                 'firm_id' => $firm->id,
                 'firm_integration_id' => $connection->id,
@@ -211,7 +216,7 @@ class FinancialEvidenceTransactionSearchAndClassificationTest extends TestCase
 
     public function test_financial_evidence_bank_accounts_has_no_full_account_number_column(): void
     {
-        $columns = \Illuminate\Support\Facades\Schema::getColumnListing('financial_evidence_bank_accounts');
+        $columns = Schema::getColumnListing('financial_evidence_bank_accounts');
 
         foreach (['account_number', 'full_account_number', 'routing_number', 'iban'] as $forbidden) {
             $this->assertNotContains($forbidden, $columns, "financial_evidence_bank_accounts must never carry a '{$forbidden}' column — only the short masked identifier.");
@@ -222,7 +227,7 @@ class FinancialEvidenceTransactionSearchAndClassificationTest extends TestCase
 
     public function test_the_mask_column_is_short_enough_to_only_ever_hold_a_masked_fragment(): void
     {
-        $row = \Illuminate\Support\Facades\DB::selectOne(
+        $row = DB::selectOne(
             "select character_maximum_length from information_schema.columns where table_name = 'financial_evidence_bank_accounts' and column_name = 'mask'"
         );
 
@@ -291,7 +296,7 @@ class FinancialEvidenceTransactionSearchAndClassificationTest extends TestCase
         });
     }
 
-    private function makeTransaction(Firm $firm, FinancialEvidenceBankAccount $account, int $amountCents, \Illuminate\Support\Carbon $date, ?string $merchant = null): FinancialEvidenceTransaction
+    private function makeTransaction(Firm $firm, FinancialEvidenceBankAccount $account, int $amountCents, Carbon $date, ?string $merchant = null): FinancialEvidenceTransaction
     {
         return FinancialEvidenceTransaction::query()->create([
             'firm_id' => $firm->id,
@@ -317,7 +322,7 @@ class FinancialEvidenceTransactionSearchAndClassificationTest extends TestCase
      * requires a live Filament Resource context this suite intentionally
      * does not construct).
      */
-    private function queryPanel(Firm $firm, Matter $matter, array $filters, ?string $search = null): \Illuminate\Support\Collection
+    private function queryPanel(Firm $firm, Matter $matter, array $filters, ?string $search = null): Collection
     {
         $viewer = $this->runWithFirmContext($firm, fn () => FirmUser::factory()->role(FirmUserRole::Attorney)->create(['firm_id' => $firm->id]));
         $this->actingAs($viewer->user);
@@ -325,7 +330,7 @@ class FinancialEvidenceTransactionSearchAndClassificationTest extends TestCase
         $panel = new FinancialEvidenceTransactionSearchPanel;
         $panel->matterId = $matter->id;
 
-        $table = $panel->table(\Filament\Tables\Table::make($panel));
+        $table = $panel->table(Table::make($panel));
 
         $recordsClosure = $table->getDataSource();
         $this->assertNotNull($recordsClosure, 'Sanity check: the panel\'s table() must define a records() data source closure.');

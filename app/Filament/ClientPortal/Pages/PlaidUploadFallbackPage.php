@@ -27,6 +27,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -162,7 +163,7 @@ class PlaidUploadFallbackPage extends Page implements HasSchemas, HasTable
     public function table(Table $table): Table
     {
         return $table
-            ->records(function (): \Illuminate\Support\Collection {
+            ->records(function (): Collection {
                 $matterModel = $this->resolveMatterOrFail();
 
                 return (new TenantContextService)->runWithFirmContext($matterModel->firm_id, fn () => Document::query()

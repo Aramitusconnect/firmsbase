@@ -18,6 +18,7 @@ use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 use RuntimeException;
 
@@ -42,7 +43,7 @@ class ViewPlaidItem extends ViewRecord
 {
     protected static string $resource = PlaidItemResource::class;
 
-    protected function resolveRecord(int|string $key): \Illuminate\Database\Eloquent\Model
+    protected function resolveRecord(int|string $key): Model
     {
         /** @var FirmIntegration $record */
         $record = parent::resolveRecord($key);
