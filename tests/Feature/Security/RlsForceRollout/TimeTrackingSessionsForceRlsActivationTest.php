@@ -13,6 +13,7 @@ use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use App\Services\TimeTrackingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
@@ -596,26 +597,49 @@ class TimeTrackingSessionsForceRlsActivationTest extends TestCase
 
     public function test_stop_persists_correctly_when_called_with_no_ambient_context_established_beforehand(): void
     {
-        $firm = Firm::factory()->create();
-        $user = User::factory()->create();
+        // FOUND AND FIXED (Checkpoint 7 baseline hardening): this test
+        // used two independent real wall-clock now() calls — one to
+        // compute the fixture's last_resumed_at, one inside
+        // TimeTrackingService::elapsedSinceResume() itself — to derive
+        // an elapsed-seconds value asserted with strict equality
+        // (assertSame(3600, ...)). Under load (a long, sequential
+        // full-suite run), real time can advance by a second or more
+        // between those two calls, non-deterministically flipping the
+        // computed value to 3601 and failing an otherwise-correct
+        // assertion — confirmed reproducing under full-suite load while
+        // passing reliably every time in isolation. Freezing the clock
+        // for the fixture-creation-through-stop() window makes both
+        // now() calls resolve to the exact same instant, so the elapsed
+        // computation is exactly 3600 deterministically, regardless of
+        // real execution speed. Carbon::setTestNow(null) unfreezes in a
+        // finally block so a failed assertion can never leak a frozen
+        // clock into any later test.
+        Carbon::setTestNow(Carbon::now());
 
-        $session = $this->runWithFirmContext($firm, fn () => TimeTrackingSession::factory()->forFirm($firm)->create([
-            'user_id' => $user->id,
-            'status' => TimeTrackingSessionStatus::Active,
-            'accumulated_seconds' => 0,
-            'last_resumed_at' => now()->subSeconds(3600),
-        ]));
+        try {
+            $firm = Firm::factory()->create();
+            $user = User::factory()->create();
 
-        // Explicitly clear any ambient context left active by the
-        // fixture-building factory above (the factory deliberately
-        // leaves context set afterward for the common "create then
-        // read" pattern) — this test's entire point depends on NO
-        // context being active the moment stop() is called.
-        (new TenantContextService)->clearDatabaseTenantContext();
-        $this->assertNoDatabaseTenantContext();
+            $session = $this->runWithFirmContext($firm, fn () => TimeTrackingSession::factory()->forFirm($firm)->create([
+                'user_id' => $user->id,
+                'status' => TimeTrackingSessionStatus::Active,
+                'accumulated_seconds' => 0,
+                'last_resumed_at' => now()->subSeconds(3600),
+            ]));
 
-        $service = new TimeTrackingService;
-        $entry = $service->stop($session);
+            // Explicitly clear any ambient context left active by the
+            // fixture-building factory above (the factory deliberately
+            // leaves context set afterward for the common "create then
+            // read" pattern) — this test's entire point depends on NO
+            // context being active the moment stop() is called.
+            (new TenantContextService)->clearDatabaseTenantContext();
+            $this->assertNoDatabaseTenantContext();
+
+            $service = new TimeTrackingService;
+            $entry = $service->stop($session);
+        } finally {
+            Carbon::setTestNow(null);
+        }
 
         $this->assertNotNull($entry->id, 'stop() must still create the TimeEntry — this is the part that worked even before the fix.');
         $this->assertSame(3600, $entry->seconds);
