@@ -156,7 +156,14 @@ class ViewPlaidItem extends ViewRecord
                         ->where('firm_id', $firmUser->firm_id)
                         ->firstOrFail();
 
-                    $result = app(ProviderConnectionService::class)->initiateLinkTokenConnection($connection, $firmUser->id);
+                    // H4 fix: ProviderConnectionService::resolveActingFirmUser()
+                    // looks the actor up by FirmUser.user_id — a real
+                    // users.id — never FirmUser.id directly (the two
+                    // independent id sequences rarely coincide in a real
+                    // database). See PlaidAccountSelectionPage/
+                    // PlaidExchangeController for the identical, already
+                    // corrected defect and fix.
+                    $result = app(ProviderConnectionService::class)->initiateLinkTokenConnection($connection, $firmUser->user_id);
 
                     Notification::make()
                         ->title('Reconnect Link session started')
@@ -191,7 +198,10 @@ class ViewPlaidItem extends ViewRecord
                         ->where('firm_id', $firmUser->firm_id)
                         ->firstOrFail();
 
-                    app(ProviderConnectionService::class)->disconnect($connection, currentUserId: $firmUser->id);
+                    // H4 fix — see reconnectAction()'s identical comment
+                    // above: pass the real users.id (FirmUser.user_id),
+                    // never FirmUser.id.
+                    app(ProviderConnectionService::class)->disconnect($connection, currentUserId: $firmUser->user_id);
 
                     Notification::make()->title('Connection disconnected')->success()->send();
                 } catch (RuntimeException $e) {

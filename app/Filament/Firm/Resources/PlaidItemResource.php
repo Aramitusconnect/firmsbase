@@ -9,7 +9,7 @@ use App\Filament\Firm\Resources\PlaidItemResource\Pages\ViewPlaidItem;
 use App\Filament\Firm\Resources\PlaidItemResource\RelationManagers\AccountsRelationManager;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\FirmIntegration;
-use App\Integrations\Services\IntegrationAccessPolicyService;
+use App\Integrations\Services\FinancialIntegrationAccessPolicyService;
 use App\Services\IntegrationEntitlementPolicyService;
 use App\Services\PlaidEntitlementPolicyService;
 use BackedEnum;
@@ -19,6 +19,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 
 /**
@@ -32,6 +33,31 @@ use Illuminate\Support\Facades\Auth;
  * provider filter (a query-level UX filter — `ViewPlaidItem::resolveRecord()`
  * re-checks the provider server-side too, never trusting the list-query
  * filter alone as the real boundary).
+ *
+ * FOUND AND FIXED (Checkpoint 7 authorization review, item 19 —
+ * missed on the first pass across the Plaid admin surface, unlike its
+ * every sibling Plaid page): this resource previously gated on
+ * `IntegrationAccessPolicyService::canView()` — the NON-financial tier
+ * (FirmOwner/Attorney/Paralegal/LegalAssistant) — for a financial-tier
+ * connection view. Corrected to
+ * `FinancialIntegrationAccessPolicyService::canView()` (FirmOwner,
+ * Attorney, BillingStaff ONLY — narrower; no Paralegal/LegalAssistant),
+ * matching `PlaidOverviewPage::canAccess()`'s established shape exactly.
+ * Because `$model = FirmIntegration::class` is shared with
+ * `FirmIntegrationResource`, this resource ALSO shares
+ * `FirmIntegrationPolicy` (the standard Laravel policy Filament
+ * consults for `canViewAny()`/`canView($record)` by default) —  that
+ * policy itself is wired to the non-financial-tier
+ * `IntegrationAccessPolicyService`, wrong for this financial-tier
+ * resource. `canViewAny()`/`canView()` below are therefore explicitly
+ * overridden rather than left to that shared, wrong-tier policy, so
+ * `ListPlaidItems`/`ViewPlaidItem`'s own Filament-framework
+ * authorization hooks (`CanAuthorizeResourceAccess`'s
+ * `canAccess()`-based mount/hydrate hooks, and `ViewRecord::authorizeAccess()`'s
+ * own separate `canView($record)` call) both consult the correct,
+ * financial-tier ceiling — never merely hiding the nav item while a
+ * direct route hit still resolves. `getEloquentQuery()` layers the
+ * same check as defense-in-depth at the query level.
  */
 class PlaidItemResource extends Resource
 {
@@ -49,14 +75,19 @@ class PlaidItemResource extends Resource
 
     public static function canAccess(): bool
     {
-        return parent::canAccess() && static::isFirmEntitled();
+        return static::isFirmEntitled();
     }
 
     public static function shouldRegisterNavigation(): bool
     {
-        return parent::shouldRegisterNavigation() && static::isFirmEntitled();
+        return static::isFirmEntitled();
     }
 
+    /**
+     * FOUND AND FIXED (Checkpoint 7 authorization review, item 19): the
+     * financial-tier ceiling, not `IntegrationAccessPolicyService`'s
+     * wider non-financial one — see this class's own docblock.
+     */
     public static function isFirmEntitled(): bool
     {
         $firmUser = Auth::user()?->activeFirmUser();
@@ -67,15 +98,68 @@ class PlaidItemResource extends Resource
 
         return app(IntegrationEntitlementPolicyService::class)->isEnabled($firmUser->firm)
             && app(PlaidEntitlementPolicyService::class)->isEnabled($firmUser->firm)
-            && app(IntegrationAccessPolicyService::class)->canView($firmUser->role);
+            && app(FinancialIntegrationAccessPolicyService::class)->canView($firmUser->role);
     }
 
+    /**
+     * FOUND AND FIXED (Checkpoint 7 authorization review, item 19):
+     * overridden rather than left to the default
+     * `Gate::authorize('viewAny', FirmIntegration::class)` ->
+     * `FirmIntegrationPolicy::viewAny()` chain — that policy is shared
+     * with `FirmIntegrationResource` and is wired to the non-financial
+     * tier, wrong for this resource. See this class's own docblock.
+     */
+    public static function canViewAny(): bool
+    {
+        return static::isFirmEntitled();
+    }
+
+    /**
+     * FOUND AND FIXED (Checkpoint 7 authorization review, item 19):
+     * overridden rather than left to the default
+     * `Gate::authorize('view', $record)` -> `FirmIntegrationPolicy::view()`
+     * chain, for the same reason as `canViewAny()` above —
+     * `ViewRecord::authorizeAccess()` calls THIS method directly (not
+     * `canAccess()`), so leaving it unoverridden would silently keep
+     * gating `ViewPlaidItem` on the wrong, non-financial tier even after
+     * `isFirmEntitled()` above was corrected. Re-confirms firm ownership
+     * of the record, mirroring `FirmIntegrationPolicy::view()`'s own
+     * defense-in-depth scoping check.
+     */
+    public static function canView(Model $record): bool
+    {
+        /** @var FirmIntegration $record */
+        $firmUser = Auth::user()?->activeFirmUser();
+
+        if ($firmUser === null || $firmUser->firm_id !== $record->firm_id) {
+            return false;
+        }
+
+        return static::isFirmEntitled();
+    }
+
+    /**
+     * FOUND AND FIXED (Checkpoint 7 authorization review, item 19): the
+     * provider filter alone previously left this query reachable by any
+     * authenticated firm user via a direct route hit whose role failed
+     * `isFirmEntitled()` — canAccess()/canView() above are the real
+     * boundary, but this is layered on top as defense-in-depth so a
+     * gap in the framework's own authorization wiring (or a future
+     * caller of this query outside the Filament page lifecycle) can
+     * never leak rows to an unentitled/wrong-tier actor.
+     */
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->whereHas(
+        $query = parent::getEloquentQuery()->whereHas(
             'integrationProvider',
             fn (Builder $query) => $query->where('code', ProviderKey::Plaid->value)
         );
+
+        if (! static::isFirmEntitled()) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query;
     }
 
     public static function table(Table $table): Table
