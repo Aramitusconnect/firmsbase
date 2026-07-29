@@ -82,12 +82,24 @@ class PlaidAccountSelectionPage extends Page
             throw new RuntimeException('Plaid is not registered as an integration provider.');
         }
 
-        $connection = (new TenantContextService)->runWithFirmContext($matterModel->firm_id, fn () => app(ProviderConnectionService::class)->startConnection(
-            $matterModel->firm_id,
-            $provider->id,
-            $request->requested_by_firm_user_id,
-            requestedCapabilities: $request->requested_products_json,
-        ));
+        $connection = (new TenantContextService)->runWithFirmContext($matterModel->firm_id, function () use ($matterModel, $provider, $request) {
+            $connection = app(ProviderConnectionService::class)->startConnection(
+                $matterModel->firm_id,
+                $provider->id,
+                $request->requested_by_firm_user_id,
+                requestedCapabilities: $request->requested_products_json,
+            );
+
+            // Checkpoint 7 fix: persist the request-to-connection binding
+            // at the earliest possible point (before the client ever
+            // sees a firm_integration_id) — see the owning migration's
+            // docblock for the IDOR this closes.
+            // `PlaidExchangeController::exchange()` trusts THIS column,
+            // never a client-supplied firm_integration_id.
+            $request->update(['firm_integration_id' => $connection->id]);
+
+            return $connection;
+        });
 
         $this->firmIntegrationId = $connection->id;
 

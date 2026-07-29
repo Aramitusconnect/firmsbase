@@ -35,6 +35,20 @@ use RuntimeException;
  * documented, narrower threat model for the Link-token flow: the
  * public_token never leaves FirmsVault's own authenticated page via a
  * cross-origin redirect, so no `state`/PKCE-shaped defense is needed.
+ *
+ * FOUND AND FIXED (Checkpoint 7 authorization review, item 19): this
+ * controller previously resolved the client-supplied
+ * `firm_integration_id` by firm membership ONLY ("belongs to the same
+ * firm"), never by matter/request ownership — a real IDOR letting a
+ * client with legitimate access to any matter in the firm complete a
+ * DIFFERENT matter's connection with their own public_token. Fixed by
+ * resolving the connection from `FinancialEvidenceMatterRequest.firm_integration_id`
+ * — the server-authoritative binding `PlaidAccountSelectionPage::mount()`
+ * persists at the moment it creates the connection FOR this specific
+ * request, before the client ever sees an id at all. The
+ * client-supplied `firm_integration_id` is still validated as present
+ * (wire-format compatibility with the existing Link-flow JS) but is now
+ * cross-checked against, never substituted for, the server's own value.
  */
 class PlaidExchangeController extends Controller
 {
@@ -69,9 +83,19 @@ class PlaidExchangeController extends Controller
             return response()->json(['message' => 'No pending request for this matter.'], 404);
         }
 
+        if ($request2->firm_integration_id === null || $request2->firm_integration_id !== (int) $validated['firm_integration_id']) {
+            // The client-supplied id must match the server's own
+            // record of which connection was created FOR this request
+            // — never trusted on its own. A mismatch means either a
+            // stale client (the request moved on since the id was
+            // issued) or a tampered id aimed at a different matter's
+            // connection; both are correctly rejected the same way.
+            return response()->json(['message' => 'This connection does not belong to the current request.'], 403);
+        }
+
         try {
             $connection = FirmIntegration::query()
-                ->where('id', (int) $validated['firm_integration_id'])
+                ->where('id', $request2->firm_integration_id)
                 ->where('firm_id', $matter->firm_id)
                 ->firstOrFail();
 
@@ -91,7 +115,18 @@ class PlaidExchangeController extends Controller
         }
 
         return response()->json([
-            'redirect' => PlaidDateRangeConfirmationPage::getUrl(['matter' => $matter->id]),
+            // FOUND AND FIXED (Checkpoint 7 authorization review, item
+            // 19): this route is a bare, non-Filament-routed endpoint
+            // (registered directly in routes/web.php) — no request ever
+            // passes through Filament's own SetUpPanel middleware for
+            // it, so Filament::getCurrentPanel() is always null here and
+            // getUrl() previously fell back to the DEFAULT panel
+            // ('admin'), which has no 'plaid-date-range-confirmation-page'
+            // route at all. Every successful exchange — the happy path
+            // this whole checkpoint exists for — 500'd on its own
+            // success response. Passing the panel explicitly makes URL
+            // generation independent of "current panel" state entirely.
+            'redirect' => PlaidDateRangeConfirmationPage::getUrl(['matter' => $matter->id], panel: 'client-portal'),
         ]);
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Integrations\Models\FirmIntegration;
 use App\Models\Concerns\BelongsToTenant;
 use App\Models\Concerns\HasPublicUuid;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -28,6 +29,7 @@ class FinancialEvidenceMatterRequest extends Model
     protected $fillable = [
         'firm_id',
         'matter_id',
+        'firm_integration_id',
         'requested_by_firm_user_id',
         'purpose',
         'requested_products_json',
@@ -58,6 +60,17 @@ class FinancialEvidenceMatterRequest extends Model
     public function requestedBy(): BelongsTo
     {
         return $this->belongsTo(FirmUser::class, 'requested_by_firm_user_id');
+    }
+
+    /**
+     * Checkpoint 7 addition — the server-authoritative binding between
+     * this request and the Plaid connection created for it (see this
+     * column's own migration docblock for the IDOR it closes). Null
+     * until `PlaidAccountSelectionPage::mount()` sets it.
+     */
+    public function firmIntegration(): BelongsTo
+    {
+        return $this->belongsTo(FirmIntegration::class);
     }
 
     public function isPending(): bool
