@@ -50,11 +50,27 @@ return new class extends Migration
             $table->string('credential_environment_mode')->nullable()->after('status');
         });
 
+        // MIGRATION-SAFETY CORRECTION (mirrors
+        // 2026_09_20_140001_add_cursor_value_encryption_key_id_to_integration_sync_cursors_table.php):
+        // a plain `ADD CONSTRAINT ... CHECK (...)` validates every existing
+        // row immediately under an ACCESS EXCLUSIVE lock and hard-fails the
+        // whole migration if any pre-existing row violates it. `NOT VALID` +
+        // a separate `VALIDATE CONSTRAINT` is the standard safe-migration
+        // split: the constraint still applies to every row going forward
+        // from the instant `ADD CONSTRAINT` commits (no window where a new
+        // violating write could sneak in), takes the much weaker SHARE
+        // UPDATE EXCLUSIVE lock for the historical scan, and the final
+        // enforced invariant is byte-for-byte identical to the original
+        // single-statement form — this is a migration-safety-only
+        // correction, not a behavior change.
         DB::statement(
             'ALTER TABLE integration_credentials '.
             'ADD CONSTRAINT integration_credentials_environment_mode_check '.
-            "CHECK (credential_environment_mode IS NULL OR credential_environment_mode IN ('sandbox', 'live'))"
+            "CHECK (credential_environment_mode IS NULL OR credential_environment_mode IN ('sandbox', 'live')) ".
+            'NOT VALID'
         );
+
+        DB::statement('ALTER TABLE integration_credentials VALIDATE CONSTRAINT integration_credentials_environment_mode_check');
     }
 
     public function down(): void

@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Policies\FirmIntegrationPolicy;
 use Google\Auth\AccessToken;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -81,5 +83,52 @@ class IntegrationServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Gate::policy(FirmIntegration::class, FirmIntegrationPolicy::class);
+
+        $this->warnIfEnabledProvidersAreMissingCredentials();
+    }
+
+    /**
+     * Narrow, log-only misconfiguration check (M4 remediation pass) —
+     * NOT a new validation layer, deliberately: each provider's own
+     * `isConfigured()` (Microsoft365Provider/GoogleWorkspaceProvider/
+     * PlaidProvider) already independently re-checks its own required
+     * `oauth_apps.*` credentials before doing anything live, per
+     * config/integrations.php's own "defense in depth, never assumed
+     * true from the registry alone" documented discipline. This only
+     * makes an already-broken-but-silent deployment state ("provider
+     * flagged enabled in `providers`, but its client_id/secret env vars
+     * were never set") visible in the log at boot, instead of only
+     * surfacing later as an opaque failure the first time a firm tries
+     * to connect. Read from already-resolved config() (config-cache
+     * safe), never a second env() call. Never throws — a missing
+     * credential must not prevent the application from booting.
+     */
+    private function warnIfEnabledProvidersAreMissingCredentials(): void
+    {
+        $requiredCredentialKeysByProvider = [
+            ProviderKey::Microsoft365->value => ['client_id', 'client_secret'],
+            ProviderKey::GoogleWorkspace->value => ['client_id', 'client_secret'],
+            ProviderKey::Plaid->value => ['client_id', 'secret'],
+        ];
+
+        foreach ($requiredCredentialKeysByProvider as $providerKey => $requiredCredentialKeys) {
+            if (config("integrations.providers.{$providerKey}") === null) {
+                continue; // not enabled — nothing to warn about
+            }
+
+            $missingCredentialKeys = array_values(array_filter(
+                $requiredCredentialKeys,
+                fn (string $key): bool => blank(config("integrations.oauth_apps.{$providerKey}.{$key}")),
+            ));
+
+            if ($missingCredentialKeys === []) {
+                continue;
+            }
+
+            Log::warning("Integration provider '{$providerKey}' is enabled but missing required credentials.", [
+                'provider' => $providerKey,
+                'missing_credential_keys' => $missingCredentialKeys,
+            ]);
+        }
     }
 }

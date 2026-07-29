@@ -86,6 +86,22 @@ class PlaidReclassificationApprovalsPage extends Page implements HasTable
                     return collect();
                 }
 
+                // CP8 fix: canAccess() gates navigation/route entry with
+                // canApprove(), but this records() closure — the actual
+                // data query — previously only checked for an
+                // authenticated FirmUser. Any active firm user reaching
+                // this route directly (bypassing nav) could read every
+                // pending trust-account reclassification request
+                // firm-wide (account names, requested classification,
+                // reasoning) without holding the approve-tier role.
+                // approve()/reject() were already independently re-gated
+                // via assertCanApprove() inside
+                // FinancialAccountReclassificationService — only this
+                // read path was missing its own re-check.
+                if (! app(FinancialIntegrationAccessPolicyService::class)->canApprove($firmUser->role)) {
+                    return collect();
+                }
+
                 return FinancialAccountReclassificationRequest::query()
                     ->where('firm_id', $firmUser->firm_id)
                     ->whereIn('status', ['pending', 'first_approved'])

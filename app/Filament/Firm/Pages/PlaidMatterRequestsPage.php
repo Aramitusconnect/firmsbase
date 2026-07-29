@@ -26,6 +26,7 @@ use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use RuntimeException;
 
 /**
  * PlaidMatterRequestsPage — FirmsVault Live Integrations, Checkpoint 4
@@ -54,7 +55,12 @@ class PlaidMatterRequestsPage extends Page implements HasTable
     {
         $firmUser = Auth::user()?->activeFirmUser();
 
-        return $firmUser !== null && app(PlaidEntitlementPolicyService::class)->isEnabled($firmUser->firm);
+        if ($firmUser === null) {
+            return false;
+        }
+
+        return app(PlaidEntitlementPolicyService::class)->isEnabled($firmUser->firm)
+            && app(FinancialIntegrationAccessPolicyService::class)->canView($firmUser->role);
     }
 
     public static function shouldRegisterNavigation(): bool
@@ -111,12 +117,28 @@ class PlaidMatterRequestsPage extends Page implements HasTable
                     return;
                 }
 
-                app(FinancialIntegrationAccessPolicyService::class)->assertCanRequest($firmUser);
+                try {
+                    app(FinancialIntegrationAccessPolicyService::class)->assertCanRequest($firmUser);
+                } catch (RuntimeException $exception) {
+                    Notification::make()->title('Request denied')->body($exception->getMessage())->danger()->send();
+
+                    return;
+                }
 
                 (new TenantContextService)->runWithFirmContext($firmUser->firm_id, function () use ($firmUser, $data) {
+                    // Server-side re-validation: the Select's options are
+                    // firm-scoped for DISPLAY only — Filament does not
+                    // enforce that the submitted matter_id still belongs to
+                    // the actor's own firm, so a tampered/forged submission
+                    // must be rejected here rather than trusted as-is.
+                    $matter = Matter::query()
+                        ->where('firm_id', $firmUser->firm_id)
+                        ->where('id', (int) $data['matter_id'])
+                        ->firstOrFail();
+
                     FinancialEvidenceMatterRequest::query()->create([
                         'firm_id' => $firmUser->firm_id,
-                        'matter_id' => (int) $data['matter_id'],
+                        'matter_id' => $matter->id,
                         'requested_by_firm_user_id' => $firmUser->id,
                         'purpose' => $data['purpose'],
                         'requested_products_json' => array_values($data['requested_products']),
@@ -135,7 +157,7 @@ class PlaidMatterRequestsPage extends Page implements HasTable
             ->records(function (): Collection {
                 $firmUser = Auth::user()?->activeFirmUser();
 
-                if ($firmUser === null) {
+                if ($firmUser === null || ! app(FinancialIntegrationAccessPolicyService::class)->canView($firmUser->role)) {
                     return collect();
                 }
 
