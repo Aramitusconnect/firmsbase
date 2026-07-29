@@ -57,11 +57,30 @@ return new class extends Migration
                 ->restrictOnDelete();
         });
 
+        // CHECKPOINT 7 MIGRATION-SAFETY CORRECTION: a plain `ADD
+        // CONSTRAINT ... CHECK (...)` validates every existing row
+        // immediately under an ACCESS EXCLUSIVE lock and hard-fails the
+        // whole migration if any pre-existing row violates it. This
+        // table predates this mission (2026_09_05_053001) and is
+        // actively written by SyncCursorService::advance() — a
+        // long-lived environment where the (production-gated-off) test
+        // provider was exercised between the two dates could carry a
+        // pre-existing `cursor_value IS NOT NULL` row with no key id yet.
+        // `NOT VALID` + a separate `VALIDATE CONSTRAINT` is the standard
+        // safe-migration split: the constraint still applies to every
+        // row going forward from the instant `ADD CONSTRAINT` commits
+        // (no window where a new violating write could sneak in), takes
+        // the much weaker SHARE UPDATE EXCLUSIVE lock for the historical
+        // scan, and the final enforced invariant is byte-for-byte
+        // identical to the original single-statement form — this is a
+        // migration-safety-only correction, not a behavior change.
         DB::statement(<<<'SQL'
             ALTER TABLE integration_sync_cursors ADD CONSTRAINT integration_sync_cursors_value_key_id_pair CHECK (
                 (cursor_value IS NOT NULL) = (cursor_value_encryption_key_id IS NOT NULL)
-            )
+            ) NOT VALID
         SQL);
+
+        DB::statement('ALTER TABLE integration_sync_cursors VALIDATE CONSTRAINT integration_sync_cursors_value_key_id_pair');
     }
 
     public function down(): void
