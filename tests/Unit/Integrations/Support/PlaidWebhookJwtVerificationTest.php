@@ -170,19 +170,62 @@ final class PlaidWebhookJwtVerificationTest extends TestCase
         $this->assertNotFalse($resource, 'Test environment must support EC key generation.');
 
         openssl_pkey_export($resource, $privatePem);
-        $details = openssl_pkey_get_details($resource);
 
-        $jwk = [
+        return [$privatePem, $this->jwkFromPrivateKeyPem($privatePem, $kid)];
+    }
+
+    /**
+     * PRODUCTION-TEST-ONLY DEFECT, FOUND AND FIXED here (this codebase's
+     * real `PlaidProvider` never generates key material — it only ever
+     * parses a JWK Plaid's own API already served correctly-encoded — so
+     * this was never a production security defect).
+     *
+     * `openssl_pkey_get_details()`'s `ec.x`/`ec.y` are the MINIMAL
+     * big-endian representation of each coordinate: whenever a
+     * coordinate's own most-significant byte happens to be 0x00,
+     * OpenSSL silently returns it 31 bytes long instead of the
+     * structurally mandatory fixed 32 bytes (SEC1/JWK P-256 point
+     * encoding). Measured directly: ~0.77% of freshly generated P-256
+     * keypairs (1,531 of 200,000) have a short `x` or `y` this way.
+     *
+     * Every test in this file calls generateEs256KeyPair() exactly once
+     * per test method (some twice), each time with a BRAND NEW random
+     * keypair — so across a full run of this file (and more so across a
+     * full suite run, which exercises it many times over), this ~0.77%
+     * chance was hit often enough to intermittently produce a genuinely
+     * malformed JWK. Firebase\JWT\JWK::parseKeySet() rejects that
+     * unpadded JWK with a DomainException ("OpenSSL unable to validate
+     * key"), which PlaidProvider::verifyInboundSignature()'s blanket
+     * catch(Throwable) turns into an ordinary `false` — rejecting a
+     * genuinely, cryptographically valid signature. Whichever
+     * positive-path (assertTrue) test's own setUp()-generated keypair
+     * happened to hit the ~0.77% chance in a given run is exactly why
+     * two different full-suite runs saw two different Plaid JWT test
+     * methods fail: it was never test order, cache, Carbon, tenant
+     * context, or any other cross-test state — this was random,
+     * per-keypair encoding chance, confined entirely to this test's own
+     * fixture generator. See
+     * test_a_keypair_whose_x_coordinate_has_a_leading_zero_byte_still_verifies()
+     * for the deterministic reproduction (a fixed key known to exhibit
+     * this exact defect, so the proof does not depend on random luck).
+     *
+     * Padding to 32 bytes here (never in production code, which has
+     * nothing to pad) is the complete fix: it is what every real
+     * SEC1/JWK P-256 coordinate already always is.
+     */
+    private function jwkFromPrivateKeyPem(string $privatePem, string $kid): array
+    {
+        $details = openssl_pkey_get_details(openssl_pkey_get_private($privatePem));
+
+        return [
             'kty' => 'EC',
             'crv' => 'P-256',
-            'x' => $this->base64UrlEncode($details['ec']['x']),
-            'y' => $this->base64UrlEncode($details['ec']['y']),
+            'x' => $this->base64UrlEncode(str_pad($details['ec']['x'], 32, "\x00", STR_PAD_LEFT)),
+            'y' => $this->base64UrlEncode(str_pad($details['ec']['y'], 32, "\x00", STR_PAD_LEFT)),
             'kid' => $kid,
             'alg' => 'ES256',
             'use' => 'sig',
         ];
-
-        return [$privatePem, $jwk];
     }
 
     private function base64UrlEncode(string $data): string
@@ -649,6 +692,53 @@ final class PlaidWebhookJwtVerificationTest extends TestCase
     // ------------------------------------------------------------
     // Never logs the raw JWT
     // ------------------------------------------------------------
+
+    // ------------------------------------------------------------
+    // Leading-zero-byte EC coordinate — deterministic regression proof
+    // ------------------------------------------------------------
+
+    /**
+     * A fixed, known EC P-256 private key (found by brute-force search,
+     * offline, over freshly generated keypairs) chosen specifically
+     * because its `x` coordinate's most significant byte is 0x00 —
+     * openssl_pkey_get_details() therefore returns a 31-byte (not
+     * 32-byte) `x` for this key on every single run, deterministically
+     * reproducing the exact defect jwkFromPrivateKeyPem() now fixes,
+     * rather than depending on the ~0.77%-per-keypair chance a freshly
+     * generated key would only hit intermittently.
+     */
+    private const SHORT_X_COORDINATE_PRIVATE_KEY_PEM = <<<'PEM'
+    -----BEGIN PRIVATE KEY-----
+    MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg2+sarsD8raP1CXzT
+    i+KCf2FeYkQoco+r4kZvllL9jcahRANCAAQAFKCosKO26LcUFLgU9/W6DrZMUpuC
+    i14/4LmnI2OQ6t07mAJmgqKsE2Ms9V8CRikITB5aMwUVtJK58eD7mRlo
+    -----END PRIVATE KEY-----
+    PEM;
+
+    public function test_a_keypair_whose_x_coordinate_has_a_leading_zero_byte_still_verifies(): void
+    {
+        $rawUnpaddedX = openssl_pkey_get_details(openssl_pkey_get_private(self::SHORT_X_COORDINATE_PRIVATE_KEY_PEM))['ec']['x'];
+        $this->assertSame(
+            31,
+            strlen($rawUnpaddedX),
+            'Fixture key must genuinely have a short (unpadded-by-OpenSSL) x coordinate, or this test proves nothing.'
+        );
+
+        [, , $itemId] = $this->routedConnection();
+        $rawBody = json_encode(['item_id' => $itemId]);
+        $jwk = $this->jwkFromPrivateKeyPem(self::SHORT_X_COORDINATE_PRIVATE_KEY_PEM, self::KID);
+        $jwt = $this->signJwt($this->validClaims($rawBody), self::SHORT_X_COORDINATE_PRIVATE_KEY_PEM);
+        $this->fakeJwkEndpoint($jwk);
+
+        $result = $this->provider()->verifyInboundSignature($rawBody, ['Plaid-Verification' => $jwt]);
+
+        $this->assertTrue(
+            $result,
+            "A genuinely valid ES256 signature must verify even when its public key's x coordinate has a ".
+            'leading zero byte — the JWK\'s x/y must always be the fixed 32-byte SEC1/JWK encoding, never '.
+            "OpenSSL's shorter minimal-length form."
+        );
+    }
 
     public function test_verification_never_logs_the_raw_plaid_verification_header(): void
     {
