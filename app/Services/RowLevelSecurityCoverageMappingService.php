@@ -816,6 +816,30 @@ class RowLevelSecurityCoverageMappingService
         // rows without the row itself being tenant-owned. See
         // EXEMPT_TABLE_METADATA below.
         'financial_evidence_large_deposit_thresholds',
+        // FirmsVault Live Integrations, Checkpoint 8.2 §A4 addition —
+        // provider_operation_attempts, the FK-FREE durable at-most-once
+        // provider-call gate. Carries a real NOT NULL firm_id scalar
+        // (like integration_webhook_routing_index/
+        // integration_gmail_mailbox_routes/integration_plaid_item_routes,
+        // unlike every "no firm_id" entry above), exempted for a
+        // documented reason: it is written on a database session
+        // deliberately INDEPENDENT of whatever transaction/row locks a
+        // caller holds, so a firm-keyed RLS policy would require tenant
+        // context pushed on that separate session for every read —
+        // including the pre-claim probe that runs before any firm
+        // context is necessarily established — reintroducing exactly the
+        // cross-session coupling this table exists to eliminate.
+        // Checkpoint 8.1's rejected design proved that coupling
+        // deadlocks against PullSyncJob's lockForUpdate() on
+        // firm_integrations. Tenant attribution is preserved via the
+        // firm_id scalar, which every query in
+        // ProviderOperationAttemptService filters on explicitly, and
+        // these rows are operational evidence only — never a source of
+        // truth for money owed (the authoritative billing rows keep
+        // their real FKs and RLS on the ordinary connection). See
+        // EXEMPT_TABLE_METADATA below and the create migration's own
+        // docblock.
+        'provider_operation_attempts',
     ];
 
     /**
@@ -1683,6 +1707,29 @@ class RowLevelSecurityCoverageMappingService
                 .'Sole reader: App\\Integrations\\Services\\FinancialEvidenceLargeDepositDetectionService. See '
                 .'EXEMPT_TABLE_METADATA.',
         ],
+        // FirmsVault Live Integrations, Checkpoint 8.2 §A4 addition — the
+        // FK-free durable at-most-once provider-call gate. Classified
+        // Global (no RLS), the same treatment as its exempt siblings
+        // integration_webhook_routing_index/integration_gmail_mailbox_routes/
+        // integration_plaid_item_routes, which likewise carry a real
+        // firm_id column that is a non-authoritative correlation pointer
+        // rather than a security boundary.
+        'provider_operation_attempts' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Global, no RLS — the durable at-most-once gate for outbound provider calls, written on a '
+                .'database session deliberately INDEPENDENT of the calling job\'s transaction and row locks so that '
+                .'"a request was already sent" survives a rollback or crash (FirmsVault Live Integrations '
+                .'Checkpoint 8.2 §A4). Carries a real NOT NULL firm_id scalar (like '
+                .'integration_webhook_routing_index) but NO foreign keys at all — Checkpoint 8.1 proved that a '
+                .'cross-session INSERT whose FK references a row PullSyncJob holds FOR UPDATE deadlocks in '
+                .'production. A firm-keyed policy would require tenant context on that independent session for '
+                .'every read, including the pre-claim probe that runs before any firm context necessarily exists, '
+                .'reintroducing exactly that coupling. Sole reader and sole writer: '
+                .'App\\Integrations\\Billing\\ProviderOperationAttemptService, always filtered on the scalar '
+                .'firm_id. Operational evidence only — never a source of truth for money owed. See '
+                .'EXEMPT_TABLE_METADATA and the create migration\'s own docblock.',
+        ],
     ];
 
     /**
@@ -2076,6 +2123,41 @@ class RowLevelSecurityCoverageMappingService
             'authorized_writers' => [
                 'A firm\'s own FirmOwner/Attorney/BillingStaff (FinancialIntegrationAccessPolicyService::canRequest()-gated) may write ONLY their own firm\'s firm_override row (scope_id = their own firm_id) — never the platform_default row',
                 'platform-admin-only Filament action (not built by this checkpoint) writes the platform_default row',
+            ],
+        ],
+        // FirmsVault Live Integrations, Checkpoint 8.2 §A4 addition — the
+        // FK-free durable at-most-once provider-call gate.
+        'provider_operation_attempts' => [
+            'reason' => 'FirmsVault Live Integrations, Checkpoint 8.2 (§A4): the durable at-most-once gate for '
+                .'outbound provider calls. It records, on a database session deliberately INDEPENDENT of whatever '
+                .'transaction and row locks the calling job holds, that one logical operation has been claimed and '
+                .'that its request is about to leave the process — so a rollback or crash in the network window can '
+                .'never be mistaken for "never sent" and silently re-charge the customer. Two properties follow from '
+                .'that independence and together force the exemption: (1) the table carries NO foreign keys at all '
+                .'(Checkpoint 8.1 proved that a cross-session INSERT whose FK references a row PullSyncJob has '
+                .'locked FOR UPDATE must wait for FOR KEY SHARE and deadlocks in production), and (2) an '
+                .'app.current_firm_id-keyed policy would require tenant context to be pushed on that separate '
+                .'session for every read — including the pre-claim probe that must run BEFORE any firm context is '
+                .'necessarily established — reintroducing exactly the cross-session coupling this table exists to '
+                .'eliminate. Tenant attribution is nonetheless preserved: a real NOT NULL firm_id scalar is stored '
+                .'on every row, and every query in ProviderOperationAttemptService filters on it explicitly. That '
+                .'firm_id is a non-authoritative correlation pointer, never a security boundary — firm ownership of '
+                .'the connection is authorized against real, FK-backed, RLS-protected rows on the ordinary '
+                .'connection BEFORE a claim is written, and these rows are operational evidence only, never a '
+                .'source of truth for money owed (provider_billable_call_reservations and integration_usage_records '
+                .'keep their real FKs and their own protection, and are rebuilt from this evidence during recovery, '
+                .'never invented from it). No credential, token, or raw provider payload is ever stored here — only '
+                .'a redacted metadata summary and a checksum (§A8). A dangling scalar can only cause a claim to be '
+                .'refused or reconciled; it can never authorize a call or expose another tenant\'s data. See '
+                .'database/migrations/2026_10_01_100001_create_provider_operation_attempts_table.php\'s own '
+                .'"THIS TABLE INTENTIONALLY HAS NO FOREIGN KEYS" class docblock for the full reasoning.',
+            'expected_readers' => [
+                'App\\Integrations\\Billing\\ProviderOperationAttemptService — the sole reader, always on the independent durable connection and always filtered on the scalar firm_id, returning only gate decisions and redacted recovery evidence',
+                'App\\Integrations\\Billing\\ProviderBillableCallPipeline — indirectly, via that service, to decide whether a logical operation may send at all (§A5)',
+            ],
+            'authorized_writers' => [
+                'App\\Integrations\\Billing\\ProviderOperationAttemptService — the sole writer (claim/lease CAS, markAttemptStarted before the send, outcome classification after it, local-processing and reconciliation transitions); no controller, Livewire component, Filament resource, or firm user ever writes this table',
+                'platform admins only, and only through an explicit audited reconciliation resolution on a reconciliation_required row — never a direct edit',
             ],
         ],
     ];

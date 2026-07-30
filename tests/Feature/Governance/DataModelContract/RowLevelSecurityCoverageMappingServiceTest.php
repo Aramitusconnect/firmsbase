@@ -349,7 +349,23 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // updated AGAIN by this checkpoint's Financial Evidence
         // Workspace UI track — financial_evidence_large_deposit_thresholds
         // (Global, §1.6's found-and-fixed RLS misclassification) — 34 -> 35.
-        $this->assertCount(35, $this->service->exemptTables());
+        // Narrowly updated AGAIN by FirmsVault Live Integrations
+        // Checkpoint 8.2 §A4 — provider_operation_attempts, the FK-free
+        // durable at-most-once provider-call gate, added to EXEMPT_TABLES
+        // (35 -> 36) for the same "genuinely has a firm_id column but is
+        // documented-exempt anyway" reason as
+        // integration_webhook_routing_index/integration_gmail_mailbox_routes/
+        // integration_plaid_item_routes above: it is written on a database
+        // session deliberately independent of the calling job's
+        // transaction and locks, so a firm-keyed policy would require
+        // tenant context on that separate session for every read —
+        // including the pre-claim probe that runs before any firm context
+        // necessarily exists — reintroducing exactly the cross-session
+        // coupling the table exists to eliminate (Checkpoint 8.1 proved
+        // that coupling deadlocks against PullSyncJob's lockForUpdate()).
+        // Classified Global (never DirectTenant), so it does not change
+        // tenantOwnedTables() or preparedTables().
+        $this->assertCount(36, $this->service->exemptTables());
         $this->assertCount(147, $this->service->tenantOwnedTables());
         $forceMigrationFiles = glob(
             database_path('migrations/*_force_rls_on_*_table.php')
@@ -771,8 +787,12 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // provider_invoice_reconciliations: +4) — 51 -> 56. Narrowly
         // updated AGAIN by this checkpoint's Financial Evidence
         // Workspace UI track — financial_evidence_large_deposit_thresholds
-        // (Global) — 56 -> 57.
-        $this->assertSame(57, $summary[TenantOwnershipClassification::Global->value]);
+        // (Global) — 56 -> 57. Narrowly updated AGAIN by FirmsVault Live
+        // Integrations Checkpoint 8.2 §A4 — provider_operation_attempts
+        // (Global, the FK-free durable at-most-once provider-call gate;
+        // see test_exact_registry_counts_reconcile's own comment for the
+        // full reasoning) — 57 -> 58.
+        $this->assertSame(58, $summary[TenantOwnershipClassification::Global->value]);
         $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
         // 9 -> 10: client_portal_users' corrected System classification
         // (see the InheritedTenant/System comment above this method's
@@ -826,7 +846,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Workspace/Firm-Admin/PlatformAdmin/Client-Portal UI track —
         // +10 DirectTenant tables, +1 Global
         // (financial_evidence_large_deposit_thresholds): 246 -> 257.
-        $this->assertSame(257, array_sum($summary));
+        // Narrowly updated AGAIN by FirmsVault Live Integrations
+        // Checkpoint 8.2 §A4 — +1 Global (provider_operation_attempts):
+        // 257 -> 258. No other bucket affected.
+        $this->assertSame(258, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void
