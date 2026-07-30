@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Integrations\Billing;
 
+use App\Integrations\Billing\ProviderOperationAttemptService;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\ProviderBillableCallReservation;
@@ -11,6 +12,7 @@ use App\Jobs\ExpireStaleProviderReservationsJob;
 use App\Models\Firm;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\PurgesDurableProviderOperationAttempts;
 use Tests\TestCase;
 
 /**
@@ -22,7 +24,14 @@ use Tests\TestCase;
  */
 class ExpireStaleProviderReservationsJobTest extends TestCase
 {
+    use PurgesDurableProviderOperationAttempts;
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->purgeDurableProviderOperationAttempts();
+    }
 
     private function connection(Firm $firm): FirmIntegration
     {
@@ -54,7 +63,7 @@ class ExpireStaleProviderReservationsJobTest extends TestCase
         $connection = $this->connection($firm);
         $stale = $this->reservationRow($firm, $connection, ProviderBillableCallReservation::STATUS_RESERVED, now()->subMinutes(5));
 
-        (new ExpireStaleProviderReservationsJob)->handle();
+        (new ExpireStaleProviderReservationsJob)->handle(app(ProviderOperationAttemptService::class));
 
         $fresh = $this->runWithFirmContext($firm, fn () => $stale->fresh());
         $this->assertSame(ProviderBillableCallReservation::STATUS_EXPIRED, $fresh->status);
@@ -67,7 +76,7 @@ class ExpireStaleProviderReservationsJobTest extends TestCase
         $connection = $this->connection($firm);
         $fresh = $this->reservationRow($firm, $connection, ProviderBillableCallReservation::STATUS_RESERVED, now()->addMinutes(5));
 
-        (new ExpireStaleProviderReservationsJob)->handle();
+        (new ExpireStaleProviderReservationsJob)->handle(app(ProviderOperationAttemptService::class));
 
         $refetched = $this->runWithFirmContext($firm, fn () => $fresh->fresh());
         $this->assertSame(ProviderBillableCallReservation::STATUS_RESERVED, $refetched->status);
@@ -81,7 +90,7 @@ class ExpireStaleProviderReservationsJobTest extends TestCase
         $finalized = $this->reservationRow($firm, $connection, ProviderBillableCallReservation::STATUS_FINALIZED_BILLABLE, now()->subDays(2));
         $originalFinalizedAt = $this->runWithFirmContext($firm, fn () => $finalized->fresh()->finalized_at);
 
-        (new ExpireStaleProviderReservationsJob)->handle();
+        (new ExpireStaleProviderReservationsJob)->handle(app(ProviderOperationAttemptService::class));
 
         $refetched = $this->runWithFirmContext($firm, fn () => $finalized->fresh());
         $this->assertSame(ProviderBillableCallReservation::STATUS_FINALIZED_BILLABLE, $refetched->status);
@@ -97,7 +106,7 @@ class ExpireStaleProviderReservationsJobTest extends TestCase
         $staleA = $this->reservationRow($firmA, $connectionA, ProviderBillableCallReservation::STATUS_RESERVED, now()->subMinutes(5));
         $staleB = $this->reservationRow($firmB, $connectionB, ProviderBillableCallReservation::STATUS_RESERVED, now()->subMinutes(5));
 
-        (new ExpireStaleProviderReservationsJob)->handle();
+        (new ExpireStaleProviderReservationsJob)->handle(app(ProviderOperationAttemptService::class));
 
         $freshA = $this->runWithFirmContext($firmA, fn () => $staleA->fresh());
         $freshB = $this->runWithFirmContext($firmB, fn () => $staleB->fresh());

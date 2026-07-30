@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
+use App\Integrations\Billing\ProviderOperationAttemptService;
 use App\Integrations\Models\ProviderBillableCallReservation;
 use App\Models\Firm;
 use App\Support\TenantAwareJobContext;
@@ -45,8 +46,15 @@ final class ExpireStaleProviderReservationsJob implements ShouldQueue
         ];
     }
 
-    public function handle(): void
+    public function handle(ProviderOperationAttemptService $operationAttempts): void
     {
+        // The durable gate's own lease sweep. Bounded, context-free, and
+        // deliberately first: it only ever moves a row to a state that
+        // forbids an automated re-send (`retry_allowed` for a provably
+        // un-sent claim, `provider_outcome_uncertain` for an abandoned
+        // in-flight one), so it can never authorize a call.
+        $operationAttempts->sweepExpiredLeases();
+
         Firm::query()->select('id')->orderBy('id')->chunkById(200, function ($firms) {
             foreach ($firms as $firm) {
                 $firmId = $firm->id;
