@@ -25,10 +25,14 @@ use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Enums\ProviderWebhookSubscriptionStatus;
 use App\Integrations\Enums\ResourceType;
 use App\Integrations\Enums\SyncDirection;
+use App\Integrations\Enums\WebhookBootstrapState;
+use App\Integrations\Exceptions\GmailMailboxAlreadyRoutedException;
 use App\Integrations\Exceptions\OAuthAccountMismatchException;
 use App\Integrations\Exceptions\OAuthRedirectUriMismatchException;
 use App\Integrations\Exceptions\OAuthTenantMismatchException;
+use App\Integrations\Exceptions\ProviderOperationRequiresReconciliationException;
 use App\Integrations\Exceptions\SanitizedProviderHttpException;
+use App\Integrations\Jobs\BootstrapWebhookSubscriptionsJob;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationCredential;
 use App\Integrations\Models\IntegrationProvider;
@@ -128,6 +132,21 @@ class ProviderConnectionService
         // site $gmailMailboxRouting->unroute() already establishes.
         private readonly PlaidItemRoutingService $plaidItemRouting,
     ) {}
+
+    /**
+     * CHECKPOINT 8.2 (§A7b). Set by `finishLinkTokenCallback()` INSIDE its
+     * transaction and consumed by `completeLinkTokenConnection()` after
+     * that transaction commits, so the webhook bootstrap's outbound calls
+     * happen outside it.
+     *
+     * Scalars only, deliberately: nothing carried across the boundary is a
+     * live model, so the bootstrap always re-reads fresh state. The OAuth
+     * flow needs no equivalent — `completeOAuthCallback()` already has the
+     * committed result in hand.
+     *
+     * @var array{connection_id: int, firm_id: int, current_user_id: int}|null
+     */
+    private ?array $deferredWebhookBootstrap = null;
 
     /**
      * Checkpoint 10 addition (frozen-design-post-security-review.md §2;
@@ -416,10 +435,30 @@ class ProviderConnectionService
         $consumed = $this->stateService->resolveAndConsume($rawState, $currentUserId);
 
         try {
-            return (new TenantContextService)->runWithFirmContext(
+            $result = (new TenantContextService)->runWithFirmContext(
                 $consumed->firmId,
                 fn () => $this->finishCallback($consumed, $authorizationCode, $currentUserId)
             );
+
+            // CHECKPOINT 8.2 (§A7b). AFTER the OAuth transaction has
+            // committed — so the authorization is already safe, and no
+            // lock is held on the connection row — bring up the webhook
+            // subscriptions. Deliberately fail-soft: a `subscribe()`
+            // failure now degrades this connection's push delivery and
+            // records why, instead of discarding a completed
+            // authorization.
+            $this->runWebhookBootstrapAfterConnect(
+                $result->firmIntegration,
+                $currentUserId,
+                // Anti-tautology (ProviderBillableCallPipeline's own class
+                // docblock, addition #0): $consumed->firmId is the OAuth
+                // state's own independently-resolved firm id, established
+                // long before the connection row was loaded — never
+                // $connection->firm itself.
+                $consumed->firmId,
+            );
+
+            return $result;
         } catch (OAuthAccountMismatchException|OAuthTenantMismatchException $e) {
             // By this point runWithFirmContext()'s DB::transaction() has
             // ALREADY rolled back and re-thrown — the lockForUpdate()
@@ -675,15 +714,27 @@ class ProviderConnectionService
         // `if ($provider instanceof SupportsWebhooksContract)` branch and
         // the SAME ambient transaction/lock finishCallback() already runs
         // under.
+        // CHECKPOINT 8.2 (§A7b) — the bootstrap no longer runs here.
+        //
+        // `enableWebhookRouting()` STAYS: it is entirely local (a routing
+        // token plus an index row), makes no provider call, and must be
+        // atomic with the connection becoming Active.
+        //
+        // `bootstrapWebhookSubscriptions()` does NOT stay. It makes real
+        // outbound `subscribe()` calls, and running those inside this
+        // transaction had two consequences this checkpoint removes: the
+        // provider call was made while this transaction held `FOR UPDATE`
+        // on the connection row (the Checkpoint 8.1 deadlock shape), and
+        // ANY failure rolled back a completed, valid authorization —
+        // including the credential just exchanged — instead of degrading
+        // honestly. The connection is marked `pending_webhook_bootstrap`
+        // here, in the very transaction that makes it Active, so the
+        // intermediate state is durable the instant it exists; the
+        // bootstrap itself runs after this transaction commits, in
+        // completeOAuthCallback().
         if ($provider instanceof SupportsWebhooksContract) {
             $this->enableWebhookRouting($connection, $currentUserId);
-            // Anti-tautology (ProviderBillableCallPipeline's own class
-            // docblock, addition #0): $consumed->firmId is the OAuth
-            // state's own independently-resolved firm id (established
-            // long before $connection was loaded), never $connection->firm
-            // itself — see bootstrapWebhookSubscriptions()'s own docblock
-            // addition below for the full reasoning.
-            $this->bootstrapWebhookSubscriptions($connection, $provider, $currentUserId, Firm::query()->findOrFail($consumed->firmId));
+            $this->markWebhookBootstrapPending($connection, $provider);
         }
 
         return new OAuthCallbackResult($connection, $connection->status, $scopeSatisfied);
@@ -830,10 +881,28 @@ class ProviderConnectionService
      */
     public function completeLinkTokenConnection(FirmIntegration $connection, string $publicToken, int $currentUserId): OAuthCallbackResult
     {
-        return (new TenantContextService)->runWithFirmContext(
+        $this->deferredWebhookBootstrap = null;
+
+        $result = (new TenantContextService)->runWithFirmContext(
             $connection->firm_id,
             fn () => $this->finishLinkTokenCallback($connection, $publicToken, $currentUserId)
         );
+
+        // CHECKPOINT 8.2 (§A7b): run the deferred bootstrap only once the
+        // transaction above has committed — see
+        // runWebhookBootstrapAfterConnect().
+        $deferred = $this->deferredWebhookBootstrap;
+        $this->deferredWebhookBootstrap = null;
+
+        if ($deferred !== null) {
+            $this->runWebhookBootstrapAfterConnect(
+                $result->firmIntegration,
+                $deferred['current_user_id'],
+                $deferred['firm_id'],
+            );
+        }
+
+        return $result;
     }
 
     /**
@@ -943,6 +1012,14 @@ class ProviderConnectionService
 
         if ($provider instanceof SupportsWebhooksContract) {
             $this->enableWebhookRouting($fresh, $currentUserId);
+            $this->markWebhookBootstrapPending($fresh, $provider);
+
+            // CHECKPOINT 8.2 (§A7b): same staging as the OAuth flow — the
+            // local state is committed first, and the outbound
+            // `subscribe()` calls happen fail-soft afterwards. See
+            // finishCallback()'s own comment and
+            // runWebhookBootstrapAfterConnect().
+            //
             // Anti-tautology (ProviderBillableCallPipeline's own class
             // docblock, addition #0): this flow (unlike finishCallback()'s
             // OAuth-state-derived $consumed->firmId) has no independent
@@ -952,12 +1029,11 @@ class ProviderConnectionService
             // runWithFirmContext() is the closest genuinely-separate
             // source available, so it is read fresh here rather than
             // reusing $fresh->firm.
-            $this->bootstrapWebhookSubscriptions(
-                $fresh,
-                $provider,
-                $currentUserId,
-                Firm::query()->findOrFail((new TenantContextService)->currentFirmId()),
-            );
+            $this->deferredWebhookBootstrap = [
+                'connection_id' => (int) $fresh->id,
+                'firm_id' => (int) (new TenantContextService)->currentFirmId(),
+                'current_user_id' => $currentUserId,
+            ];
         }
 
         return new OAuthCallbackResult($fresh, $fresh->status, true);
@@ -1794,6 +1870,20 @@ class ProviderConnectionService
      * this stays additive/non-breaking for any other hypothetical caller
      * this private method might gain in the future. Only used when the
      * resolved `$provider` implements `RequiresBillableCallPipelineContract`.
+     *
+     * CHECKPOINT 8.2 (§A7b) CORRECTION TO THIS DOCBLOCK. The paragraph
+     * above describing this method as running "inside the SAME ambient
+     * `TenantContextService::runWithFirmContext()`/`DB::transaction()`
+     * wrap `completeOAuthCallback()` already opens" — so that a failure
+     * "rolls back the entire OAuth connect, leaving the connection never
+     * `Active`, rather than silently degrading to manual-sync-only" — is
+     * NO LONGER TRUE, and that behavior was a defect rather than a
+     * safeguard: it discarded a completed authorization (credential
+     * included) over a transient `subscribe()` hiccup, and it made a
+     * provider HTTP call while holding `FOR UPDATE` on the connection row.
+     * This method is now called by `runWebhookBootstrapAfterConnect()`
+     * AFTER that transaction commits, and each iteration's local writes
+     * are committed in their own short transaction.
      */
     private function bootstrapWebhookSubscriptions(
         FirmIntegration $connection,
@@ -1815,112 +1905,356 @@ class ProviderConnectionService
         $actor = $this->resolveActingFirmUser($currentUserId, $connection->firm_id);
 
         foreach ($resourceTypes as $resourceType) {
-            $alreadyActive = IntegrationProviderWebhookSubscription::query()
-                ->where('firm_integration_id', $connection->id)
-                ->where('resource_type', $resourceType)
-                ->where('status', ProviderWebhookSubscriptionStatus::Active->value)
-                ->exists();
+            $this->runOneWebhookSubscriptionBootstrap(
+                $connection, $provider, $resourceType, $actor, $firm,
+            );
+        }
+    }
 
-            if ($alreadyActive) {
-                continue;
-            }
+    private function runOneWebhookSubscriptionBootstrap(
+        FirmIntegration $connection,
+        IntegrationProviderContract $provider,
+        string $resourceType,
+        FirmUser $actor,
+        ?Firm $firm,
+    ): void {
+        $alreadyActive = IntegrationProviderWebhookSubscription::query()
+            ->where('firm_integration_id', $connection->id)
+            ->where('resource_type', $resourceType)
+            ->where('status', ProviderWebhookSubscriptionStatus::Active->value)
+            ->exists();
 
-            // DETERMINISTIC SUBSCRIBE-CYCLE IDENTITY (double-billing
-            // remediation). The idempotency key below used to end in
-            // `now()->format('YmdHi')`, which made a re-entry of this
-            // bootstrap that crossed a minute boundary reserve a brand
-            // new row and bill a second real subscribe() call. Lower
-            // severity than the job call sites (this path is connect-flow
-            // driven, not queue-auto-retried, and the $alreadyActive
-            // guard above already suppresses the common case) but fixed
-            // for the same reason.
-            //
-            // A FULLY static key would be wrong in the other direction:
-            // it would wedge every legitimate future re-subscribe of the
-            // same (connection, resourceType) behind one permanently
-            // terminal reservation. The highest subscription-row id this
-            // connection/resource has ever reached is the durable
-            // discriminator that already exists — it is stable across
-            // re-entries of one failed bootstrap (no row is written until
-            // subscribe() succeeds) and advances exactly once a real
-            // subscription is created.
-            $subscribeCycle = (int) (IntegrationProviderWebhookSubscription::query()
-                ->where('firm_integration_id', $connection->id)
-                ->where('resource_type', $resourceType)
-                ->max('id') ?? 0);
+        if ($alreadyActive) {
+            return;
+        }
 
-            // FirmsVault Live Integrations, Checkpoint 4 cost-control
-            // wiring pass (checkpoint4-design-cost-control.md §2.1 call
-            // site #3). Additive `instanceof` branch only — every other
-            // provider (Microsoft365Provider, GoogleWorkspaceProvider)
-            // does not implement RequiresBillableCallPipelineContract and
-            // falls straight through to the else branch below, which is
-            // the exact, byte-for-byte unchanged
-            // `$this->httpClient->execute(...)` call this method has
-            // always made.
-            if ($provider instanceof RequiresBillableCallPipelineContract && $firm !== null) {
-                $result = app(ProviderBillableCallPipeline::class)->execute(
-                    providerKey: $provider->key(),
-                    connection: $connection,
-                    firm: $firm,
-                    actor: $actor,
-                    product: 'webhook_subscribe',
-                    billingOperation: 'subscribe',
-                    environment: (new ProviderEnvironmentResolver)->modeFor($provider->key()),
-                    direction: SyncDirection::Outbound,
-                    resourceType: ResourceType::from($resourceType),
-                    providerCall: fn () => $this->httpClient->execute(
-                        fn () => $provider->subscribe([
-                            'connection' => $connection,
-                            'resource_type' => $resourceType,
-                        ]),
-                        'subscribe',
-                    ),
-                    usageIdempotencyKey: 'provider_webhook_subscribe:'.$connection->id.':'.$resourceType.':cycle'.$subscribeCycle,
-                    provider: $provider,
-                    requiredContractFqcn: SupportsWebhooksContract::class,
-                );
+        // DETERMINISTIC SUBSCRIBE-CYCLE IDENTITY (double-billing
+        // remediation). The idempotency key below used to end in
+        // `now()->format('YmdHi')`, which made a re-entry of this
+        // bootstrap that crossed a minute boundary reserve a brand
+        // new row and bill a second real subscribe() call. Lower
+        // severity than the job call sites (this path is connect-flow
+        // driven, not queue-auto-retried, and the $alreadyActive
+        // guard above already suppresses the common case) but fixed
+        // for the same reason.
+        //
+        // A FULLY static key would be wrong in the other direction:
+        // it would wedge every legitimate future re-subscribe of the
+        // same (connection, resourceType) behind one permanently
+        // terminal reservation. The highest subscription-row id this
+        // connection/resource has ever reached is the durable
+        // discriminator that already exists — it is stable across
+        // re-entries of one failed bootstrap (no row is written until
+        // subscribe() succeeds) and advances exactly once a real
+        // subscription is created.
+        $subscribeCycle = (int) (IntegrationProviderWebhookSubscription::query()
+            ->where('firm_integration_id', $connection->id)
+            ->where('resource_type', $resourceType)
+            ->max('id') ?? 0);
 
-                $result = $result->response;
-            } else {
-                $result = $this->httpClient->execute(
+        // FirmsVault Live Integrations, Checkpoint 4 cost-control
+        // wiring pass (checkpoint4-design-cost-control.md §2.1 call
+        // site #3). Additive `instanceof` branch only — every other
+        // provider (Microsoft365Provider, GoogleWorkspaceProvider)
+        // does not implement RequiresBillableCallPipelineContract and
+        // falls straight through to the else branch below, which is
+        // the exact, byte-for-byte unchanged
+        // `$this->httpClient->execute(...)` call this method has
+        // always made.
+        if ($provider instanceof RequiresBillableCallPipelineContract && $firm !== null) {
+            $result = app(ProviderBillableCallPipeline::class)->execute(
+                providerKey: $provider->key(),
+                connection: $connection,
+                firm: $firm,
+                actor: $actor,
+                product: 'webhook_subscribe',
+                billingOperation: 'subscribe',
+                environment: (new ProviderEnvironmentResolver)->modeFor($provider->key()),
+                direction: SyncDirection::Outbound,
+                resourceType: ResourceType::from($resourceType),
+                providerCall: fn () => $this->httpClient->execute(
                     fn () => $provider->subscribe([
                         'connection' => $connection,
                         'resource_type' => $resourceType,
                     ]),
                     'subscribe',
-                );
+                ),
+                usageIdempotencyKey: 'provider_webhook_subscribe:'.$connection->id.':'.$resourceType.':cycle'.$subscribeCycle,
+                provider: $provider,
+                requiredContractFqcn: SupportsWebhooksContract::class,
+            );
+
+            $result = $result->response;
+        } else {
+            $result = $this->httpClient->execute(
+                fn () => $provider->subscribe([
+                    'connection' => $connection,
+                    'resource_type' => $resourceType,
+                ]),
+                'subscribe',
+            );
+        }
+
+        [$providerSubscriptionId, $expiresAt] = $this->extractSubscriptionState($result);
+
+        $providerResourceRaw = $result['resource'] ?? null;
+        $providerResource = (is_string($providerResourceRaw) && $providerResourceRaw !== '')
+            ? $providerResourceRaw
+            : $resourceType;
+
+        $providerChangeTypeRaw = $result['change_type'] ?? null;
+        $providerChangeType = (is_string($providerChangeTypeRaw) && $providerChangeTypeRaw !== '')
+            ? $providerChangeTypeRaw
+            : 'default';
+
+        // Committed together with the subscribe() above by this
+        // method's own transaction, so a later resource type's failure
+        // can never undo an earlier one's subscription (which really
+        // does exist at the provider by then).
+        IntegrationProviderWebhookSubscription::query()->create([
+            'firm_id' => $connection->firm_id,
+            'firm_integration_id' => $connection->id,
+            'provider_key' => $provider->key()->value,
+            'resource_type' => $resourceType,
+            'provider_resource' => $providerResource,
+            'provider_change_type' => $providerChangeType,
+            'provider_subscription_id' => $providerSubscriptionId,
+            'expires_at' => $expiresAt,
+            'status' => ProviderWebhookSubscriptionStatus::Active,
+        ]);
+
+        $this->events->record($connection->firm, 'integration_oauth.webhook_subscription_bootstrapped', $connection, $actor->user, [
+            'firm_integration_id' => $connection->id,
+            'resource_type' => $resourceType,
+        ]);
+    }
+
+    /**
+     * CHECKPOINT 8.2 (§A7b). Marks a connection as awaiting its webhook
+     * bootstrap, from INSIDE the transaction that makes it Active — so the
+     * "connected, push not yet live" state is durable the instant it
+     * exists, and a crash between the commit and the bootstrap leaves a
+     * connection that is honestly labelled rather than silently
+     * push-dead.
+     *
+     * `NotRequired` is written when there is genuinely nothing to do, so
+     * the column never implies a pending action that will never come.
+     */
+    private function markWebhookBootstrapPending(FirmIntegration $connection, IntegrationProviderContract $provider): void
+    {
+        $connection->forceFill([
+            'webhook_bootstrap_state' => $this->webhookBootstrapResourceTypes($connection, $provider) === []
+                ? WebhookBootstrapState::NotRequired
+                : WebhookBootstrapState::Pending,
+            'webhook_bootstrap_error' => null,
+        ])->save();
+    }
+
+    /**
+     * CHECKPOINT 8.2 (§A7b). Runs the webhook bootstrap AFTER the connect
+     * transaction has committed, and never lets its failure undo the
+     * connection.
+     *
+     * Outcomes, all recorded on the connection itself:
+     *   - success                     -> `bootstrap_complete`
+     *   - retryable provider failure  -> `bootstrap_pending_retry`, and a
+     *                                    retry is queued
+     *   - definite provider failure   -> `bootstrap_failed`
+     *   - unknown outcome / gate says
+     *     reconciliation              -> `bootstrap_reconciliation_required`,
+     *                                    never retried automatically
+     *
+     * Only the SANITIZED failure category is stored (§A8) — never a
+     * provider message. The connection stays Active throughout: scheduled
+     * and manual syncs keep working, and the UI says plainly which part is
+     * degraded (see `WebhookBootstrapState::firmFacingSummary()`).
+     *
+     * `$scheduleRetry` MUST be false when this call IS itself a retry —
+     * see the dispatch site below for the recursion that taught us so.
+     */
+    public function runWebhookBootstrapAfterConnect(
+        FirmIntegration $connection,
+        int $currentUserId,
+        int $firmId,
+        bool $scheduleRetry = true,
+    ): WebhookBootstrapState {
+        return (new TenantContextService)->runWithFirmContextWithoutTransaction($firmId, function () use ($connection, $currentUserId, $firmId, $scheduleRetry) {
+            $fresh = FirmIntegration::query()
+                ->where('id', $connection->id)
+                ->where('firm_id', $firmId)
+                ->first();
+
+            if ($fresh === null || $fresh->webhook_bootstrap_state === WebhookBootstrapState::NotRequired) {
+                return WebhookBootstrapState::NotRequired;
             }
 
-            [$providerSubscriptionId, $expiresAt] = $this->extractSubscriptionState($result);
+            if ($fresh->webhook_bootstrap_state === WebhookBootstrapState::ReconciliationRequired) {
+                // A previous attempt's outcome is unknown. Retrying blindly
+                // is exactly how duplicate provider-side subscriptions get
+                // created; a human decides.
+                return WebhookBootstrapState::ReconciliationRequired;
+            }
 
-            $providerResourceRaw = $result['resource'] ?? null;
-            $providerResource = (is_string($providerResourceRaw) && $providerResourceRaw !== '')
-                ? $providerResourceRaw
-                : $resourceType;
+            $provider = $this->resolveProvider($fresh);
 
-            $providerChangeTypeRaw = $result['change_type'] ?? null;
-            $providerChangeType = (is_string($providerChangeTypeRaw) && $providerChangeTypeRaw !== '')
-                ? $providerChangeTypeRaw
-                : 'default';
+            if (! $provider instanceof SupportsWebhooksContract) {
+                $this->recordWebhookBootstrapState($fresh, WebhookBootstrapState::NotRequired, null);
 
-            IntegrationProviderWebhookSubscription::query()->create([
-                'firm_id' => $connection->firm_id,
-                'firm_integration_id' => $connection->id,
-                'provider_key' => $provider->key()->value,
-                'resource_type' => $resourceType,
-                'provider_resource' => $providerResource,
-                'provider_change_type' => $providerChangeType,
-                'provider_subscription_id' => $providerSubscriptionId,
-                'expires_at' => $expiresAt,
-                'status' => ProviderWebhookSubscriptionStatus::Active,
-            ]);
+                return WebhookBootstrapState::NotRequired;
+            }
 
-            $this->events->record($connection->firm, 'integration_oauth.webhook_subscription_bootstrapped', $connection, $actor->user, [
-                'firm_integration_id' => $connection->id,
-                'resource_type' => $resourceType,
-            ]);
+            try {
+                $this->bootstrapWebhookSubscriptions($fresh, $provider, $currentUserId, Firm::query()->findOrFail($firmId));
+            } catch (ProviderOperationRequiresReconciliationException $e) {
+                $this->recordWebhookBootstrapState($fresh, WebhookBootstrapState::ReconciliationRequired, 'reconciliation_required');
+
+                return WebhookBootstrapState::ReconciliationRequired;
+            } catch (GmailMailboxAlreadyRoutedException $e) {
+                // A LOCAL claim conflict, raised BEFORE any provider call
+                // was made (§A7b): definite, never ambiguous. Nothing
+                // exists at the provider to reconcile, and no retry will
+                // change the answer while another connection still owns
+                // that mailbox — so `failed`, not `pending_retry` and not
+                // `reconciliation_required`.
+                $this->recordWebhookBootstrapState($fresh, WebhookBootstrapState::Failed, 'mailbox_already_routed');
+
+                return WebhookBootstrapState::Failed;
+            } catch (SanitizedProviderHttpException $e) {
+                $retryable = in_array($e->category(), [
+                    SanitizedProviderHttpException::CATEGORY_RATE_LIMITED,
+                    SanitizedProviderHttpException::CATEGORY_PROVIDER_REJECTED,
+                ], true);
+
+                $uncertain = in_array($e->category(), [
+                    SanitizedProviderHttpException::CATEGORY_TIMEOUT,
+                    SanitizedProviderHttpException::CATEGORY_NETWORK_ERROR,
+                    SanitizedProviderHttpException::CATEGORY_CONNECTION_UNAVAILABLE,
+                    SanitizedProviderHttpException::CATEGORY_UNKNOWN,
+                    SanitizedProviderHttpException::CATEGORY_MALFORMED_RESPONSE,
+                ], true);
+
+                // An ambiguous outcome means a subscription may already
+                // exist at the provider — that is a reconciliation, never a
+                // retry.
+                $state = match (true) {
+                    $uncertain => WebhookBootstrapState::ReconciliationRequired,
+                    $retryable => WebhookBootstrapState::PendingRetry,
+                    default => WebhookBootstrapState::Failed,
+                };
+
+                $this->recordWebhookBootstrapState($fresh, $state, $e->category());
+
+                // Only the FIRST attempt may schedule a retry. Found the
+                // hard way: dispatching unconditionally meant a retry that
+                // failed again queued another retry — and under a
+                // synchronous queue driver that dispatch runs INLINE, so it
+                // recursed until the process was killed. Even on a real
+                // queue it was an uncapped, never-terminating retry chain.
+                // BootstrapWebhookSubscriptionsJob's own $tries/backoff()
+                // is the one repetition mechanism.
+                if ($scheduleRetry && $state === WebhookBootstrapState::PendingRetry) {
+                    BootstrapWebhookSubscriptionsJob::dispatch($fresh->id, $firmId, $currentUserId);
+                }
+
+                return $state;
+            } catch (Throwable $e) {
+                // Anything unsanitized is treated as ambiguous rather than
+                // as a clean failure, for the same reason the outcome
+                // normalizer does: we cannot prove the provider did not act.
+                $this->recordWebhookBootstrapState($fresh, WebhookBootstrapState::ReconciliationRequired, 'unsanitized_failure');
+
+                return WebhookBootstrapState::ReconciliationRequired;
+            }
+
+            $this->recordWebhookBootstrapState($fresh, WebhookBootstrapState::Complete, null);
+
+            return WebhookBootstrapState::Complete;
+        });
+    }
+
+    /**
+     * CHECKPOINT 8.2 (§A7b). The retry entry point, used by
+     * `BootstrapWebhookSubscriptionsJob` and safe for a UI action to call.
+     * Refuses to touch a connection whose bootstrap needs a human
+     * (`bootstrap_failed` is retryable only by explicit request, and
+     * `bootstrap_reconciliation_required` never automatically).
+     */
+    public function retryWebhookBootstrap(int $connectionId, int $firmId, int $currentUserId, bool $force = false): WebhookBootstrapState
+    {
+        $connection = (new TenantContextService)->runWithFirmContext(
+            $firmId,
+            fn () => FirmIntegration::query()->where('id', $connectionId)->where('firm_id', $firmId)->first()
+        );
+
+        if ($connection === null) {
+            return WebhookBootstrapState::NotRequired;
         }
+
+        if (! $force && ! $connection->webhook_bootstrap_state->isRetryable()) {
+            return $connection->webhook_bootstrap_state;
+        }
+
+        if ($connection->webhook_bootstrap_state === WebhookBootstrapState::ReconciliationRequired) {
+            // Not even `force` may bypass this one: a blind retry here can
+            // create a duplicate provider-side subscription.
+            return WebhookBootstrapState::ReconciliationRequired;
+        }
+
+        // scheduleRetry: false — this IS the retry. Repetition is owned by
+        // BootstrapWebhookSubscriptionsJob's $tries/backoff(), never by a
+        // retry queueing its own successor.
+        return $this->runWebhookBootstrapAfterConnect($connection, $currentUserId, $firmId, scheduleRetry: false);
+    }
+
+    /**
+     * The resource types this connection would subscribe to — the same
+     * intersection `bootstrapWebhookSubscriptions()` computes, extracted so
+     * `markWebhookBootstrapPending()` can tell "nothing to do" from
+     * "something to do" without duplicating the rule.
+     *
+     * @return list<string>
+     */
+    private function webhookBootstrapResourceTypes(FirmIntegration $connection, IntegrationProviderContract $provider): array
+    {
+        if (! $provider instanceof SupportsPullSyncContract) {
+            return [];
+        }
+
+        return array_values(array_intersect(
+            $provider->pullableResourceTypes(),
+            $connection->requested_capabilities_json ?? [],
+        ));
+    }
+
+    /**
+     * Persists a bootstrap outcome in its own short transaction, with an
+     * audit event. Stores only the sanitized category — never a provider
+     * message or payload (§A8).
+     */
+    private function recordWebhookBootstrapState(
+        FirmIntegration $connection,
+        WebhookBootstrapState $state,
+        ?string $sanitizedCategory,
+    ): void {
+        (new TenantContextService)->runWithFirmContext($connection->firm_id, function () use ($connection, $state, $sanitizedCategory) {
+            $connection->forceFill([
+                'webhook_bootstrap_state' => $state,
+                'webhook_bootstrap_error' => $sanitizedCategory,
+                'webhook_bootstrap_attempted_at' => now(),
+            ])->save();
+
+            $this->events->record(
+                $connection->firm,
+                'integration_oauth.webhook_bootstrap_state_changed',
+                $connection,
+                null,
+                [
+                    'firm_integration_id' => $connection->id,
+                    'webhook_bootstrap_state' => $state->value,
+                    'sanitized_category' => $sanitizedCategory,
+                ],
+            );
+        });
     }
 
     /**

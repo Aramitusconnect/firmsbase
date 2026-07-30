@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Integrations\Support;
 
 use App\Integrations\Data\ResolvedGmailMailboxRoute;
+use App\Integrations\Exceptions\GmailMailboxAlreadyRoutedException;
 use App\Integrations\Models\FirmIntegration;
 use App\Services\EmailBodyEncryptionService;
 use Illuminate\Support\Facades\DB;
@@ -94,15 +95,28 @@ final class GmailMailboxRoutingService
      *
      * The `mailbox_lookup_hmac` UNIQUE constraint means a second,
      * DIFFERENT connection attempting to route the SAME mailbox fails
-     * here at the DB layer — a real, catchable
-     * `Illuminate\Database\QueryException`, deliberately allowed to
-     * propagate UNCAUGHT (never a silent overwrite of the first
-     * connection's route) so the caller's own ambient transaction rolls
-     * back the whole operation rather than degrading silently
-     * (checkpoint3-combined-design.md §4.7's "Byproduct" — an
-     * ambiguous-mailbox `route()` failure rolls back the entire OAuth
-     * connect, never leaving a connection `Active` with webhooks
-     * silently broken).
+     * here — never a silent overwrite of the first connection's route.
+     *
+     * CHECKPOINT 8.2 (§A7b) — CLAIM FIRST, CALL SECOND. This method is now
+     * a CLAIM, and its caller must invoke it BEFORE the provider `watch()`
+     * network call, not after.
+     *
+     * The claim itself is ONE autocommitted statement: an
+     * `INSERT ... ON CONFLICT (mailbox_lookup_hmac) DO NOTHING`. Winning it
+     * means this connection owns the mailbox and the network call may
+     * proceed; losing it to another connection throws
+     * `GmailMailboxAlreadyRoutedException` BEFORE any request is made — so
+     * a cross-firm conflict costs zero provider calls and needs no
+     * rollback to undo.
+     *
+     * That ordering replaces the previous contract, which this docblock
+     * used to describe as a feature: the route was written AFTER the watch
+     * call, and a conflict was "deliberately allowed to propagate UNCAUGHT
+     * ... so the caller's own ambient transaction rolls back the whole
+     * operation". That meant using rollback to compensate for a provider
+     * call that had ALREADY happened — the watch subscription existed at
+     * Google while the local record of it was discarded, and a completed
+     * OAuth authorization was thrown away with it.
      *
      * $mailboxEmail MUST be sourced from an authenticated, first-party
      * Google API response (Gmail's own `users.getProfile` —
@@ -125,11 +139,10 @@ final class GmailMailboxRoutingService
             );
         }
 
-        DB::table('integration_gmail_mailbox_routes')
-            ->where('firm_integration_id', $connection->id)
-            ->delete();
-
-        DB::table('integration_gmail_mailbox_routes')->insert([
+        // THE CLAIM — one statement, autocommitted, no transaction. A
+        // competing connection either loses this INSERT or wins it; there
+        // is no window in which both believe they own the mailbox.
+        $claimed = DB::table('integration_gmail_mailbox_routes')->insertOrIgnore([
             'firm_id' => $connection->firm_id,
             'firm_integration_id' => $connection->id,
             'integration_provider_id' => $connection->integration_provider_id,
@@ -139,6 +152,45 @@ final class GmailMailboxRoutingService
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+
+        if ($claimed === 0) {
+            $owner = DB::table('integration_gmail_mailbox_routes')
+                ->where('mailbox_lookup_hmac', $hmac)
+                ->first();
+
+            if ($owner === null) {
+                // The conflicting row disappeared between the INSERT and
+                // this read. Refuse rather than retry in a loop — the
+                // caller's own retry is the right place for that.
+                throw new RuntimeException(
+                    "GmailMailboxRoutingService::route() could not claim the mailbox for connection {$connection->id}: the conflicting route vanished mid-claim."
+                );
+            }
+
+            if ((int) $owner->firm_integration_id !== (int) $connection->id) {
+                // Fail closed, BEFORE any provider call. Another
+                // connection — possibly another firm's — owns this
+                // mailbox, and inbound Gmail notifications carry only the
+                // address, so a second claim would make delivery ambiguous.
+                throw new GmailMailboxAlreadyRoutedException(
+                    (int) $connection->id,
+                    (int) $owner->firm_integration_id,
+                );
+            }
+
+            // Already ours: an ordinary re-claim on reconnect or renewal.
+            // Idempotent, nothing to do.
+            return;
+        }
+
+        // The claim is won and committed. Any OLDER route this connection
+        // held for a DIFFERENT mailbox is now superseded — dropped
+        // afterwards, deliberately, so a failure here can never undo the
+        // claim that already succeeded.
+        DB::table('integration_gmail_mailbox_routes')
+            ->where('firm_integration_id', $connection->id)
+            ->where('mailbox_lookup_hmac', '!=', $hmac)
+            ->delete();
     }
 
     /**

@@ -145,6 +145,20 @@ class IntegrationAuditEventTypeTest extends TestCase
         // where nothing in the timeline previously distinguished "we
         // revoked at the provider" from "we never even tried."
         'integration_oauth.provider_revocation_not_supported',
+        // CHECKPOINT 8.2 addition (§A7b): fired by
+        // ProviderConnectionService::recordWebhookBootstrapState() every
+        // time a connection's webhook-bootstrap lifecycle moves — complete,
+        // pending_retry, failed, or reconciliation_required.
+        //
+        // It exists because the bootstrap no longer runs inside the OAuth
+        // completion transaction. It used to, and a failure there rolled
+        // back the whole authorization, so there was never an intermediate
+        // state to audit — the connect either happened or it did not. Now
+        // that a connection can be Active while its subscriptions are not,
+        // that transition needs to be visible to an operator, and the
+        // sanitized failure category is recorded with it (never a provider
+        // message).
+        'integration_oauth.webhook_bootstrap_state_changed',
     ];
 
     /**
@@ -186,10 +200,16 @@ class IntegrationAuditEventTypeTest extends TestCase
         'integration_oauth.required_scope_missing',
     ];
 
-    public function test_the_closed_taxonomy_has_exactly_twenty_two_distinct_event_names(): void
+    /**
+     * 22 -> 23: Checkpoint 8.2 (§A7b) adds
+     * `integration_oauth.webhook_bootstrap_state_changed`. See its entry in
+     * CLOSED_TAXONOMY for why the staged bootstrap needs an audit event the
+     * all-or-nothing version never did.
+     */
+    public function test_the_closed_taxonomy_has_exactly_twenty_three_distinct_event_names(): void
     {
-        $this->assertCount(22, self::CLOSED_TAXONOMY);
-        $this->assertCount(22, array_unique(self::CLOSED_TAXONOMY), 'No duplicate event names in the closed taxonomy.');
+        $this->assertCount(23, self::CLOSED_TAXONOMY);
+        $this->assertCount(23, array_unique(self::CLOSED_TAXONOMY), 'No duplicate event names in the closed taxonomy.');
     }
 
     /**

@@ -97,6 +97,22 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
         ...self::EXPECTED_COLUMNS,
         'requested_capabilities_json',
         'external_tenant_id',
+        // CHECKPOINT 8.2 (§A7b) additions, from the later, separate
+        // database/migrations/2026_10_01_100002_add_webhook_bootstrap_state_to_firm_integrations_table.php.
+        // Listed HERE and deliberately not in EXPECTED_COLUMNS, for exactly
+        // the reason that constant's own docblock gives: the rollback/
+        // reapply tests replay ONLY the two original 2026_09_02
+        // migrations, and after that narrower cycle these three columns are
+        // genuinely, correctly absent.
+        //
+        // They exist because the webhook-subscription bootstrap now runs
+        // AFTER the OAuth transaction commits — it used to run inside it,
+        // holding FOR UPDATE on this row across a provider call — so a
+        // connection can legitimately be Active while its subscriptions are
+        // not yet in place. See App\Integrations\Enums\WebhookBootstrapState.
+        'webhook_bootstrap_state',
+        'webhook_bootstrap_error',
+        'webhook_bootstrap_attempted_at',
     ];
 
     /**
@@ -1990,6 +2006,11 @@ class FirmIntegrationsForceRlsActivationTest extends TestCase
             // rationale.
             'requested_capabilities_json',
             'external_tenant_id',
+            // CHECKPOINT 8.2 (§A7b) additions — see EXPECTED_COLUMNS's own
+            // comment above and FirmIntegration::$fillable.
+            'webhook_bootstrap_state',
+            'webhook_bootstrap_error',
+            'webhook_bootstrap_attempted_at',
         ];
 
         $fillable = $model->getFillable();

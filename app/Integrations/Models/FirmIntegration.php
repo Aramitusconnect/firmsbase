@@ -7,6 +7,7 @@ namespace App\Integrations\Models;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\HealthSummaryState;
 use App\Integrations\Enums\ProviderKey;
+use App\Integrations\Enums\WebhookBootstrapState;
 use App\Models\Concerns\BelongsToTenant;
 use App\Models\Concerns\HasPublicUuid;
 use App\Models\Firm;
@@ -85,6 +86,15 @@ class FirmIntegration extends Model
         // each from its nearest existing sibling column.
         'requested_capabilities_json',
         'external_tenant_id',
+        // CHECKPOINT 8.2 additions (§A7b). The webhook-subscription
+        // bootstrap now runs AFTER the OAuth transaction commits, so a
+        // connection can be Active while its subscriptions are not yet in
+        // place. These three columns make that intermediate state explicit
+        // — see App\Integrations\Enums\WebhookBootstrapState and the
+        // add-column migration's own docblock.
+        'webhook_bootstrap_state',
+        'webhook_bootstrap_error',
+        'webhook_bootstrap_attempted_at',
     ];
 
     /**
@@ -130,6 +140,9 @@ class FirmIntegration extends Model
             // — casting it here clarifies the read path without any
             // schema/column change.
             'last_health_status' => HealthSummaryState::class,
+            // CHECKPOINT 8.2 addition (§A7b) — see $fillable's comment.
+            'webhook_bootstrap_state' => WebhookBootstrapState::class,
+            'webhook_bootstrap_attempted_at' => 'datetime',
         ];
     }
 

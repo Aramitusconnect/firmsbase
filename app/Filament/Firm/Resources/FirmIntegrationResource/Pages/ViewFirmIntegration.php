@@ -9,6 +9,7 @@ use App\Integrations\Core\ProviderRegistry;
 use App\Integrations\Data\FirmIntegrationCredentialSummary;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\ResourceType;
+use App\Integrations\Enums\WebhookBootstrapState;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationCredential;
 use App\Integrations\Services\HealthStateService;
@@ -130,6 +131,44 @@ class ViewFirmIntegration extends ViewRecord
                     TextEntry::make('disconnected_at')->dateTime()->placeholder('—'),
                     TextEntry::make('scopes_granted_json')->label('Granted scopes')->listWithLineBreaks()->placeholder('—'),
                     TextEntry::make('error_reason')->label('Error')->placeholder('—')->columnSpanFull(),
+
+                    // CHECKPOINT 8.2 addition (§A7b). The webhook bootstrap
+                    // now runs AFTER the OAuth transaction commits, so a
+                    // connection can legitimately be Active while real-time
+                    // delivery is not yet working. Saying nothing here would
+                    // leave the firm believing push updates are live when
+                    // they are not — the status badge above reads "active"
+                    // and would be the only signal.
+                    //
+                    // Rendered for EVERY state, including the healthy one,
+                    // so its absence never has to be interpreted. The copy
+                    // comes from WebhookBootstrapState::firmFacingSummary(),
+                    // which always names both what is degraded and what
+                    // still works.
+                    TextEntry::make('webhook_bootstrap_state')
+                        ->label('Real-time updates')
+                        ->badge()
+                        ->formatStateUsing(fn ($state): string => $state instanceof WebhookBootstrapState
+                            ? match ($state) {
+                                WebhookBootstrapState::Complete => 'Active',
+                                WebhookBootstrapState::NotRequired => 'Not used',
+                                WebhookBootstrapState::Pending => 'Setting up',
+                                WebhookBootstrapState::PendingRetry => 'Retrying',
+                                WebhookBootstrapState::Failed => 'Not set up',
+                                WebhookBootstrapState::ReconciliationRequired => 'Needs review',
+                            }
+                            : (string) $state)
+                        ->color(fn ($state): string => match (true) {
+                            ! $state instanceof WebhookBootstrapState => 'gray',
+                            $state === WebhookBootstrapState::Complete => 'success',
+                            $state === WebhookBootstrapState::NotRequired => 'gray',
+                            $state->needsHumanAttention() => 'danger',
+                            default => 'warning',
+                        })
+                        ->helperText(fn ($state): string => $state instanceof WebhookBootstrapState
+                            ? $state->firmFacingSummary()
+                            : '')
+                        ->columnSpanFull(),
                 ]),
 
             Section::make('Health')

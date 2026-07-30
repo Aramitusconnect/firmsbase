@@ -10,10 +10,12 @@ use App\Integrations\Data\OAuthCallbackResult;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Enums\ResourceType;
+use App\Integrations\Exceptions\GmailMailboxAlreadyRoutedException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationProvider;
 use App\Integrations\Providers\GoogleWorkspace\GoogleWorkspaceProvider;
 use App\Integrations\Services\ProviderConnectionService;
+use App\Integrations\Support\GmailMailboxRoutingService;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\TenantEncryptionKey;
@@ -24,7 +26,6 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\URL;
-use RuntimeException;
 use Tests\TestCase;
 use Throwable;
 
@@ -277,33 +278,133 @@ final class GmailMailboxRoutingLifecycleTest extends TestCase
     // 5. Cross-firm ambiguous mailbox
     // ------------------------------------------------------------
 
-    public function test_a_second_firms_connection_cannot_route_the_same_gmail_mailbox_while_the_first_connections_route_is_still_active(): void
+    /**
+     * CHECKPOINT 8.2 (§A7b) REWRITE. The security contract this test
+     * enforces is unchanged and its assertions are strictly stronger; only
+     * the MECHANISM it relied on changed.
+     *
+     * It used to assert that a cross-firm mailbox conflict "rolls back the
+     * whole transaction, leaving firm 2's connection exactly where it
+     * started". That worked because the route was claimed AFTER the Gmail
+     * watch() call, inside the OAuth transaction — so the only way to undo
+     * a conflict was to discard a completed authorization, using a rollback
+     * to compensate for a provider call that had already been made.
+     *
+     * The claim now runs BEFORE any network call, as one short
+     * autocommitted statement, so a conflict is caught with zero provider
+     * calls made and nothing to compensate for. This test therefore no
+     * longer depends on outer-transaction rollback for anything: its
+     * fixtures are committed, and it cleans up explicitly through the
+     * owning connection.
+     */
+    public function test_a_second_firms_connection_cannot_claim_a_gmail_mailbox_already_owned_by_another_firm(): void
     {
-        [$firm1, $connection1, $firmUser1] = $this->firmConnectionAndActor();
-        $this->fakeSuccessfulGmailConnect('cross-firm-mailbox@example.test');
-        $result1 = $this->connect($connection1, $firmUser1);
-        $this->assertTrue($result1->successful);
+        // (1) Committed fixtures — two firms, two connections, real for
+        // every database session rather than only this test's transaction.
+        [$firmA, $connectionA] = $this->committedFirmAndConnection();
+        [$firmB, $connectionB] = $this->committedFirmAndConnection();
 
-        [$firm2, $connection2, $firmUser2] = $this->firmConnectionAndActor();
-        $this->fakeSuccessfulGmailConnect('cross-firm-mailbox@example.test');
+        $routing = app(GmailMailboxRoutingService::class);
+        $mailbox = 'cross-firm-owned-mailbox@example.test';
 
-        $threw = false;
+        // Firm A legitimately claims the mailbox.
+        $this->withCommittedFirmContext($firmA, fn () => $routing->route($connectionA, $mailbox));
+
+        $ownerBefore = $this->committedRouteForConnection($connectionA->id);
+        $this->assertNotNull($ownerBefore);
+
+        // (2)+(3) Firm B attempts the SAME mailbox. The globally-unique
+        // constraint must fail it closed.
+        $threw = null;
 
         try {
-            $this->connect($connection2, $firmUser2);
+            $this->withCommittedFirmContext($firmB, fn () => $routing->route($connectionB, $mailbox));
         } catch (Throwable $e) {
-            $threw = true;
+            $threw = $e;
         }
 
-        $this->assertTrue($threw, 'A second firm must never be able to route an already-active mailbox belonging to another firm.');
+        $this->assertInstanceOf(
+            GmailMailboxAlreadyRoutedException::class,
+            $threw,
+            'A second firm must never be able to claim a mailbox already routed to another firm.'
+        );
+        $this->assertSame((int) $connectionB->id, $threw->requestedFirmIntegrationId);
+        $this->assertSame((int) $connectionA->id, $threw->owningFirmIntegrationId);
 
-        $fresh2 = $this->runWithFirmContext($firm2, fn () => FirmIntegration::query()->where('id', $connection2->id)->first());
-        $this->assertSame(ConnectionStatus::Pending, $fresh2->status, 'The whole transaction must roll back, leaving firm 2\'s connection exactly where it started.');
+        // (4)+(5) The existing owner is untouched: not reassigned, not
+        // duplicated, not deleted.
+        $routes = $this->committedRoutesForConnections([(int) $connectionA->id, (int) $connectionB->id]);
 
-        $routes = DB::table('integration_gmail_mailbox_routes')->get();
-        $this->assertCount(1, $routes);
-        $this->assertSame($firm1->id, (int) $routes->first()->firm_id);
-        $this->assertSame($connection1->id, (int) $routes->first()->firm_integration_id);
+        $this->assertCount(1, $routes, 'No duplicate route may be created by the refused claim.');
+        $this->assertSame((int) $connectionA->id, (int) $routes[0]->firm_integration_id, 'Ownership must not be reassigned.');
+        $this->assertSame((int) $firmA->id, (int) $routes[0]->firm_id);
+        $this->assertSame($ownerBefore->mailbox_lookup_hmac, $routes[0]->mailbox_lookup_hmac);
+        $this->assertSame(
+            $ownerBefore->mailbox_display_ciphertext,
+            $routes[0]->mailbox_display_ciphertext,
+            'The existing owner\'s stored mailbox value must be byte-identical afterwards.'
+        );
+        $this->assertSame(
+            0,
+            $this->committedRouteCountFor((int) $connectionB->id),
+            'The refused connection must hold no route at all.'
+        );
+
+        // (8) Explicit cleanup through the OWNING connection — never a
+        // reliance on transaction rollback.
+        $this->withCommittedFirmContext($firmA, fn () => $routing->unroute($connectionA));
+        $this->assertSame(0, $this->committedRouteCountFor((int) $connectionA->id));
+    }
+
+    /**
+     * (6)+(7) The other half of the same contract: when the local claim is
+     * refused, NO provider network call is made and nothing about the
+     * refused connection is corrupted.
+     *
+     * This is what makes "claim before call" worth doing. Under the old
+     * ordering the watch() request had already been sent by the time the
+     * conflict surfaced, so a real Gmail subscription existed at Google
+     * that nothing local recorded.
+     */
+    public function test_a_refused_mailbox_claim_makes_no_provider_call_and_corrupts_no_connection_state(): void
+    {
+        [$firmA, $connectionA] = $this->committedFirmAndConnection();
+        [$firmB, $connectionB] = $this->committedFirmAndConnection();
+
+        $routing = app(GmailMailboxRoutingService::class);
+        $mailbox = 'no-call-on-refusal@example.test';
+
+        $this->withCommittedFirmContext($firmA, fn () => $routing->route($connectionA, $mailbox));
+
+        // Any outbound HTTP at all would show up here — and TestCase's own
+        // preventStrayRequests() already forbids un-faked requests.
+        Http::fake();
+
+        $before = $this->committedConnectionRow($firmB, (int) $connectionB->id);
+
+        try {
+            $this->withCommittedFirmContext($firmB, fn () => $routing->route($connectionB, $mailbox));
+            $this->fail('The claim must have been refused.');
+        } catch (GmailMailboxAlreadyRoutedException) {
+            // expected
+        }
+
+        Http::assertNothingSent();
+
+        // (7) Firm B's connection is untouched.
+        $after = $this->committedConnectionRow($firmB, (int) $connectionB->id);
+
+        $this->assertSame($before->status, $after->status, 'A refused claim must not change connection status.');
+        $this->assertSame($before->webhook_routing_token, $after->webhook_routing_token);
+        $this->assertSame($before->external_account_id, $after->external_account_id);
+        $this->assertSame(
+            0,
+            $this->committedCredentialCountFor($firmB, (int) $connectionB->id),
+            'No credential may be created or destroyed by a refused mailbox claim.'
+        );
+
+        // Explicit cleanup via the owning connection.
+        $this->withCommittedFirmContext($firmA, fn () => $routing->unroute($connectionA));
     }
 
     // ------------------------------------------------------------
@@ -343,46 +444,61 @@ final class GmailMailboxRoutingLifecycleTest extends TestCase
     // 7. Atomicity — a failed subscribe() leaves no partial route row
     // ------------------------------------------------------------
 
-    public function test_a_rolled_back_subscribe_call_leaves_no_partial_mailbox_route_row(): void
+    /**
+     * CHECKPOINT 8.2 (§A7b) REWRITE. This previously asserted that a
+     * malformed watch() response rolled back "the ENTIRE ambient
+     * transaction — including the route() insert that already happened".
+     *
+     * That is deliberately no longer the contract. The route is claimed
+     * BEFORE the call, so by the time a malformed response is detected a
+     * real Gmail watch subscription may already exist at Google. Discarding
+     * the claim would orphan it — nothing local would point at a live
+     * provider-side subscription — which is exactly the "rollback as
+     * compensation for a call that already happened" pattern this
+     * checkpoint removes.
+     *
+     * What must hold instead: the authorization survives, the claim
+     * survives, exactly one route exists, no subscription row is invented
+     * from an unparseable response, and the connection is honestly labelled
+     * as not-yet-bootstrapped rather than silently broken.
+     */
+    public function test_a_malformed_watch_response_keeps_the_claim_and_degrades_honestly(): void
     {
         [$firm, $connection, $firmUser] = $this->firmConnectionAndActor();
 
-        // The watch() response is deliberately malformed (no usable
-        // 'expiration' at all) — GmailMailboxRoutingService::route()
-        // still runs (and succeeds) INSIDE callGmailWatch(), but
-        // extractSubscriptionState() back in
-        // ProviderConnectionService::bootstrapWebhookSubscriptions()
-        // then throws on the unparseable expires_at, which must roll
-        // back the ENTIRE ambient transaction — including the route()
-        // insert that already happened.
-        $this->fakeGmailConnectWithMalformedWatchResponse('atomic-rollback-mailbox@example.test');
+        $this->fakeGmailConnectWithMalformedWatchResponse('degrade-honestly-mailbox@example.test');
 
-        $threw = false;
+        $result = $this->connect($connection, $firmUser);
 
-        try {
-            $this->connect($connection, $firmUser);
-        } catch (Throwable $e) {
-            $threw = true;
-            $this->assertInstanceOf(RuntimeException::class, $e);
-        }
-
-        $this->assertTrue($threw, 'A malformed subscribe() result must propagate as a real exception.');
+        // The OAuth authorization completed and was NOT discarded.
+        $this->assertSame(ConnectionStatus::Active, $result->status);
 
         $fresh = $this->runWithFirmContext($firm, fn () => FirmIntegration::query()->where('id', $connection->id)->first());
-        $this->assertSame(ConnectionStatus::Pending, $fresh->status, 'The whole transaction — including the earlier status transition to Active — must roll back.');
-        $this->assertNull($fresh->webhook_routing_token);
+        $this->assertSame(ConnectionStatus::Active, $fresh->status);
+        $this->assertNotNull($fresh->webhook_routing_token, 'Webhook routing was enabled inside the OAuth transaction and stays enabled.');
 
-        $this->assertSame(0, DB::table('integration_gmail_mailbox_routes')->where('firm_integration_id', $connection->id)->count(), 'No partial mailbox route row may survive the rollback.');
-
-        // integration_provider_webhook_subscriptions carries FORCE RLS —
-        // this query must run under real tenant context, otherwise a
-        // count of 0 would be meaningless (RLS itself would hide any
-        // row, masking a genuine rollback failure).
-        $subscriptionCount = $this->runWithFirmContext(
-            $firm,
-            fn () => DB::table('integration_provider_webhook_subscriptions')->where('firm_integration_id', $connection->id)->count()
+        // The degradation is recorded rather than hidden.
+        $this->assertTrue(
+            $fresh->webhook_bootstrap_state->isDegraded(),
+            'A connection whose bootstrap failed must never look fully healthy.'
         );
-        $this->assertSame(0, $subscriptionCount);
+
+        // Exactly one route — the claim won before the call, neither
+        // duplicated nor silently compensated away.
+        $this->assertSame(
+            1,
+            DB::table('integration_gmail_mailbox_routes')->where('firm_integration_id', $connection->id)->count(),
+            'The committed claim survives; it is not undone by a rollback.'
+        );
+
+        // And no subscription row invented from a response we could not parse.
+        $this->assertSame(
+            0,
+            $this->runWithFirmContext($firm, fn () => DB::table('integration_provider_webhook_subscriptions')
+                ->where('firm_integration_id', $connection->id)
+                ->count()),
+            'A subscription row must never be persisted from an unparseable provider response.'
+        );
     }
 
     // ------------------------------------------------------------
@@ -403,6 +519,148 @@ final class GmailMailboxRoutingLifecycleTest extends TestCase
         $user = User::factory()->create();
 
         return $this->runWithFirmContext($firm, fn () => FirmUser::factory()->forFirm($firm)->forUser($user)->role($role)->create());
+    }
+
+    // ------------------------------------------------------------
+    // Committed fixtures (§A7b). These must not depend on the outer test
+    // transaction for setup OR teardown: the behaviour under test is
+    // precisely that a claim COMMITS before any provider call. Created on
+    // a genuinely separate, committing session; removed explicitly.
+    // ------------------------------------------------------------
+
+    private const COMMITTED_CONNECTION = 'pgsql_audit';
+
+    /**
+     * @return array{0: Firm, 1: FirmIntegration}
+     */
+    private function committedFirmAndConnection(): array
+    {
+        $firm = Firm::factory()->connection(self::COMMITTED_CONNECTION)->create();
+        $this->setCommittedFirmContext((int) $firm->id);
+
+        TenantEncryptionKey::factory()->connection(self::COMMITTED_CONNECTION)->forFirm($firm)->create();
+
+        $connection = FirmIntegration::factory()
+            ->connection(self::COMMITTED_CONNECTION)
+            ->forFirm($firm)
+            ->forProvider($this->googleWorkspaceProviderRow())
+            ->create([
+                'status' => ConnectionStatus::Active->value,
+                'external_account_id' => null,
+                'requested_capabilities_json' => [ResourceType::Message->value],
+                // The factory default would create a FirmUser inside the
+                // outer test transaction, invisible to this session.
+                'connected_by_firm_user_id' => null,
+            ]);
+
+        $this->beforeApplicationDestroyed(function () use ($firm, $connection) {
+            $committed = DB::connection(self::COMMITTED_CONNECTION);
+            $this->setCommittedFirmContext((int) $firm->id);
+
+            $committed->table('integration_gmail_mailbox_routes')->where('firm_integration_id', $connection->id)->delete();
+            $committed->table('integration_provider_webhook_subscriptions')->where('firm_integration_id', $connection->id)->delete();
+            $committed->table('integration_credentials')->where('firm_integration_id', $connection->id)->delete();
+            $committed->table('timeline_events')->where('firm_id', $firm->id)->delete();
+            $committed->table('firm_integrations')->where('id', $connection->id)->delete();
+            $committed->table('tenant_encryption_keys')->where('firm_id', $firm->id)->delete();
+            $committed->table('firms')->where('id', $firm->id)->delete();
+
+            $this->clearCommittedFirmContext();
+        });
+
+        $this->clearCommittedFirmContext();
+
+        return [$firm, $connection];
+    }
+
+    /**
+     * Runs $callback with $firm's tenant context active on BOTH sessions —
+     * the committed one the fixtures live on, and the default one the
+     * service under test writes through.
+     */
+    private function withCommittedFirmContext(Firm $firm, callable $callback): mixed
+    {
+        $this->setCommittedFirmContext((int) $firm->id);
+
+        try {
+            return $this->runWithFirmContext($firm, $callback);
+        } finally {
+            $this->clearCommittedFirmContext();
+        }
+    }
+
+    private function setCommittedFirmContext(int $firmId): void
+    {
+        DB::connection(self::COMMITTED_CONNECTION)
+            ->select('select set_config(?, ?, ?)', ['app.current_firm_id', (string) $firmId, false]);
+    }
+
+    private function clearCommittedFirmContext(): void
+    {
+        DB::connection(self::COMMITTED_CONNECTION)
+            ->select('select set_config(?, ?, ?)', ['app.current_firm_id', '', false]);
+    }
+
+    private function committedRouteForConnection(int $connectionId): ?object
+    {
+        return DB::table('integration_gmail_mailbox_routes')
+            ->where('firm_integration_id', $connectionId)
+            ->first();
+    }
+
+    /**
+     * @param  array<int, int>  $connectionIds
+     * @return array<int, object>
+     */
+    private function committedRoutesForConnections(array $connectionIds): array
+    {
+        return DB::table('integration_gmail_mailbox_routes')
+            ->whereIn('firm_integration_id', $connectionIds)
+            ->orderBy('id')
+            ->get()
+            ->all();
+    }
+
+    private function committedRouteCountFor(int $connectionId): int
+    {
+        return DB::table('integration_gmail_mailbox_routes')->where('firm_integration_id', $connectionId)->count();
+    }
+
+    /**
+     * Both tables are FORCE-RLS protected, and the committed session is a
+     * genuinely separate one, so each read needs its own tenant context
+     * pushed and cleared again.
+     */
+    private function committedConnectionRow(Firm $firm, int $connectionId): object
+    {
+        $this->setCommittedFirmContext((int) $firm->id);
+
+        try {
+            $row = DB::connection(self::COMMITTED_CONNECTION)
+                ->table('firm_integrations')
+                ->where('id', $connectionId)
+                ->first();
+
+            $this->assertNotNull($row, 'The committed connection fixture must be visible to the committed session.');
+
+            return $row;
+        } finally {
+            $this->clearCommittedFirmContext();
+        }
+    }
+
+    private function committedCredentialCountFor(Firm $firm, int $connectionId): int
+    {
+        $this->setCommittedFirmContext((int) $firm->id);
+
+        try {
+            return DB::connection(self::COMMITTED_CONNECTION)
+                ->table('integration_credentials')
+                ->where('firm_integration_id', $connectionId)
+                ->count();
+        } finally {
+            $this->clearCommittedFirmContext();
+        }
     }
 
     private function googleWorkspaceProviderRow(): IntegrationProvider

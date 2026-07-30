@@ -360,6 +360,11 @@ final class GoogleWorkspaceProvider implements IntegrationProviderContract, Supp
     {
         $connection = $this->resolveConnectionFromContext($context);
 
+        // DETERMINISTIC REFRESH-CYCLE IDENTITY (see
+        // oauthRefreshCycleToken()'s own docblock). Computed BEFORE the
+        // call, from state the refresh itself is about to replace.
+        $refreshCycleToken = $this->oauthRefreshCycleToken($connection);
+
         $clientId = (string) config('integrations.oauth_apps.googleworkspace.client_id');
         $clientSecret = (string) config('integrations.oauth_apps.googleworkspace.client_secret');
 
@@ -382,7 +387,7 @@ final class GoogleWorkspaceProvider implements IntegrationProviderContract, Supp
             direction: SyncDirection::Outbound,
             resourceType: null,
             authInjector: fn (PendingRequest $request): PendingRequest => $request,
-            usageIdempotencyKey: 'oauth_refresh:'.$connection->id.':'.now()->format('YmdHi'),
+            usageIdempotencyKey: 'oauth_refresh:'.$connection->id.':'.$refreshCycleToken,
             body: $body,
             formEncoded: true,
             urlPurpose: 'token',
@@ -532,7 +537,39 @@ final class GoogleWorkspaceProvider implements IntegrationProviderContract, Supp
                 direction: SyncDirection::Outbound,
                 resourceType: null,
                 authInjector: fn (PendingRequest $request): PendingRequest => $request,
-                usageIdempotencyKey: 'oauth_revoke:'.$connection->id.':'.now()->format('YmdHi'),
+                // DETERMINISTIC REVOCATION IDENTITY (replaces a
+                // `now()->format('YmdHi')` component). Traced caller:
+                // `App\Integrations\Services\ProviderConnectionService::disconnect()`
+                // (the only `->revokeAtProvider(` call site in app/),
+                // which passes `['firm_integration_id' => $fresh->id]`
+                // and swallows failures as best-effort — so a user
+                // double-click, or a re-entered disconnect after a
+                // transient revoke failure, genuinely re-runs this call.
+                //
+                // `$credential` (already resolved above) is the durable
+                // anchor: an `integration_credentials` row id never
+                // repeats, and it is exactly what this revocation acts
+                // on. It is stable across every re-entry of one failed
+                // disconnect (nothing is revoked locally until
+                // disconnect() proceeds past this call) and can never
+                // wedge a future revocation, because once disconnect()
+                // completes, `IntegrationCredentialService::revoke()`
+                // flips every credential off Active — so the
+                // findActiveCredential() lookup above returns null and
+                // this method short-circuits to `false` without ever
+                // reaching here again. A later re-connect mints brand
+                // new credential rows, hence a brand new key.
+                //
+                // The credential's own row id is the whole anchor —
+                // `credential_type` is deliberately NOT folded in: it is
+                // an enum-cast attribute (not a string), and the id
+                // already identifies the row uniquely across every type,
+                // so adding it would buy nothing and only invite a cast
+                // bug.
+                usageIdempotencyKey: 'oauth_revoke:'.$connection->id.':'.hash('sha256', implode('|', [
+                    (string) $connection->id,
+                    (string) $credential->id,
+                ])),
                 body: ['token' => $tokenPlaintext],
                 formEncoded: true,
                 urlPurpose: 'token',
@@ -661,12 +698,41 @@ final class GoogleWorkspaceProvider implements IntegrationProviderContract, Supp
         // request to capture the CURRENT historyId as the incremental
         // baseline, the phase transition (analogous to Graph's terminal
         // @odata.deltaLink, but across two different Gmail endpoints).
-        $historyId = $this->fetchGmailStartingHistoryId($connection, $accessToken);
+        $historyId = $this->fetchGmailStartingHistoryId($connection, $accessToken, $pageToken);
 
         return ['items' => $items, 'next_cursor' => 'delta:'.$historyId, 'has_more' => false];
     }
 
-    private function fetchGmailStartingHistoryId(FirmIntegration $connection, string $accessToken): string
+    /**
+     * $pageToken is threaded down from pullGmailFullList() (this
+     * method's ONLY caller) purely to give the usage idempotency key a
+     * stable identity — replacing a `now()->format('YmdHi')` component.
+     *
+     * This profile fetch is not a free-standing operation: it happens
+     * exactly once, on the TERMINAL page of one full-list enumeration,
+     * to capture the incremental baseline. Its logical identity is
+     * therefore "the terminal page of THIS enumeration", which is
+     * precisely the `(connection, $pageToken)` pair that already keys
+     * the `messages.list` call immediately preceding it — so a
+     * `PullSyncJob` retry of that same page collapses onto one usage
+     * row and one `Idempotency-Key` header instead of minting a fresh
+     * pair per attempt. A distinct `:message:profile:` key prefix keeps
+     * the two calls separately traceable.
+     *
+     * DISCLOSED RESIDUAL: for a mailbox small enough to fit in a single
+     * page, $pageToken is null on every full enumeration, so a LATER
+     * full re-baseline (only reachable after
+     * `SyncCursorService::invalidate()` on a CATEGORY_CURSOR_EXPIRED
+     * cycle) re-derives the same key and its usage row is deduplicated
+     * away rather than recorded again. That is a deliberate trade:
+     * `PullSyncJob` threads no run id or cursor_version into `pull()`'s
+     * $context (it merges only `'connection'`), so no
+     * enumeration-generation discriminator exists at this layer without
+     * widening a framework contract this narrow fix does not own.
+     * Under-recording one usage row on a rare re-baseline is strictly
+     * less harmful than the per-attempt key explosion it replaces.
+     */
+    private function fetchGmailStartingHistoryId(FirmIntegration $connection, string $accessToken, ?string $pageToken): string
     {
         $gmailBase = (new ProviderEnvironmentResolver)->baseUrlFor(ProviderKey::GoogleWorkspace, 'gmail');
 
@@ -680,7 +746,11 @@ final class GoogleWorkspaceProvider implements IntegrationProviderContract, Supp
             direction: SyncDirection::Inbound,
             resourceType: ResourceType::Message,
             authInjector: fn (PendingRequest $request): PendingRequest => $request->withToken($accessToken),
-            usageIdempotencyKey: 'pull:'.$connection->id.':message:profile:'.now()->format('YmdHi'),
+            usageIdempotencyKey: 'pull:'.$connection->id.':message:profile:'.hash('sha256', implode('|', [
+                (string) $connection->id,
+                'message_full_terminal',
+                (string) $pageToken,
+            ])),
             urlPurpose: 'gmail',
         );
 
@@ -989,12 +1059,37 @@ final class GoogleWorkspaceProvider implements IntegrationProviderContract, Supp
             return ['items' => $items, 'next_cursor' => 'full:'.$nextPageToken, 'has_more' => true];
         }
 
-        $startPageToken = $this->fetchDriveStartPageToken($connection, $accessToken);
+        $startPageToken = $this->fetchDriveStartPageToken(
+            $connection,
+            $accessToken,
+            'pull:'.$connection->id.':document:start_page_token:'.hash('sha256', implode('|', [
+                (string) $connection->id,
+                'document_full_terminal',
+                (string) $pageToken,
+            ])),
+        );
 
         return ['items' => $items, 'next_cursor' => 'delta:'.$startPageToken, 'has_more' => false];
     }
 
-    private function fetchDriveStartPageToken(FirmIntegration $connection, string $accessToken): string
+    /**
+     * $usageIdempotencyKey is supplied by the caller — replacing a
+     * `now()->format('YmdHi')` component that was ALSO hiding a second,
+     * independent defect: this method has TWO callers driving two
+     * genuinely different logical operations
+     * (pullDriveFullList()'s terminal-page baseline capture, and
+     * callDriveWatch()'s pre-watch change-stream position fetch), and
+     * the old key shape made them indistinguishable — two different
+     * operations landing in the same wall-clock minute collided on one
+     * usage row, destroying audit correlation between them.
+     *
+     * Each caller now derives its own stable identity from what it
+     * actually holds — the enumeration's $pageToken for the pull path,
+     * the watch-cycle token for the watch path (see watchCycleToken())
+     * — and passes the finished key here, so the two are both
+     * retry-stable and permanently distinguishable from each other.
+     */
+    private function fetchDriveStartPageToken(FirmIntegration $connection, string $accessToken, string $usageIdempotencyKey): string
     {
         $driveBase = (new ProviderEnvironmentResolver)->baseUrlFor(ProviderKey::GoogleWorkspace, 'drive');
 
@@ -1008,7 +1103,7 @@ final class GoogleWorkspaceProvider implements IntegrationProviderContract, Supp
             direction: SyncDirection::Inbound,
             resourceType: ResourceType::Document,
             authInjector: fn (PendingRequest $request): PendingRequest => $request->withToken($accessToken),
-            usageIdempotencyKey: 'pull:'.$connection->id.':document:start_page_token:'.now()->format('YmdHi'),
+            usageIdempotencyKey: $usageIdempotencyKey,
             urlPurpose: 'drive',
         );
 
@@ -1819,13 +1914,41 @@ final class GoogleWorkspaceProvider implements IntegrationProviderContract, Supp
      */
     private function callGmailWatch(FirmIntegration $connection): array
     {
+        // DETERMINISTIC WATCH-CYCLE IDENTITY (see watchCycleToken()'s
+        // own docblock) — shared by BOTH outbound calls this method
+        // makes, so the profile read and the watch() call that depend on
+        // each other stay correlated across a retry.
+        $watchCycleToken = $this->watchCycleToken($connection, 'gmail:me');
+
         $accessToken = $this->decryptAccessToken($connection, 'webhook_subscribe');
 
         try {
-            $emailAddress = $this->fetchGmailProfileEmailAddress($connection, $accessToken);
+            $emailAddress = $this->fetchGmailProfileEmailAddress($connection, $accessToken, $watchCycleToken);
 
             $gmailBase = (new ProviderEnvironmentResolver)->baseUrlFor(ProviderKey::GoogleWorkspace, 'gmail');
             $topicName = (string) config('integrations.oauth_apps.googleworkspace.gmail_pubsub_topic_name');
+
+            // CHECKPOINT 8.2 (§A7b) — CLAIM BEFORE CALL.
+            //
+            // The mailbox route used to be written AFTER the watch call
+            // below, which meant a cross-firm conflict was discovered only
+            // once a real Gmail watch subscription already existed, and the
+            // only way to "undo" it was to roll back the caller's
+            // transaction — compensating with a rollback for a provider
+            // call that had already happened, while the subscription lived
+            // on at Google.
+            //
+            // The claim now runs first, as one short autocommitted
+            // statement (see GmailMailboxRoutingService::route()). A
+            // mailbox already owned by another connection throws
+            // GmailMailboxAlreadyRoutedException HERE, before a single
+            // request leaves this process — zero provider calls, nothing to
+            // compensate for, and the existing owner untouched.
+            //
+            // No transaction is opened around any of this: the claim
+            // commits on its own, and the network call below runs outside
+            // every transaction.
+            $this->mailboxRouting->route($connection, $emailAddress);
 
             $response = $this->executor->send(
                 connection: $connection,
@@ -1837,17 +1960,10 @@ final class GoogleWorkspaceProvider implements IntegrationProviderContract, Supp
                 direction: SyncDirection::Inbound,
                 resourceType: ResourceType::Message,
                 authInjector: fn (PendingRequest $request): PendingRequest => $request->withToken($accessToken),
-                usageIdempotencyKey: 'webhook_subscribe:'.$connection->id.':gmail:'.now()->format('YmdHi'),
+                usageIdempotencyKey: 'webhook_subscribe:'.$connection->id.':gmail:'.$watchCycleToken,
                 body: ['topicName' => $topicName],
                 urlPurpose: 'gmail',
             );
-
-            // Same transaction as this call's own caller (either the
-            // new bootstrapWebhookSubscriptions() orchestration or
-            // RenewGraphSubscriptionJob's existing renewal loop) —
-            // route() deliberately opens no transaction of its own, see
-            // GmailMailboxRoutingService's class docblock.
-            $this->mailboxRouting->route($connection, $emailAddress);
         } finally {
             unset($accessToken);
         }
@@ -1860,7 +1976,18 @@ final class GoogleWorkspaceProvider implements IntegrationProviderContract, Supp
         ];
     }
 
-    private function fetchGmailProfileEmailAddress(FirmIntegration $connection, string $accessToken): string
+    /**
+     * $watchCycleToken is threaded down from callGmailWatch() (this
+     * method's ONLY caller) purely to give the usage idempotency key a
+     * stable identity — replacing a `now()->format('YmdHi')` component.
+     * This profile read is not a free-standing operation: it exists
+     * solely to obtain the mailbox address for the watch() call that
+     * immediately follows it in the same method, so it belongs to the
+     * same logical watch cycle and must share its identity. A distinct
+     * `:gmail_profile:` key prefix keeps the two calls separately
+     * traceable.
+     */
+    private function fetchGmailProfileEmailAddress(FirmIntegration $connection, string $accessToken, string $watchCycleToken): string
     {
         $gmailBase = (new ProviderEnvironmentResolver)->baseUrlFor(ProviderKey::GoogleWorkspace, 'gmail');
 
@@ -1874,7 +2001,7 @@ final class GoogleWorkspaceProvider implements IntegrationProviderContract, Supp
             direction: SyncDirection::Inbound,
             resourceType: ResourceType::Message,
             authInjector: fn (PendingRequest $request): PendingRequest => $request->withToken($accessToken),
-            usageIdempotencyKey: 'webhook_subscribe:'.$connection->id.':gmail_profile:'.now()->format('YmdHi'),
+            usageIdempotencyKey: 'webhook_subscribe:'.$connection->id.':gmail_profile:'.$watchCycleToken,
             urlPurpose: 'gmail',
         );
 
@@ -1940,6 +2067,16 @@ final class GoogleWorkspaceProvider implements IntegrationProviderContract, Supp
                 direction: SyncDirection::Inbound,
                 resourceType: ResourceType::CalendarEvent,
                 authInjector: fn (PendingRequest $request): PendingRequest => $request->withToken($accessToken),
+                // NOT wall-clock-based, so outside this remediation's
+                // scope — but flagged honestly: $channelId is a freshly
+                // minted Str::uuid() per call, so this key is
+                // random-per-attempt rather than time-per-attempt and
+                // has the SAME retry-dedup weakness the wall-clock keys
+                // did. Left unchanged deliberately (the channel id is
+                // also the real provider-side identity of the channel
+                // being created, so changing it is a behavioural
+                // decision, not a mechanical one) — see this change's
+                // report for the recommended follow-up.
                 usageIdempotencyKey: 'webhook_subscribe:'.$connection->id.':calendar:'.$channelId,
                 body: $body,
                 urlPurpose: 'calendar',
@@ -1980,10 +2117,20 @@ final class GoogleWorkspaceProvider implements IntegrationProviderContract, Supp
             );
         }
 
+        // DETERMINISTIC WATCH-CYCLE IDENTITY (see watchCycleToken()).
+        // Only the start-page-token fetch below consumes it today — the
+        // watch() call itself is still keyed on its own freshly-minted
+        // $channelId, see that call site's own note.
+        $watchCycleToken = $this->watchCycleToken($connection, 'drive:changes');
+
         $accessToken = $this->decryptAccessToken($connection, 'webhook_subscribe');
 
         try {
-            $startPageToken = $this->fetchDriveStartPageToken($connection, $accessToken);
+            $startPageToken = $this->fetchDriveStartPageToken(
+                $connection,
+                $accessToken,
+                'webhook_subscribe:'.$connection->id.':drive_start_page_token:'.$watchCycleToken,
+            );
 
             $driveBase = (new ProviderEnvironmentResolver)->baseUrlFor(ProviderKey::GoogleWorkspace, 'drive');
             $channelId = (string) Str::uuid();
@@ -2010,6 +2157,9 @@ final class GoogleWorkspaceProvider implements IntegrationProviderContract, Supp
                 direction: SyncDirection::Inbound,
                 resourceType: ResourceType::Document,
                 authInjector: fn (PendingRequest $request): PendingRequest => $request->withToken($accessToken),
+                // Same disclosed, deliberately-unchanged $channelId
+                // caveat as callCalendarWatch()'s own watch() key —
+                // see that call site's note.
                 usageIdempotencyKey: 'webhook_subscribe:'.$connection->id.':drive:'.$channelId,
                 body: $body,
                 urlPurpose: 'drive',
@@ -2075,6 +2225,113 @@ final class GoogleWorkspaceProvider implements IntegrationProviderContract, Supp
             'GoogleWorkspaceProvider requires $context[\'connection\'] (a FirmIntegration instance) or '.
             '$context[\'firm_integration_id\'] to resolve the active connection for this operation.'
         );
+    }
+
+    /**
+     * DETERMINISTIC REFRESH-CYCLE IDENTITY for refreshToken()'s usage
+     * idempotency key (replaces a `now()->format('YmdHi')` component).
+     *
+     * The sole production caller is
+     * `App\Integrations\Services\ProviderConnectionService::refreshConnectionToken()`,
+     * itself driven by the retrying `App\Integrations\Jobs\RefreshIntegrationToken`
+     * job — so one logical refresh can genuinely reach this method
+     * several times, and with a wall-clock key each attempt wrote a
+     * SEPARATE `integration_usage_records` row and sent Google a
+     * DIFFERENT `Idempotency-Key` header, defeating local usage
+     * deduplication, provider-side idempotency, and audit correlation
+     * alike.
+     *
+     * The anchor is the connection's CURRENTLY-Active access-token
+     * credential — the structural analogue of the subscription row
+     * `App\Integrations\Jobs\RenewGraphSubscriptionJob` anchors its own
+     * `$renewalCycleToken` on. `refreshConnectionToken()` reads that
+     * credential under `withRefreshLock()` and only calls
+     * `IntegrationCredentialService::rotate()` AFTER this method
+     * returns successfully; `rotate()` marks the old row `Rotated` and
+     * stores a NEW row (new id, new expires_at). So the token is stable
+     * across every retry of one refresh and advances exactly once a
+     * refresh actually completes.
+     *
+     * DELIBERATELY DIFFERENT FROM Microsoft365Provider's own
+     * `oauthRefreshCycleToken()`, which additionally folds in a hash of
+     * the presented refresh token: Microsoft's documented MANDATORY
+     * refresh-token rotation makes that value a genuine per-refresh
+     * advance signal, whereas Google's refresh tokens are long-lived
+     * and its refresh-grant response USUALLY carries no new one (see
+     * refreshToken()'s own docblock). Folding Google's effectively
+     * immutable refresh token in would therefore contribute a CONSTANT,
+     * making the key look stable while providing no advance signal at
+     * all — and if the access-credential anchor were ever absent, the
+     * key would silently become permanently static, which
+     * `integration_usage_records`' `unique(firm_integration_id,
+     * idempotency_key)` index would turn into "stop recording usage
+     * forever". Anchoring only on the credential that actually rotates
+     * keeps the advance signal honest for this provider.
+     */
+    private function oauthRefreshCycleToken(FirmIntegration $connection): string
+    {
+        $accessCredential = $this->credentials->findActiveCredential($connection, CredentialType::OauthAccessToken);
+
+        return hash('sha256', implode('|', [
+            (string) $connection->id,
+            (string) ($accessCredential?->id ?? 'no_access_credential'),
+            $accessCredential?->expires_at?->toIso8601String() ?? 'no_expiry',
+        ]));
+    }
+
+    /**
+     * DETERMINISTIC WATCH-CYCLE IDENTITY for the Gmail/Drive watch-path
+     * usage idempotency keys (replaces `now()->format('YmdHi')`
+     * components).
+     *
+     * Google's Calendar/Drive channels and Gmail's watch() have no
+     * PATCH-style in-place renewal, so a "renewal" here is literally a
+     * re-issued watch() call — meaning subscribe() and renewSubscription()
+     * share these call paths, and BOTH of their traced callers can
+     * genuinely re-run one logical watch:
+     * `ProviderConnectionService::bootstrapWebhookSubscriptions()` (a
+     * re-entered connect flow) and the retrying
+     * `App\Integrations\Jobs\RenewGraphSubscriptionJob` ($tries = 5,
+     * backoff() = [30, 60, 120, 240] — so retries reliably cross
+     * wall-clock minute boundaries).
+     *
+     * The anchor is this connection's own most recent webhook
+     * subscription row for the given $providerResource, hashed over the
+     * same durable triple RenewGraphSubscriptionJob's own
+     * `$renewalCycleToken` uses: row id, provider-side subscription id,
+     * and expires_at.
+     *
+     *   - FIRST subscribe: no row exists yet, so every retry of one
+     *     failed bootstrap derives the identical 'no_subscription'
+     *     token (no row is written until subscribe() actually
+     *     succeeds), and the token advances the moment the row is
+     *     created.
+     *   - RENEWAL: RenewGraphSubscriptionJob updates the EXISTING row in
+     *     place, so the row id alone would never advance — `expires_at`
+     *     is what carries the advance signal, and it is rewritten only
+     *     once a renewal genuinely succeeds. Hence all three fields,
+     *     not just the id.
+     *
+     * Matched to $providerResource (not resource_type) because that is
+     * the value `existingActiveSubscription()` in this same class
+     * already keys its own pre-call idempotency check on, and the value
+     * each callXWatch() returns as `resource`.
+     */
+    private function watchCycleToken(FirmIntegration $connection, string $providerResource): string
+    {
+        $latest = IntegrationProviderWebhookSubscription::query()
+            ->where('firm_integration_id', $connection->id)
+            ->where('provider_resource', $providerResource)
+            ->orderByDesc('id')
+            ->first();
+
+        return hash('sha256', implode('|', [
+            (string) $connection->id,
+            $providerResource,
+            (string) ($latest?->id ?? 'no_subscription'),
+            (string) ($latest?->provider_subscription_id ?? 'no_provider_subscription'),
+            $latest?->expires_at?->toIso8601String() ?? 'no_expiry',
+        ]));
     }
 
     /**
