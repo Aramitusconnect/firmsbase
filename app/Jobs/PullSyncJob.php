@@ -691,6 +691,14 @@ final class PullSyncJob implements ShouldQueue
 
         $billingProduct = self::PLAID_BILLING_PRODUCT_MAP[$this->resourceType] ?? $this->resourceType;
 
+        // Built BEFORE the call, and deliberately on its own line: the raw
+        // cursor must not appear anywhere near the `localProcessingState:`
+        // argument, so the source-level firewall in
+        // DurableOperationMetadataRedactionTest needs no allowlist entry to
+        // tell a hashed marker from a leaked one. A firewall with no
+        // exceptions is worth more than a slightly tidier call site.
+        $progressMarker = $this->pageProgressMarker($run->id, $cursorVersion, $pageCursor);
+
         $result = app(ProviderBillableCallPipeline::class)->execute(
             providerKey: $provider->key(),
             connection: $connection,
@@ -750,7 +758,22 @@ final class PullSyncJob implements ShouldQueue
             redactResultForRecovery: static fn (mixed $response) => is_array($response)
                 ? 'items='.count($response['items'] ?? []).';has_more='.(($response['has_more'] ?? null) ? '1' : '0')
                 : null,
-            localProcessingState: 'run_'.$run->id.':cursor_version_'.$cursorVersion.':page_'.($pageCursor ?? 'initial'),
+            // SECURITY (§A8, corrective pass). This used to interpolate
+            // $pageCursor VERBATIM. That value is the DECRYPTED
+            // continuation cursor — `integration_sync_cursors.cursor_value`
+            // is deliberately encrypted per firm, with a CHECK constraint
+            // tying it to its encryption key — and
+            // `provider_operation_attempts` is FK-free, RLS-EXEMPT and
+            // unencrypted by design. Every multi-page Plaid sync therefore
+            // copied a firm's plaintext cursor into a globally readable
+            // table, contradicting this column's own "never a payload"
+            // contract.
+            //
+            // A one-way, firm-scoped marker replaces it: enough to tell
+            // pages apart for recovery, reversible by nobody, and
+            // non-correlatable across firms because the firm id is inside
+            // the digest.
+            localProcessingState: $progressMarker,
         );
 
         // CHECKPOINT 8.2 (§A5/§A6). The durable gate short-circuited: the
@@ -766,6 +789,31 @@ final class PullSyncJob implements ShouldQueue
         }
 
         return $result->response;
+    }
+
+    /**
+     * A safe progress marker for one page of one sync run.
+     *
+     * NEVER contains cursor content. The cursor is hashed together with
+     * this job's own firm id, so the marker is stable for a given page
+     * (recovery can tell which page an interrupted attempt was on), is
+     * one-way, and cannot be correlated across firms even by someone who
+     * can read every row of the gate table.
+     *
+     * The authoritative cursor stays where it belongs: encrypted, in
+     * `integration_sync_cursors`, reachable only under tenant context.
+     */
+    private function pageProgressMarker(int $runId, int $cursorVersion, ?string $pageCursor): string
+    {
+        $page = $pageCursor === null
+            ? 'initial'
+            : 'sha256:'.hash('sha256', implode('|', [
+                (string) $this->firmId,
+                (string) $cursorVersion,
+                $pageCursor,
+            ]));
+
+        return 'run_'.$runId.':cursor_version_'.$cursorVersion.':page_'.$page;
     }
 
     /**
