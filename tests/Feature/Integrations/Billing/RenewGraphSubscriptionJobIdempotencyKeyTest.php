@@ -23,6 +23,7 @@ use App\Services\EntitlementService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\PurgesDurableProviderOperationAttempts;
 use Tests\Support\BillableWebhookStubProvider;
 use Tests\TestCase;
 use Throwable;
@@ -60,6 +61,7 @@ use Throwable;
  */
 class RenewGraphSubscriptionJobIdempotencyKeyTest extends TestCase
 {
+    use PurgesDurableProviderOperationAttempts;
     use RefreshDatabase;
 
     private BillableWebhookStubProvider $provider;
@@ -70,6 +72,7 @@ class RenewGraphSubscriptionJobIdempotencyKeyTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->purgeDurableProviderOperationAttempts();
         Cache::flush();
 
         $this->provider = new BillableWebhookStubProvider;
@@ -281,29 +284,27 @@ class RenewGraphSubscriptionJobIdempotencyKeyTest extends TestCase
     }
 
     /**
-     * CHARACTERISATION of a PRE-EXISTING behaviour this remediation does
-     * NOT change, recorded so the residual risk is visible in the suite
-     * rather than only in a report.
+     * CHECKPOINT 8.2 (§A6/§A7) — this REPLACES a characterisation test
+     * that recorded the residual C3 gap as accepted behaviour.
      *
-     * `TenantAwareJobContext::runInFirmContext()` delegates to
-     * `TenantContextService::runWithFirmContext()`, which wraps its
-     * callback in a real `DB::transaction()`. The whole of
-     * RenewGraphSubscriptionJob::handle() therefore runs in one
-     * transaction, so an exception escaping the job rolls back the
-     * reservation AND any `integration_usage_records` row written for it
-     * — they are on the default connection, unlike TimelineEventRecorder
-     * which deliberately writes `independentOfAmbientTransaction`.
+     * What it used to assert: that a failed attempt's reservation was
+     * rolled back with the job's own job-wide transaction, and that
+     * closing that window "requires the reservation ledger to be written
+     * outside the ambient transaction ... well beyond this remediation's
+     * scope."
      *
-     * Consequence (residual, NOT introduced here): if the outbound call
-     * SUCCEEDS and is billed by the provider, but the job then throws
-     * afterwards — e.g. extractSubscriptionState() rejecting a malformed
-     * response — the evidence of that billed call is rolled back, and the
-     * next attempt reserves and calls again. Closing that window
-     * requires the reservation ledger to be written outside the ambient
-     * transaction (a separate connection, as the audit trail already
-     * has), which is infrastructure well beyond this remediation's scope.
+     * That work has now been done, though more narrowly than that note
+     * anticipated: the job no longer wraps its whole body — provider call
+     * included — in one transaction, so a failed attempt's evidence
+     * survives; and the authoritative record of "this logical operation
+     * already sent a request" lives in `provider_operation_attempts` on an
+     * independent database session, which no rollback can reach.
+     *
+     * Both facts are asserted here, because either alone would mislead:
+     * the reservation surviving only matters if the gate genuinely refuses
+     * to re-send.
      */
-    public function test_a_failed_attempts_reservation_is_rolled_back_with_the_jobs_own_transaction(): void
+    public function test_a_failed_attempts_evidence_survives_the_attempt(): void
     {
         $firm = $this->firmWithEntitlement();
         $connection = $this->plaidConnection($firm);
@@ -313,7 +314,56 @@ class RenewGraphSubscriptionJobIdempotencyKeyTest extends TestCase
         $this->assertNotNull($this->runJob($firm, $connection, $subscription));
 
         $this->assertCount(1, $this->capturedKeys, 'The reservation provably existed during the attempt...');
-        $this->assertCount(0, $this->persistedReservationKeys($firm), '...but the job-wide transaction rolled it back on failure.');
+        $this->assertCount(
+            1,
+            $this->persistedReservationKeys($firm),
+            '...and it is still there afterwards: the job no longer runs inside one all-or-nothing transaction.'
+        );
+
+        // The durable gate recorded the send on its own session, entirely
+        // independently of how the job ended.
+        $attempt = DB::connection('pgsql_audit')
+            ->table('provider_operation_attempts')
+            ->where('firm_id', $firm->id)
+            ->orderByDesc('id')
+            ->first();
+
+        $this->assertNotNull($attempt, 'The durable gate row must exist independently of the job.');
+        $this->assertSame(1, (int) $attempt->total_send_count, 'Exactly one send is on the record.');
+
+        // No usage record: a 500 is finalized non-billable, exactly as
+        // before this checkpoint.
         $this->assertSame(0, $this->usageRecordCount($firm));
+    }
+
+    /**
+     * The success-then-rollback case §A7 exists for: the provider really
+     * performed the renewal, and then this side's own work failed. A retry
+     * must never renew again.
+     */
+    public function test_a_renewal_that_succeeded_before_a_local_failure_is_never_repeated(): void
+    {
+        $firm = $this->firmWithEntitlement();
+        $connection = $this->plaidConnection($firm);
+        $subscription = $this->subscription($firm, $connection);
+
+        // The provider succeeds, but returns an expiry this side cannot
+        // parse — extractSubscriptionState() throws AFTER the call.
+        $this->provider->onRenew = static fn (): array => [
+            'subscription_id' => 'sub-renewed',
+            'expires_at' => 'not-a-parseable-date',
+        ];
+
+        $this->assertNotNull($this->runJob($firm, $connection, $subscription));
+        $this->assertSame(1, $this->provider->renewCalls);
+
+        // The retry. The gate knows the provider already did the work.
+        $this->runJob($firm, $connection, $subscription);
+
+        $this->assertSame(
+            1,
+            $this->provider->renewCalls,
+            'A renewal the provider already performed must never be sent a second time.'
+        );
     }
 }
