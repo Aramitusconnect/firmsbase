@@ -19,6 +19,8 @@ use App\Integrations\Enums\ResourceType;
 use App\Integrations\Enums\SyncDirection;
 use App\Integrations\Exceptions\SanitizedProviderHttpException;
 use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Models\IntegrationSyncCursor;
+use App\Integrations\Models\ProviderBalanceSnapshot;
 use App\Integrations\Services\IntegrationCredentialService;
 use App\Integrations\Services\SyncCursorService;
 use App\Integrations\Support\PlaidItemRoutingService;
@@ -103,6 +105,28 @@ use Throwable;
  * touches a token itself. Reverting to the codebase-wide internal-decrypt
  * convention removes an unnecessary plaintext-credential exposure
  * across a method boundary, not just a signature-compatibility fix.
+ *
+ * DETERMINISTIC `usageIdempotencyKey`s (release-candidate security
+ * review, "secondary hardening opportunity" follow-up to
+ * checkpoint8-remediation-report.md §"Dispositioned, not a defect"):
+ * every one of this class's idempotency keys used to end in
+ * `now()->format('YmdHi')` or `now()->getTimestampMs()`. Those keys feed
+ * BOTH `ProviderRequestExecutor::send()`'s outbound `Idempotency-Key`
+ * header (a real anti-double-charge mechanism on Plaid's own side) and
+ * `IntegrationUsageRecorderService::recordOnce()`'s local
+ * usage-record dedup — and a wall-clock key changes on every retry
+ * (every single invocation, for `getTimestampMs()`), so neither
+ * mechanism could ever recognize a retry. Each one is now a
+ * `hash('sha256', implode('|', [...]))` over STABLE, DURABLE state that
+ * changes only once the operation the key represents has actually
+ * completed successfully — the identical shape
+ * `App\Integrations\Jobs\RenewGraphSubscriptionJob`'s
+ * `$renewalCycleToken` and `App\Jobs\PullSyncJob`'s own pull key already
+ * established. Each site's own comment names the caller that was traced
+ * and the durable row the identity is read from. `createLinkToken()` is
+ * the ONE deliberate, documented exception (see its own comment):
+ * `/link/token/create` mints a new short-lived artifact per user click
+ * and has no idempotency identity to collapse onto.
  */
 final class PlaidProvider implements IntegrationProviderContract, RequiresBillableCallPipelineContract, SupportsBalanceContract, SupportsDisconnectContract, SupportsIncrementalSyncContract, SupportsLinkTokenContract, SupportsPullSyncContract, SupportsWebhooksContract
 {
@@ -208,6 +232,59 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
             $body['products'] = $this->translateCapabilitiesToProducts($requestedCapabilities);
         }
 
+        // DELIBERATELY TIME-BASED — INTENTIONALLY NOT AN IDEMPOTENCY
+        // IDENTITY (documented here per the release-candidate security
+        // review's own instruction to "document each remaining
+        // time-based use that is intentionally not an idempotency
+        // identity"; every OTHER wall-clock key in this class was
+        // replaced with a deterministic hash of durable state in the
+        // same pass).
+        //
+        // Callers traced: ProviderConnectionService::initiateLinkTokenConnection()
+        // and ::initiateLinkTokenUpdateMode(). BOTH are synchronous,
+        // user-initiated (a firm user clicking "Connect"/"Reconnect"),
+        // wrapped only in OutboundProviderHttpClient::execute() — which
+        // contains no retry logic whatsoever — and are NOT routed
+        // through ProviderBillableCallPipeline, so no reservation ledger
+        // is involved. There is therefore no retry of "the same logical
+        // request" to collapse in the first place.
+        //
+        // All three of those facts re-verified for Checkpoint 8.2 Phase
+        // A10: (1) neither `link_token` nor `link_token_create` appears
+        // anywhere in ProviderBillingClassifier — its
+        // ENDPOINT_CATEGORY_MAP covers only item/transactions/balance/
+        // auth/liabilities/identity/identity_match/
+        // identity_verification/investments/income/statements/enrich/
+        // monitor, and no ProviderBillableCallPipeline call site passes
+        // such a product; (2) both call sites above invoke this method
+        // inside `$this->httpClient->execute(...)`, never
+        // `app(ProviderBillableCallPipeline::class)->execute(...)`; and
+        // (3) the only `->reserve(` call site in app/ lives inside
+        // ProviderBillableCallPipeline itself, which (2) shows this path
+        // never reaches — so no ProviderBillableCallReservation row is
+        // ever created for a link-token issuance.
+        //
+        // More importantly, collapsing would be actively WRONG here.
+        // /link/token/create MINTS a new, short-lived, single-use
+        // artifact: neither mode persists anything at all (this flow
+        // deliberately creates no IntegrationOAuthState row — see
+        // initiateLinkTokenConnection()'s own docblock), so there is no
+        // durable row whose mutation marks "this link token has been
+        // used up." Every user click is genuinely a NEW logical request
+        // for a NEW token. A deterministic key would make the outbound
+        // Idempotency-Key header identical across two genuinely separate
+        // Link launches, inviting Plaid to replay the FIRST (by then
+        // expired) link_token and breaking the user's Link session —
+        // trading a real functional break for a dedup that has no
+        // correct meaning at this endpoint.
+        //
+        // The mode discriminator IS a real logical distinction (new-Item
+        // vs. update-mode re-authentication are two different
+        // operations against the same connection) and is folded in
+        // deterministically; only the per-issuance component is
+        // wall-clock.
+        $linkTokenMode = $hasUpdateAccessToken ? 'update_mode' : 'new_item';
+
         $response = $this->executor->send(
             connection: $connection,
             providerKey: ProviderKey::Plaid,
@@ -218,7 +295,7 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
             direction: SyncDirection::Outbound,
             resourceType: null,
             authInjector: fn (PendingRequest $request): PendingRequest => $request,
-            usageIdempotencyKey: 'plaid_link_token_create:'.$connection->id.':'.now()->getTimestampMs(),
+            usageIdempotencyKey: 'plaid_link_token_create:'.$connection->id.':'.$linkTokenMode.':'.now()->getTimestampMs(),
             body: $this->withPlatformCredentials($body),
         );
 
@@ -248,6 +325,19 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
             throw new InvalidArgumentException('PlaidProvider::exchangePublicToken() requires a non-empty publicToken.');
         }
 
+        // The stable identity of THIS exchange. Already the (correct,
+        // untouched) basis of the exchange call's own key below; hoisted
+        // into a variable so the best-effort /item/get follow-up can
+        // share the same durable identity instead of a wall clock — the
+        // two calls are two halves of ONE logical operation (see
+        // bestEffortFetchInstitutionId()'s own docblock). A public_token
+        // is single-use and Link-session-scoped, so it is exactly the
+        // "changes only once the operation this key represents actually
+        // completes" marker the deterministic-key discipline asks for:
+        // a retried exchange re-presents the same public_token, while a
+        // genuinely new Link session always produces a different one.
+        $exchangeIdentity = hash('sha256', $publicToken);
+
         $response = $this->executor->send(
             connection: $connection,
             providerKey: ProviderKey::Plaid,
@@ -258,7 +348,7 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
             direction: SyncDirection::Outbound,
             resourceType: null,
             authInjector: fn (PendingRequest $request): PendingRequest => $request,
-            usageIdempotencyKey: 'plaid_public_token_exchange:'.$connection->id.':'.hash('sha256', $publicToken),
+            usageIdempotencyKey: 'plaid_public_token_exchange:'.$connection->id.':'.$exchangeIdentity,
             body: $this->withPlatformCredentials(['public_token' => $publicToken]),
         );
 
@@ -274,7 +364,7 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
         return [
             'access_token' => $accessToken,
             'item_id' => $itemId,
-            'institution_id' => $this->bestEffortFetchInstitutionId($connection, $accessToken),
+            'institution_id' => $this->bestEffortFetchInstitutionId($connection, $accessToken, $exchangeIdentity),
         ];
     }
 
@@ -288,8 +378,16 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
      * and simply leaves `institution_id` uncaptured for this attempt
      * (`SupportsLinkTokenContract`'s own docblock already documents this
      * field as optional/MAY).
+     *
+     * $exchangeIdentity is the caller's own stable identity for the
+     * exchange this call is a follow-up to (see exchangePublicToken()'s
+     * own hoisted `$exchangeIdentity`) — this private method's ONLY
+     * caller, so widening it touches nothing outside this class. It
+     * replaces a `now()->getTimestampMs()` idempotency key that changed
+     * on literally every invocation, defeating both the outbound
+     * `Idempotency-Key` header and local usage-record dedup.
      */
-    private function bestEffortFetchInstitutionId(FirmIntegration $connection, string $accessToken): ?string
+    private function bestEffortFetchInstitutionId(FirmIntegration $connection, string $accessToken, string $exchangeIdentity): ?string
     {
         try {
             $response = $this->executor->send(
@@ -302,7 +400,11 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
                 direction: SyncDirection::Inbound,
                 resourceType: null,
                 authInjector: fn (PendingRequest $request): PendingRequest => $request,
-                usageIdempotencyKey: 'plaid_item_get:'.$connection->id.':'.now()->getTimestampMs(),
+                usageIdempotencyKey: 'plaid_item_get:'.$connection->id.':exchange:'.hash('sha256', implode('|', [
+                    (string) $connection->id,
+                    'public_token_exchange_institution_lookup',
+                    $exchangeIdentity,
+                ])),
                 body: $this->withPlatformCredentials(['access_token' => $accessToken]),
             );
         } catch (SanitizedProviderHttpException) {
@@ -378,6 +480,29 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
             $connection, $credential, 'plaid oauth_disconnect connection '.$connection->id, 'oauth_disconnect',
         );
 
+        // DETERMINISTIC REVOCATION IDENTITY (replaces
+        // `now()->format('YmdHi')`, which changed on every retry that
+        // crossed a minute boundary).
+        //
+        // Caller traced: ProviderConnectionService::disconnect() (the
+        // sole caller), which invokes this inside a best-effort
+        // try/catch and then immediately revokes every Active credential
+        // locally. `/item/remove` removes exactly ONE Plaid Item,
+        // identified by exactly ONE access-token credential row — so the
+        // credential row's own primary key IS the durable identity of
+        // "this specific revocation", already resolved above. It only
+        // changes once the operation this key represents has actually
+        // completed: a later re-connect mints a brand-new
+        // IntegrationCredential (a strictly higher id) and a new Plaid
+        // Item, so a subsequent, genuinely different disconnect gets a
+        // different key, while any re-attempt of THIS disconnect
+        // (same credential, same Item) collapses onto one.
+        $revocationIdentity = hash('sha256', implode('|', [
+            (string) $connection->id,
+            (string) $credential->id,
+            (string) ($connection->external_account_id ?? 'no_item_id'),
+        ]));
+
         try {
             $response = $this->executor->send(
                 connection: $connection,
@@ -389,7 +514,7 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
                 direction: SyncDirection::Outbound,
                 resourceType: null,
                 authInjector: fn (PendingRequest $request): PendingRequest => $request,
-                usageIdempotencyKey: 'oauth_revoke:'.$connection->id.':'.now()->format('YmdHi'),
+                usageIdempotencyKey: 'oauth_revoke:'.$connection->id.':'.$revocationIdentity,
                 body: $this->withPlatformCredentials(['access_token' => $accessToken]),
             );
         } catch (SanitizedProviderHttpException) {
@@ -448,6 +573,77 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
     }
 
     /**
+     * DETERMINISTIC PULL-PAGE IDENTITY — the shared replacement for the
+     * `now()->format('YmdHi')` suffix every pull* method below used to
+     * carry (release-candidate security review: a wall-clock idempotency
+     * key changes on every retry that crosses a minute boundary,
+     * defeating BOTH the outbound `Idempotency-Key` header Plaid itself
+     * honours and `IntegrationUsageRecorderService::recordOnce()`'s
+     * local usage-record dedup).
+     *
+     * Caller traced: `App\Jobs\PullSyncJob` is the ONLY production
+     * caller of `pull()`. Before it ever invokes the provider it has
+     * already persisted this operation's stable identity onto a durable
+     * row: `SyncCursorService::firstOrCreate()` resolves (or creates)
+     * the one `integration_sync_cursors` row for
+     * (connection, resource_type, inbound), and `claim()` locks it to
+     * the run. This method re-reads that SAME durable row — it never
+     * guesses and never invents state of its own.
+     *
+     * The identity is `(connection, resource_type, cursor_version,
+     * page cursor)` — deliberately the same shape as PullSyncJob's OWN
+     * already-deterministic billing-pipeline key (`plaid_pull:` …
+     * `hash('sha256', [run id, cursor_version, page cursor])`), minus
+     * the run id. Omitting the run id is not an oversight, it is the
+     * correction that makes retries actually collapse:
+     * `SyncCursorService::advance()` clears `locked_by_sync_run_id` at
+     * the end of every page, so a run id read back mid-loop is NOT
+     * stable across a resumed run, whereas `cursor_version` is —
+     * `advance()` is the only thing that bumps it (once per successfully
+     * committed page, including the single page of a full-snapshot
+     * resource type) and `markFailed()` deliberately leaves it alone.
+     *
+     * Consequences, all intended:
+     *   - the SAME page re-fetched after a crash/redelivery sees an
+     *     unchanged `cursor_version` and page cursor → IDENTICAL key;
+     *   - page N+1 of the same run has an advanced `cursor_version`
+     *     (and, for `/transactions/sync`, a different page cursor) →
+     *     DIFFERENT key;
+     *   - the next scheduled run of a full-snapshot resource type runs
+     *     against a `cursor_version` the previous run advanced →
+     *     DIFFERENT key;
+     *   - a re-dispatch of a page that has never yet succeeded (the
+     *     previous run failed without advancing) is the same logical
+     *     provider call and correctly collapses onto the same key;
+     *   - each resource type has its own cursor row → never collapsed
+     *     with another resource type, and never with another connection.
+     *
+     * `no_cursor` is only ever reached by a caller that invokes `pull()`
+     * without going through `PullSyncJob` (no such production caller
+     * exists today — see `SupportsPullSyncContract`). Deliberately a
+     * fixed literal rather than a wall-clock fallback: with no durable
+     * progress state to key on, collapsing onto one key is the safe
+     * direction (it can only ever suppress a duplicate), whereas
+     * reintroducing `now()` would silently restore exactly the defect
+     * this method exists to remove.
+     */
+    private function pullOperationIdentity(FirmIntegration $connection, string $resourceType, ?string $pageCursor = null): string
+    {
+        $cursor = IntegrationSyncCursor::query()
+            ->where('firm_integration_id', $connection->id)
+            ->where('resource_type', $resourceType)
+            ->where('sync_direction', SyncDirection::Inbound->value)
+            ->first();
+
+        return hash('sha256', implode('|', [
+            (string) $connection->id,
+            $resourceType,
+            $cursor === null ? 'no_cursor' : 'cursor_version:'.$cursor->cursor_version,
+            $pageCursor ?? 'initial',
+        ]));
+    }
+
+    /**
      * `/transactions/sync` — the ONLY truly incremental resource type
      * this provider offers. First call passes `cursor: null` (full
      * history). `removed` transactions (id-only objects) are included as
@@ -467,7 +663,7 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
             direction: SyncDirection::Inbound,
             resourceType: ResourceType::Transaction,
             authInjector: fn (PendingRequest $request): PendingRequest => $request,
-            usageIdempotencyKey: 'plaid_transactions_sync:'.$connection->id.':'.($cursor ?? 'initial').':'.now()->format('YmdHi'),
+            usageIdempotencyKey: 'plaid_transactions_sync:'.$connection->id.':'.$this->pullOperationIdentity($connection, ResourceType::Transaction->value, $cursor),
             body: $this->withPlatformCredentials(['access_token' => $accessToken, 'cursor' => $cursor]),
         );
 
@@ -523,7 +719,7 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
             direction: SyncDirection::Inbound,
             resourceType: ResourceType::BankAccount,
             authInjector: fn (PendingRequest $request): PendingRequest => $request,
-            usageIdempotencyKey: 'plaid_auth_get:'.$connection->id.':'.now()->format('YmdHi'),
+            usageIdempotencyKey: 'plaid_auth_get:'.$connection->id.':'.$this->pullOperationIdentity($connection, ResourceType::BankAccount->value),
             body: $this->withPlatformCredentials(['access_token' => $accessToken]),
         );
 
@@ -575,7 +771,7 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
             direction: SyncDirection::Inbound,
             resourceType: ResourceType::Identity,
             authInjector: fn (PendingRequest $request): PendingRequest => $request,
-            usageIdempotencyKey: 'plaid_identity_get:'.$connection->id.':'.now()->format('YmdHi'),
+            usageIdempotencyKey: 'plaid_identity_get:'.$connection->id.':'.$this->pullOperationIdentity($connection, ResourceType::Identity->value),
             body: $this->withPlatformCredentials(['access_token' => $accessToken]),
         );
 
@@ -617,7 +813,7 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
             direction: SyncDirection::Inbound,
             resourceType: ResourceType::Liability,
             authInjector: fn (PendingRequest $request): PendingRequest => $request,
-            usageIdempotencyKey: 'plaid_liabilities_get:'.$connection->id.':'.now()->format('YmdHi'),
+            usageIdempotencyKey: 'plaid_liabilities_get:'.$connection->id.':'.$this->pullOperationIdentity($connection, ResourceType::Liability->value),
             body: $this->withPlatformCredentials(['access_token' => $accessToken]),
         );
 
@@ -651,6 +847,21 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
      */
     private function pullInvestments(FirmIntegration $connection, string $accessToken): array
     {
+        $syncIdentity = $this->pullOperationIdentity($connection, ResourceType::Investment->value);
+
+        // Hoisted out of the request body below, where the two bounds
+        // used to be two SEPARATE `now()` reads — a pull that happened
+        // to straddle a UTC midnight could therefore compute
+        // `start_date` from one day and `end_date` from the next. One
+        // read, one window, and the SAME two values are folded into this
+        // call's idempotency key so the key provably describes the exact
+        // window that was actually requested: two genuinely different
+        // date ranges can never share a key, and a retry within the same
+        // UTC day (the overwhelmingly common case) keeps the identical
+        // one.
+        $windowStartDate = now()->subYears(2)->toDateString();
+        $windowEndDate = now()->toDateString();
+
         $holdingsResponse = $this->executor->send(
             connection: $connection,
             providerKey: ProviderKey::Plaid,
@@ -661,7 +872,7 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
             direction: SyncDirection::Inbound,
             resourceType: ResourceType::Investment,
             authInjector: fn (PendingRequest $request): PendingRequest => $request,
-            usageIdempotencyKey: 'plaid_investments_holdings_get:'.$connection->id.':'.now()->format('YmdHi'),
+            usageIdempotencyKey: 'plaid_investments_holdings_get:'.$connection->id.':'.$syncIdentity,
             body: $this->withPlatformCredentials(['access_token' => $accessToken]),
         );
 
@@ -675,11 +886,15 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
             direction: SyncDirection::Inbound,
             resourceType: ResourceType::Investment,
             authInjector: fn (PendingRequest $request): PendingRequest => $request,
-            usageIdempotencyKey: 'plaid_investments_transactions_get:'.$connection->id.':'.now()->format('YmdHi'),
+            usageIdempotencyKey: 'plaid_investments_transactions_get:'.$connection->id.':'.hash('sha256', implode('|', [
+                $syncIdentity,
+                $windowStartDate,
+                $windowEndDate,
+            ])),
             body: $this->withPlatformCredentials([
                 'access_token' => $accessToken,
-                'start_date' => now()->subYears(2)->toDateString(),
-                'end_date' => now()->toDateString(),
+                'start_date' => $windowStartDate,
+                'end_date' => $windowEndDate,
             ]),
         );
 
@@ -736,7 +951,7 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
             direction: SyncDirection::Inbound,
             resourceType: ResourceType::Income,
             authInjector: fn (PendingRequest $request): PendingRequest => $request,
-            usageIdempotencyKey: 'plaid_bank_income_get:'.$connection->id.':'.now()->format('YmdHi'),
+            usageIdempotencyKey: 'plaid_bank_income_get:'.$connection->id.':'.$this->pullOperationIdentity($connection, ResourceType::Income->value),
             body: $this->withPlatformCredentials(['access_token' => $accessToken]),
         );
 
@@ -783,7 +998,7 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
             direction: SyncDirection::Inbound,
             resourceType: ResourceType::Statement,
             authInjector: fn (PendingRequest $request): PendingRequest => $request,
-            usageIdempotencyKey: 'plaid_statements_list:'.$connection->id.':'.now()->format('YmdHi'),
+            usageIdempotencyKey: 'plaid_statements_list:'.$connection->id.':'.$this->pullOperationIdentity($connection, ResourceType::Statement->value),
             body: $this->withPlatformCredentials(['access_token' => $accessToken]),
         );
 
@@ -826,6 +1041,61 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
     {
         $accessToken = $this->decryptAccessToken($connection, 'fetch_balance');
 
+        // DETERMINISTIC LIVE-BALANCE IDENTITY (replaces
+        // `now()->getTimestampMs()`, which changed on literally every
+        // invocation — the worst of the wall-clock shapes the
+        // release-candidate security review flagged).
+        //
+        // Caller traced: ProviderLiveBalanceConfirmationService::confirm()
+        // (the sole caller), which runs this inside
+        // ProviderBillableCallPipeline::execute() and — only when the
+        // pipeline reports a certain, billable outcome — calls
+        // persistBalanceSnapshot(), an updateOrCreate() on
+        // provider_balance_snapshots keyed by exactly
+        // (firm_integration_id, account_id) that rewrites `retrieved_at`.
+        //
+        // That `retrieved_at` is therefore the durable "this specific
+        // live-balance retrieval has actually completed successfully"
+        // marker — structurally the same thing
+        // `RenewGraphSubscriptionJob`'s `$renewalCycleToken` uses
+        // `integration_provider_webhook_subscriptions.expires_at` for.
+        // Every re-attempt of a retrieval that has NOT yet succeeded
+        // reads the same (or absent) snapshot and collapses onto one
+        // key; the next genuinely new confirmed retrieval reads the
+        // snapshot the previous one wrote and gets a different key.
+        // The account id is part of the identity, so two different
+        // accounts can never share a key.
+        //
+        // Reading a FORCE-RLS'd table here is safe: every
+        // ProviderRequestExecutor::send() call in this class already
+        // REQUIRES an active `app.current_firm_id` context to write its
+        // own integration_usage_records row (see
+        // resolveVerificationKeyWithAttribution()'s docblock for the
+        // confirmed defect that proved this), so this read runs under
+        // exactly the context the call below already depends on.
+        //
+        // NOTE for reviewers: the strictly better identity is
+        // ProviderLiveBalanceConfirmationService's own single-use
+        // `$confirmationToken` (already the basis of that service's
+        // deterministic pipeline key). It is not threaded down here
+        // because doing so requires editing that service's own
+        // `fetchBalance(..., ['connection' => ..., 'account_id' => ...])`
+        // context array, which is outside this change's file scope. If
+        // it is ever added as `$context['confirmation_token']`, prefer
+        // it over the snapshot below.
+        $lastConfirmedRetrievalAt = ProviderBalanceSnapshot::query()
+            ->where('firm_integration_id', $connection->id)
+            ->where('account_id', $accountId)
+            ->value('retrieved_at');
+
+        $balanceIdentity = hash('sha256', implode('|', [
+            (string) $connection->id,
+            $accountId,
+            $lastConfirmedRetrievalAt === null
+                ? 'no_prior_confirmed_retrieval'
+                : (string) $lastConfirmedRetrievalAt,
+        ]));
+
         try {
             $response = $this->executor->send(
                 connection: $connection,
@@ -837,7 +1107,7 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
                 direction: SyncDirection::Inbound,
                 resourceType: ResourceType::BankAccount,
                 authInjector: fn (PendingRequest $request): PendingRequest => $request,
-                usageIdempotencyKey: 'plaid_balance:'.$connection->id.':'.$accountId.':'.now()->getTimestampMs(),
+                usageIdempotencyKey: 'plaid_balance:'.$connection->id.':'.$accountId.':'.$balanceIdentity,
                 body: $this->withPlatformCredentials([
                     'access_token' => $accessToken,
                     'options' => ['account_ids' => [$accountId]],
@@ -905,6 +1175,31 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
      */
     public function matchIdentity(FirmIntegration $connection, string $accessToken, array $callerSuppliedIdentity): array
     {
+        // DETERMINISTIC MATCH IDENTITY (replaces
+        // `now()->getTimestampMs()`). Callers traced: this method has NO
+        // caller anywhere under app/ today — it is a stateless utility
+        // deliberately outside the Item/pull/webhook lifecycle (see this
+        // method's own docblock), so there is no caller-side run/job/
+        // request row to key on and none can be invented.
+        //
+        // The correct identity is instead intrinsic to the call:
+        // `/identity/match` is a pure query — the SAME identity payload
+        // scored against the SAME Item is, by definition, the same
+        // logical request, and any two different payloads (a different
+        // name, phone, email or address) or any two different
+        // connections are different logical requests. Retried verbatim
+        // it now collapses onto one key instead of minting a fresh one
+        // per millisecond.
+        //
+        // ksort() so a caller that happens to build the array in a
+        // different key order still produces the same identity; only
+        // a SHA-256 of the payload is ever emitted, never the payload
+        // itself (this is PII), matching the hash-the-payload discipline
+        // the `version_token` construction in every pull* method above
+        // already uses.
+        $identityForKey = $callerSuppliedIdentity;
+        ksort($identityForKey);
+
         $response = $this->executor->send(
             connection: $connection,
             providerKey: ProviderKey::Plaid,
@@ -915,7 +1210,10 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
             direction: SyncDirection::Inbound,
             resourceType: ResourceType::Identity,
             authInjector: fn (PendingRequest $request): PendingRequest => $request,
-            usageIdempotencyKey: 'plaid_identity_match:'.$connection->id.':'.now()->getTimestampMs(),
+            usageIdempotencyKey: 'plaid_identity_match:'.$connection->id.':'.hash('sha256', implode('|', [
+                (string) $connection->id,
+                json_encode($identityForKey, JSON_THROW_ON_ERROR),
+            ])),
             body: $this->withPlatformCredentials(array_merge(['access_token' => $accessToken], $callerSuppliedIdentity)),
         );
 
@@ -951,7 +1249,21 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
             direction: SyncDirection::Inbound,
             resourceType: null,
             authInjector: fn (PendingRequest $request): PendingRequest => $request,
-            usageIdempotencyKey: 'plaid_transactions_enrich:'.$connection->id.':'.now()->getTimestampMs(),
+            // DETERMINISTIC ENRICH IDENTITY (replaces
+            // `now()->getTimestampMs()`). Callers traced: like
+            // matchIdentity() above, this method has NO caller anywhere
+            // under app/ today, and by its own docblock it operates
+            // ONLY on caller-supplied transaction data, never on
+            // Plaid-connected Item data — so the submitted batch IS the
+            // whole logical request, and enrichment is a pure function
+            // of it. The same batch resubmitted (the exact shape a
+            // retry takes) now reuses one key; any different batch —
+            // one more transaction, one changed amount — hashes
+            // differently and is correctly treated as a new request.
+            usageIdempotencyKey: 'plaid_transactions_enrich:'.$connection->id.':'.hash('sha256', implode('|', [
+                (string) $connection->id,
+                json_encode($transactions, JSON_THROW_ON_ERROR),
+            ])),
             body: $this->withPlatformCredentials(['transactions' => $transactions]),
         );
 
@@ -1474,9 +1786,52 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
      * (fail-closed: the listener must never guess a error code that was
      * not actually confirmed by Plaid).
      */
-    public function fetchItemErrorCode(FirmIntegration $connection): ?string
+    public function fetchItemErrorCode(FirmIntegration $connection, ?int $inboundWebhookEventId = null): ?string
     {
         $accessToken = $this->decryptAccessToken($connection, 'item_error_state');
+
+        // DETERMINISTIC ITEM-STATE IDENTITY (replaces
+        // `now()->getTimestampMs()`). This is the ONE site in this class
+        // whose caller genuinely retries: the sole caller,
+        // DispatchPlaidItemLifecycleTransitionOnVerifiedWebhookEvent, is
+        // a ShouldQueue listener with `$tries = 3`, so the old key
+        // minted three different values — and three separately-headered
+        // outbound calls plus three usage rows — for ONE logical
+        // "re-verify this Item's error state" operation.
+        //
+        // $inboundWebhookEventId is that caller's own durable
+        // integration_inbound_webhook_events id — the exact,
+        // per-delivery identity this /item/get re-verifies, already
+        // carried on the listener as `$this->webhookEventId` and
+        // constant across all three of its attempts. Additive and
+        // nullable so no call site is forced to change; the listener
+        // adopting it is a one-line follow-up
+        // (`$provider->fetchItemErrorCode($connection, $this->webhookEventId)`)
+        // and is the preferred identity whenever supplied.
+        //
+        // Fallback when it is not supplied: the connection's own durable
+        // lifecycle state, which markItemErrorState() — the very thing
+        // this call's result feeds — rewrites (status →
+        // ReauthorizationRequired, error_reason → the Plaid error code)
+        // once the operation completes successfully. Deliberately does
+        // NOT include `updated_at`/`last_health_check_at`: HealthStateService
+        // rewrites both on EVERY provider call, so folding them in would
+        // silently reintroduce a per-attempt key. Disclosed limitation
+        // of the fallback: connection state is cyclic (Active/null →
+        // ReauthorizationRequired/code → Active/null after a repair), so
+        // two error episodes separated by a successful repair can
+        // reuse a key, costing one usage-evidence row on a free,
+        // non-mutating Plaid read. That is strictly better than the
+        // per-millisecond key it replaces, and disappears entirely once
+        // the caller passes the webhook event id.
+        $itemStateIdentity = hash('sha256', implode('|', $inboundWebhookEventId !== null
+            ? [(string) $connection->id, 'inbound_webhook_event', (string) $inboundWebhookEventId]
+            : [
+                (string) $connection->id,
+                'connection_lifecycle_state',
+                $connection->status->value,
+                (string) ($connection->error_reason ?? 'no_error_reason'),
+            ]));
 
         try {
             $response = $this->executor->send(
@@ -1489,7 +1844,7 @@ final class PlaidProvider implements IntegrationProviderContract, RequiresBillab
                 direction: SyncDirection::Inbound,
                 resourceType: null,
                 authInjector: fn (PendingRequest $request): PendingRequest => $request,
-                usageIdempotencyKey: 'plaid_item_get:'.$connection->id.':'.now()->getTimestampMs(),
+                usageIdempotencyKey: 'plaid_item_get:'.$connection->id.':item_state:'.$itemStateIdentity,
                 body: $this->withPlatformCredentials(['access_token' => $accessToken]),
             );
         } catch (Throwable) {

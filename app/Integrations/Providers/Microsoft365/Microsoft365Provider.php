@@ -339,6 +339,11 @@ final class Microsoft365Provider implements IntegrationProviderContract, Support
     {
         $connection = $this->resolveConnectionFromContext($context);
 
+        // DETERMINISTIC REFRESH-CYCLE IDENTITY (see
+        // oauthRefreshCycleToken()'s own docblock). Computed BEFORE the
+        // call, from state the refresh itself is about to replace.
+        $refreshCycleToken = $this->oauthRefreshCycleToken($connection, $refreshToken);
+
         $clientId = (string) config('integrations.oauth_apps.microsoft365.client_id');
         $clientSecret = (string) config('integrations.oauth_apps.microsoft365.client_secret');
 
@@ -367,7 +372,7 @@ final class Microsoft365Provider implements IntegrationProviderContract, Support
             direction: SyncDirection::Outbound,
             resourceType: null,
             authInjector: fn (PendingRequest $request): PendingRequest => $request,
-            usageIdempotencyKey: 'oauth_refresh:'.$connection->id.':'.now()->format('YmdHi'),
+            usageIdempotencyKey: 'oauth_refresh:'.$connection->id.':'.$refreshCycleToken,
             body: $body,
             formEncoded: true,
             urlPurpose: 'identity',
@@ -1151,11 +1156,44 @@ final class Microsoft365Provider implements IntegrationProviderContract, Support
         $subscriptionId = null;
         $fallbackResource = null;
         $fallbackChangeType = null;
+        $renewalCycleToken = null;
 
         if ($subscriptionModel instanceof IntegrationProviderWebhookSubscription) {
             $subscriptionId = $subscriptionModel->provider_subscription_id;
             $fallbackResource = $subscriptionModel->provider_resource;
             $fallbackChangeType = $subscriptionModel->provider_change_type;
+
+            // DETERMINISTIC RENEWAL-CYCLE IDENTITY, computed from the
+            // SAME durable fields
+            // App\Integrations\Jobs\RenewGraphSubscriptionJob::handle()
+            // already hashes into its own `$renewalCycleToken` — that
+            // job is the one and only production caller of this method
+            // (confirmed by grepping `->renewSubscription(` across app/),
+            // and it always supplies `$context['subscription']` as a
+            // hydrated model, so this branch is the real path.
+            //
+            // This key used to end in `now()->format('YmdHi')`. The job
+            // retries with backoff() = [30, 60, 120, 240] and $tries = 5,
+            // so every retry after the first almost certainly lands in a
+            // DIFFERENT wall-clock minute than the attempt it is
+            // retrying — which meant one logical renewal wrote up to five
+            // SEPARATE local usage-record rows and sent Graph five
+            // DIFFERENT Idempotency-Key header values, defeating both
+            // dedup layers at once.
+            //
+            // `expires_at` already IS the durable "this specific renewal
+            // still needs doing" marker: the job re-reads the
+            // subscription row fresh at the top of every attempt and
+            // rewrites provider_subscription_id/expires_at ONLY once a
+            // renewal actually SUCCEEDS. So all five attempts at one
+            // renewal share a key, while the next genuine renewal of the
+            // same subscription gets a different one.
+            $renewalCycleToken = hash('sha256', implode('|', [
+                (string) $connection->id,
+                (string) $subscriptionModel->id,
+                (string) ($subscriptionModel->provider_subscription_id ?? ''),
+                $subscriptionModel->expires_at?->toIso8601String() ?? 'no_expiry',
+            ]));
         } elseif (is_string($context['provider_subscription_id'] ?? null) && $context['provider_subscription_id'] !== '') {
             $subscriptionId = $context['provider_subscription_id'];
         }
@@ -1183,7 +1221,25 @@ final class Microsoft365Provider implements IntegrationProviderContract, Support
             direction: SyncDirection::Inbound,
             resourceType: null,
             authInjector: fn (PendingRequest $request): PendingRequest => $request->withToken($accessToken),
-            usageIdempotencyKey: 'webhook_renew:'.$connection->id.':'.$subscriptionId.':'.now()->format('YmdHi'),
+            // INTENTIONALLY TIME-BASED ONLY on the `$renewalCycleToken
+            // === null` fallback branch (documented per the security
+            // review's own "document each remaining time-based use that
+            // is intentionally not an idempotency identity"): that
+            // branch is reached only by a caller that supplies a BARE
+            // `$context['provider_subscription_id']` opaque string and
+            // no subscription model. Such a caller hands this method no
+            // durable renewal-cycle marker at all — no local row id, no
+            // expires_at — so there is genuinely nothing stable to
+            // anchor on, and a bare `$subscriptionId`-only key would be
+            // worse than the clock: it never changes, so the SECOND
+            // genuine renewal of that subscription would collide
+            // permanently against `integration_usage_records`' own
+            // `unique(firm_integration_id, idempotency_key)` index and
+            // silently stop recording usage forever. This branch has
+            // ZERO production callers today (verified by grep); the real
+            // path above is fully deterministic.
+            usageIdempotencyKey: 'webhook_renew:'.$connection->id.':'.$subscriptionId.':'
+                .($renewalCycleToken ?? now()->format('YmdHi')),
             body: ['expirationDateTime' => $expirationDateTime],
             urlPurpose: 'graph',
         );
@@ -1245,6 +1301,56 @@ final class Microsoft365Provider implements IntegrationProviderContract, Support
             'Microsoft365Provider requires $context[\'connection\'] (a FirmIntegration instance) or '.
             '$context[\'firm_integration_id\'] to resolve the active connection for this operation.'
         );
+    }
+
+    /**
+     * DETERMINISTIC REFRESH-CYCLE IDENTITY for refreshToken()'s usage
+     * idempotency key (replaces a `now()->format('YmdHi')` component).
+     *
+     * The sole production caller is
+     * `App\Integrations\Services\ProviderConnectionService::refreshConnectionToken()`,
+     * itself driven by the retrying `App\Integrations\Jobs\RefreshIntegrationToken`
+     * job — so one logical refresh can genuinely reach this method
+     * several times, and with a wall-clock key each attempt wrote a
+     * SEPARATE `integration_usage_records` row and sent Microsoft a
+     * DIFFERENT `Idempotency-Key` header, defeating local usage
+     * deduplication, provider-side idempotency, and audit correlation
+     * alike.
+     *
+     * The anchor is the connection's CURRENTLY-Active access-token
+     * credential — the exact structural analogue of the subscription
+     * row `App\Integrations\Jobs\RenewGraphSubscriptionJob` anchors its
+     * own `$renewalCycleToken` on. `refreshConnectionToken()` reads that
+     * credential under `withRefreshLock()` and only calls
+     * `IntegrationCredentialService::rotate()` AFTER this method
+     * returns successfully; `rotate()` marks the old row `Rotated` and
+     * stores a NEW row (a new id, a new expires_at). So the token is
+     * stable across every retry of one refresh and advances exactly
+     * once a refresh actually completes — never a permanently static
+     * key, which `integration_usage_records`' own
+     * `unique(firm_integration_id, idempotency_key)` index would turn
+     * into "silently stop recording usage forever".
+     *
+     * `$refreshToken` is folded in (hashed, never in the clear —
+     * matching this file's existing `hash('sha256', $code)` precedent
+     * in exchangeCodeForToken()) as a second, independent advance
+     * signal: Microsoft's documented MANDATORY refresh-token rotation
+     * means this value also changes on every successful refresh, so the
+     * key still advances correctly even in the defensive
+     * no-access-credential case below (which `refreshConnectionToken()`
+     * itself already makes unreachable — it throws on a missing active
+     * access credential before ever calling this provider).
+     */
+    private function oauthRefreshCycleToken(FirmIntegration $connection, string $refreshToken): string
+    {
+        $accessCredential = $this->credentials->findActiveCredential($connection, CredentialType::OauthAccessToken);
+
+        return hash('sha256', implode('|', [
+            (string) $connection->id,
+            (string) ($accessCredential?->id ?? 'no_access_credential'),
+            $accessCredential?->expires_at?->toIso8601String() ?? 'no_expiry',
+            hash('sha256', $refreshToken),
+        ]));
     }
 
     /**
