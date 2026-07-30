@@ -11,11 +11,13 @@ use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Enums\ResourceType;
 use App\Integrations\Exceptions\GmailMailboxAlreadyRoutedException;
+use App\Integrations\Exceptions\SanitizedProviderHttpException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationProvider;
 use App\Integrations\Providers\GoogleWorkspace\GoogleWorkspaceProvider;
 use App\Integrations\Services\ProviderConnectionService;
 use App\Integrations\Support\GmailMailboxRoutingService;
+use App\Integrations\Support\OutboundProviderHttpClient;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\TenantEncryptionKey;
@@ -519,6 +521,64 @@ final class GmailMailboxRoutingLifecycleTest extends TestCase
         $user = User::factory()->create();
 
         return $this->runWithFirmContext($firm, fn () => FirmUser::factory()->forFirm($firm)->forUser($user)->role($role)->create());
+    }
+
+    /**
+     * CHECKPOINT 8.2 corrective pass — HIGH finding 2.
+     *
+     * The typed refusal used to be swallowed: `subscribe()` runs inside
+     * `OutboundProviderHttpClient::execute()`, whose catch-all converted
+     * `GmailMailboxAlreadyRoutedException` into
+     * `SanitizedProviderHttpException(UNKNOWN)`. Callers read UNKNOWN as
+     * "the provider's outcome is ambiguous", so a DEFINITE local conflict —
+     * detected before any request was sent — parked the connection in
+     * `bootstrap_reconciliation_required`, a state with no correct
+     * resolution and no automated exit.
+     *
+     * The exception now implements `LocalDomainFailureContract` and crosses
+     * that boundary unchanged, so it reaches the branch written for it.
+     */
+    public function test_a_cross_firm_mailbox_conflict_reaches_the_definite_failure_state_not_reconciliation(): void
+    {
+        $routing = app(GmailMailboxRoutingService::class);
+        $client = app(OutboundProviderHttpClient::class);
+
+        [$firmA, $connectionA] = $this->committedFirmAndConnection();
+        [$firmB, $connectionB] = $this->committedFirmAndConnection();
+
+        $mailbox = 'boundary-preserved-mailbox@example.test';
+        $this->withCommittedFirmContext($firmA, fn () => $routing->route($connectionA, $mailbox));
+
+        // Exactly how the bootstrap invokes a provider: the claim happens
+        // inside the closure the HTTP client wraps.
+        $caught = null;
+
+        try {
+            $this->withCommittedFirmContext($firmB, fn () => $client->execute(
+                fn () => $routing->route($connectionB, $mailbox),
+                'subscribe',
+            ));
+        } catch (Throwable $e) {
+            $caught = $e;
+        }
+
+        $this->assertInstanceOf(
+            GmailMailboxAlreadyRoutedException::class,
+            $caught,
+            'The typed local refusal must survive the sanitizing boundary intact.'
+        );
+        $this->assertNotInstanceOf(
+            SanitizedProviderHttpException::class,
+            $caught,
+            'It must NOT be flattened into a sanitized provider failure — that is what made it look ambiguous.'
+        );
+        $this->assertSame('mailbox_already_routed', $caught->localFailureReason());
+
+        // And the ownership guarantee still holds through the boundary.
+        $this->assertSame(1, $this->committedRouteCountFor((int) $connectionA->id));
+        $this->assertSame(0, $this->committedRouteCountFor((int) $connectionB->id));
+
+        $this->withCommittedFirmContext($firmA, fn () => $routing->unroute($connectionA));
     }
 
     // ------------------------------------------------------------

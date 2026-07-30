@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Integrations\Exceptions;
 
+use App\Integrations\Contracts\LocalDomainFailureContract;
 use RuntimeException;
 
 /**
@@ -32,8 +33,18 @@ use RuntimeException;
  * because nothing could have happened at the provider — there is nothing
  * to reconcile.
  */
-final class GmailMailboxAlreadyRoutedException extends RuntimeException
+final class GmailMailboxAlreadyRoutedException extends RuntimeException implements LocalDomainFailureContract
 {
+    /**
+     * Satisfies all three conditions the marker requires: raised by local
+     * logic, before any request is sent, and carrying only two integer
+     * connection ids — no credential, token or provider payload.
+     */
+    public function localFailureReason(): string
+    {
+        return 'mailbox_already_routed';
+    }
+
     public function __construct(
         public readonly int $requestedFirmIntegrationId,
         public readonly int $owningFirmIntegrationId,

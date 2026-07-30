@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Integrations\Support;
 
+use App\Integrations\Contracts\LocalDomainFailureContract;
 use App\Integrations\Exceptions\AuthorizationCodeAlreadyUsedException;
 use App\Integrations\Exceptions\ExpiredAuthorizationCodeException;
 use App\Integrations\Exceptions\InvalidPkceVerifierException;
@@ -92,6 +93,22 @@ final class OutboundProviderHttpClient
                     ->parse($e->retryAfterRaw(), new DateTimeImmutable);
 
             throw new SanitizedProviderHttpException($e->category(), $e->statusCode(), $operationLabel, $retryAfterSeconds);
+        } catch (LocalDomainFailureContract $e) {
+            // CHECKPOINT 8.2 corrective pass. This boundary exists to
+            // sanitize failures of request construction, transport, and
+            // provider response handling. A LOCAL domain failure raised
+            // inside the same closure is none of those, and folding it into
+            // CATEGORY_UNKNOWN actively caused harm: callers read UNKNOWN as
+            // "the provider's outcome is ambiguous", which is the one
+            // classification that must never be auto-retried, so a definite
+            // local conflict (a Gmail mailbox owned by another firm,
+            // detected before the request was sent) parked the connection in
+            // a reconciliation state that had no correct resolution.
+            //
+            // The marker's own contract requires such an exception to carry
+            // no credential, token or payload, so rethrowing it unchanged
+            // cannot leak anything this boundary would otherwise strip.
+            throw $e;
         } catch (Throwable) {
             throw new SanitizedProviderHttpException(SanitizedProviderHttpException::CATEGORY_UNKNOWN, null, $operationLabel);
         }
