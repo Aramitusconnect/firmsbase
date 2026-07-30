@@ -6,6 +6,7 @@ namespace Tests\Unit\Integrations\Support;
 
 use App\Integrations\Data\ResolvedGmailMailboxRoute;
 use App\Integrations\Enums\ProviderKey;
+use App\Integrations\Exceptions\GmailMailboxAlreadyRoutedException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationProvider;
 use App\Integrations\Support\GmailMailboxRoutingService;
@@ -151,9 +152,33 @@ final class GmailMailboxRoutingServiceTest extends TestCase
 
         $this->service()->route($connectionA, 'shared-mailbox@firm-domain.test');
 
-        $this->expectException(QueryException::class);
+        // CHECKPOINT 8.2 (§A7b): this used to surface as a raw
+        // QueryException from the unique index. The claim is now an
+        // explicit INSERT ... ON CONFLICT DO NOTHING made BEFORE the
+        // provider call, so a losing claim is reported as a typed,
+        // catchable refusal instead of a database error — which is what
+        // lets ProviderConnectionService classify it as a DEFINITE failure
+        // (nothing happened at the provider) rather than an ambiguous one.
+        //
+        // Strictly stronger than the previous expectation: it also pins
+        // WHICH connection lost and WHICH one owns the mailbox.
+        try {
+            $this->service()->route($connectionB, 'shared-mailbox@firm-domain.test');
+            $this->fail('A second connection must never be able to claim an already-routed mailbox.');
+        } catch (GmailMailboxAlreadyRoutedException $e) {
+            $this->assertSame((int) $connectionB->id, $e->requestedFirmIntegrationId);
+            $this->assertSame((int) $connectionA->id, $e->owningFirmIntegrationId);
+        }
 
-        $this->service()->route($connectionB, 'shared-mailbox@firm-domain.test');
+        // The first connection's route is untouched by the refusal.
+        $this->assertSame(
+            1,
+            DB::table('integration_gmail_mailbox_routes')->where('firm_integration_id', $connectionA->id)->count()
+        );
+        $this->assertSame(
+            0,
+            DB::table('integration_gmail_mailbox_routes')->where('firm_integration_id', $connectionB->id)->count()
+        );
     }
 
     /**

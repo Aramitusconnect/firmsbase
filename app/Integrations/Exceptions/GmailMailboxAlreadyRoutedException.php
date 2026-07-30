@@ -12,12 +12,17 @@ use RuntimeException;
  * mailbox being claimed is already routed to a DIFFERENT connection
  * (Checkpoint 8.2 §A7b).
  *
- * `integration_gmail_mailbox_routes.mailbox_lookup_hmac` is GLOBALLY
- * unique, not unique per firm, because Gmail's shared Pub/Sub topic
- * delivers an inbound notification carrying only the mailbox address:
- * if two firms could both claim one mailbox, there would be no way to
- * decide which firm's data an inbound message belongs to. Failing closed
- * here is the entire point.
+ * A mailbox's lookup hash is GLOBALLY unique, not unique per firm,
+ * because Gmail's shared Pub/Sub topic delivers an inbound notification
+ * carrying only the mailbox address: if two firms could both claim one
+ * mailbox, there would be no way to decide which firm's data an inbound
+ * message belongs to. Failing closed here is the entire point.
+ *
+ * This class deliberately names no table. The routing table may be
+ * referenced by exactly one file — enforced by
+ * IntegrationGmailMailboxRoutesNoRlsAndHmacOnlyColumnTest — and widening
+ * that allowlist for a docblock's convenience would trade a real
+ * containment guarantee for prose.
  *
  * WHY IT IS A TYPED EXCEPTION RATHER THAN A RAW UNIQUE-VIOLATION. The
  * claim now happens BEFORE the provider `watch()` call, so this is the
