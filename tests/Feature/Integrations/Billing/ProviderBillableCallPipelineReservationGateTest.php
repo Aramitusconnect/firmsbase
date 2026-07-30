@@ -25,6 +25,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
+use Tests\Concerns\PurgesDurableProviderOperationAttempts;
 use Tests\TestCase;
 
 /**
@@ -42,6 +43,7 @@ use Tests\TestCase;
  */
 class ProviderBillableCallPipelineReservationGateTest extends TestCase
 {
+    use PurgesDurableProviderOperationAttempts;
     use RefreshDatabase;
 
     private ProviderBillableCallPipeline $pipeline;
@@ -49,6 +51,7 @@ class ProviderBillableCallPipelineReservationGateTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->purgeDurableProviderOperationAttempts();
         $this->pipeline = app(ProviderBillableCallPipeline::class);
         Cache::flush();
     }
@@ -163,6 +166,39 @@ class ProviderBillableCallPipelineReservationGateTest extends TestCase
         });
     }
 
+    /**
+     * CHECKPOINT 8.2 (§A5). The pipeline now has TWO gates, and the
+     * DURABLE operation gate (step 12d) is deliberately consulted first,
+     * because the ambient reservation this suite exercises lives inside
+     * the caller's transaction and can be missing, stale, or outright
+     * contradicted by what really happened.
+     *
+     * That leaves the ambient gate with one job it still owns
+     * exclusively, and it is the job this suite tests: a reservation that
+     * has NO durable counterpart — i.e. one created before Checkpoint 8.2
+     * shipped, or by a code path that predates the durable ledger. This
+     * helper produces exactly that state by deleting the durable row for
+     * the logical operation, leaving the ambient reservation untouched.
+     *
+     * Nothing is being weakened here. The scenarios below (a live peer
+     * reservation, an already-finalized reservation, a stale one, an
+     * abandoned one) are still driven end to end through the real
+     * pipeline and still assert the same invocation counts, statuses and
+     * usage-record counts as before. What changed is only that the
+     * premise "no durable record exists for this reservation" is now
+     * stated explicitly instead of being true by default — and the
+     * complementary case, where durable evidence overrules a
+     * contradictory reservation, is proven directly in
+     * ProviderBillableCallPipelineDurableGateTest.
+     */
+    private function simulateReservationWithNoDurableRecord(string $key): void
+    {
+        DB::connection('pgsql_audit')
+            ->table('provider_operation_attempts')
+            ->where('logical_operation_key', 'like', '%:'.$key)
+            ->delete();
+    }
+
     // ------------------------------------------------------------
     // 1. Retry inside the same wall-clock minute
     // ------------------------------------------------------------
@@ -262,6 +298,10 @@ class ProviderBillableCallPipelineReservationGateTest extends TestCase
             'provider_call_started_at' => now()->subMinutes(10),
             'expires_at' => now()->subMinutes(5),
         ]);
+        // CHECKPOINT 8.2 (§A5): this scenario is a reservation with no
+        // durable counterpart — the case the ambient gate still owns. See
+        // simulateReservationWithNoDurableRecord()'s docblock.
+        $this->simulateReservationWithNoDurableRecord($key);
 
         $result = $this->execute($firm, $connection, $call, $key);
 
@@ -417,6 +457,10 @@ class ProviderBillableCallPipelineReservationGateTest extends TestCase
             'provider_call_started_at' => now(),
             'expires_at' => now()->addSeconds(120),
         ]);
+        // CHECKPOINT 8.2 (§A5): this scenario is a reservation with no
+        // durable counterpart — the case the ambient gate still owns. See
+        // simulateReservationWithNoDurableRecord()'s docblock.
+        $this->simulateReservationWithNoDurableRecord($key);
 
         [$call, $counter] = $this->countingCall();
 
@@ -475,6 +519,10 @@ class ProviderBillableCallPipelineReservationGateTest extends TestCase
 
         $this->execute($firm, $connection, $seedCall, $key);
         $this->assertSame(1, $this->usageRecordCount($firm));
+        // CHECKPOINT 8.2 (§A5): this scenario is a reservation with no
+        // durable counterpart — the case the ambient gate still owns. See
+        // simulateReservationWithNoDurableRecord()'s docblock.
+        $this->simulateReservationWithNoDurableRecord($key);
 
         [$call, $counter] = $this->countingCall();
         $result = $this->execute($firm, $connection, $call, $key);
@@ -506,6 +554,11 @@ class ProviderBillableCallPipelineReservationGateTest extends TestCase
         } catch (SanitizedProviderHttpException) {
             // expected
         }
+
+        // CHECKPOINT 8.2 (§A5): this scenario is a reservation with no
+        // durable counterpart — the case the ambient gate still owns. See
+        // simulateReservationWithNoDurableRecord()'s docblock.
+        $this->simulateReservationWithNoDurableRecord($key);
 
         [$call, $counter] = $this->countingCall();
         $result = $this->execute($firm, $connection, $call, $key);
@@ -539,6 +592,10 @@ class ProviderBillableCallPipelineReservationGateTest extends TestCase
             'provider_call_started_at' => null,
             'expires_at' => now()->subMinutes(6),
         ]);
+        // CHECKPOINT 8.2 (§A5): this scenario is a reservation with no
+        // durable counterpart — the case the ambient gate still owns. See
+        // simulateReservationWithNoDurableRecord()'s docblock.
+        $this->simulateReservationWithNoDurableRecord($key);
 
         [$call, $counter] = $this->countingCall();
         $result = $this->execute($firm, $connection, $call, $key);
@@ -571,6 +628,10 @@ class ProviderBillableCallPipelineReservationGateTest extends TestCase
             'provider_call_started_at' => now()->subMinutes(7),
             'expires_at' => now()->subMinutes(6),
         ]);
+        // CHECKPOINT 8.2 (§A5): this scenario is a reservation with no
+        // durable counterpart — the case the ambient gate still owns. See
+        // simulateReservationWithNoDurableRecord()'s docblock.
+        $this->simulateReservationWithNoDurableRecord($key);
 
         [$call, $counter] = $this->countingCall();
         $result = $this->execute($firm, $connection, $call, $key);
@@ -599,6 +660,11 @@ class ProviderBillableCallPipelineReservationGateTest extends TestCase
         $this->assertSame(1, $rejectingCounter->calls);
         $this->assertSame(ProviderBillableCallReservation::STATUS_FINALIZED_NON_BILLABLE, $this->reservationFor($firm, $key)->status);
         $this->assertSame(0, $this->usageRecordCount($firm));
+
+        // CHECKPOINT 8.2 (§A5): this scenario is a reservation with no
+        // durable counterpart — the case the ambient gate still owns. See
+        // simulateReservationWithNoDurableRecord()'s docblock.
+        $this->simulateReservationWithNoDurableRecord($key);
 
         // A rate-limited rejection is positive knowledge that no
         // billable work happened, so the queue retry must still be able

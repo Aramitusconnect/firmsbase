@@ -6,6 +6,7 @@ namespace App\Integrations\Billing;
 
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\ProviderKey;
+use App\Integrations\Enums\ProviderOperationClaimDecision;
 use App\Integrations\Enums\ResourceType;
 use App\Integrations\Enums\SyncDirection;
 use App\Integrations\Events\ProviderBillableCallCompleted;
@@ -13,9 +14,11 @@ use App\Integrations\Exceptions\ProviderCooldownActiveException;
 use App\Integrations\Exceptions\ProviderDuplicateRequestInFlightException;
 use App\Integrations\Exceptions\ProviderHardLimitExceededException;
 use App\Integrations\Exceptions\ProviderKillSwitchActiveException;
+use App\Integrations\Exceptions\ProviderOperationRequiresReconciliationException;
 use App\Integrations\Exceptions\ProviderOptionalOperationSuspendedException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\ProviderBillableCallReservation;
+use App\Integrations\Models\ProviderOperationAttempt;
 use App\Integrations\Services\FinancialIntegrationAccessPolicyService;
 use App\Integrations\Services\ProviderTenantSafePolicyService;
 use App\Models\Firm;
@@ -112,6 +115,63 @@ use Throwable;
  * Untouched by that remediation, deliberately: PerConnectionRateLimiter,
  * the step 7 kill-switch/suspension checks, the step 10 cooldown, and the
  * step 11 soft/hard usage limits are separate, already-correct layers.
+ *
+ * ---------------------------------------------------------------------
+ * DURABLE PHASING (Checkpoint 8.2 §A5) — CLAIM / CALL / APPLY / RECOVER
+ * ---------------------------------------------------------------------
+ *
+ * The reservation-state gate above is still the right idea, but all of
+ * its evidence lives on the ordinary application connection, inside
+ * whatever transaction the CALLER holds. When that transaction rolls back
+ * — a post-call exception, a crash, a worker killed mid-deploy — both the
+ * reservation and its `provider_call_started_at` intent marker vanish,
+ * and the retry re-fires a call the provider already performed. That
+ * residual gap is the Checkpoint 8 C3 defect.
+ *
+ * `execute()` is therefore phased around a SECOND, independent record
+ * that the caller's transaction cannot erase — a
+ * `provider_operation_attempts` row, written on its own database session
+ * via `ProviderOperationAttemptService` (see that class and its table's
+ * migration for why the table carries no foreign keys, no RLS policy and
+ * no transactions):
+ *
+ *   CLAIM   (steps 12/12b/12d) Reserve as before, then durably claim the
+ *           logical operation. Exactly one of five decisions comes back,
+ *           and only `Proceed` authorizes a send. Committed BEFORE any
+ *           request can leave the process.
+ *   CALL    (steps 12e/13) Record `attempt_started` durably — a
+ *           compare-and-set that can succeed at most once per attempt
+ *           generation — and only then run `$providerCall()`. No database
+ *           transaction is opened and no row lock is held by this
+ *           pipeline across that call.
+ *   APPLY   (steps 14-17) Classify the provider's outcome durably first,
+ *           then do the local work (finalize, cache, audit, events). A
+ *           throw during local work is recorded as
+ *           `local_processing_failed` WITH the provider-success evidence
+ *           intact, so the retry resumes instead of re-sending.
+ *   RECOVER A retry of the same logical operation is routed by the gate,
+ *           not by guesswork: resume local processing, no-op if already
+ *           settled, back off if a peer holds a live lease, or refuse and
+ *           demand reconciliation if the provider's outcome is unknown.
+ *
+ * WHY UNIVERSAL RECONCILIATION IS SAFE HERE. An uncertain outcome parks
+ * the logical operation until a human resolves it, for non-billable
+ * operations too (a duplicated webhook subscription is a real side
+ * effect, not merely a cost). That is not a permanent stall, because
+ * every logical operation key in this system is scoped to ONE attempt
+ * cycle — a sync run plus cursor version plus page, or a subscription
+ * renewal cycle — never to a resource for all time. A later cycle
+ * computes a different key and proceeds normally; only the ambiguous
+ * cycle waits for a human.
+ *
+ * WHAT IS DELIBERATELY *NOT* MOVED. `provider_billable_call_reservations`
+ * and `integration_usage_records` remain the authoritative billing rows
+ * on the ordinary connection, with their real foreign keys and their real
+ * RLS. Checkpoint 8.1 tried to make those rows themselves durable by
+ * relocating the FK-bearing table onto the independent connection and
+ * deadlocked against `PullSyncJob`'s `lockForUpdate()`. The gate row is
+ * evidence used to REBUILD billing state during recovery, never a second
+ * ledger of money owed.
  */
 final class ProviderBillableCallPipeline
 {
@@ -128,6 +188,7 @@ final class ProviderBillableCallPipeline
         private readonly ProviderUsageReservationService $reservationService,
         private readonly ProviderCallOutcomeNormalizer $outcomeNormalizer,
         private readonly TimelineEventRecorder $events,
+        private readonly ProviderOperationAttemptService $operationAttempts,
     ) {}
 
     public function execute(
@@ -149,6 +210,8 @@ final class ProviderBillableCallPipeline
         ?string $requiredContractFqcn = null,
         ?string $accountId = null,
         array $cacheKeyContext = [],
+        ?Closure $redactResultForRecovery = null,
+        ?string $localProcessingState = null,
     ): ProviderBillableCallResult {
         // STEP 1 — authorize actor.
         if ($actor !== null) {
@@ -285,6 +348,36 @@ final class ProviderBillableCallPipeline
                 reservationReason: $confirmationReason,
             );
 
+            // STEP 12d — DURABLE CLAIM, and the AUTHORITATIVE answer to
+            // "may this logical operation send a request?" It runs BEFORE
+            // the ambient reservation gate below, deliberately: the
+            // reservation lives inside the caller's transaction and can
+            // therefore be missing (rolled back), stale, or — as
+            // ProviderBillableCallPipelineDurableGateTest proves —
+            // outright contradicted by what actually happened. Only
+            // ProviderOperationClaimDecision::Proceed authorizes a send;
+            // every other decision either short-circuits with durable
+            // evidence (including the owner token a caller needs to finish
+            // interrupted local work) or refuses outright.
+            $logicalOperationKey = $this->logicalOperationKeyFor($providerKey, $firm, $classification, $environment, $usageIdempotencyKey);
+
+            $claim = $this->operationAttempts->claim(
+                logicalOperationKey: $logicalOperationKey,
+                providerKey: $providerKey->value,
+                firmId: (int) $firm->id,
+                firmIntegrationId: (int) $connection->id,
+                operationType: $classification->capability(),
+            );
+
+            if (! $claim->maySendProviderRequest()) {
+                return $this->resolveDeniedClaim(
+                    $firm, $connection, $actor, $providerKey, $classification,
+                    $claim, $reservation, $softLimitExceeded,
+                );
+            }
+
+            $ownerToken = $claim->ownerTokenOrFail();
+
             // STEP 12b — RESERVATION-STATE GATE (double-billing
             // remediation; see this class's docblock, "Reservation-state
             // gate"). `reserve()` is idempotent bookkeeping for the
@@ -293,6 +386,14 @@ final class ProviderBillableCallPipeline
             // one — so step 13 re-fired the REAL outbound call for a
             // logical operation an earlier attempt may already have made
             // and been billed for.
+            //
+            // Retained BELOW the durable claim rather than replaced by it:
+            // it still covers reservations created before this checkpoint
+            // shipped (which have no durable counterpart at all), and it
+            // remains a genuine second opinion within one transaction. A
+            // short-circuit here releases the claim taken just above —
+            // nothing was sent, so the release can only ever make the
+            // operation retryable, never sendable twice.
             if (! $reservation->wasRecentlyCreated) {
                 $reservation = $this->gateExistingReservation(
                     $firm, $connection, $actor, $providerKey, $classification,
@@ -306,6 +407,10 @@ final class ProviderBillableCallPipeline
                     // and never call the provider again. Distinguishable
                     // by the caller exactly the way step 8's cache hit
                     // already is.
+                    $this->operationAttempts->releaseUnusedClaim(
+                        $claim->attempt, $ownerToken, 'superseded_by_reservation_gate:'.$reservation->status,
+                    );
+
                     $this->events->record($firm, 'provider_billing.call_served_from_existing_reservation', $reservation, $actor?->user, [
                         'provider_key' => $providerKey->value,
                         'capability' => $classification->capability(),
@@ -326,12 +431,24 @@ final class ProviderBillableCallPipeline
                 'capability' => $classification->capability(),
             ], independentOfAmbientTransaction: true);
 
-            // STEP 12c — durably record outbound-call INTENT before the
-            // call can leave this process, so a crash from here onward is
-            // distinguishable (by a later attempt reaching step 12b) from
-            // a crash between step 12 and here. See the
-            // `provider_call_started_at` migration's docblock.
+            // STEP 12c — record outbound-call INTENT on the reservation
+            // itself, so a crash from here onward is distinguishable (by
+            // a later attempt reaching step 12b) from a crash between
+            // step 12 and here. See the `provider_call_started_at`
+            // migration's docblock. This marker is still useful within a
+            // single transaction, but it is NOT durable across the
+            // caller's rollback — step 12e is what makes the same fact
+            // survive (Checkpoint 8.2 §A5/§A9).
             $reservation = $this->reservationService->markProviderCallStarted($firm, $reservation);
+
+            // STEP 12e — DURABLE SEND INTENT, before the request can
+            // leave this process. The compare-and-set inside
+            // markAttemptStarted() requires this worker's owner token, the
+            // `claimed` state and `send_count = 0`, so this transition
+            // succeeds at most once per attempt generation — and once it
+            // has succeeded, no automated path can ever return `Proceed`
+            // for this key again.
+            $attempt = $this->operationAttempts->markAttemptStarted($claim->attempt, $ownerToken, $usageIdempotencyKey);
 
             // STEP 13 — execute through OutboundProviderHttpClient ->
             // ProviderRequestExecutor. $providerCall() is always,
@@ -367,44 +484,91 @@ final class ProviderBillableCallPipeline
             // STEP 14 — normalize outcome.
             $outcome = $this->outcomeNormalizer->normalize($response, $caughtException);
 
-            // STEP 15 — finalize usage.
-            $reservation = $this->reservationService->finalize($firm, $reservation, $outcome, $direction, $resourceType, $quantity);
-
-            if ($outcome->certain && $outcome->billable) {
-                $this->cooldown->start($connection, $classification, $accountId, $policy->cooldownSeconds);
-
-                if ($classification->isCacheable && $policy->cacheTtlSeconds !== null && is_array($response)) {
-                    $this->responseCache->put($connection, $classification, $cacheKeyContext, $response, $policy->cacheTtlSeconds);
-                }
-            }
-
-            // STEP 16 — audit.
-            $finalizedEventType = match (true) {
-                ! $outcome->certain => 'provider_billing.call_finalized_uncertain',
-                $outcome->billable => 'provider_billing.call_finalized_billable',
-                default => 'provider_billing.call_finalized_non_billable',
-            };
-
-            $this->events->record($firm, $finalizedEventType, $reservation, $actor?->user, [
-                'provider_key' => $providerKey->value,
-                'capability' => $classification->capability(),
-                'category' => $outcome->category,
-            ], independentOfAmbientTransaction: true);
-
-            // STEP 17 — update observability.
-            ProviderBillableCallCompleted::dispatch(
-                $providerKey->value,
-                $classification->product,
-                $classification->billingOperation,
-                $outcome->billable,
-                $outcome->certain,
-                $reservation->estimated_customer_price_cents,
-                $connection->id,
-                $reservation->correlation_id,
+            // STEP 14b — DURABLE OUTCOME, recorded before ANY local work
+            // runs. This is the ordering that makes the C3 defect
+            // impossible: if everything below throws or the caller's
+            // transaction rolls back, the provider's outcome is still on
+            // record, so the retry resumes or reconciles instead of
+            // re-sending.
+            $attempt = $this->recordDurableOutcome(
+                $attempt, $ownerToken, $outcome, $response, $classification, $redactResultForRecovery,
             );
 
+            // STEPS 15-17 — LOCAL APPLY. Everything here touches only this
+            // system's own state. A throw is recorded durably as a LOCAL
+            // failure — never as a provider failure — with the
+            // provider-success evidence preserved.
+            try {
+                // STEP 15 — finalize usage.
+                $reservation = $this->reservationService->finalize($firm, $reservation, $outcome, $direction, $resourceType, $quantity);
+
+                if ($outcome->certain && $outcome->billable) {
+                    $this->cooldown->start($connection, $classification, $accountId, $policy->cooldownSeconds);
+
+                    if ($classification->isCacheable && $policy->cacheTtlSeconds !== null && is_array($response)) {
+                        $this->responseCache->put($connection, $classification, $cacheKeyContext, $response, $policy->cacheTtlSeconds);
+                    }
+                }
+
+                // STEP 16 — audit.
+                $finalizedEventType = match (true) {
+                    ! $outcome->certain => 'provider_billing.call_finalized_uncertain',
+                    $outcome->billable => 'provider_billing.call_finalized_billable',
+                    default => 'provider_billing.call_finalized_non_billable',
+                };
+
+                $this->events->record($firm, $finalizedEventType, $reservation, $actor?->user, [
+                    'provider_key' => $providerKey->value,
+                    'capability' => $classification->capability(),
+                    'category' => $outcome->category,
+                    'logical_operation_key' => $logicalOperationKey,
+                ], independentOfAmbientTransaction: true);
+
+                // STEP 17 — update observability.
+                ProviderBillableCallCompleted::dispatch(
+                    $providerKey->value,
+                    $classification->product,
+                    $classification->billingOperation,
+                    $outcome->billable,
+                    $outcome->certain,
+                    $reservation->estimated_customer_price_cents,
+                    $connection->id,
+                    $reservation->correlation_id,
+                );
+            } catch (Throwable $localFailure) {
+                if ($attempt->providerWorkIsDone()) {
+                    $attempt = $this->operationAttempts->markLocalProcessingFailed(
+                        $attempt,
+                        $ownerToken,
+                        'pipeline_local_apply_threw:'.$this->shortClassName($localFailure),
+                        $localProcessingState,
+                    );
+
+                    $this->auditDenied($firm, $actor, 'provider_billing.operation_local_processing_failed', $classification, [
+                        'provider_key' => $providerKey->value,
+                        'firm_integration_id' => $connection->id,
+                        'logical_operation_key' => $logicalOperationKey,
+                        'attempt_state' => $attempt->attempt_state->value,
+                    ]);
+                }
+
+                throw $localFailure;
+            }
+
             if ($caughtException !== null) {
+                // The provider itself failed. The durable row already
+                // records whether that failure was definite
+                // (`provider_rejected`, retryable) or ambiguous
+                // (escalated to reconciliation), so the original
+                // throwable is rethrown unchanged for the caller and its
+                // queue worker, exactly as before.
                 throw $caughtException;
+            }
+
+            // The provider succeeded and the local apply above completed,
+            // so this logical operation is settled end to end.
+            if ($attempt->providerWorkIsDone()) {
+                $attempt = $this->operationAttempts->markLocalProcessingComplete($attempt, $ownerToken, $localProcessingState);
             }
 
             return new ProviderBillableCallResult(
@@ -412,6 +576,8 @@ final class ProviderBillableCallPipeline
                 reservation: $reservation,
                 outcome: $outcome,
                 softLimitExceeded: $softLimitExceeded,
+                operationAttempt: $attempt,
+                operationOwnerToken: $ownerToken,
             );
         } finally {
             $lock->release();
@@ -541,6 +707,220 @@ final class ProviderBillableCallPipeline
         }
 
         return $reservation;
+    }
+
+    /**
+     * The durable gate's identity for ONE logical operation (Checkpoint
+     * 8.2 §A5). Built from the caller's already-deterministic
+     * `$usageIdempotencyKey` (§A10 removed every wall-clock component
+     * from those) plus the firm and the full capability coordinates.
+     *
+     * `firm_` is included FIRST and unconditionally: it makes a
+     * cross-tenant key collision impossible by construction rather than
+     * merely unlikely, which matters more than usual here because the
+     * gate table deliberately carries no foreign keys.
+     * ProviderOperationAttemptService still refuses a mismatch at read
+     * time — that check now covers only genuine key-construction bugs.
+     */
+    private function logicalOperationKeyFor(
+        ProviderKey $providerKey,
+        Firm $firm,
+        ProviderBillingClassification $classification,
+        string $environment,
+        string $usageIdempotencyKey,
+    ): string {
+        return implode(':', [
+            'firm_'.$firm->id,
+            $providerKey->value,
+            $classification->product,
+            $classification->billingOperation,
+            $environment,
+            $usageIdempotencyKey,
+        ]);
+    }
+
+    /**
+     * STEP 12d's decision table for a claim that did NOT authorize a
+     * send. Each branch is either an honest short-circuit backed by
+     * durable evidence, or a refusal — none of them calls the provider.
+     *
+     *   InFlightElsewhere      -> a peer holds a live lease on this exact
+     *                             logical operation. Refuse with the same
+     *                             signal step 9 already raises for a
+     *                             concurrent duplicate, so the caller's
+     *                             existing backoff handles it.
+     *   AlreadyComplete        -> settled end to end by an earlier
+     *                             attempt. Serve the recorded evidence,
+     *                             exactly as step 8's cache hit and step
+     *                             12b's reservation gate do.
+     *   ResumeLocalProcessing  -> the provider DID the work; only local
+     *                             post-processing is outstanding. Hand
+     *                             the caller the durable evidence AND the
+     *                             owner token it needs to finish, without
+     *                             ever re-sending.
+     *   ReconciliationRequired -> the outcome is unknown, or a local
+     *                             failure cannot be safely resumed.
+     *                             Refuse loudly; only a human (or a
+     *                             genuinely new logical operation) moves
+     *                             this forward.
+     */
+    private function resolveDeniedClaim(
+        Firm $firm,
+        FirmIntegration $connection,
+        ?FirmUser $actor,
+        ProviderKey $providerKey,
+        ProviderBillingClassification $classification,
+        ProviderOperationClaim $claim,
+        ProviderBillableCallReservation $reservation,
+        bool $softLimitExceeded,
+    ): ProviderBillableCallResult {
+        $attempt = $claim->attempt;
+
+        $metadata = [
+            'provider_key' => $providerKey->value,
+            'firm_integration_id' => $connection->id,
+            'logical_operation_key' => $attempt->logical_operation_key,
+            'claim_decision' => $claim->decision->value,
+            'attempt_state' => $attempt->attempt_state->value,
+        ];
+
+        if ($claim->decision === ProviderOperationClaimDecision::InFlightElsewhere) {
+            $this->auditDenied($firm, $actor, 'provider_billing.operation_in_flight_denied', $classification, $metadata);
+
+            throw new ProviderDuplicateRequestInFlightException;
+        }
+
+        if ($claim->decision === ProviderOperationClaimDecision::ReconciliationRequired) {
+            $this->auditDenied($firm, $actor, 'provider_billing.operation_requires_reconciliation', $classification, $metadata);
+
+            throw new ProviderOperationRequiresReconciliationException(
+                $attempt->logical_operation_key,
+                $attempt->attempt_state->value,
+                $attempt->reconciliation_reason,
+            );
+        }
+
+        // AlreadyComplete / ResumeLocalProcessing — both are served from
+        // durable evidence, and neither fabricates a fresh outcome.
+        $this->events->record($firm, 'provider_billing.call_served_from_durable_operation_evidence', $reservation, $actor?->user, [
+            'capability' => $classification->capability(),
+            ...$metadata,
+        ], independentOfAmbientTransaction: true);
+
+        return new ProviderBillableCallResult(
+            response: null,
+            reservation: $reservation,
+            outcome: ProviderNormalizedOutcome::servedFromExistingReservation(),
+            softLimitExceeded: $softLimitExceeded,
+            operationAttempt: $attempt,
+            operationOwnerToken: $claim->ownerToken,
+        );
+    }
+
+    /**
+     * STEP 14b — translate the normalized outcome into the durable gate's
+     * own vocabulary, on the independent connection, before any local work
+     * runs.
+     *
+     *   certain + billable  -> provider_succeeded. The provider did the
+     *                          work; a retry may resume local processing
+     *                          but may never re-send.
+     *   certain + !billable -> provider_rejected. Positive knowledge that
+     *                          the provider refused BEFORE doing billable
+     *                          work, so a fresh attempt is safe. This is
+     *                          the only post-send state that stays
+     *                          retryable, and it mirrors step 12b's own
+     *                          `finalized_non_billable` refinement.
+     *   !certain            -> provider_outcome_uncertain, immediately
+     *                          escalated to reconciliation_required. We
+     *                          genuinely cannot tell whether the provider
+     *                          did the work, so no automated path touches
+     *                          it again (see the class docblock for why
+     *                          that cannot stall a resource permanently).
+     *
+     * Only ALREADY-REDACTED evidence is stored (§A8): an optional
+     * caller-supplied redactor for the metadata summary, plus a one-way
+     * SHA-256 digest of the response for later comparison. No response
+     * body, token, or provider payload is ever written.
+     */
+    private function recordDurableOutcome(
+        ProviderOperationAttempt $attempt,
+        string $ownerToken,
+        ProviderNormalizedOutcome $outcome,
+        mixed $response,
+        ProviderBillingClassification $classification,
+        ?Closure $redactResultForRecovery,
+    ): ProviderOperationAttempt {
+        if (! $outcome->certain) {
+            $uncertain = $this->operationAttempts->recordProviderOutcomeUncertain(
+                $attempt, $ownerToken, 'provider_outcome_uncertain:'.$outcome->category,
+            );
+
+            return $this->operationAttempts->markReconciliationRequired(
+                $uncertain, 'uncertain_provider_outcome:'.$outcome->category,
+            );
+        }
+
+        if (! $outcome->billable) {
+            return $this->operationAttempts->recordProviderRejected(
+                $attempt, $ownerToken, 'provider_rejected:'.$outcome->category, $outcome->category,
+            );
+        }
+
+        return $this->operationAttempts->recordProviderSucceeded(
+            $attempt,
+            $ownerToken,
+            providerOutcome: $outcome->category,
+            billableClassification: $classification->capability(),
+            redactedResultMetadata: $this->redactedResultMetadata($response, $redactResultForRecovery),
+            resultChecksum: $this->resultChecksum($response),
+        );
+    }
+
+    /**
+     * A short, safe summary of the provider result for recovery
+     * purposes, or null. NEVER the response itself: without a
+     * caller-supplied redactor this returns null rather than guessing
+     * what would be safe to keep.
+     */
+    private function redactedResultMetadata(mixed $response, ?Closure $redactResultForRecovery): ?string
+    {
+        if ($redactResultForRecovery === null) {
+            return null;
+        }
+
+        $redacted = $redactResultForRecovery($response);
+
+        if ($redacted === null) {
+            return null;
+        }
+
+        return mb_substr(is_string($redacted) ? $redacted : json_encode($redacted), 0, 2000) ?: null;
+    }
+
+    /**
+     * A one-way digest of the response, so a resumed attempt can tell
+     * "the same result" from "a different result" without the result
+     * itself ever being stored. Deliberately hashes a JSON encoding and
+     * returns null when the response cannot be encoded — never a partial
+     * or lossy rendering of a payload.
+     */
+    private function resultChecksum(mixed $response): ?string
+    {
+        if ($response === null) {
+            return null;
+        }
+
+        $encoded = json_encode($response);
+
+        return $encoded === false ? null : 'sha256:'.hash('sha256', $encoded);
+    }
+
+    private function shortClassName(object $subject): string
+    {
+        $class = $subject::class;
+
+        return ($position = strrpos($class, '\\')) === false ? $class : substr($class, $position + 1);
     }
 
     /**

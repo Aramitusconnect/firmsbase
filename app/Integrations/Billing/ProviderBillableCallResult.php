@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Integrations\Billing;
 
+use App\Integrations\Enums\ProviderOperationAttemptState;
 use App\Integrations\Models\ProviderBillableCallReservation;
+use App\Integrations\Models\ProviderOperationAttempt;
 
 /**
  * ProviderBillableCallResult — `ProviderBillableCallPipeline::execute()`'s
@@ -41,10 +43,55 @@ use App\Integrations\Models\ProviderBillableCallReservation;
  */
 final class ProviderBillableCallResult
 {
+    /**
+     * `$operationAttempt` / `$operationOwnerToken` are Checkpoint 8.2 §A5
+     * additions, both optional so no existing construction site changes
+     * meaning. They carry the DURABLE gate row for this logical operation
+     * (see `App\Integrations\Billing\ProviderOperationAttemptService`) and,
+     * when this caller owns the operation, the token every subsequent
+     * transition on it must present.
+     *
+     * The token is present in exactly two situations: a call this worker
+     * performed, and a `mustResumeLocalProcessing()` short-circuit where
+     * this worker took over the abandoned local work. It is null whenever
+     * this worker owns nothing — a cache hit, or an already-settled
+     * operation.
+     */
     public function __construct(
         public readonly mixed $response,
         public readonly ?ProviderBillableCallReservation $reservation,
         public readonly ProviderNormalizedOutcome $outcome,
         public readonly bool $softLimitExceeded,
+        public readonly ?ProviderOperationAttempt $operationAttempt = null,
+        public readonly ?string $operationOwnerToken = null,
     ) {}
+
+    /**
+     * True when the pipeline refused to call the provider because the
+     * durable gate proves the provider ALREADY did this logical
+     * operation's work and only this side's local post-processing is
+     * outstanding (Checkpoint 8.2 §A5).
+     *
+     * The caller must resume from `$operationAttempt`'s durable evidence
+     * — never by calling the provider again — and must report the
+     * outcome via `ProviderOperationAttemptService`, presenting
+     * `$operationOwnerToken`.
+     */
+    public function mustResumeLocalProcessing(): bool
+    {
+        return $this->operationAttempt !== null
+            && $this->operationOwnerToken !== null
+            && $this->response === null
+            && $this->operationAttempt->providerWorkIsDone()
+            && $this->operationAttempt->attempt_state !== ProviderOperationAttemptState::LocalProcessingComplete;
+    }
+
+    /**
+     * True when this logical operation is already settled end to end, so
+     * the caller's only correct behavior is to do nothing at all.
+     */
+    public function isAlreadySettled(): bool
+    {
+        return $this->operationAttempt?->attempt_state === ProviderOperationAttemptState::LocalProcessingComplete;
+    }
 }
