@@ -139,6 +139,55 @@ class TenantContextService
     }
 
     /**
+     * CHECKPOINT 8.2 addition (§A6/§A11). Identical to
+     * runWithFirmContext() in every respect EXCEPT that it does not open
+     * a database transaction: the context is established with
+     * session-scoped `set_config` (because `isLocalScoped()` is false
+     * outside a transaction) and restored in the same `finally`.
+     *
+     * WHY THIS EXISTS. A caller that performs an outbound provider HTTP
+     * call must not hold a database transaction across it, and must not
+     * hold row locks across it — Checkpoint 8.1 proved that a lock held
+     * over the network window deadlocks anything that needs to write
+     * durably about the same connection. `App\Jobs\PullSyncJob` used to
+     * wrap its ENTIRE run, provider calls included, in one
+     * runWithFirmContext() transaction. It now claims ownership in a
+     * short transaction, runs the provider calls under this method, and
+     * applies each page's local writes in its own short
+     * runWithFirmContext() transaction nested inside this one.
+     *
+     * This is not a new context mechanism. A session-scoped, ambient,
+     * non-transactional firm context is exactly what the `firm` panel's
+     * HTTP middleware already establishes for a whole request
+     * (EstablishFirmTenantContext + ApplyTenantDatabaseContext), and
+     * nesting runWithFirmContext() inside such an ambient context is
+     * already proven to restore rather than wipe it — see
+     * TenantContextServiceSessionScopedNestingTest.
+     *
+     * CAVEAT, stated plainly: because there is no transaction, the
+     * callback's writes are NOT atomic with each other. Only use this for
+     * work whose atomic units are established by the callback itself
+     * (PullSyncJob's per-page runWithFirmContext() blocks), never as a
+     * cheaper substitute for runWithFirmContext().
+     */
+    public function runWithFirmContextWithoutTransaction(Firm|int|string $firm, callable $callback): mixed
+    {
+        $previousContext = TenantContextResolver::current();
+        $previousDatabaseFirmId = $this->currentDatabaseTenantContextValue();
+
+        $this->setFirmContext($firm);
+
+        try {
+            $this->setDatabaseTenantContext();
+
+            return $callback();
+        } finally {
+            $this->restoreDatabaseTenantContext($previousDatabaseFirmId);
+            $this->restoreFirmContext($previousContext);
+        }
+    }
+
+    /**
      * Pushes the CURRENTLY active PHP-memory firm context into the
      * PostgreSQL session/transaction setting the RLS policies read.
      * Throws if no PHP-memory context is active — there is nothing

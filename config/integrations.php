@@ -149,6 +149,16 @@ return [
         'retention_days' => env('INTEGRATIONS_SYNC_ITEMS_RETENTION_DAYS', 60),
     ],
 
+    // Checkpoint 8.2 (§A6). How long a cursor claim
+    // (SyncCursorService::claim()) stays valid before another run may take
+    // it over as abandoned. MUST remain comfortably larger than
+    // PullSyncJob::$timeout (300s): a lease that could lapse while its
+    // owner is still legitimately working would let two runs process one
+    // cursor. 1800s is 6x that ceiling.
+    'sync_cursors' => [
+        'claim_lease_seconds' => env('INTEGRATIONS_SYNC_CURSOR_CLAIM_LEASE_SECONDS', 1800),
+    ],
+
     'conflicts' => [
         'retention_days' => env('INTEGRATIONS_CONFLICTS_RETENTION_DAYS', 365),
     ],

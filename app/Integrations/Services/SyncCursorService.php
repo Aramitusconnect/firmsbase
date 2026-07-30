@@ -78,17 +78,45 @@ final class SyncCursorService
      * Atomic conditional claim (agent-6e §4.3), the direct extension of
      * IntegrationOAuthStateService::claimAndDecrypt()'s proven
      * `UPDATE ... WHERE ... RETURNING *` idiom to this table. Zero rows
-     * returned means the cursor is already claimed by another run —
-     * the caller must abort dispatch, never fall back to a bare read.
+     * returned means the cursor is already claimed by a LIVE run — the
+     * caller must abort dispatch, never fall back to a bare read.
+     *
+     * CHECKPOINT 8.2 (§A6) — CLAIM LEASE. The `status != 'running'`
+     * predicate alone was safe only because `PullSyncJob` used to run its
+     * whole body, provider calls included, inside ONE transaction: a
+     * crashed worker's claim rolled back with everything else, so a
+     * `running` cursor always meant a genuinely live run.
+     *
+     * That transaction has been removed (it held `FOR UPDATE` on
+     * `firm_integrations` across the provider HTTP call — the exact shape
+     * Checkpoint 8.1 proved deadlocks durable writes), so the claim now
+     * COMMITS immediately. Without a lease, a worker killed mid-run would
+     * leave the cursor `running` forever and no future pull could ever
+     * claim it again — trading a deadlock for a permanent stall.
+     *
+     * A claim is therefore also grantable when the existing one is
+     * provably abandoned: `locked_at` older than
+     * `config('integrations.sync_cursors.claim_lease_seconds')`. That
+     * default is deliberately several times `PullSyncJob::$timeout`, so a
+     * lease can never lapse while its owner is still legitimately working
+     * — the queue worker kills the job long before. Takeover is still one
+     * atomic compare-and-set, so two workers can never both win, and
+     * `locked_by_sync_run_id` records which run owns it.
      */
     public function claim(int $cursorId, int $syncRunId): ?IntegrationSyncCursor
     {
+        $leaseSeconds = (int) config('integrations.sync_cursors.claim_lease_seconds', 1800);
+
         $row = DB::selectOne(
             'UPDATE integration_sync_cursors '.
             "SET status = 'running', locked_by_sync_run_id = ?, locked_at = now() ".
-            "WHERE id = ? AND status != 'running' ".
+            'WHERE id = ? AND ('.
+            "status != 'running' ".
+            'OR locked_at IS NULL '.
+            'OR locked_at <= ?'.
+            ') '.
             'RETURNING *',
-            [$syncRunId, $cursorId]
+            [$syncRunId, $cursorId, now()->subSeconds($leaseSeconds)]
         );
 
         return $row === null ? null : IntegrationSyncCursor::hydrate([(array) $row])->first();

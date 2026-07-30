@@ -32,6 +32,20 @@ trait TenantAwareJobContext
      */
     public function runInFirmContext(Firm|int|string $firm, callable $callback): mixed
     {
-        return (new TenantContextService())->runWithFirmContext($firm, $callback);
+        return (new TenantContextService)->runWithFirmContext($firm, $callback);
+    }
+
+    /**
+     * CHECKPOINT 8.2 addition (§A6). The same tenant context, WITHOUT an
+     * enclosing transaction — for a job phase that performs an outbound
+     * provider call and therefore must hold neither a transaction nor any
+     * row lock across the network window. The job wraps its own atomic
+     * units in runInFirmContext() nested inside this one; see
+     * TenantContextService::runWithFirmContextWithoutTransaction()'s
+     * docblock for the rationale and its stated caveat.
+     */
+    public function runInFirmContextWithoutTransaction(Firm|int|string $firm, callable $callback): mixed
+    {
+        return (new TenantContextService)->runWithFirmContextWithoutTransaction($firm, $callback);
     }
 }
