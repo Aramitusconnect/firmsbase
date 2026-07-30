@@ -52,6 +52,19 @@ use Tests\TestCase;
  * that never go through a `use` import (e.g.
  * `app(\App\Services\TrustXService::class)`). All of these are now
  * covered.
+ *
+ * MUTATION-SHAPE WIDENING: a subsequent review found the mutation-shape
+ * detector itself (MUTATION_METHOD_SHAPES plus the raw-query regex)
+ * still missed several real write shapes: `firstOrCreate(`,
+ * `updateOrCreate(`, `->increment(`/`->decrement(`, and raw
+ * `DB::update(`/`DB::delete(`/`DB::statement(` calls. No live use of
+ * any of these against a Trust* model/table existed at the time (an
+ * independent grep across the full scanned scope turned up only
+ * unrelated, non-Trust usages of these same method names), but a future
+ * PR using any of them against a Trust* model/table would have bypassed
+ * this firewall undetected. trustMutationViolations() now also covers
+ * them — see its own docblock for how DB::statement(...) is guarded
+ * against false-positiving on a legitimate raw SELECT.
  */
 class FinancialEvidenceTrustLedgerFirewallTest extends TestCase
 {
@@ -100,6 +113,22 @@ class FinancialEvidenceTrustLedgerFirewallTest extends TestCase
      * Method-call shapes that indicate an actual MUTATION (as opposed
      * to a read: ::query()/->get()/->where()/->first()). Includes both
      * Eloquent-shaped writes and raw query-builder writes.
+     *
+     * MUTATION-SHAPE WIDENING: an earlier version of this list only
+     * covered ::create(/->save(/->update(/->delete(/->insert(/->upsert(/
+     * ->forceDelete( — a genuine (independently-verified-unexploited)
+     * blind spot remained for firstOrCreate()/updateOrCreate() (both the
+     * static `Model::firstOrCreate(...)` shorthand and the
+     * `Model::query()->updateOrCreate(...)` fluent shape) and the
+     * counter mutators ->increment()/->decrement() (including their
+     * static-shorthand forms, since Eloquent's __callStatic forwards an
+     * undefined static call to a fresh query builder just like it does
+     * for ::create()). All are now covered here. Raw
+     * DB::update(...)/DB::delete(...)/DB::statement(...) calls are
+     * handled separately in trustMutationViolations() below rather than
+     * as flat shape strings here, because DB::statement(...) can also
+     * carry a harmless raw SELECT and must not be flagged purely for
+     * mentioning a forbidden table name.
      */
     private const MUTATION_METHOD_SHAPES = [
         '::create(',
@@ -112,6 +141,14 @@ class FinancialEvidenceTrustLedgerFirewallTest extends TestCase
         '->insert(',
         '->upsert(',
         '->forceDelete(',
+        '::firstOrCreate(',
+        '->firstOrCreate(',
+        '::updateOrCreate(',
+        '->updateOrCreate(',
+        '::increment(',
+        '->increment(',
+        '::decrement(',
+        '->decrement(',
     ];
 
     /**
@@ -298,17 +335,30 @@ class FinancialEvidenceTrustLedgerFirewallTest extends TestCase
      * protects the real files, rather than a parallel implementation
      * that could silently drift out of sync.
      *
-     * Flags two independent shapes:
+     * Flags three independent shapes:
      *   1. A line that combines a forbidden Trust* model class name
      *      (or a forbidden snake_case table name) with a mutation
      *      method shape — e.g. `TrustLedgerEntry::query()->update(...)`
-     *      or `trust_ledger_entries` next to `->insert(`.
+     *      or `trust_ledger_entries` next to `->insert(`. As of the
+     *      MUTATION-SHAPE WIDENING (see class docblock),
+     *      MUTATION_METHOD_SHAPES also includes `firstOrCreate(`,
+     *      `updateOrCreate(`, and `increment(`/`decrement(` (both their
+     *      `::` and `->` forms), so e.g. `TrustAccount::firstOrCreate(...)`
+     *      or `TrustAccount::find($id)->increment('balance', ...)` are
+     *      caught the same way.
      *   2. A raw `DB::table('<forbidden-table>')->insert|update|delete|upsert(`
      *      call against any forbidden trust table, regardless of
      *      whether the literal table-name string appears on the same
      *      line as the method call (handles the common
      *      `DB::table('trust_ledger_entries')\n    ->insert([...])`
      *      multi-line style used elsewhere in this codebase).
+     *   3. A raw `DB::update(...)`/`DB::delete(...)`/`DB::statement(...)`
+     *      call whose SQL-string argument mentions a forbidden trust
+     *      table, also matched across the whole file rather than
+     *      line-by-line. `DB::statement(...)` is only flagged when its
+     *      SQL text itself contains an INSERT/UPDATE/DELETE keyword, so
+     *      an unusual-but-legitimate raw SELECT via `DB::statement(...)`
+     *      does not false-positive.
      *
      * @return list<string> human-readable violation descriptions (empty = clean)
      */
@@ -364,6 +414,51 @@ class FinancialEvidenceTrustLedgerFirewallTest extends TestCase
                 if (in_array($table, self::FORBIDDEN_TRUST_TABLE_NAMES, true)) {
                     $violations[] = "{$label} contains a raw DB::table('{$table}')->{$method}(...) call against a forbidden trust table.";
                 }
+            }
+        }
+
+        // Raw DB::update(...)/DB::delete(...)/DB::statement(...) calls
+        // carrying a raw SQL string that targets a forbidden trust
+        // table — also matched across the whole file (not line-by-line)
+        // for the same multi-line-call reason as the DB::table(...)
+        // block above (e.g. a `DB::update(\n    'UPDATE trust_ledger_entries ...',\n    [...]\n)`
+        // split across lines).
+        //
+        // DB::update(...) and DB::delete(...) are unconditionally
+        // mutations — Laravel always executes them as an UPDATE/DELETE
+        // regardless of the SQL text — so any mention of a forbidden
+        // table in their arguments is flagged outright. DB::statement(...)
+        // can also carry a harmless raw SELECT (unusual but legitimate),
+        // so it is only flagged when its own SQL text additionally
+        // contains an INSERT/UPDATE/DELETE keyword, to avoid a false
+        // positive against a genuine read.
+        if (preg_match_all(
+            '/DB::(update|delete|statement)\s*\((.*?)\);/s',
+            $code,
+            $rawStatementMatches,
+            PREG_SET_ORDER
+        )) {
+            foreach ($rawStatementMatches as $match) {
+                $method = $match[1];
+                $callArguments = $match[2];
+
+                $targetsForbiddenTable = false;
+                foreach (self::FORBIDDEN_TRUST_TABLE_NAMES as $table) {
+                    if (str_contains($callArguments, $table)) {
+                        $targetsForbiddenTable = true;
+                        break;
+                    }
+                }
+
+                if (! $targetsForbiddenTable) {
+                    continue;
+                }
+
+                if ($method === 'statement' && preg_match('/\b(INSERT|UPDATE|DELETE)\b/i', $callArguments) !== 1) {
+                    continue;
+                }
+
+                $violations[] = "{$label} contains a raw DB::{$method}(...) call against a forbidden trust table.";
             }
         }
 
@@ -618,5 +713,252 @@ class FinancialEvidenceTrustLedgerFirewallTest extends TestCase
             $violations,
             'The detector must flag TrustAccount::query()->update(...) even though the read-only TrustAccount::query()->where(...)->first() on the preceding line is legitimate shape-wise — this proves the detector distinguishes reads from mutations rather than banning the symbol outright.'
         );
+    }
+
+    /**
+     * NEGATIVE PROOF (MUTATION-SHAPE WIDENING): the filesystem-level
+     * sibling of test_the_widened_firewall_actually_catches_a_planted_trust_ledger_mutation
+     * above, proving EVERY newly-widened shape — `firstOrCreate(`,
+     * `updateOrCreate(`, `->increment(`/`->decrement(`, and raw
+     * `DB::update(...)`/`DB::delete(...)`/`DB::statement(...)` — is now
+     * detected by the exact same shared detector
+     * (trustMutationViolationsInFile() -> trustMutationViolations())
+     * that protects the real files, not a reimplemented/parallel check.
+     * Follows the same throwaway-fixture discipline as the existing
+     * negative proof: written to disk inside this test, always removed
+     * in a `finally` block (even on assertion failure), and confirmed
+     * absent afterwards.
+     *
+     * The complementary safe-read half of the DB::statement(...) guard —
+     * that a raw SELECT via DB::statement(...) against the very same
+     * forbidden table is NOT flagged — is proven separately by
+     * test_the_detector_does_not_false_positive_on_a_raw_db_statement_select_against_a_trust_table
+     * below, using a distinct fixture so the two outcomes cannot be
+     * confused with one another (the violation strings this detector
+     * emits for DB::statement(...) are identical regardless of the SQL
+     * text, so a single mixed fixture could not distinguish them).
+     */
+    public function test_the_widened_firewall_actually_catches_the_newly_added_mutation_shapes(): void
+    {
+        $fixturePath = app_path('Filament/Firm/Pages/PlaidZZZFirewallMutationShapesProofFixture.php');
+
+        // Defensive cleanup in case a previous interrupted run left the
+        // fixture behind.
+        if (file_exists($fixturePath)) {
+            unlink($fixturePath);
+        }
+
+        $violatingSource = <<<'PHP'
+            <?php
+
+            declare(strict_types=1);
+
+            namespace App\Filament\Firm\Pages;
+
+            use App\Models\TrustAccount;
+            use Illuminate\Support\Facades\DB;
+            use Filament\Pages\Page;
+
+            /**
+             * PlaidZZZFirewallMutationShapesProofFixture — NOT real
+             * production code. A throwaway fixture written and removed
+             * by FinancialEvidenceTrustLedgerFirewallTest to prove the
+             * widened mutation-shape detector catches
+             * firstOrCreate(...), updateOrCreate(...), increment(...),
+             * decrement(...), and raw DB::update(...)/DB::delete(...)/
+             * DB::statement(...) against a forbidden Trust* model/table.
+             * This class is never autoloaded/registered and never
+             * executed.
+             */
+            class PlaidZZZFirewallMutationShapesProofFixture extends Page
+            {
+                public function plantedFirstOrCreateViolation(): void
+                {
+                    TrustAccount::firstOrCreate(['matter_id' => 1], ['balance_cents' => 0]);
+                }
+
+                public function plantedUpdateOrCreateViolation(): void
+                {
+                    TrustAccount::query()->updateOrCreate(['matter_id' => 1], ['balance_cents' => 0]);
+                }
+
+                public function plantedIncrementViolation(): void
+                {
+                    TrustAccount::find(1)->increment('balance_cents', 100);
+                }
+
+                public function plantedDecrementViolation(): void
+                {
+                    TrustAccount::find(1)->decrement('balance_cents', 100);
+                }
+
+                public function plantedRawDbUpdateViolation(): void
+                {
+                    DB::update("UPDATE trust_ledger_entries SET amount_cents = 100 WHERE id = 1");
+                }
+
+                public function plantedRawDbDeleteViolation(): void
+                {
+                    DB::delete("DELETE FROM trust_ledger_entries WHERE id = 1");
+                }
+
+                public function plantedRawDbStatementViolation(): void
+                {
+                    DB::statement("INSERT INTO trust_ledger_entries (amount_cents) VALUES (100)");
+                }
+            }
+
+            PHP;
+
+        try {
+            $written = file_put_contents($fixturePath, $violatingSource);
+            $this->assertNotFalse($written, 'Failed to write the throwaway mutation-shapes firewall-proof fixture file.');
+
+            // Prove the widened GLOB still covers this path (same
+            // "Plaid*.php dropped in app/Filament/Firm/Pages" shape as
+            // the original negative proof).
+            $this->assertContains(
+                $fixturePath,
+                $this->financialEvidenceApplicationFiles(),
+                'The financialEvidenceApplicationFiles() glob must include this Plaid*.php mutation-shapes fixture.'
+            );
+
+            // Prove the widened detector — the same shared method the
+            // real-file scan test uses — flags every newly-added shape.
+            $violations = $this->trustMutationViolationsInFile($fixturePath);
+
+            $this->assertNotEmpty(
+                $violations,
+                'The widened firewall must detect at least one of the newly-added mutation shapes planted in this fixture.'
+            );
+
+            $this->assertTrue(
+                (bool) array_filter($violations, static fn (string $v): bool => str_contains($v, '::firstOrCreate(')),
+                'Expected a violation for TrustAccount::firstOrCreate(...). Got: '.implode('; ', $violations)
+            );
+
+            $this->assertTrue(
+                (bool) array_filter($violations, static fn (string $v): bool => str_contains($v, '->updateOrCreate(')),
+                'Expected a violation for TrustAccount::query()->updateOrCreate(...). Got: '.implode('; ', $violations)
+            );
+
+            $this->assertTrue(
+                (bool) array_filter($violations, static fn (string $v): bool => str_contains($v, "'->increment('")),
+                'Expected a violation for TrustAccount::find(1)->increment(\'balance_cents\', ...). Got: '.implode('; ', $violations)
+            );
+
+            $this->assertTrue(
+                (bool) array_filter($violations, static fn (string $v): bool => str_contains($v, "'->decrement('")),
+                'Expected a violation for TrustAccount::find(1)->decrement(\'balance_cents\', ...). Got: '.implode('; ', $violations)
+            );
+
+            $this->assertTrue(
+                (bool) array_filter($violations, static fn (string $v): bool => str_contains($v, 'DB::update(...)') && str_contains($v, 'trust')),
+                'Expected a violation for the raw DB::update("UPDATE trust_ledger_entries ...") call. Got: '.implode('; ', $violations)
+            );
+
+            $this->assertTrue(
+                (bool) array_filter($violations, static fn (string $v): bool => str_contains($v, 'DB::delete(...)') && str_contains($v, 'trust')),
+                'Expected a violation for the raw DB::delete("DELETE FROM trust_ledger_entries ...") call. Got: '.implode('; ', $violations)
+            );
+
+            $this->assertTrue(
+                (bool) array_filter($violations, static fn (string $v): bool => str_contains($v, 'DB::statement(...)') && str_contains($v, 'trust')),
+                'Expected a violation for the raw DB::statement("INSERT INTO trust_ledger_entries ...") call. Got: '.implode('; ', $violations)
+            );
+        } finally {
+            if (file_exists($fixturePath)) {
+                unlink($fixturePath);
+            }
+        }
+
+        $this->assertFileDoesNotExist($fixturePath, 'The throwaway mutation-shapes firewall-proof fixture must always be cleaned up, even on assertion failure.');
+    }
+
+    /**
+     * SAFE-READ PROOF (the complement of the test above): the widened
+     * detector must NOT flag a raw `DB::statement(...)` whose SQL text is
+     * a plain SELECT, even when that SELECT names a forbidden trust
+     * table. This is the exact false-positive the DB::statement(...)
+     * INSERT/UPDATE/DELETE keyword guard in trustMutationViolations()
+     * exists to prevent, and it is what preserves this firewall's
+     * safe-read-vs-prohibited-write distinction rather than degrading it
+     * into a blanket "never mention a trust table" ban.
+     *
+     * Deliberately a SEPARATE disk fixture from the mutation-shapes
+     * fixture above: the detector's DB::statement(...) violation string
+     * does not vary with the SQL text, so a mixed fixture could not
+     * prove which call produced (or failed to produce) a violation.
+     * Same throwaway-fixture discipline — written here, always removed
+     * in `finally`, confirmed absent afterwards.
+     */
+    public function test_the_detector_does_not_false_positive_on_a_raw_db_statement_select_against_a_trust_table(): void
+    {
+        $fixturePath = app_path('Filament/Firm/Pages/PlaidZZZFirewallSafeReadProofFixture.php');
+
+        if (file_exists($fixturePath)) {
+            unlink($fixturePath);
+        }
+
+        $safeReadSource = <<<'PHP'
+            <?php
+
+            declare(strict_types=1);
+
+            namespace App\Filament\Firm\Pages;
+
+            use Illuminate\Support\Facades\DB;
+            use Filament\Pages\Page;
+
+            /**
+             * PlaidZZZFirewallSafeReadProofFixture — NOT real production
+             * code. A throwaway fixture written and removed by
+             * FinancialEvidenceTrustLedgerFirewallTest to prove the
+             * widened DB::statement(...) rule does NOT flag a legitimate
+             * raw SELECT against a trust table. Never autoloaded,
+             * registered, or executed.
+             */
+            class PlaidZZZFirewallSafeReadProofFixture extends Page
+            {
+                public function legitimateRawSelect(): void
+                {
+                    DB::statement("SELECT count(*) FROM trust_ledger_entries WHERE firm_id = 1");
+                }
+
+                public function anotherLegitimateRawSelect(): void
+                {
+                    DB::statement("SELECT id, amount_cents FROM trust_accounts ORDER BY id");
+                }
+            }
+
+            PHP;
+
+        try {
+            $written = file_put_contents($fixturePath, $safeReadSource);
+            $this->assertNotFalse($written, 'Failed to write the throwaway safe-read firewall-proof fixture file.');
+
+            // Same glob, same shared detector as every assertion above —
+            // only the SQL text differs from the mutation fixture.
+            $this->assertContains(
+                $fixturePath,
+                $this->financialEvidenceApplicationFiles(),
+                'The financialEvidenceApplicationFiles() glob must include this Plaid*.php safe-read fixture, or this proof would be vacuous.'
+            );
+
+            $violations = $this->trustMutationViolationsInFile($fixturePath);
+
+            $this->assertSame(
+                [],
+                $violations,
+                'A raw DB::statement("SELECT ... FROM trust_ledger_entries ...") read must NOT be flagged as a mutation — '
+                    .'the firewall distinguishes prohibited writes from permitted reads. Got: '.implode('; ', $violations)
+            );
+        } finally {
+            if (file_exists($fixturePath)) {
+                unlink($fixturePath);
+            }
+        }
+
+        $this->assertFileDoesNotExist($fixturePath, 'The throwaway safe-read firewall-proof fixture must always be cleaned up, even on assertion failure.');
     }
 }

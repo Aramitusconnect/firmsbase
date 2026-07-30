@@ -11,41 +11,92 @@ use RuntimeException;
 
 /**
  * FinancialIntegrationAccessPolicyService — the financial-tier
- * integration role gate (checkpoint-00-final-specification.md §17;
- * architecture.md §4's permission-tiering table). Covers the financial
- * provider category (QuickBooks, LawPay, Stripe, Plaid).
+ * integration role gate (checkpoint-00-final-specification.md §17).
+ * Covers the financial provider category; Plaid is the only live
+ * financial provider in this codebase (LawPay/Stripe/QuickBooks are
+ * named in the original spec's category definition but are explicitly
+ * NOT implemented — see App\Integrations\Enums\ProviderKey, which has
+ * exactly four cases: Test, Microsoft365, GoogleWorkspace, Plaid).
  *
- * *** PURE SCAFFOLDING THIS CHECKPOINT — NO LIVE FINANCIAL PROVIDER OR
- * CREDENTIAL EXISTS YET. *** Exactly one provider is registered and
- * seeded anywhere in this mission — `test` (category `internal`,
- * see database/migrations/2026_09_01_010001_create_integration_providers_table.php)
- * — and zero `integration_providers` rows of category `financial`
- * exist. This class has no live/reachable financial capability behind
- * it at Checkpoint 3 (confirmed safe by checkpoint-03-security-review.md,
- * finding 6: "Policy-service scaffolding is safe... as long as it's
- * documented as scaffolding"). It exists purely as reviewed scaffolding
- * for a future, separately-authorized financial-provider add-on, per
- * checkpoint-00-final-specification.md §17 and §19's explicit
- * prohibition on any live Stripe/Plaid/LawPay/QuickBooks code,
- * credentials, routes, or SDKs in this mission. No code path in this
- * mission calls or reaches this class.
+ * Citation corrected in Checkpoint 8.2: an earlier version of this line
+ * also cited "architecture.md §4's permission-tiering table." No such
+ * table exists — docs/integrations/architecture.md §4 is titled "Known
+ * duplicate-looking abstractions (intentional, not accidental)" and
+ * contains no permission tiering at all. The live, authoritative role
+ * ceilings are the constants in this class itself.
+ *
+ * CORRECTED (Checkpoint 8.2, after an independent review found this
+ * docblock materially inaccurate on two counts):
+ *
+ * (1) This class is NO LONGER SCAFFOLDING. An earlier version of this
+ * docblock declared "*** PURE SCAFFOLDING THIS CHECKPOINT — NO LIVE
+ * FINANCIAL PROVIDER OR CREDENTIAL EXISTS YET ***" and "No code path in
+ * this mission calls or reaches this class." Both were true when written
+ * (Checkpoint 3, before any financial provider existed) and are FALSE as
+ * of the FirmsVault Live Integrations mission: Plaid is a live,
+ * registered, seeded `financial`-category provider (see
+ * database/migrations/2026_09_24_180002_seed_plaid_integration_provider_catalog_entry.php,
+ * `'category' => 'financial'`), and this class is genuinely reached from
+ * the Plaid Firm-panel pages/resources/widgets, the Financial Evidence
+ * Livewire panels, ProviderLiveBalanceConfirmationService, and
+ * ProviderBillableCallPipeline's own step-1 actor authorization. Treat
+ * every ceiling below as LIVE, enforced policy — not aspirational
+ * scaffolding.
+ *
+ * (2) THE DUAL-APPROVAL SCOPE CLAIM WAS WRONG. An earlier version
+ * asserted that "architecture.md §4 requires the identical dual-approval
+ * discipline for financial-tier connect/disconnect/credential-rotation/
+ * conflict-resolution actions," quoting `architecture.md §4: "Same
+ * (symmetric, not weaker)"`. That quoted text does not exist anywhere in
+ * docs/integrations/architecture.md, in any version in this
+ * repository's history — the citation was never real, and §4 of that
+ * document is about an unrelated topic ("Known duplicate-looking
+ * abstractions"). The AUTHORITATIVE, contemporaneous design record for
+ * what actually shipped is checkpoint4-final-report.md §5-§6 plus
+ * App\Integrations\Enums\FinancialAccountClassification's own binding
+ * sensitive-transition list, and both scope two-person approval
+ * NARROWLY:
+ *
+ *   - Dual approval (assertDistinctApprovers()) IS required for
+ *     SENSITIVE ACCOUNT RECLASSIFICATION only — a transition into or out
+ *     of TrustIolta, a TrustIolta account replacement, a second
+ *     concurrent trust-account connection, or a SettlementDestination
+ *     change. Enforced for real by
+ *     App\Integrations\Services\FinancialAccountReclassificationService,
+ *     the sole PRODUCTION caller of assertDistinctApprovers() on this
+ *     class (PlaidReclassificationApprovalsPage only mirrors the rule in
+ *     its UX layer and delegates the real enforcement to that service;
+ *     the only other direct callers are tests).
+ *   - Dual approval is NOT required for ordinary provider connection
+ *     lifecycle (connect / reconnect / disconnect / credential
+ *     rotation). Those are single-actor actions gated by the role
+ *     ceilings below. This is a deliberate design boundary, not an
+ *     unenforced control: a FirmIntegration connection strictly
+ *     PRECEDES bank-account discovery, so no account classification
+ *     even exists at connect/disconnect time for a
+ *     classification-sensitivity rule to be evaluated against. The
+ *     schema enforces that ordering: `classification` lives on
+ *     `financial_evidence_bank_accounts`, whose rows are FK-bound to
+ *     `firm_integrations(firm_id, id)` and therefore cannot exist before
+ *     the connection does.
  *
  * Deliberately a SEPARATE class from IntegrationAccessPolicyService —
  * never one merged class with an `if ($isFinancial)` branch (frozen
- * spec, §17). Mirrors TrustAccessPolicyService's real, proven
- * dual-approval shape (app/Services/TrustAccessPolicyService.php,
- * assertDistinctApprovers()) rather than inventing a new pattern,
- * because architecture.md §4 requires the identical dual-approval
- * discipline for financial-tier connect/disconnect/credential-rotation/
- * conflict-resolution actions:
- *   - Connect/initiate MAY BE REQUESTED by FirmOwner, Attorney, or
- *     BillingStaff, but only APPROVED by FirmOwner or Attorney,
- *     requiring a distinct second approver (symmetric with trust
- *     accounting's request/approve split).
- *   - Disconnect / credential rotation: same dual-approval requirement
- *     (architecture.md §4: "Same (symmetric, not weaker)").
- *   - Resolve conflicts on a monetary/trust field: dual-approval, same
- *     as disconnect.
+ * spec, §17). assertDistinctApprovers() below still mirrors
+ * TrustAccessPolicyService's real, proven shape
+ * (app/Services/TrustAccessPolicyService.php) rather than inventing a
+ * new pattern — note that the trust-domain precedent is itself scoped to
+ * one specific high-risk action class (TrustHighRiskAdjustmentService),
+ * consistent with the narrow reclassification-only scope above.
+ *
+ * Live role ceilings:
+ *   - Request a sensitive reclassification: FirmOwner, Attorney,
+ *     BillingStaff (see REQUESTER_ROLES).
+ *   - Approve a sensitive reclassification: FirmOwner or Attorney ONLY,
+ *     and the second approver must be a DIFFERENT firm user than the
+ *     first (see APPROVER_ROLES + assertDistinctApprovers()).
+ *   - Connect / reconnect / disconnect / credential rotation:
+ *     single-actor, bounded by the view ceiling below.
  *   - View health/activity: FirmOwner, Attorney, BillingStaff ONLY —
  *     narrower than the non-financial tier's view ceiling (which also
  *     includes Paralegal/LegalAssistant).

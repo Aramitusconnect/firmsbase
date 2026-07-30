@@ -143,3 +143,52 @@ No real provider credentials or real customer/bank/payment/financial data were u
 All 3 Critical and 7 High findings from the independent post-push review are fixed with regression tests, plus 1 additional finding the pattern sweep surfaced and 3 Medium items (M1, M3, M4 fixed; M2 resolved as a written, non-code decision per its own instructions). Every fix is narrowly scoped to the identified defect — no architectural redesign of the Integration Framework, Admin Control Center, Microsoft 365, Google Workspace, Plaid, Matter, or Client Portal. No test was weakened to pass. Every corrected action enforces authorization inside the action/service itself. Static checks (Pint, `git diff --check`, secret scan, network scan) and 3 strictly sequential full-suite runs on fresh disposable databases (10,060/10,060, 89,241 assertions, 0 failures, 57 risky, identical every time) are all clean.
 
 This verdict is **not** READY_FOR_STAGING — that determination is explicitly reserved for a new independent review of this checkpoint's final SHA, per this checkpoint's own governing instructions. Two items are disclosed as requiring follow-up decisions beyond this checkpoint's scope: the job-wide ambient-transaction rollback residual risk under C3, and the M2 dual-approval implementation decision.
+
+---
+
+<!-- APPENDED 2026-07-30 (Checkpoint 8.2, Phase A12). Nothing above this
+     marker was rewritten, reordered, or deleted; this section is a pure
+     addition recording the disposition of the Checkpoint 8.1 attempt. -->
+
+## Checkpoint 8.1 rejected — superseded by Checkpoint 8.2
+
+Checkpoint 8.1 attempted to close the C3 residual risk disclosed under "Known
+limitations" above (the job-wide ambient-transaction rollback that can discard a
+billable-call reservation) by moving the FK-bearing
+`provider_billable_call_reservations` table onto an **independent database
+connection**, so that a reservation write would survive a rollback of the
+enclosing job transaction.
+
+**That approach is rejected — it converts a rollback-durability bug into a hard
+deadlock.** `provider_billable_call_reservations` carries a foreign key to
+`firm_integrations`. `PullSyncJob` (`app/Jobs/PullSyncJob.php:173`) takes
+`->lockForUpdate()` on the `firm_integrations` row and **holds that row lock for
+the entire duration of the outbound provider call**. An INSERT into
+`provider_billable_call_reservations` issued from a *separate* database session
+must acquire `FOR KEY SHARE` on the referenced `firm_integrations` row to
+validate its FK. `FOR KEY SHARE` conflicts with the `FOR UPDATE` lock the job is
+already holding, and because the two statements are on different sessions
+Postgres cannot resolve the wait by ordering them within one transaction — the
+reservation INSERT simply blocks until the provider call completes, and in the
+common case where the job's own progress depends on that reservation, the two
+sessions wait on each other indefinitely.
+
+This was **not** a theoretical objection: it was proven live against a
+disposable database via direct `pg_stat_activity` / `pg_locks` inspection, which
+showed the ambient job backend holding the `firm_integrations` row lock while the
+independent-connection reservation INSERT sat blocked on the FK's `FOR KEY SHARE`
+request. The failure is reachable in production, not only under test.
+
+**Disposition:** Checkpoint 8.1 is rejected in full and superseded by
+**Checkpoint 8.2**, which takes a structurally different route:
+
+- an **FK-free operation ledger** — the durable record carries no foreign key to
+  `firm_integrations`, so no cross-session FK validation lock is ever required
+  and the deadlock above cannot arise; and
+- **phased claim / call / apply execution** — the durable claim is committed
+  before the provider call is made, the provider call happens outside any
+  ambient transaction holding the connection lock, and the outcome is applied in
+  a separate final phase.
+
+Checkpoint 8.2's own findings, implementation, and verification are recorded
+separately in [checkpoint8-2-remediation-report.md](checkpoint8-2-remediation-report.md).
