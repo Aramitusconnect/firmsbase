@@ -9,6 +9,7 @@ use App\Integrations\Enums\ProviderOperationClaimDecision;
 use App\Integrations\Exceptions\ProviderOperationOwnershipLostException;
 use App\Integrations\Exceptions\ProviderOperationTenantMismatchException;
 use App\Integrations\Models\ProviderOperationAttempt;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -526,6 +527,37 @@ class ProviderOperationAttemptService
         return ProviderOperationAttempt::on(self::DURABLE_CONNECTION)
             ->where('firm_id', $attempt->firm_id)
             ->find($attempt->id);
+    }
+
+    /**
+     * CHECKPOINT 8.2 (§A-reconciliation) addition. The base query for the
+     * Platform Admin reconciliation surface — every row a human must act
+     * on before it can ever be automatically retried or resumed. Public
+     * so a Filament page can layer its own filters/pagination without
+     * duplicating the connection choice or the state predicate; this
+     * class remains the sole reader.
+     */
+    public function queryRequiringReconciliation(): EloquentBuilder
+    {
+        return ProviderOperationAttempt::on(self::DURABLE_CONNECTION)
+            ->where('attempt_state', ProviderOperationAttemptState::ReconciliationRequired->value);
+    }
+
+    /**
+     * CHECKPOINT 8.2 (§A-reconciliation) addition. Read one attempt by
+     * its numeric id, scoped to a specific firm — the lookup a Filament
+     * action uses, since Filament passes back only the array record's
+     * own cached fields (including `id` and `firm_id`), never a live
+     * model. Never trusts anything about the record beyond the id itself
+     * for a mutation; the firm_id match here is a defense-in-depth
+     * sanity check on top of that.
+     */
+    public function findByIdForFirm(int $id, int $firmId): ?ProviderOperationAttempt
+    {
+        return ProviderOperationAttempt::on(self::DURABLE_CONNECTION)
+            ->where('id', $id)
+            ->where('firm_id', $firmId)
+            ->first();
     }
 
     // ------------------------------------------------------------------
