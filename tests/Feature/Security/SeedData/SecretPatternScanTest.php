@@ -139,6 +139,16 @@ class SecretPatternScanTest extends TestCase
         // rows (per-firm, under explicit tenant context) and dispatches
         // RenewGraphSubscriptionJob for whichever are due for renewal —
         // the opposite of a seeding command.
+        // Platform Firm Provisioning workflow added ProvisionFirmCommand
+        // (firms:provision) — reviewed and safe: it does not seed demo
+        // or placeholder data of any kind. Every field (firm name, owner
+        // name/email, customer type, deployment mode, optional
+        // organization/plan) is explicit interactive/CLI-option input
+        // from the operator running it, requires an interactive
+        // confirmation before writing anything, and is blocked outside
+        // local/testing without --confirm-staging and refused
+        // unconditionally in production (no escape hatch at all, unlike
+        // every other reviewed command in this allowlist).
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
@@ -151,6 +161,7 @@ class SecretPatternScanTest extends TestCase
             'RunHealthChecksCommand.php',
             'RecordSchedulerHeartbeatCommand.php',
             'RenewProviderWebhookSubscriptionsCommand.php',
+            'ProvisionFirmCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

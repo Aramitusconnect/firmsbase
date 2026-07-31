@@ -791,8 +791,13 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Integrations Checkpoint 8.2 §A4 — provider_operation_attempts
         // (Global, the FK-free durable at-most-once provider-call gate;
         // see test_exact_registry_counts_reconcile's own comment for the
-        // full reasoning) — 57 -> 58.
-        $this->assertSame(58, $summary[TenantOwnershipClassification::Global->value]);
+        // full reasoning) — 57 -> 58. Narrowly updated AGAIN by the
+        // Platform Firm Provisioning workflow — firm_provisioning_requests
+        // (Global, the idempotency ledger for FirmProvisioningService;
+        // platform-wide, requested_by_platform_admin_id-scoped, not
+        // firm_id-scoped, mirroring trial_requests' own classification
+        // exactly) — 58 -> 59.
+        $this->assertSame(59, $summary[TenantOwnershipClassification::Global->value]);
         $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
         // 9 -> 10: client_portal_users' corrected System classification
         // (see the InheritedTenant/System comment above this method's
@@ -848,8 +853,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // (financial_evidence_large_deposit_thresholds): 246 -> 257.
         // Narrowly updated AGAIN by FirmsVault Live Integrations
         // Checkpoint 8.2 §A4 — +1 Global (provider_operation_attempts):
-        // 257 -> 258. No other bucket affected.
-        $this->assertSame(258, array_sum($summary));
+        // 257 -> 258. Narrowly updated AGAIN by the Platform Firm
+        // Provisioning workflow — +1 Global (firm_provisioning_requests):
+        // 258 -> 259. No other bucket affected.
+        $this->assertSame(259, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

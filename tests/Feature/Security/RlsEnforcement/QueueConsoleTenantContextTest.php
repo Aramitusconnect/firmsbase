@@ -111,6 +111,14 @@ class QueueConsoleTenantContextTest extends TestCase
         // set_config manipulation of any RLS-relevant session variable.
         // Any OTHER command appearing here has not been reviewed for
         // the silent-bypass risk this test exists to catch.
+        // Platform Firm Provisioning workflow added ProvisionFirmCommand
+        // (firms:provision) — reviewed and safe: see
+        // QueueConsoleContextRolloutTest's own identical review note.
+        // No independent database-creation logic; every write happens
+        // inside FirmProvisioningService::provision(), which correctly
+        // scopes every FORCE-RLS-protected write via
+        // TenantContextService::runWithFirmContext() — no raw SQL, no
+        // BYPASSRLS, no superuser role, no set_config manipulation.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
@@ -123,6 +131,7 @@ class QueueConsoleTenantContextTest extends TestCase
             'RunHealthChecksCommand.php',
             'RecordSchedulerHeartbeatCommand.php',
             'RenewProviderWebhookSubscriptionsCommand.php',
+            'ProvisionFirmCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

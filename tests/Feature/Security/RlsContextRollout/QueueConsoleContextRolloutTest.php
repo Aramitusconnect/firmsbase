@@ -105,6 +105,20 @@ class QueueConsoleContextRolloutTest extends TestCase
         // SweepIntegrationRetentionCommand already establish above — no
         // RLS bypass, no raw SQL, no BYPASSRLS, no superuser role, no
         // set_config manipulation of any RLS-relevant session variable.
+        // Platform Firm Provisioning workflow added ProvisionFirmCommand
+        // (firms:provision) — reviewed and safe: it implements no
+        // independent database-creation logic of its own at all: every
+        // write happens inside FirmProvisioningService::provision(),
+        // which does the identical work ProvisionFirmAction's own
+        // closure does — Firm itself is created before any tenant
+        // context exists (it is not RLS-protected, being the tenancy
+        // boundary itself), and every subsequent FORCE-RLS-protected
+        // write (FirmUser, FirmSettings, FirmLicense, entitlements, the
+        // encryption key, the activation checklist, the audit event)
+        // runs inside TenantContextService::runWithFirmContext() —
+        // no raw SQL, no BYPASSRLS, no superuser role, no set_config
+        // manipulation of any RLS-relevant session variable anywhere in
+        // the command itself.
         // Any OTHER command appearing here has not been reviewed for
         // the silent-bypass risk this test exists to catch.
         $allowlist = [
@@ -119,6 +133,7 @@ class QueueConsoleContextRolloutTest extends TestCase
             'RunHealthChecksCommand.php',
             'RecordSchedulerHeartbeatCommand.php',
             'RenewProviderWebhookSubscriptionsCommand.php',
+            'ProvisionFirmCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

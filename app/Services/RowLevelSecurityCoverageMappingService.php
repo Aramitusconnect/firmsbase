@@ -877,6 +877,18 @@ class RowLevelSecurityCoverageMappingService
                 .'PK match, no recursive parent lookup, unlike every DirectTenant table\'s '
                 .'`firm_id = current_setting(...)::bigint` predicate.',
         ],
+        // Platform Firm Provisioning workflow addition. Global, no
+        // firm_id — mirrors trial_requests' own reasoning exactly: a
+        // firm does not yet exist (or, for a concurrent racing
+        // submission, may still be mid-creation) at the point this
+        // idempotency-ledger row is claimed. firm_id/owner_user_id are
+        // nullable FKs populated only once the referenced Firm/User
+        // rows actually exist.
+        'firm_provisioning_requests' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Idempotency ledger for FirmProvisioningService::provision(); platform-wide, requested_by_platform_admin_id-scoped, not firm_id-scoped.',
+        ],
 
         // --- Uncertain (1) ------------------------------------------
         'offboarding_exports' => [
