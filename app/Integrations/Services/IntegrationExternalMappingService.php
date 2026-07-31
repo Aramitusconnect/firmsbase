@@ -154,6 +154,46 @@ final class IntegrationExternalMappingService
     }
 
     /**
+     * CHECKPOINT 8.2 (§A-push) addition. Identical to
+     * refreshVersionTokens() except the update applies ONLY when the
+     * mapping's CURRENT local_version_token still matches
+     * $expectedPreviousLocalVersionToken (or the mapping still has no
+     * local_version_token at all, when that expectation is null) — the
+     * compare-and-set a stale APPLY phase needs so a push whose provider
+     * call already completed cannot silently regress a mapping a NEWER,
+     * concurrently-applied push already advanced past it.
+     *
+     * Returns null (never throws) when the guard did not match — the
+     * caller's own APPLY phase decides what a rejected-as-stale apply
+     * means (skip, never overwrite). Callers that do not need this
+     * guard should keep using refreshVersionTokens() unchanged.
+     */
+    public function refreshVersionTokensIfCurrent(
+        IntegrationExternalMapping $mapping,
+        ?string $expectedPreviousLocalVersionToken,
+        ?string $externalVersionToken,
+        ?string $localVersionToken,
+    ): ?IntegrationExternalMapping {
+        $query = IntegrationExternalMapping::query()
+            ->where('id', $mapping->id)
+            ->whereNull('tombstoned_at');
+
+        if ($expectedPreviousLocalVersionToken === null) {
+            $query->whereNull('local_version_token');
+        } else {
+            $query->where('local_version_token', $expectedPreviousLocalVersionToken);
+        }
+
+        $affected = $query->update([
+            'external_version_token' => $externalVersionToken,
+            'local_version_token' => $localVersionToken,
+            'last_synced_at' => now(),
+        ]);
+
+        return $affected === 1 ? $mapping->fresh() : null;
+    }
+
+    /**
      * Tombstones a mapping (frozen-design-post-review.md §8's 4
      * reasons) — the ONLY legitimate way to end a mapping's "live"
      * lifecycle. The historical row is retained for audit (permanent
