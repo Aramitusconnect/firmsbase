@@ -205,3 +205,230 @@ intended set was reverted and re-verified. Separately, a first attempt at
 purging the gate table between tests used a global `TestCase::setUp()` hook; it
 poisoned the shared audit session for unrelated tests and was replaced with an
 opt-in trait.
+
+---
+
+<!-- APPENDED 2026-07-31 (Checkpoint 8.2, "webhook-renewal cycle identity +
+     durable-metadata safety sweep + report correction" mission). Nothing
+     above this marker was rewritten, reordered, or deleted; every number
+     below was independently re-measured against this branch's HEAD at
+     3e53216e6c9385d1a305f1b7cedf940df4ef6c16 by running the actual test
+     files listed, not by re-reading a prior report's claim. -->
+
+## Corrective addendum — report-accuracy review
+
+This section exists because a later mission's explicit instruction was to
+verify every prior test/assertion-count claim on this branch against measured
+command output, not to trust it. Two genuine discrepancies were found in the
+table above; everything else checked was accurate.
+
+### Confirmed inaccuracies, now corrected
+
+| Claim in the table above | Measured (re-run against HEAD `3e53216`) |
+|---|---|
+| Trust-ledger firewall (§A12): **17 tests, 1061 assertions** | **12 tests, 820 assertions** — `php artisan test tests/Feature/FinancialEvidence/FinancialEvidenceTrustLedgerFirewallTest.php` |
+| `GmailMailboxRoutingLifecycleTest` (§A7b): **9 tests, 53 assertions** | **10 tests, 58 assertions** — `php artisan test tests/Feature/Integrations/GmailMailboxRoutingLifecycleTest.php` |
+
+Neither discrepancy reflects a weakened or missing test — both actual counts
+are the file's real, currently-passing content; the table above simply
+recorded a stale or mistaken number at write time. No test was deleted or
+disabled to produce either correction.
+
+### Confirmed accurate (independently re-measured, not merely re-read)
+
+| Suite | Table claim | Measured |
+|---|---|---|
+| `ProviderOperationAttemptServiceTest` (§A4) | 21 tests, 95 assertions | 21 tests, 95 assertions ✓ |
+| `ProviderBillableCallPipelineDurableGateTest` (§A5) | 11 tests, 48 assertions | 11 tests, 48 assertions ✓ |
+| `PullSyncJobConcurrencyBoundaryTest` (§A6) | 12 tests | 12 tests, 30 assertions ✓ |
+| `RenewGraphSubscriptionJobDurableGateTest` (§A7) | 8 tests, 45 assertions | 8 tests, 45 assertions ✓ |
+| `OAuthStagedWebhookBootstrapTest` (§A7b) | 11 tests, 38 assertions | 11 tests, 38 assertions ✓ |
+| `DurableGateNegativeControlsTest` (§A13/§A14) | 7 tests, 19 assertions | 7 tests, 19 assertions ✓ |
+| Provider unit suite (§A10) | 225 tests, 731 assertions | 225 tests, 731 assertions ✓ |
+
+### A correction to a claim made in this repository's OWN external session
+### handoff, not in this file
+
+The external handoff at `/home/ubuntu/firmsbase-recovery/checkpoint-8-2-current-handoff.md`,
+written by the session that added the webhook-bootstrap retry and
+reconciliation workflow (commits `50cf2a9`/`4eb3400`/`3e53216`), stated
+`OAuthStagedWebhookBootstrapTest.php` has **67** tests. It has **11** tests
+(38 assertions, confirmed in the table above) — the same file this report's
+own §A7b table already correctly recorded. That handoff has been corrected in
+place (see this branch's external handoff file, updated in the same session
+as this addendum) rather than left standing. Likely cause: 67 was probably an
+assertion figure from a different, broader combined run that was mislabeled
+as this file's own test count — a caution against repeating a number without
+re-running its specific source, exactly the discipline this addendum itself
+was instructed to apply.
+
+### `tests/Feature/Integrations/` combined count — superseded, not wrong
+
+The table above's **1885 tests, 8247 assertions** was accurate for this
+branch's state on 2026-07-30, when this report was written (base commit
+`5e62113`/`63fcd46`-era). Two later, legitimate sessions added tests on top
+of it (the PushSyncJob claim/call/apply/recover redesign, and this mission's
+own additions below) — as of `3e53216`, before this mission's own new test
+file, the same directory measured **1922 tests, 8433 assertions**, still 0
+failures. This is forward growth, not a defect in the original figure.
+
+### PushSyncJob — omission, not inaccuracy
+
+This report's own commit table (`## Commits` above) does not mention
+PushSyncJob at all, because **PushSyncJob's own claim/call/apply/recover
+redesign had not happened yet** when this file was committed (`0a5486e`) —
+it landed three commits later, in commit `3bad196` ("Refactor PushSyncJob
+into claim/call/apply phases with a durable at-most-once gate"), in a
+separate session. Nothing in this report claims PushSyncJob was already
+fixed; it is simply silent on a defect class (PushSyncJob shared the exact
+same wall-clock-idempotency-key and ambient-transaction defects §A6/§A10
+fixed for PullSyncJob/RenewGraphSubscriptionJob, just not yet applied to
+PushSyncJob) that a later session closed. Recorded here so a reader of this
+report alone knows to look at `3bad196`'s own commit message, not to assume
+PushSyncJob was in scope of the work above it.
+
+### Everything else in the mission's report-accuracy checklist: verified accurate as recorded
+
+Independently re-checked against this file, `checkpoint8-remediation-report.md`,
+and the actual code/tests currently on this branch — no further inaccuracy
+found in any of the following (each already correctly stated where it is
+recorded, and not repeated here in full to avoid duplicating an already-
+accurate record):
+
+- The original `PullSyncJob` wall-clock idempotency-key defect and its
+  correction (§A6/§A10 above; `checkpoint8-remediation-report.md`'s own C3
+  section).
+- The rejected Checkpoint 8.1 FK-backed audit-ledger design and the specific
+  `FOR UPDATE`/`FOR KEY SHARE` deadlock mechanism that rejected it
+  (`checkpoint8-remediation-report.md`'s own "Checkpoint 8.1 rejected"
+  section — independently re-read, and its mechanism claim matches this
+  report's own "Load-bearing decisions" section above; not re-litigated).
+- The plaintext Plaid cursor finding and its correction (commit `84230d7`;
+  proven by `DurableOperationMetadataRedactionTest`, extended further by this
+  addendum's own metadata sweep below).
+- The Gmail local-domain exception-boundary correction (commit `f23fa79`).
+- The Plaid JWT synthetic-JWK root cause and its deterministic regression
+  test (commit `cdf74a48b9edc4b260ecfd9dadc6dbc1b4efdd04`) — the JWK
+  fixed-width coordinate defect, not a `PlaidProvider.php` production defect.
+- The bootstrap queue-retry defect (dead `$tries`/`backoff()` under the old
+  always-caught-every-exception design) and its correction, the durable
+  non-Plaid subscribe gate, the Platform Admin reconciliation production
+  workflow, and its authorization/audit/CAS behavior — all recorded in this
+  session's own external handoff update, cross-checked here against the
+  actual commits (`50cf2a9`, `4eb3400`, `3e53216`) and re-run tests, and
+  found accurate except for the single "67 tests" slip corrected above.
+
+### This mission's own contribution: renewal-cycle identity + metadata sweep
+
+**Old renewal-key limitation.** By the time this mission started (HEAD
+`3e53216`), the wall-clock renewal/subscribe-cycle defect described in
+`checkpoint8-remediation-report.md`'s C3 section was **already fixed** — not
+by this mission, but by the two prior CP8.2 sessions (`63fcd46` for
+`RenewGraphSubscriptionJob`'s `renewalCycleToken`/`GoogleWorkspaceProvider`'s
+`watchCycleToken()`, `50cf2a9` for `ProviderConnectionService`'s
+`$subscribeCycle`). Both derive their identity purely from persisted state
+(subscription row id, provider-side subscription id, expiry) with zero
+wall-clock or random component, and both were already covered by
+`RenewGraphSubscriptionJobIdempotencyKeyTest`/`RenewGraphSubscriptionJobDurableGateTest`/
+`GmailMailboxRoutingLifecycleTest`. This mission's own mapping (Phase 2)
+independently re-verified this design end-to-end — including OAuth
+reconnect/revoke lifecycle (a full disconnect always mints a new
+`firm_integrations` row; subscription rows are never deleted or superseded
+on disconnect; a new connection's row id is folded into every operation key,
+so it cannot collide with any prior connection's finalized cycle) — and
+found it structurally sound, not defective. No production code change was
+required for renewal-cycle identity itself.
+
+**What this mission added:** the test coverage that mapping exposed as
+missing (`tests/Feature/Integrations/RenewalCycleIdentityMatrixTest.php`, 6
+tests, 47 assertions): same-cycle stability across a day rollover (not just
+the minute rollover the prior session tested), a new connection's durable
+row never colliding with an old, fully-disconnected connection's finalized
+cycle, a second worker racing a live cycle being refused rather than
+double-invoking the provider, cross-firm operation-key isolation at the job
+level, a `reconciliation_required` cycle resisting bypass by a fresh-looking
+attempt even after a 10-day wall-clock jump, and a malicious/defensive
+provider response's `access_token` field being stripped before it ever
+reaches `redacted_result_metadata`.
+
+**One deliberately out-of-scope finding, flagged rather than fixed:**
+`GoogleWorkspaceProvider::callCalendarWatch()`/`callDriveWatch()`'s own
+`usageIdempotencyKey` for the actual `watch()` HTTP call is keyed on a
+freshly-minted `Str::uuid()` `$channelId` per attempt — not derived from the
+same deterministic `watchCycleToken()` every other call in this class uses.
+This is already disclosed, by name, in that file's own inline comment
+("Left unchanged deliberately... see this change's report for the
+recommended follow-up") from a prior pass. It sits one layer below this
+mission's own scope (it is the provider's inner HTTP-usage idempotency key,
+not the outer `ProviderOperationAttemptService` logical-operation-key gate
+this mission's Phase 2/3 is about — the outer gate already ensures the
+`providerCall` closure containing it runs at most once per logical cycle
+regardless), and Calendar/Drive watches are not named in this mission's own
+Phase 2 mapping list (only Gmail watch and Microsoft Graph subscriptions
+are). Left as a flagged follow-up, not fixed in this pass, to avoid scope
+creep into a resource type this mission was not asked to redesign.
+
+### Durable-metadata repository-wide sweep — results
+
+`DurableOperationMetadataRedactionTest.php` was widened (not replaced) with
+a second, broader source-level firewall
+(`test_no_call_site_writes_a_raw_secret_shaped_variable_into_any_durable_gate_field`)
+scanning every `app/` file for ~30 categories of sensitive variable
+(OAuth/refresh tokens, Plaid Link/access/public tokens, mailbox addresses,
+raw HTTP bodies/headers, webhook signing keys, Drive/Gmail continuation
+tokens) co-occurring on the same source line as any of 7 durable-gate field
+markers (`local_processing_state`, `redacted_result_metadata`,
+`reconciliation_reason`, `provider_request_reference`,
+`usageIdempotencyKey`, and their camelCase call-site forms), with two
+negative controls: one proving the scan actually flags a planted violation,
+one proving a longer variable name that merely starts with a forbidden one
+(`$linkTokenMode` vs. `$linkToken`) is never mistaken for it (an early
+version of this exact sweep tripped on that false positive during
+development, plus a second false positive on a function signature
+co-locating two unrelated parameter names on one line — both are why the
+scan skips signature lines and uses word-boundary matching, not naive
+substring `str_contains()`).
+
+**Result: zero live violations found** across Plaid, Microsoft 365, Google
+Workspace, PullSyncJob, PushSyncJob, RenewGraphSubscriptionJob, the OAuth
+callback, webhook bootstrap, and every reconciliation action. Every
+`redactedResultMetadata`/recovery-evidence closure in the codebase already
+redacts to a small, explicit, non-secret field allowlist (confirmed
+directly in `RenewGraphSubscriptionJob::recoveryEvidenceFor()`,
+`ProviderConnectionService::subscriptionRecoveryEvidenceFor()`) rather than
+passing a provider response through unfiltered.
+
+### Optional broad-suite failures from the prior session, and their fix
+
+The prior session's optional full-suite run (10,204 tests) reported 2
+failures, both in `FirmIntegrationSuperAdminBoundaryStructuralTest` — the
+new reconciliation Filament files were missing from that test's own
+explicit cascade allowlist. Fixed in commit `3e53216`, re-verified
+(8/8 passing on that file alone, 36/36 combined with the two new/changed
+test files). Not re-litigated further here; see the external handoff for
+the full account.
+
+### Known unrelated schema-wipe test-infrastructure issue
+
+Still open, still untouched by this mission (out of scope, per this
+mission's own explicit instruction not to expand into a general test-
+infrastructure rewrite): the ad-hoc-multi-directory-test-run schema-wipe
+cascade, tracked as a separately spawned follow-up task in a prior session.
+Nothing in this mission's own test runs (each invoked with an explicit,
+narrow file/directory list, or with no path argument for the one optional
+broad run) re-triggered it.
+
+### Distinction between implementation-agent evidence and independent review
+
+Every number in this report — including every correction in this addendum —
+was measured by the same implementing agent that wrote the corresponding
+code, running `php artisan test` against disposable local databases it
+created and destroyed itself. That is real, reproducible, command-verified
+evidence, and it is what this addendum re-verified rather than trusted. It
+is **not** an independent review: no reviewer without access to this
+session's own reasoning has examined this branch's diff, and this report's
+own final verdicts (`REMEDIATION_COMPLETE_READY_FOR_REVIEW` and, for this
+addendum, the mission-specific status recorded in the external handoff) have
+never claimed otherwise. Three sequential clean full-suite runs and a fresh
+independent review are both explicitly still pending — recorded as the next
+mission in the external handoff, not performed here.
