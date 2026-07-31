@@ -6,6 +6,7 @@ namespace App\Integrations\Services;
 
 use App\Enums\FirmUserStatus;
 use App\Integrations\Billing\ProviderBillableCallPipeline;
+use App\Integrations\Billing\ProviderOperationAttemptService;
 use App\Integrations\Contracts\IntegrationProviderContract;
 use App\Integrations\Contracts\RequiresBillableCallPipelineContract;
 use App\Integrations\Contracts\SupportsDisconnectContract;
@@ -22,6 +23,8 @@ use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\CredentialType;
 use App\Integrations\Enums\IntegrationCredentialStatus;
 use App\Integrations\Enums\ProviderKey;
+use App\Integrations\Enums\ProviderOperationAttemptState;
+use App\Integrations\Enums\ProviderOperationClaimDecision;
 use App\Integrations\Enums\ProviderWebhookSubscriptionStatus;
 use App\Integrations\Enums\ResourceType;
 use App\Integrations\Enums\SyncDirection;
@@ -38,6 +41,7 @@ use App\Integrations\Models\IntegrationCredential;
 use App\Integrations\Models\IntegrationProvider;
 use App\Integrations\Models\IntegrationProviderWebhookSubscription;
 use App\Integrations\Models\IntegrationWebhookRoutingIndex;
+use App\Integrations\Models\ProviderOperationAttempt;
 use App\Integrations\Support\GmailMailboxRoutingService;
 use App\Integrations\Support\OutboundProviderHttpClient;
 use App\Integrations\Support\PlaidItemRoutingService;
@@ -1957,10 +1961,8 @@ class ProviderConnectionService
         // site #3). Additive `instanceof` branch only — every other
         // provider (Microsoft365Provider, GoogleWorkspaceProvider)
         // does not implement RequiresBillableCallPipelineContract and
-        // falls straight through to the else branch below, which is
-        // the exact, byte-for-byte unchanged
-        // `$this->httpClient->execute(...)` call this method has
-        // always made.
+        // falls into the CP8.2 §A-bootstrap direct gate below, mirroring
+        // RenewGraphSubscriptionJob's own non-pipeline gate.
         if ($provider instanceof RequiresBillableCallPipelineContract && $firm !== null) {
             $result = app(ProviderBillableCallPipeline::class)->execute(
                 providerKey: $provider->key(),
@@ -1984,8 +1986,85 @@ class ProviderConnectionService
                 requiredContractFqcn: SupportsWebhooksContract::class,
             );
 
-            $result = $result->response;
-        } else {
+            if ($result->outcome->servedWithoutProviderCall() && $result->response === null) {
+                // The pipeline's own durable gate already settled this
+                // logical operation (already complete, or refused —
+                // ProviderBillableCallPipeline throws
+                // ProviderOperationRequiresReconciliationException itself
+                // for the refused case). Nothing further to apply here.
+                return;
+            }
+
+            $this->applyWebhookSubscriptionResult($connection, $provider, $resourceType, $actor, $result->response);
+
+            return;
+        }
+
+        $this->subscribeWithDurableGate($connection, $provider, $resourceType, $actor, $subscribeCycle);
+    }
+
+    /**
+     * CHECKPOINT 8.2 (§A-bootstrap). The durable at-most-once gate for a
+     * provider whose subscribe() call does NOT go through
+     * `ProviderBillableCallPipeline` — i.e. every real Microsoft 365 /
+     * Google Workspace webhook bootstrap. Same shape
+     * `RenewGraphSubscriptionJob::callGatedProviderOperation()` applies to
+     * the non-pipeline renewal path, applied here to the initial
+     * subscribe.
+     *
+     * WHAT WAS WRONG BEFORE THIS FIX. This branch used to call
+     * `subscribe()` directly with no gate at all — the ONLY protection
+     * against a duplicate provider-side subscription was the
+     * `$alreadyActive` pre-check (itself only effective once a PRIOR
+     * attempt had already committed a subscription row) and the
+     * `$subscribeCycle` idempotency key threaded into the request, which
+     * only helps if the PROVIDER itself honors it. A subscribe that
+     * succeeded and then failed to commit its local row (e.g. a crash,
+     * or an exception in a later resource type's own iteration) would
+     * simply subscribe again on the next bootstrap attempt.
+     */
+    private function subscribeWithDurableGate(
+        FirmIntegration $connection,
+        IntegrationProviderContract $provider,
+        string $resourceType,
+        FirmUser $actor,
+        int $subscribeCycle,
+    ): void {
+        $attempts = app(ProviderOperationAttemptService::class);
+        $logicalOperationKey = 'provider_webhook_subscribe:'.$connection->id.':'.$resourceType.':cycle'.$subscribeCycle;
+
+        $claim = $attempts->claim(
+            logicalOperationKey: $logicalOperationKey,
+            providerKey: $provider->key()->value,
+            firmId: $connection->firm_id,
+            firmIntegrationId: (int) $connection->id,
+            operationType: 'webhook_bootstrap_subscribe',
+        );
+
+        if (! $claim->maySendProviderRequest()) {
+            if ($claim->decision === ProviderOperationClaimDecision::ReconciliationRequired) {
+                throw new ProviderOperationRequiresReconciliationException(
+                    $claim->attempt->logical_operation_key,
+                    $claim->attempt->attempt_state->value,
+                    $claim->attempt->reconciliation_reason,
+                );
+            }
+
+            if ($claim->decision === ProviderOperationClaimDecision::ResumeLocalProcessing) {
+                $this->resumeWebhookSubscriptionFromEvidence(
+                    $claim->attempt, $claim->ownerTokenOrFail(), $connection, $provider, $resourceType, $actor, $attempts,
+                );
+            }
+
+            // AlreadyComplete / InFlightElsewhere — this worker must not
+            // send and has nothing further to apply.
+            return;
+        }
+
+        $ownerToken = $claim->ownerTokenOrFail();
+        $attempt = $attempts->markAttemptStarted($claim->attempt, $ownerToken, $logicalOperationKey);
+
+        try {
             $result = $this->httpClient->execute(
                 fn () => $provider->subscribe([
                     'connection' => $connection,
@@ -1993,8 +2072,117 @@ class ProviderConnectionService
                 ]),
                 'subscribe',
             );
+        } catch (SanitizedProviderHttpException $e) {
+            // CRITICAL: the outcome MUST be classified on the gate here,
+            // before this exception is allowed to propagate. Without
+            // this, the row stays stuck at `attempt_started` with a live
+            // lease, so ANY subsequent claim() for this same key — most
+            // notably `runWebhookBootstrapAfterConnect()`'s own
+            // synchronous, SAME-PROCESS `BootstrapWebhookSubscriptionsJob::dispatch()`
+            // under a sync queue driver, re-entering THIS method while
+            // this catch block is still unwinding — sees
+            // `InFlightElsewhere` and silently no-ops, which the caller
+            // then misreads as a completed bootstrap. Classifying here
+            // FIRST (recordProviderRejected releases the lease
+            // immediately; recordProviderOutcomeUncertain escalates to
+            // reconciliation) makes the very next claim attempt see the
+            // real, retryable state instead.
+            if (in_array($e->category(), [
+                SanitizedProviderHttpException::CATEGORY_TIMEOUT,
+                SanitizedProviderHttpException::CATEGORY_NETWORK_ERROR,
+                SanitizedProviderHttpException::CATEGORY_CONNECTION_UNAVAILABLE,
+                SanitizedProviderHttpException::CATEGORY_UNKNOWN,
+                SanitizedProviderHttpException::CATEGORY_MALFORMED_RESPONSE,
+            ], true)) {
+                $uncertain = $attempts->recordProviderOutcomeUncertain($attempt, $ownerToken, 'provider_outcome_uncertain:'.$e->category());
+                $attempts->markReconciliationRequired($uncertain, 'uncertain_provider_outcome:'.$e->category());
+            } else {
+                $attempts->recordProviderRejected($attempt, $ownerToken, 'provider_rejected:'.$e->category(), $e->category());
+            }
+
+            throw $e;
         }
 
+        $attempts->recordProviderSucceeded(
+            $attempt,
+            $ownerToken,
+            providerOutcome: 'success',
+            redactedResultMetadata: $this->subscriptionRecoveryEvidenceFor($result, $resourceType),
+        );
+
+        try {
+            $this->applyWebhookSubscriptionResult($connection, $provider, $resourceType, $actor, $result);
+        } catch (Throwable $localFailure) {
+            $attempts->markLocalProcessingFailed($attempt, $ownerToken, 'webhook_bootstrap_local_apply_threw', $attempt->local_processing_state);
+
+            throw $localFailure;
+        }
+
+        $attempts->markLocalProcessingComplete($attempt, $ownerToken, $attempt->local_processing_state);
+    }
+
+    /**
+     * RECOVER — resume a subscribe the provider already performed, using
+     * the durable evidence recorded before this side failed. Never calls
+     * the provider again.
+     */
+    private function resumeWebhookSubscriptionFromEvidence(
+        ProviderOperationAttempt $attempt,
+        string $ownerToken,
+        FirmIntegration $connection,
+        IntegrationProviderContract $provider,
+        string $resourceType,
+        FirmUser $actor,
+        ProviderOperationAttemptService $attempts,
+    ): void {
+        $evidence = json_decode((string) $attempt->redacted_result_metadata, true);
+
+        if (! is_array($evidence) || ! is_string($evidence['subscription_id'] ?? null) || $evidence['subscription_id'] === '') {
+            $failed = $attempt->attempt_state === ProviderOperationAttemptState::LocalProcessingFailed
+                ? $attempt
+                : $attempts->markLocalProcessingFailed($attempt, $ownerToken, 'webhook_bootstrap_evidence_unusable', $attempt->local_processing_state);
+
+            $attempts->markReconciliationRequired($failed, 'webhook_bootstrap_succeeded_but_evidence_unusable');
+
+            throw new ProviderOperationRequiresReconciliationException(
+                $attempt->logical_operation_key,
+                ProviderOperationAttemptState::ReconciliationRequired->value,
+                'webhook_bootstrap_succeeded_but_evidence_unusable',
+            );
+        }
+
+        try {
+            $this->applyWebhookSubscriptionResult($connection, $provider, $resourceType, $actor, [
+                'subscription_id' => $evidence['subscription_id'],
+                'expires_at' => $evidence['expires_at'] ?? null,
+                'resource' => $evidence['resource'] ?? null,
+                'change_type' => $evidence['change_type'] ?? null,
+            ]);
+        } catch (Throwable $localFailure) {
+            $attempts->markLocalProcessingFailed($attempt, $ownerToken, 'webhook_bootstrap_local_apply_threw', $attempt->local_processing_state);
+
+            throw $localFailure;
+        }
+
+        $attempts->markLocalProcessingComplete($attempt, $ownerToken, $attempt->local_processing_state);
+    }
+
+    /**
+     * The local write, in its own short transaction: creates the
+     * subscription row and records the audit event. Nothing here touches
+     * the network. Idempotent against the `$alreadyActive` guard already
+     * checked by the caller — this is only ever reached once per
+     * logical subscribe cycle.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    private function applyWebhookSubscriptionResult(
+        FirmIntegration $connection,
+        IntegrationProviderContract $provider,
+        string $resourceType,
+        FirmUser $actor,
+        array $result,
+    ): void {
         [$providerSubscriptionId, $expiresAt] = $this->extractSubscriptionState($result);
 
         $providerResourceRaw = $result['resource'] ?? null;
@@ -2007,10 +2195,6 @@ class ProviderConnectionService
             ? $providerChangeTypeRaw
             : 'default';
 
-        // Committed together with the subscribe() above by this
-        // method's own transaction, so a later resource type's failure
-        // can never undo an earlier one's subscription (which really
-        // does exist at the provider by then).
         IntegrationProviderWebhookSubscription::query()->create([
             'firm_id' => $connection->firm_id,
             'firm_integration_id' => $connection->id,
@@ -2027,6 +2211,38 @@ class ProviderConnectionService
             'firm_integration_id' => $connection->id,
             'resource_type' => $resourceType,
         ]);
+    }
+
+    /**
+     * The only subscribe-response fields kept for recovery: the
+     * provider-side subscription id, its expiry, resource and
+     * change_type — the same fields `integration_provider_webhook_subscriptions`
+     * already stores unencrypted for exactly this purpose (§A8). No
+     * token, no credential, no request body. Returns null when the
+     * response carries no usable subscription id, so nothing is ever
+     * half-recorded.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    private function subscriptionRecoveryEvidenceFor(array $result, string $resourceType): ?string
+    {
+        $subscriptionId = $result['subscription_id'] ?? null;
+        $expiresAt = $result['expires_at'] ?? null;
+
+        if (! is_string($subscriptionId) || $subscriptionId === '') {
+            return null;
+        }
+
+        if ($expiresAt instanceof DateTimeInterface) {
+            $expiresAt = $expiresAt->format(DateTimeInterface::ATOM);
+        }
+
+        return json_encode([
+            'subscription_id' => $subscriptionId,
+            'expires_at' => is_string($expiresAt) ? $expiresAt : null,
+            'resource' => is_string($result['resource'] ?? null) ? $result['resource'] : $resourceType,
+            'change_type' => is_string($result['change_type'] ?? null) ? $result['change_type'] : 'default',
+        ]) ?: null;
     }
 
     /**
@@ -2071,14 +2287,33 @@ class ProviderConnectionService
      *
      * `$scheduleRetry` MUST be false when this call IS itself a retry —
      * see the dispatch site below for the recursion that taught us so.
+     *
+     * `$rethrowRetryable` (CP8.2 §A-bootstrap-retry) is the fix for the
+     * defect this checkpoint closes: `$tries`/`backoff()` on
+     * `BootstrapWebhookSubscriptionsJob` used to be dead code, because
+     * this method caught EVERY exception and returned a state instead of
+     * ever letting one escape — the queue therefore always saw
+     * `handle()` complete successfully, regardless of outcome, and never
+     * counted an attempt or applied backoff. `BootstrapWebhookSubscriptionsJob::handle()`
+     * passes `true` here so a genuinely retryable failure is, AFTER its
+     * state is durably persisted, rethrown — giving Laravel's own
+     * retry/backoff mechanism the exception it needs to actually retry.
+     * The OAuth-callback caller passes `false` (the default): that call
+     * happens synchronously inside an HTTP request completing a
+     * connection, and must never throw into it — it keeps its existing
+     * "persist state, dispatch one retry job" behavior instead. Neither
+     * path ever rethrows for `ReconciliationRequired` or `Failed` — an
+     * uncertain outcome must never be auto-resent, and a definite
+     * failure gains nothing from an automatic retry.
      */
     public function runWebhookBootstrapAfterConnect(
         FirmIntegration $connection,
         int $currentUserId,
         int $firmId,
         bool $scheduleRetry = true,
+        bool $rethrowRetryable = false,
     ): WebhookBootstrapState {
-        return (new TenantContextService)->runWithFirmContextWithoutTransaction($firmId, function () use ($connection, $currentUserId, $firmId, $scheduleRetry) {
+        return (new TenantContextService)->runWithFirmContextWithoutTransaction($firmId, function () use ($connection, $currentUserId, $firmId, $scheduleRetry, $rethrowRetryable) {
             $fresh = FirmIntegration::query()
                 ->where('id', $connection->id)
                 ->where('firm_id', $firmId)
@@ -2153,7 +2388,40 @@ class ProviderConnectionService
                 // BootstrapWebhookSubscriptionsJob's own $tries/backoff()
                 // is the one repetition mechanism.
                 if ($scheduleRetry && $state === WebhookBootstrapState::PendingRetry) {
-                    BootstrapWebhookSubscriptionsJob::dispatch($fresh->id, $firmId, $currentUserId);
+                    // CHECKPOINT 8.2 (§A-bootstrap-retry). This dispatch
+                    // MUST NOT let anything it triggers escape into the
+                    // OAuth callback that is completing right now — under
+                    // QUEUE_CONNECTION=sync (routine in tests, and legal
+                    // in any environment) `dispatch()` runs the job's own
+                    // `handle()` INLINE, synchronously, in this same
+                    // call stack, and `handle()` now deliberately
+                    // rethrows a retryable failure (see this job's own
+                    // docblock) so a REAL async worker's $tries/backoff()
+                    // can see it. That rethrow must terminate at the
+                    // queue boundary, exactly as it would if a real
+                    // worker's own exception handling absorbed it in a
+                    // separate process — never propagate back through a
+                    // synchronous dispatch() call into code that already
+                    // durably persisted this outcome and is about to
+                    // return successfully to the OAuth caller.
+                    try {
+                        BootstrapWebhookSubscriptionsJob::dispatch($fresh->id, $firmId, $currentUserId);
+                    } catch (Throwable) {
+                        // Already recorded via recordWebhookBootstrapState()
+                        // above (and, for a synchronous inline run, again
+                        // by the nested attempt itself) — nothing further
+                        // to do here.
+                    }
+                }
+
+                if ($rethrowRetryable && $state === WebhookBootstrapState::PendingRetry) {
+                    // State is already durably persisted above. Rethrow
+                    // the ORIGINAL sanitized exception (never a new type)
+                    // so the job's own $tries/backoff() actually fires —
+                    // mirrors RenewGraphSubscriptionJob's identical
+                    // "persist, then rethrow" contract for its own
+                    // non-pipeline retryable failures.
+                    throw $e;
                 }
 
                 return $state;
@@ -2178,8 +2446,16 @@ class ProviderConnectionService
      * Refuses to touch a connection whose bootstrap needs a human
      * (`bootstrap_failed` is retryable only by explicit request, and
      * `bootstrap_reconciliation_required` never automatically).
+     *
+     * `$rethrowRetryable` defaults to false (safe for a synchronous UI
+     * caller that must never see an exception thrown at it).
+     * `BootstrapWebhookSubscriptionsJob::handle()` — the ONLY caller
+     * today — explicitly passes `true`, so a genuinely retryable failure
+     * propagates and its own `$tries`/`backoff()` actually applies. See
+     * `runWebhookBootstrapAfterConnect()`'s docblock for the full
+     * rationale.
      */
-    public function retryWebhookBootstrap(int $connectionId, int $firmId, int $currentUserId, bool $force = false): WebhookBootstrapState
+    public function retryWebhookBootstrap(int $connectionId, int $firmId, int $currentUserId, bool $force = false, bool $rethrowRetryable = false): WebhookBootstrapState
     {
         $connection = (new TenantContextService)->runWithFirmContext(
             $firmId,
@@ -2203,7 +2479,34 @@ class ProviderConnectionService
         // scheduleRetry: false — this IS the retry. Repetition is owned by
         // BootstrapWebhookSubscriptionsJob's $tries/backoff(), never by a
         // retry queueing its own successor.
-        return $this->runWebhookBootstrapAfterConnect($connection, $currentUserId, $firmId, scheduleRetry: false);
+        return $this->runWebhookBootstrapAfterConnect(
+            $connection, $currentUserId, $firmId, scheduleRetry: false, rethrowRetryable: $rethrowRetryable,
+        );
+    }
+
+    /**
+     * CHECKPOINT 8.2 (§A-bootstrap-retry) addition. Called ONLY from
+     * `BootstrapWebhookSubscriptionsJob::failed()`, once every configured
+     * retry attempt for a genuinely retryable failure is exhausted.
+     * Transitions the connection to the definite `Failed` state — the
+     * honest terminal state (`needsHumanAttention()`), never a silent
+     * "still pending" — via the same audited `recordWebhookBootstrapState()`
+     * path every other terminal outcome already uses.
+     */
+    public function markWebhookBootstrapRetriesExhausted(FirmIntegration $connection): void
+    {
+        (new TenantContextService)->runWithFirmContext($connection->firm_id, function () use ($connection) {
+            $fresh = FirmIntegration::query()
+                ->where('id', $connection->id)
+                ->where('firm_id', $connection->firm_id)
+                ->first();
+
+            if ($fresh === null || ! $fresh->webhook_bootstrap_state->isRetryable()) {
+                return;
+            }
+
+            $this->recordWebhookBootstrapState($fresh, WebhookBootstrapState::Failed, 'retries_exhausted');
+        });
     }
 
     /**

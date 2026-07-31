@@ -4,17 +4,21 @@ declare(strict_types=1);
 
 namespace App\Integrations\Jobs;
 
+use App\Integrations\Enums\WebhookBootstrapState;
+use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Services\ProviderConnectionService;
+use App\Services\TenantContextService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Throwable;
 
 /**
- * BootstrapWebhookSubscriptionsJob — Checkpoint 8.2 §A7b. Retries a
- * webhook-subscription bootstrap that failed for a reason a retry can
- * plausibly fix.
+ * BootstrapWebhookSubscriptionsJob — Checkpoint 8.2 §A7b/§A-bootstrap-retry.
+ * Retries a webhook-subscription bootstrap that failed for a reason a
+ * retry can plausibly fix.
  *
  * WHY IT EXISTS. The bootstrap used to run inside the OAuth completion
  * transaction, so its only failure mode was "roll the whole
@@ -34,11 +38,18 @@ use Illuminate\Queue\SerializesModels;
  * point a UI retry action uses. This job deliberately owns no logic of
  * its own beyond scheduling.
  *
- * `$tries`/`backoff()` mirror RenewGraphSubscriptionJob's shape. There is
- * no `failed()` hook: exhausting the retries leaves the connection in
- * `bootstrap_pending_retry`, which is already an honest, visible state —
- * inventing a different terminal state here would claim knowledge this
- * job does not have.
+ * FIXED (CP8.2 §A-bootstrap-retry) — `$tries`/`backoff()` used to be dead
+ * code. `retryWebhookBootstrap()` caught EVERY exception internally and
+ * always returned a `WebhookBootstrapState`, so `handle()` always
+ * completed without throwing regardless of outcome — the queue counted
+ * every attempt as a success and never applied backoff. `handle()` now
+ * passes `rethrowRetryable: true`: a genuinely retryable failure is,
+ * AFTER its state is durably persisted, rethrown, so `$tries`/`backoff()`
+ * below actually govern the retry cadence. An uncertain outcome
+ * (`bootstrap_reconciliation_required`) and a definite failure
+ * (`bootstrap_failed`) are never rethrown — see
+ * `ProviderConnectionService::runWebhookBootstrapAfterConnect()`'s own
+ * docblock.
  */
 final class BootstrapWebhookSubscriptionsJob implements ShouldQueue
 {
@@ -62,6 +73,35 @@ final class BootstrapWebhookSubscriptionsJob implements ShouldQueue
 
     public function handle(ProviderConnectionService $connections): void
     {
-        $connections->retryWebhookBootstrap($this->firmIntegrationId, $this->firmId, $this->currentUserId);
+        $connections->retryWebhookBootstrap(
+            $this->firmIntegrationId, $this->firmId, $this->currentUserId, rethrowRetryable: true,
+        );
+    }
+
+    /**
+     * CHECKPOINT 8.2 (§A-bootstrap-retry) addition. Reached only once
+     * $tries is exhausted for a genuinely retryable failure (every other
+     * outcome already returns normally from handle() and never reaches
+     * here). Persists an honest degraded state — never silently leaves
+     * the connection looking healthy — and audits the exhaustion via the
+     * same recordWebhookBootstrapState() path every other terminal
+     * outcome already uses.
+     */
+    public function failed(?Throwable $exception): void
+    {
+        (new TenantContextService)->runWithFirmContext($this->firmId, function () {
+            $connection = FirmIntegration::query()
+                ->where('id', $this->firmIntegrationId)
+                ->where('firm_id', $this->firmId)
+                ->first();
+
+            if ($connection === null || ! $connection->webhook_bootstrap_state->isRetryable()) {
+                // Already moved on (resolved, or already terminal) by the
+                // time every retry exhausted.
+                return;
+            }
+
+            app(ProviderConnectionService::class)->markWebhookBootstrapRetriesExhausted($connection);
+        });
     }
 }

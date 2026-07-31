@@ -65,6 +65,26 @@ final class OAuthStagedWebhookBootstrapTest extends TestCase
         parent::setUp();
         $this->purgeDurableProviderOperationAttempts();
 
+        // CHECKPOINT 8.2 (§A-bootstrap-retry). Faked globally, not just
+        // in the handful of tests that used to opt in individually:
+        // BootstrapWebhookSubscriptionsJob::handle() now rethrows a
+        // genuinely retryable failure so a REAL queue's own $tries/
+        // backoff() can see it (see that job's own docblock). Under the
+        // `sync` queue driver this test suite otherwise runs with,
+        // dispatch() would execute that job INLINE, synchronously,
+        // immediately after completeOAuthCallback()'s own first attempt
+        // — and Laravel's sync connector does not honor $tries at all
+        // (a single exception is treated as final), so an unfaked queue
+        // would let that uncontrolled second attempt exhaust the
+        // connection to `bootstrap_failed` before a test ever gets to
+        // observe the real, single-attempt `bootstrap_pending_retry`
+        // outcome. Faking the queue here is what makes "one HTTP-facing
+        // attempt, one recorded outcome" observable at all; every test
+        // that wants a retry to actually run does so explicitly via its
+        // own `(new BootstrapWebhookSubscriptionsJob(...))->handle(...)`
+        // or `ProviderConnectionService::retryWebhookBootstrap()` call.
+        Queue::fake();
+
         config(['app.url' => 'https://app.firmsbase.test']);
         URL::forceRootUrl('https://app.firmsbase.test');
         URL::forceScheme('https');
