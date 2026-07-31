@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\FirmResource\Pages;
 
+use App\Filament\Actions\Platform\ResendFirmOwnerInvitationAction;
 use App\Filament\Resources\FirmResource;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Pages\ViewRecord;
@@ -12,12 +13,24 @@ use Filament\Schemas\Schema;
 
 /**
  * ViewFirm — read-only detail view over Firm's real fillable columns
- * only. No mutating action is registered here (no Edit page, no header
- * Action) — see FirmResource's own docblock.
+ * only. No generic Edit page exists (see FirmResource's own docblock).
+ *
+ * Platform Firm Provisioning workflow addition: ResendFirmOwnerInvitationAction
+ * is the one header action registered here — a narrow, explicit
+ * state-machine action (re-dispatch the owner's setup email), never
+ * arbitrary field editing. Its own ->visible()/authorization-inside-the-
+ * closure discipline is documented on that class.
  */
 class ViewFirm extends ViewRecord
 {
     protected static string $resource = FirmResource::class;
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            ResendFirmOwnerInvitationAction::make(),
+        ];
+    }
 
     public function infolist(Schema $schema): Schema
     {

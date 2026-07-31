@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Enums\FirmUserStatus;
 use App\Http\Middleware\EstablishFirmTenantContextForLivewireUpdate;
 use App\Models\PlatformAdmin;
 use App\Models\SecurityEvent;
@@ -9,6 +10,7 @@ use App\Models\User;
 use App\Services\TenantContextService;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Login;
+use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
@@ -31,6 +33,53 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->registerAuthenticationAuditLogging();
         $this->registerLivewireUpdateRoute();
+        $this->registerFirmOwnerInvitationAcceptance();
+    }
+
+    /**
+     * Platform Firm Provisioning workflow. A newly-provisioned firm
+     * owner's FirmUser membership starts as FirmUserStatus::Invited —
+     * User::canAccessPanel()/LoginPolicyService::canAttemptFirmLogin()
+     * both require Active, so an Invited member can complete the
+     * password-setup flow (a guest route, not gated by canAccessPanel())
+     * but could not actually log in afterward without something
+     * flipping that status. Laravel's own password broker fires this
+     * standard `PasswordReset` event on every successful reset
+     * (Illuminate\Auth\Passwords\PasswordBroker::reset(), which Filament's
+     * built-in password-reset page uses unmodified) — reused here rather
+     * than forking Filament's page or inventing a bespoke
+     * "accept invitation" controller/route.
+     *
+     * Deliberately unconditional on "is this the first reset": an
+     * ordinary later "forgot password" reset re-running this is a
+     * harmless no-op (the where('status', Invited) query simply matches
+     * nothing once the member is already Active).
+     */
+    private function registerFirmOwnerInvitationAcceptance(): void
+    {
+        Event::listen(PasswordReset::class, function (PasswordReset $event): void {
+            if (! $event->user instanceof User) {
+                return;
+            }
+
+            $user = $event->user;
+
+            $context = new TenantContextService;
+
+            $invitedMemberships = $context->withUserContext(
+                $user->id,
+                fn () => $user->firmUsers()->where('status', FirmUserStatus::Invited->value)->get(),
+            );
+
+            foreach ($invitedMemberships as $firmUser) {
+                $context->runWithFirmContext($firmUser->firm_id, function () use ($firmUser): void {
+                    $firmUser->update([
+                        'status' => FirmUserStatus::Active,
+                        'invitation_accepted_at' => now(),
+                    ]);
+                });
+            }
+        });
     }
 
     /**

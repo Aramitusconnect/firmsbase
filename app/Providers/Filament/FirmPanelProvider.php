@@ -39,6 +39,18 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
  * No custom Resources/Pages/Widgets exist yet — like AdminPanelProvider,
  * this proves login/access wiring only; building firm-facing UI is
  * explicitly out of scope for this section.
+ *
+ * `->passwordReset()` ADDED (Platform Firm Provisioning workflow). This
+ * panel had NO working password-reset flow at all before this feature —
+ * a pre-existing gap ClientPortalPanelProvider's own docblock already
+ * names explicitly ("neither FirmPanelProvider nor AdminPanelProvider
+ * currently enable it... a pre-existing gap on the other two panels,
+ * not something newly introduced or fixed here"). A newly-provisioned
+ * firm owner has no password at all until they complete this flow, so
+ * enabling it here is a direct, necessary dependency of that feature —
+ * mirroring ClientPortalPanelProvider's exact usage. See
+ * FirmOwnerInvitationNotification for the notification this unlocks a
+ * real destination route for.
  */
 class FirmPanelProvider extends PanelProvider
 {
@@ -48,6 +60,7 @@ class FirmPanelProvider extends PanelProvider
             ->id('firm')
             ->path('firm')
             ->login()
+            ->passwordReset()
             ->colors([
                 'primary' => Color::Blue,
             ])
