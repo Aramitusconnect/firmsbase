@@ -129,6 +129,30 @@ use Tests\TestCase;
  * mirroring every prior cascade's exact allowlist-widening pattern, not
  * a weakening of the underlying invariant.
  *
+ * POST-CHECKPOINT-8.2-BOOTSTRAP-RECONCILIATION UPDATE (FirmsVault
+ * Billing Durability Redesign, Checkpoint 8.2, "webhook-bootstrap
+ * retries + provider-operation reconciliation" mission): a seventh
+ * cascade, same reasoning again. This mission adds the FIRST production
+ * caller anywhere in the codebase of
+ * `ProviderOperationAttemptService::resolveReconciliation()` — a
+ * Platform Admin page (`PlatformProviderOperationReconciliationPage.php`)
+ * that lists/filters durable-gate rows stuck in `reconciliation_required`
+ * and three resolution actions
+ * (`ConfirmProviderOperationSucceededAction.php`,
+ * `AuthorizeProviderOperationRetryAction.php`,
+ * `ResolveProviderOperationWithoutRetryAction.php`), plus a shared
+ * audit-recording trait
+ * (`Concerns/AuditsProviderOperationReconciliation.php`). The page
+ * legitimately, deliberately references the Integration domain (its
+ * whole job is cross-firm provider-operation oversight) and is
+ * allowlisted in
+ * test_app_filament_pages_directory_contains_no_integration_domain_class()
+ * accordingly; the three actions and the trait carry no separate
+ * Integration-domain sweep of their own (app/Filament/Actions has never
+ * had one — only Resources/Pages/Widgets do) but still need an entry in
+ * $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles below
+ * since none of them live under app/Filament/Firm.
+ *
  * COORDINATION NOTE: since two agents land files in this one shared test
  * concurrently, whichever pass's commit lands second should re-verify
  * this allowlist still matches the real file set on disk before commit
@@ -216,6 +240,10 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'PlatformIntegrationUsagePage.php',
             'PlaidCostOversightPage.php',
             'PlaidAnomalyOversightPage.php',
+            // POST-CHECKPOINT-8.2-BOOTSTRAP-RECONCILIATION: the first
+            // production caller of resolveReconciliation() — see this
+            // file's own class docblock.
+            'PlatformProviderOperationReconciliationPage.php',
         ]);
     }
 
@@ -636,7 +664,19 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'ClientPortal'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'PlaidRequestReviewPage.php',
         ];
 
-        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles);
+        // FirmsVault Billing Durability Redesign, Checkpoint 8.2
+        // ("webhook-bootstrap retries + provider-operation
+        // reconciliation") — see this file's own class docblock's
+        // "POST-CHECKPOINT-8.2-BOOTSTRAP-RECONCILIATION UPDATE" note.
+        $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles = [
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformProviderOperationReconciliationPage.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ConfirmProviderOperationSucceededAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'AuthorizeProviderOperationRetryAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ResolveProviderOperationWithoutRetryAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'Concerns'.DIRECTORY_SEPARATOR.'AuditsProviderOperationReconciliation.php',
+        ];
+
+        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles);
 
         $unauthorizedNonFirmFilamentFiles = [];
 
