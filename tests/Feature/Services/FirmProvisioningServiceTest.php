@@ -24,11 +24,15 @@ use App\Models\Organization;
 use App\Models\Plan;
 use App\Models\PlatformAdmin;
 use App\Models\User;
+use App\Notifications\FirmOwnerInvitationNotification;
 use App\Services\FirmProvisioningService;
 use App\ValueObjects\FirmProvisioningInput;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 use Throwable;
@@ -243,6 +247,38 @@ final class FirmProvisioningServiceTest extends TestCase
 
         $tokenRow = DB::table('password_reset_tokens')->where('email', $result->owner->email)->first();
         $this->assertNotNull($tokenRow, 'A real password-reset token row must exist after successful provisioning.');
+    }
+
+    /**
+     * Independent-review finding, fixed: FirmOwnerInvitationNotification
+     * originally built its link with a plain route()/url() call, but
+     * Filament's own password-reset route requires a SIGNED URL
+     * (Illuminate\Routing\Middleware\ValidateSignature) — an unsigned
+     * link 403s the instant a real owner clicks it. This proves the
+     * fixed link both carries a valid signature AND, hit over real
+     * HTTP, actually returns 200 rather than 403 — not merely that a
+     * URL string was produced.
+     */
+    public function test_the_invitation_link_is_signed_and_actually_resolves(): void
+    {
+        Notification::fake();
+
+        $result = $this->service()->provision($this->input(), $this->actor());
+
+        Notification::assertSentTo(
+            $result->owner,
+            FirmOwnerInvitationNotification::class,
+            function (FirmOwnerInvitationNotification $notification, array $channels) use ($result) {
+                $method = new \ReflectionMethod($notification, 'resetUrl');
+                $method->setAccessible(true);
+                $url = $method->invoke($notification, $result->owner);
+
+                $this->assertTrue(URL::hasValidSignature(Request::create($url, 'GET')), 'The invitation link must carry a valid signature.');
+                $this->assertSame(200, $this->get($url)->getStatusCode(), 'The invitation link must actually resolve to the password-setup form, not 403.');
+
+                return true;
+            }
+        );
     }
 
     public function test_invitation_token_is_not_stored_in_logs_or_audit_metadata(): void

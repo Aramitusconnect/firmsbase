@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Notifications;
 
 use Illuminate\Auth\Notifications\ResetPassword;
+use Illuminate\Support\Facades\URL;
 
 /**
  * FirmOwnerInvitationNotification — the firm panel's own analogue of
@@ -18,6 +19,23 @@ use Illuminate\Auth\Notifications\ResetPassword;
  * updated docblock) — `->passwordReset()` is now enabled on the `firm`
  * panel specifically to give this notification's link somewhere real to
  * go.
+ *
+ * MUST use `URL::signedRoute()`, not a plain `route()`/`url()` call —
+ * Filament's own password-reset page route carries
+ * `Illuminate\Routing\Middleware\ValidateSignature` (see
+ * `Filament\Panel\Concerns\HasAuth::getResetPasswordUrl()`, the
+ * framework's own reference implementation, which signs for exactly
+ * this reason). An unsigned link 403s on click — confirmed live
+ * (`php artisan route:list` shows the middleware; a request to the
+ * unsigned URL this class previously built returned 403, while the
+ * identical URL built via `URL::signedRoute()` returned 200) — found
+ * during this feature's own independent review, which is exactly what
+ * that review step exists to catch. `ClientPortalResetPasswordNotification`
+ * carries the identical pre-existing defect (unsigned `route()`/`url()`
+ * link against a signature-validated route) — out of this feature's own
+ * scope to fix, flagged separately as its own follow-up, since it
+ * belongs to an unrelated existing feature (the Client Portal) this
+ * mission was not authorized to modify.
  *
  * Used for both the brand-new owner's first-time password SETUP and any
  * later ordinary "forgot password" reset — Laravel's password-reset flow
@@ -37,9 +55,9 @@ class FirmOwnerInvitationNotification extends ResetPassword
 {
     protected function resetUrl($notifiable)
     {
-        return url(route('filament.firm.auth.password-reset.reset', [
+        return URL::signedRoute('filament.firm.auth.password-reset.reset', [
             'email' => $notifiable->getEmailForPasswordReset(),
             'token' => $this->token,
-        ], false));
+        ]);
     }
 }
