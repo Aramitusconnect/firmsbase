@@ -119,6 +119,13 @@ class QueueConsoleContextRolloutTest extends TestCase
         // no raw SQL, no BYPASSRLS, no superuser role, no set_config
         // manipulation of any RLS-relevant session variable anywhere in
         // the command itself.
+        // FIRMSVAULT — STAGING ADMIN STABILIZATION added
+        // BootstrapStagingSandboxPlanCommand (plans:bootstrap-staging-sandbox)
+        // — reviewed and safe: no independent database-creation logic;
+        // every write happens inside PlanService::create(), which only
+        // writes the non-RLS `plans` table (no firm_id, no BelongsToTenant
+        // — see Plan's own docblock). No FORCE-RLS table is touched by
+        // this command's own create() path at all.
         // Any OTHER command appearing here has not been reviewed for
         // the silent-bypass risk this test exists to catch.
         $allowlist = [
@@ -134,6 +141,7 @@ class QueueConsoleContextRolloutTest extends TestCase
             'RecordSchedulerHeartbeatCommand.php',
             'RenewProviderWebhookSubscriptionsCommand.php',
             'ProvisionFirmCommand.php',
+            'BootstrapStagingSandboxPlanCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

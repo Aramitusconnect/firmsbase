@@ -119,6 +119,17 @@ class QueueConsoleTenantContextTest extends TestCase
         // scopes every FORCE-RLS-protected write via
         // TenantContextService::runWithFirmContext() — no raw SQL, no
         // BYPASSRLS, no superuser role, no set_config manipulation.
+        // FIRMSVAULT — STAGING ADMIN STABILIZATION added
+        // BootstrapStagingSandboxPlanCommand (plans:bootstrap-staging-sandbox)
+        // — reviewed and safe: no independent database-creation logic;
+        // every write happens inside PlanService::create(), which only
+        // writes the non-RLS `plans` table. PlanService::isInUse()
+        // (invoked from update(), not from this command's own create()
+        // path) reads the FORCE-RLS `firm_licenses` table via the same
+        // reviewed per-firm TenantContextService::runWithFirmContext()
+        // loop PlatformFirmUserDirectoryService::countAll() already
+        // establishes — no raw SQL, no BYPASSRLS, no superuser role, no
+        // set_config manipulation.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
@@ -132,6 +143,7 @@ class QueueConsoleTenantContextTest extends TestCase
             'RecordSchedulerHeartbeatCommand.php',
             'RenewProviderWebhookSubscriptionsCommand.php',
             'ProvisionFirmCommand.php',
+            'BootstrapStagingSandboxPlanCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

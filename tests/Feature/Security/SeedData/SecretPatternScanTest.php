@@ -149,6 +149,17 @@ class SecretPatternScanTest extends TestCase
         // local/testing without --confirm-staging and refused
         // unconditionally in production (no escape hatch at all, unlike
         // every other reviewed command in this allowlist).
+        // FIRMSVAULT — STAGING ADMIN STABILIZATION added
+        // BootstrapStagingSandboxPlanCommand (plans:bootstrap-staging-sandbox)
+        // — reviewed and safe: it creates exactly one obviously
+        // synthetic, non-commercial plan (name "Staging Sandbox", code
+        // "staging-sandbox", price_cents fixed at 0 — never real
+        // FirmsVault pricing), idempotent (refuses to create a second
+        // one if that code already exists), requires an interactive
+        // confirmation before writing anything, and is blocked outside
+        // local/testing without --confirm-staging and refused
+        // unconditionally in production, identically to
+        // ProvisionFirmCommand.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
@@ -162,6 +173,7 @@ class SecretPatternScanTest extends TestCase
             'RecordSchedulerHeartbeatCommand.php',
             'RenewProviderWebhookSubscriptionsCommand.php',
             'ProvisionFirmCommand.php',
+            'BootstrapStagingSandboxPlanCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);
