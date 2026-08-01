@@ -10,9 +10,11 @@ use App\Enums\FirmProvisioningStatus;
 use App\Enums\FirmUserRole;
 use App\Enums\FirmUserStatus;
 use App\Enums\LicenseStatus;
+use App\Enums\PlanStatus;
 use App\Enums\RecordStatus;
 use App\Exceptions\ExistingUserReviewRequiredException;
 use App\Exceptions\FirmProvisioningRequestChangedException;
+use App\Exceptions\InactivePlanSelectedException;
 use App\Exceptions\PlatformAdminIdentityCollisionException;
 use App\Models\Firm;
 use App\Models\FirmLicense;
@@ -293,6 +295,16 @@ final class FirmProvisioningService
 
                 if ($input->planId !== null) {
                     $plan = Plan::query()->findOrFail($input->planId);
+
+                    // Re-check status at the moment the transaction
+                    // actually runs, not just at the wizard's earlier
+                    // search-time filter — see
+                    // InactivePlanSelectedException's own docblock for
+                    // the stale-UI-state scenario this guards against.
+                    if ($plan->status !== PlanStatus::Active) {
+                        throw new InactivePlanSelectedException($plan->name, $plan->status->value);
+                    }
+
                     $trialDays = $input->trialDaysOverride ?? $plan->trial_days;
                     $startsAt = now();
 
@@ -398,6 +410,7 @@ final class FirmProvisioningService
         return match (true) {
             $e instanceof QueryException => 'database_error',
             $e instanceof ModelNotFoundException => 'referenced_record_not_found',
+            $e instanceof InactivePlanSelectedException => 'inactive_plan_selected',
             default => 'unexpected_error',
         };
     }

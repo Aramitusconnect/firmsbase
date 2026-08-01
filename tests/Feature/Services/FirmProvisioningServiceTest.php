@@ -16,6 +16,7 @@ use App\Enums\LicenseStatus;
 use App\Enums\TenantEncryptionKeyStatus;
 use App\Exceptions\ExistingUserReviewRequiredException;
 use App\Exceptions\FirmProvisioningRequestChangedException;
+use App\Exceptions\InactivePlanSelectedException;
 use App\Exceptions\PlatformAdminIdentityCollisionException;
 use App\Models\Firm;
 use App\Models\FirmProvisioningRequest;
@@ -472,6 +473,46 @@ final class FirmProvisioningServiceTest extends TestCase
 
         $this->assertSame($firmCountBefore, Firm::query()->count(), 'No orphan Firm may remain after rollback.');
         $this->assertSame($userCountBefore, User::query()->count(), 'No orphan User may remain after rollback.');
+        $this->assertSame(0, User::query()->where('email', $email)->count());
+    }
+
+    /**
+     * STAGING ADMIN STABILIZATION addition: proves the stale-UI-state
+     * guard (InactivePlanSelectedException) — a plan that has since
+     * been archived must be rejected atomically at submission time,
+     * not just filtered out of the wizard's own Select at search time.
+     */
+    public function test_an_archived_plan_cannot_be_submitted_from_stale_ui_state(): void
+    {
+        $plan = Plan::factory()->archived()->create();
+        $firmCountBefore = Firm::query()->count();
+        $userCountBefore = User::query()->count();
+        $email = 'rollback-archived-plan-'.Str::random(8).'@example.test';
+
+        try {
+            $this->service()->provision($this->input(['ownerEmail' => $email, 'planId' => $plan->id]), $this->actor());
+            $this->fail('Expected an InactivePlanSelectedException for an archived plan.');
+        } catch (InactivePlanSelectedException) {
+            // expected
+        }
+
+        $this->assertSame($firmCountBefore, Firm::query()->count(), 'No orphan Firm may remain after rollback.');
+        $this->assertSame($userCountBefore, User::query()->count(), 'No orphan User may remain after rollback.');
+        $this->assertSame(0, User::query()->where('email', $email)->count());
+    }
+
+    public function test_a_draft_plan_cannot_be_submitted_from_stale_ui_state(): void
+    {
+        $plan = Plan::factory()->draft()->create();
+        $email = 'rollback-draft-plan-'.Str::random(8).'@example.test';
+
+        try {
+            $this->service()->provision($this->input(['ownerEmail' => $email, 'planId' => $plan->id]), $this->actor());
+            $this->fail('Expected an InactivePlanSelectedException for a draft plan.');
+        } catch (InactivePlanSelectedException) {
+            // expected
+        }
+
         $this->assertSame(0, User::query()->where('email', $email)->count());
     }
 
