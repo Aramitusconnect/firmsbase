@@ -20,10 +20,12 @@ class Plan extends Model
 
     protected $fillable = [
         'name',
+        'code',
         'status',
         'price_cents',
         'billing_interval',
         'support_access_level',
+        'description',
         'trial_days',
         'trial_requires_card',
         'is_active',

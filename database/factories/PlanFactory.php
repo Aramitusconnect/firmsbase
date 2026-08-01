@@ -6,6 +6,7 @@ use App\Enums\BillingInterval;
 use App\Enums\PlanStatus;
 use App\Models\Plan;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Str;
 
 /**
  * @extends Factory<Plan>
@@ -16,12 +17,16 @@ class PlanFactory extends Factory
 
     public function definition(): array
     {
+        $name = $this->faker->words(2, true).' Plan';
+
         return [
-            'name' => $this->faker->words(2, true).' Plan',
+            'name' => $name,
+            'code' => Str::slug($name).'-'.$this->faker->unique()->numberBetween(1000, 999999),
             'status' => PlanStatus::Active,
             'price_cents' => $this->faker->numberBetween(9900, 49900),
             'billing_interval' => BillingInterval::Monthly,
             'support_access_level' => 'standard',
+            'description' => null,
             'trial_days' => 14,
             'trial_requires_card' => false,
             'is_active' => true,

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Plans;
 
 use App\Enums\PlanStatus;
+use App\Models\FirmLicense;
 use App\Models\Plan;
 use App\Models\PlatformAdmin;
 use App\Services\PlanService;
@@ -20,16 +21,33 @@ class PlanServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new PlanService;
+        $this->service = new PlanService(app(TenantContextService::class));
     }
 
     public function test_create_defaults_to_draft_and_active_flag(): void
     {
-        $plan = $this->service->create(['name' => 'Solo Practice', 'price_cents' => 9900]);
+        $plan = $this->service->create(['name' => 'Solo Practice', 'code' => 'solo-practice', 'price_cents' => 9900]);
 
         $this->assertSame(PlanStatus::Draft, $plan->status);
         $this->assertTrue($plan->is_active);
         $this->assertSame('Solo Practice', $plan->name);
+        $this->assertSame('solo-practice', $plan->code);
+    }
+
+    public function test_create_without_a_code_is_rejected(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->service->create(['name' => 'Solo Practice', 'price_cents' => 9900]);
+    }
+
+    public function test_create_rejects_a_duplicate_code_case_insensitively(): void
+    {
+        Plan::factory()->create(['code' => 'solo-practice']);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->service->create(['name' => 'Another Plan', 'code' => 'SOLO-PRACTICE', 'price_cents' => 1000]);
     }
 
     public function test_update_changes_editable_fields(): void
@@ -40,6 +58,26 @@ class PlanServiceTest extends TestCase
 
         $this->assertSame('New Name', $updated->name);
         $this->assertSame(14900, $updated->price_cents);
+    }
+
+    public function test_update_refuses_to_change_price_once_a_firm_license_is_assigned(): void
+    {
+        $plan = Plan::factory()->create(['price_cents' => 9900]);
+        FirmLicense::factory()->create(['plan_id' => $plan->id]);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->service->update($plan, ['price_cents' => 19900]);
+    }
+
+    public function test_update_still_allows_non_financial_fields_once_a_firm_license_is_assigned(): void
+    {
+        $plan = Plan::factory()->create(['price_cents' => 9900]);
+        FirmLicense::factory()->create(['plan_id' => $plan->id]);
+
+        $updated = $this->service->update($plan, ['name' => 'Renamed While In Use']);
+
+        $this->assertSame('Renamed While In Use', $updated->name);
     }
 
     public function test_activate_moves_draft_to_active(): void
