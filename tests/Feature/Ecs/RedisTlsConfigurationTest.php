@@ -200,4 +200,45 @@ class RedisTlsConfigurationTest extends TestCase
         $this->assertStringNotContainsString('verify_peer\' => false', $contents);
         $this->assertStringNotContainsString('allow_self_signed\' => true', $contents);
     }
+
+    /**
+     * FIRMSVAULT STAGING ADMIN STABILIZATION — regression test for the
+     * Platform Admin dashboard's HTTP 500
+     * (PlatformSecurityDashboardService::recentSecurityEvents(): "Return
+     * value must be of type Illuminate\Support\Collection,
+     * __PHP_Incomplete_Class returned"). Reproduced directly against the
+     * real staging Redis (ElastiCache): a minimal `Cache::remember()` of a
+     * Collection containing a Carbon `created_at` value round-tripped
+     * correctly on the first (write) call but returned
+     * `__PHP_Incomplete_Class` on the very next (cache-hit) call.
+     *
+     * Root cause: `Illuminate\Redis\Connectors\PhpRedisConnector` only
+     * calls `$client->setOption(Redis::OPT_SERIALIZER, ...)` when a
+     * 'serializer' key is explicitly present in config — absent that key
+     * (the previous state of this file), phpredis falls back to its own
+     * extension-level default, which this specific staging Docker image's
+     * phpredis build resolves to a non-zero (auto-serializing) value —
+     * different from this test-running host's own phpredis default,
+     * which is why this specific bug never reproduced in any local test
+     * run despite extensive attempts. Laravel's Redis cache/queue stores
+     * already do their own PHP-level serialize()/unserialize() around
+     * every value; phpredis's own serializer must stay OFF for that to
+     * round-trip correctly, per Laravel's own documented guidance.
+     *
+     * This test cannot reproduce the actual corruption on every host (it
+     * depends on phpredis's own compiled-in/php.ini-level default, which
+     * varies by image/build) — it instead asserts the actual invariant
+     * that prevents it everywhere, regardless of any given host's
+     * ambient default: the option must be explicitly forced to
+     * Redis::SERIALIZER_NONE in config, not left to chance.
+     */
+    public function test_phpredis_serializer_is_explicitly_forced_to_none(): void
+    {
+        $redis = $this->loadRedisConfig([
+            'REDIS_HOST' => '127.0.0.1',
+        ]);
+
+        $this->assertArrayHasKey('serializer', $redis['options']);
+        $this->assertSame(\Redis::SERIALIZER_NONE, $redis['options']['serializer']);
+    }
 }

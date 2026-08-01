@@ -211,10 +211,40 @@ return [
 
         'client' => env('REDIS_CLIENT', 'phpredis'),
 
+        // 'serializer' forced to Redis::SERIALIZER_NONE (0) explicitly —
+        // FIRMSVAULT STAGING ADMIN STABILIZATION fix for the Platform Admin
+        // dashboard's HTTP 500 (PlatformSecurityDashboardService::
+        // recentSecurityEvents(): "Return value must be of type
+        // Illuminate\Support\Collection, __PHP_Incomplete_Class returned").
+        // Root cause, reproduced directly against live staging Redis:
+        // without this option, Laravel's own PhpRedisConnector never sets
+        // Redis::OPT_SERIALIZER at all (it only calls setOption() when this
+        // 'serializer' config key is present — see
+        // Illuminate\Redis\Connectors\PhpRedisConnector), so the phpredis
+        // EXTENSION's own compiled-in/php.ini-level default serializer
+        // (non-zero in this image's build, undocumented anywhere in this
+        // repo's own php.ini files) was silently active underneath
+        // Laravel's Redis cache store — which ALSO does its own PHP-level
+        // serialize()/unserialize() around every cached value. That
+        // double-serialization round-trips correctly for simple/shallow
+        // values (which is why most of the app's caching appeared to work
+        // fine) but corrupts on read-back for a Collection containing
+        // nested objects (e.g. Carbon `created_at` values), because
+        // phpredis's own C-extension-level unserialize() does not
+        // reliably trigger Composer's autoloader for the outer wrapper
+        // class before Laravel's userland unserialize() ever runs —
+        // confirmed via a minimal, isolated Cache::remember() reproduction
+        // against the real staging ElastiCache instance. Laravel's own
+        // documentation is explicit that phpredis's serializer must stay
+        // off when using phpredis as the Redis client: forcing it here
+        // (rather than depending on an untracked php.ini default) makes
+        // this correct regardless of what any future base-image change
+        // ships as phpredis's own default.
         'options' => [
             'cluster' => env('REDIS_CLUSTER', 'redis'),
             'prefix' => env('REDIS_PREFIX', Str::slug((string) env('APP_NAME', 'laravel')).'-database-'),
             'persistent' => env('REDIS_PERSISTENT', false),
+            'serializer' => Redis::SERIALIZER_NONE,
         ],
 
         'default' => [
