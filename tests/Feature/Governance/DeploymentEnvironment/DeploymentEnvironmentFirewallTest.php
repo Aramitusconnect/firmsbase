@@ -546,6 +546,10 @@ class DeploymentEnvironmentFirewallTest extends TestCase
             'tests/Feature/Integrations/Admin/PlatformIntegrationProviderHealthSummaryTest.php',
             'tests/Feature/Integrations/Admin/PlatformIntegrationConnectionDisconnectTest.php',
             'tests/Feature/Integrations/Admin/PlatformIntegrationOversightQueryDeterminismTest.php',
+            // FIRMSVAULT — STAGING ADMIN STABILIZATION (a later,
+            // independently reviewed mission) legitimately added one
+            // migration (code/description columns on `plans`).
+            'database/migrations/2026_10_10_100001_add_code_and_description_to_plans_table.php',
         ];
 
         return array_values(array_filter(

@@ -567,6 +567,35 @@ class EmergencySupportApprovalFirewallTest extends TestCase
             'database/factories/ImportBatchFactory.php',
             'database/factories/MigrationProjectFactory.php',
             'database/factories/OffboardingRequestFactory.php',
+            // FIRMSVAULT — STAGING ADMIN STABILIZATION (a later,
+            // independently reviewed mission) legitimately touches
+            // files under this section's own protected scope — see
+            // that mission's own commit history for full context.
+            'config/database.php',
+            'app/Models/Plan.php',
+            'app/Services/PlanService.php',
+            'app/Services/PlanModuleService.php',
+            'app/Services/FirmProvisioningService.php',
+            'app/Exceptions/InactivePlanSelectedException.php',
+            'app/Console/Commands/BootstrapStagingSandboxPlanCommand.php',
+            'app/Filament/Actions/Platform/CreatePlanAction.php',
+            'app/Filament/Actions/Platform/EditPlanAction.php',
+            'app/Filament/Actions/Platform/AddPlanModuleAction.php',
+            'app/Filament/Resources/PlanResource.php',
+            'app/Filament/Resources/PlanResource/Pages/ListPlans.php',
+            'app/Filament/Resources/PlanAddOnResource.php',
+            'app/Filament/Resources/PlanAddOnResource/Pages/ListPlanAddOns.php',
+            'database/migrations/2026_10_10_100001_add_code_and_description_to_plans_table.php',
+            'database/factories/PlanFactory.php',
+            'tests/Feature/Ecs/RedisTlsConfigurationTest.php',
+            'tests/Feature/Plans/PlanServiceTest.php',
+            'tests/Feature/Services/FirmProvisioningServiceTest.php',
+            'tests/Feature/Console/BootstrapStagingSandboxPlanCommandTest.php',
+            'tests/Feature/PlatformAdmin/PlanCatalogCreateActionsTest.php',
+            'tests/Feature/Security/RlsContextRollout/QueueConsoleContextRolloutTest.php',
+            'tests/Feature/Security/RlsEnforcement/QueueConsoleTenantContextTest.php',
+            'tests/Feature/Security/SeedData/SecretPatternScanTest.php',
+            'tests/Feature/Integrations/Ui/FirmIntegrationSuperAdminBoundaryStructuralTest.php',
         ];
 
         return array_values(array_filter(

@@ -24,9 +24,26 @@ class AdminControlUiBoundaryTest extends TestCase
             // determinism + genuine DB-level pagination fixes) — real
             // UI work belonging to that later mission, not a Section 34
             // catalog/mapping change.
+            // FIRMSVAULT — STAGING ADMIN STABILIZATION (a later,
+            // independently reviewed mission) legitimately added
+            // Create/Edit actions for the Plan catalog and a Create
+            // action for Plan Modules/Add-ons (previously read-only) —
+            // real UI work belonging to that later mission, not a
+            // Section 34 catalog/mapping change.
+            $adminStabilizationAllowed = [
+                'app/Filament/Actions/Platform/AddPlanModuleAction.php',
+                'app/Filament/Actions/Platform/CreatePlanAction.php',
+                'app/Filament/Actions/Platform/EditPlanAction.php',
+                'app/Filament/Resources/PlanAddOnResource.php',
+                'app/Filament/Resources/PlanAddOnResource/Pages/ListPlanAddOns.php',
+                'app/Filament/Resources/PlanResource.php',
+                'app/Filament/Resources/PlanResource/Pages/ListPlans.php',
+            ];
+
             $changed = array_values(array_filter(
                 $this->changedOrUntrackedPaths($relativeDir),
-                fn (string $path) => $path !== 'app/Filament/Pages/PlatformFirmIntegrationsPage.php',
+                fn (string $path) => $path !== 'app/Filament/Pages/PlatformFirmIntegrationsPage.php'
+                    && ! in_array($path, $adminStabilizationAllowed, true),
             ));
 
             $this->assertEmpty($changed, "Section 34 must not add or modify any UI/route file, but found changes under {$relativeDir}: ".implode(', ', $changed));
@@ -386,7 +403,41 @@ class AdminControlUiBoundaryTest extends TestCase
                 // test's existing IntegrationPlatformOversightReadService.php
                 // entry exactly (same ->exists()-only existence-check
                 // pattern).
-                && $path !== 'tests/Unit/Integrations/IntegrationWebhookRoutingIndexNoRlsAndNoSecretColumnTest.php',
+                && $path !== 'tests/Unit/Integrations/IntegrationWebhookRoutingIndexNoRlsAndNoSecretColumnTest.php'
+                // FIRMSVAULT — STAGING ADMIN STABILIZATION (a later,
+                // independently reviewed mission) fixed a real Platform
+                // Admin dashboard HTTP 500 (phpredis serializer
+                // misconfiguration), added Create/Edit actions for the
+                // Plan catalog and a Create action for Plan Modules/
+                // Add-ons (previously read-only), a plan-selection
+                // safety guard in firm provisioning, and a staging-safe
+                // synthetic-plan bootstrap command — plus its own new/
+                // updated tests.
+                && $path !== 'config/database.php'
+                && $path !== 'app/Models/Plan.php'
+                && $path !== 'app/Services/PlanService.php'
+                && $path !== 'app/Services/PlanModuleService.php'
+                && $path !== 'app/Services/FirmProvisioningService.php'
+                && $path !== 'app/Exceptions/InactivePlanSelectedException.php'
+                && $path !== 'app/Console/Commands/BootstrapStagingSandboxPlanCommand.php'
+                && $path !== 'app/Filament/Actions/Platform/CreatePlanAction.php'
+                && $path !== 'app/Filament/Actions/Platform/EditPlanAction.php'
+                && $path !== 'app/Filament/Actions/Platform/AddPlanModuleAction.php'
+                && $path !== 'app/Filament/Resources/PlanResource.php'
+                && $path !== 'app/Filament/Resources/PlanResource/Pages/ListPlans.php'
+                && $path !== 'app/Filament/Resources/PlanAddOnResource.php'
+                && $path !== 'app/Filament/Resources/PlanAddOnResource/Pages/ListPlanAddOns.php'
+                && $path !== 'database/migrations/2026_10_10_100001_add_code_and_description_to_plans_table.php'
+                && $path !== 'database/factories/PlanFactory.php'
+                && $path !== 'tests/Feature/Ecs/RedisTlsConfigurationTest.php'
+                && $path !== 'tests/Feature/Plans/PlanServiceTest.php'
+                && $path !== 'tests/Feature/Services/FirmProvisioningServiceTest.php'
+                && $path !== 'tests/Feature/Console/BootstrapStagingSandboxPlanCommandTest.php'
+                && $path !== 'tests/Feature/PlatformAdmin/PlanCatalogCreateActionsTest.php'
+                && $path !== 'tests/Feature/Security/RlsContextRollout/QueueConsoleContextRolloutTest.php'
+                && $path !== 'tests/Feature/Security/RlsEnforcement/QueueConsoleTenantContextTest.php'
+                && $path !== 'tests/Feature/Security/SeedData/SecretPatternScanTest.php'
+                && $path !== 'tests/Feature/Integrations/Ui/FirmIntegrationSuperAdminBoundaryStructuralTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

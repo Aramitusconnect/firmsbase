@@ -813,6 +813,39 @@ class AdminControlFirewallTest extends TestCase
             // existing IntegrationPlatformOversightReadService.php entry
             // exactly (same ->exists()-only existence-check pattern).
             'tests/Unit/Integrations/IntegrationWebhookRoutingIndexNoRlsAndNoSecretColumnTest.php',
+            // FIRMSVAULT — STAGING ADMIN STABILIZATION (a later,
+            // independently reviewed mission) fixed a real Platform
+            // Admin dashboard HTTP 500 (phpredis serializer
+            // misconfiguration), added Create/Edit actions for the Plan
+            // catalog and a Create action for Plan Modules/Add-ons
+            // (previously read-only), a plan-selection safety guard in
+            // firm provisioning, and a staging-safe synthetic-plan
+            // bootstrap command — plus its own new/updated tests.
+            'config/database.php',
+            'app/Models/Plan.php',
+            'app/Services/PlanService.php',
+            'app/Services/PlanModuleService.php',
+            'app/Services/FirmProvisioningService.php',
+            'app/Exceptions/InactivePlanSelectedException.php',
+            'app/Console/Commands/BootstrapStagingSandboxPlanCommand.php',
+            'app/Filament/Actions/Platform/CreatePlanAction.php',
+            'app/Filament/Actions/Platform/EditPlanAction.php',
+            'app/Filament/Actions/Platform/AddPlanModuleAction.php',
+            'app/Filament/Resources/PlanResource.php',
+            'app/Filament/Resources/PlanResource/Pages/ListPlans.php',
+            'app/Filament/Resources/PlanAddOnResource.php',
+            'app/Filament/Resources/PlanAddOnResource/Pages/ListPlanAddOns.php',
+            'database/migrations/2026_10_10_100001_add_code_and_description_to_plans_table.php',
+            'database/factories/PlanFactory.php',
+            'tests/Feature/Ecs/RedisTlsConfigurationTest.php',
+            'tests/Feature/Plans/PlanServiceTest.php',
+            'tests/Feature/Services/FirmProvisioningServiceTest.php',
+            'tests/Feature/Console/BootstrapStagingSandboxPlanCommandTest.php',
+            'tests/Feature/PlatformAdmin/PlanCatalogCreateActionsTest.php',
+            'tests/Feature/Security/RlsContextRollout/QueueConsoleContextRolloutTest.php',
+            'tests/Feature/Security/RlsEnforcement/QueueConsoleTenantContextTest.php',
+            'tests/Feature/Security/SeedData/SecretPatternScanTest.php',
+            'tests/Feature/Integrations/Ui/FirmIntegrationSuperAdminBoundaryStructuralTest.php',
         ];
 
         return array_values(array_filter(

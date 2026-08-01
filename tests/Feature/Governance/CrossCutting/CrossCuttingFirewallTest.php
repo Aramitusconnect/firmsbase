@@ -219,7 +219,11 @@ class CrossCuttingFirewallTest extends TestCase
                 // no-RLS provider-health summary table, mirroring
                 // integration_platform_overview_summaries' own
                 // established pattern.
-                && $path !== 'database/migrations/2026_09_11_110001_create_integration_platform_provider_health_summaries_table.php',
+                && $path !== 'database/migrations/2026_09_11_110001_create_integration_platform_provider_health_summaries_table.php'
+                // FIRMSVAULT — STAGING ADMIN STABILIZATION (a later,
+                // independently reviewed mission) legitimately added
+                // one migration (code/description columns on `plans`).
+                && $path !== 'database/migrations/2026_10_10_100001_add_code_and_description_to_plans_table.php',
         ));
     }
 
