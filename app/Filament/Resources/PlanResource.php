@@ -8,6 +8,7 @@ use App\Enums\BillingInterval;
 use App\Enums\PlanStatus;
 use App\Filament\Actions\Platform\ActivatePlanAction;
 use App\Filament\Actions\Platform\ArchivePlanAction;
+use App\Filament\Actions\Platform\EditPlanAction;
 use App\Filament\Resources\PlanResource\Pages\ListPlans;
 use App\Filament\Resources\PlanResource\Pages\ViewPlan;
 use App\Models\Plan;
@@ -32,13 +33,18 @@ use Illuminate\Support\Str;
  * Eloquent ->query() table, same shape as FirmResource/
  * PlatformAdministratorResource.
  *
- * No Create action, per this pass's own dispatch instructions:
- * "building a brand-new Plan from scratch has pricing/catalog
- * implications beyond this phase's scope; only activate/archive
- * existing plans." No Edit form either, for the same reason and to
- * match every other Phase 1-3 oversight Resource's "no generic
- * Create/Edit forms" convention — mutations are the two discrete,
- * purpose-built Activate/Archive actions only.
+ * FIRMSVAULT — STAGING ADMIN STABILIZATION revision: Create/Edit are
+ * now supported, per this pass's own defect list ("PlanResource has no
+ * supported Create Plan action"), reversing the earlier Phase 3
+ * decision recorded below for historical context. Both are still
+ * purpose-built actions (CreatePlanAction/EditPlanAction) routed
+ * through PlanService — never Filament's generic CreateAction/
+ * EditAction — matching every other mutation in this Resource
+ * (Activate/Archive).
+ *
+ * Historical note (Phase 3, superseded above): "building a brand-new
+ * Plan from scratch has pricing/catalog implications beyond this
+ * phase's scope; only activate/archive existing plans."
  *
  * Price column renders via App\Support\MoneyDisplay::fromCents() —
  * never a bare number_format/raw integer (this Resource is the
@@ -129,6 +135,7 @@ class PlanResource extends Resource
                         ->all()),
             ])
             ->recordActions([
+                EditPlanAction::make(),
                 ActivatePlanAction::make(),
                 ArchivePlanAction::make(),
             ])

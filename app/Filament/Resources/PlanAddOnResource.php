@@ -42,12 +42,13 @@ use Illuminate\Support\Str;
  * No RLS on plan_modules (Global, same as Plan) — ordinary Eloquent
  * ->query() table.
  *
- * No Create/Edit form (add-on rows are created via
- * PlanModuleService::addModule(), out of this checkpoint's scope, per
- * the mission's own "no generic Create/Edit forms" convention).
- * Mutations are the two discrete, purpose-built Enable/Disable
+ * FIRMSVAULT — STAGING ADMIN STABILIZATION revision: a purpose-built
+ * Create workflow now exists (AddPlanModuleAction, a header action on
+ * ListPlanAddOns routing through PlanModuleService::addModule() — see
+ * that action's own docblock), reversing the earlier Phase 3 "out of
+ * scope" decision. No generic Edit form — Enable/Disable
  * (SetPlanModuleEnabledAction) and Retire (RetirePlanModuleAction)
- * actions.
+ * remain the only two discrete mutations for an existing row.
  *
  * IMPORTANT (per this pass's own dispatch instructions): editing a
  * plan's add-ons does NOT retroactively touch any firm's entitlements
