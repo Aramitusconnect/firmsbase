@@ -119,6 +119,11 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         // Round 3 audit remediation legitimately added this new
         // dedicated service.
         'app/Services/CorrelatedPasswordResetSenderService.php',
+        // Retention governance type-normalization fix (a later,
+        // distinct remediation restoring CI's protected suite) fixed
+        // RetentionGovernanceRegistryService's current_default
+        // type-coercion boundary.
+        'app/Services/RetentionGovernanceRegistryService.php',
     ];
 
     /**

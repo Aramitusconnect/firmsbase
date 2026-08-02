@@ -231,6 +231,15 @@ class RetentionGovernanceRegistryService
      * this returns null rather than fabricating one; callers wanting
      * the individual values should read the documented config() keys
      * directly.
+     *
+     * Every single-scalar entry is normalized through
+     * normalizePositiveInteger() below so `current_default` is always a
+     * real PHP int (or null when unresolvable) regardless of whether
+     * the underlying value reached config() as a native int (no env
+     * var set, PHP literal default used) or as a string (env() returns
+     * a raw string for ANY env var that is actually present —
+     * getenv()/Dotenv never distinguish "180" from "abc"; see
+     * normalizePositiveInteger()'s own docblock).
      */
     private function resolveCurrentDefault(?string $configKey): mixed
     {
@@ -238,6 +247,48 @@ class RetentionGovernanceRegistryService
             return null;
         }
 
-        return config($configKey);
+        return $this->normalizePositiveInteger(config($configKey));
+    }
+
+    /**
+     * Normalizes a raw config() value into a real positive PHP int, or
+     * null if it cannot be trusted as one.
+     *
+     * Laravel's env() helper returns a raw string for any environment
+     * variable that is actually present (Dotenv/getenv never type-cast
+     * a bare numeric literal — only the special tokens true/false/null/
+     * empty are coerced). A retention_days key configured as
+     * `env('INTEGRATIONS_SYNC_RUNS_RETENTION_DAYS', 180)` therefore
+     * resolves to the native int 180 ONLY when that env var is entirely
+     * absent from the process; the moment ANY value for it exists in
+     * the environment (including the exact same "180", e.g. from a
+     * freshly materialized .env file), config() returns the string
+     * "180" instead — this is what caused
+     * RetentionGovernanceRegistryServiceTest to see '180' fail
+     * assertIsInt() under CI (whose schema-tenant-firewall.yml workflow
+     * runs `cp .env.example .env` before testing) while passing locally
+     * (whose dev .env predates these config keys and never sets them).
+     *
+     * Deliberately NOT a blind (int) cast: that would silently turn
+     * "abc", "180.5", " 180 ", "180days", "", null, arrays, and
+     * booleans all into some int (often 0 or 1), hiding a genuine
+     * configuration mistake instead of surfacing it. Only a real int or
+     * a digit-only positive-integer string is accepted; anything else
+     * — including zero and negative values — returns null, matching
+     * this registry's existing "never guess a number, expose null and
+     * let the fail-safe/no-op path handle it" policy for
+     * NOT_CONFIGURED_FAIL_SAFE categories.
+     */
+    private function normalizePositiveInteger(mixed $value): ?int
+    {
+        if (is_int($value)) {
+            return $value > 0 ? $value : null;
+        }
+
+        if (is_string($value) && preg_match('/\A[1-9][0-9]*\z/', $value) === 1) {
+            return (int) $value;
+        }
+
+        return null;
     }
 }

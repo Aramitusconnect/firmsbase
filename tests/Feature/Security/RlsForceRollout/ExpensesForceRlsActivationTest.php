@@ -1029,6 +1029,14 @@ class ExpensesForceRlsActivationTest extends TestCase
         'tests/Feature/Security/SeedData/SeedDataAuditFirewallTest.php',
         'tests/Feature/Security/SupportAccess/EmergencySupportApprovalFirewallTest.php',
         'tests/Feature/Services/FirmProvisioningServiceTest.php',
+        // Retention governance type-normalization fix (a later,
+        // distinct remediation restoring CI's protected suite —
+        // RetentionGovernanceRegistryService::current_default was
+        // returned as a raw string under CI's fresh-.env condition
+        // instead of a real PHP int; fixed at the config() boundary,
+        // plus its own focused regression tests).
+        'app/Services/RetentionGovernanceRegistryService.php',
+        'tests/Feature/Governance/Retention/RetentionGovernanceRegistryServiceTest.php',
     ];
 
     private function changedOrUntrackedPaths(string $scope): array

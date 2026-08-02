@@ -212,6 +212,14 @@ class SeedDataAuditFirewallTest extends TestCase
             'app/Exceptions/NotificationTransportFailedException.php',
             'app/Services/CorrelatedPasswordResetSenderService.php',
             '.env.example',
+            // Retention governance type-normalization fix (a later,
+            // distinct remediation restoring CI's protected suite —
+            // RetentionGovernanceRegistryService::current_default was
+            // returned as a raw string under CI's fresh-.env condition
+            // instead of a real PHP int; fixed at the config()
+            // boundary, plus its own focused regression tests).
+            'app/Services/RetentionGovernanceRegistryService.php',
+            'tests/Feature/Governance/Retention/RetentionGovernanceRegistryServiceTest.php',
         ];
 
         $allowedPrefixes = [
