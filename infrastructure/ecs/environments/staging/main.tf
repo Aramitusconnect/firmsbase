@@ -119,10 +119,15 @@ locals {
     REDIS_QUEUE_RETRY_AFTER = "150"
     FILESYSTEM_DISK         = "s3"
     AWS_DEFAULT_REGION      = var.aws_region
-    AWS_BUCKET              = module.s3_documents.bucket_name
-    LOG_CHANNEL             = "stderr"
-    LOG_LEVEL               = "info"
-    MAIL_MAILER             = "log"
+    # Keep mail configuration consistent across all ECS services.
+    # AWS credentials are supplied by the ECS task role.
+    AWS_REGION        = var.aws_region
+    AWS_BUCKET        = module.s3_documents.bucket_name
+    LOG_CHANNEL       = "stderr"
+    LOG_LEVEL         = "info"
+    MAIL_MAILER       = "ses"
+    MAIL_FROM_ADDRESS = "no-reply@staging-mail.firmsvault.com"
+    MAIL_FROM_NAME    = "FirmsVault"
   }
 
   shared_secrets = {
