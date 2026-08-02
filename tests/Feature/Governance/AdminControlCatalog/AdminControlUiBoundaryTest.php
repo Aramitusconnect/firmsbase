@@ -474,7 +474,11 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== 'database/migrations/2026_10_20_100002_create_platform_notification_suppressions_table.php'
                 && $path !== 'tests/Feature/Mail/SesMailerTransportTest.php'
                 && $path !== 'tests/Feature/Notifications/PasswordResetPlatformCorrelationFallbackTest.php'
-                && $path !== 'tests/Feature/Notifications/PlatformNotificationCorrelationServiceTest.php',
+                && $path !== 'tests/Feature/Notifications/PlatformNotificationCorrelationServiceTest.php'
+                // Round 3 audit remediation legitimately added these.
+                && $path !== 'app/Enums/CorrelatedSendResult.php'
+                && $path !== 'app/Exceptions/NotificationTransportFailedException.php'
+                && $path !== '.env.example',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

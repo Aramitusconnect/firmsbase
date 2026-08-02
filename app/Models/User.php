@@ -7,10 +7,9 @@ use App\Enums\ConsentChannel;
 use App\Enums\FirmUserStatus;
 use App\Models\Concerns\HasPublicUuid;
 use App\Notifications\FirmOwnerInvitationNotification;
+use App\Services\CorrelatedPasswordResetSenderService;
 use App\Services\FirmUser2faPolicyService;
 use App\Services\LoginPolicyService;
-use App\Services\OutboundMailCorrelationService;
-use App\Services\PlatformNotificationCorrelationService;
 use App\Services\TenantContextService;
 use Database\Factories\UserFactory;
 use Filament\Models\Contracts\FilamentUser;
@@ -22,7 +21,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Illuminate\Support\Facades\Log;
 
 #[Fillable(['name', 'email', 'password'])]
 #[Hidden(['password', 'remember_token'])]
@@ -71,96 +69,52 @@ class User extends Authenticatable implements FilamentUser
      * owner's first-time setup — mirrors ClientPortalUser's own
      * identical, non-special-cased override.
      *
-     * SES event consumer (feature/ses-event-consumer) — resolves this
-     * user's own firm via the existing activeFirmUser() self-lookup
-     * (never from the email address itself) and, only when that
-     * succeeds, routes the send through OutboundMailCorrelationService
-     * so a later bounce/complaint can be resolved back to the correct
-     * firm. This must never block a password reset from being
-     * attempted, so a User with no resolvable firm still gets one —
-     * but never uncorrelated and untracked (post-578ee98 audit finding
-     * H1): PlatformNotificationCorrelationService gives it a
-     * tenant-agnostic correlation instead, so a later bounce/complaint
-     * can still be recorded, and a permanently-bad address stops being
-     * retried. Every User is expected to resolve an active firm — one
-     * that doesn't is itself anomalous (mid-deactivation is the only
-     * legitimate case), so this branch also emits an operational alert
-     * distinct from ClientPortalUser's own identical fallback, which
-     * has more benign causes (a detached Client record).
+     * Post-9722e88 audit remediation: delegates entirely to
+     * CorrelatedPasswordResetSenderService and discards its typed
+     * result. This is deliberate, not an oversight — this method's
+     * signature is fixed by Laravel's `CanResetPassword` contract
+     * (void), and it is reached by the PUBLIC, anti-enumeration-
+     * sensitive "forgot password" flow (`Illuminate\Auth\Passwords\
+     * PasswordBroker::sendResetLink()`, called with no custom
+     * callback) — that flow's HTTP response must never differ based on
+     * whether the internal send actually succeeded, or a failure here
+     * would become an observable side channel distinguishing "this
+     * email belongs to an account with an internal error" from "this
+     * email doesn't exist". The service itself never throws and never
+     * falls back to an uncorrelated send on any failure; it only
+     * returns Sent, Suppressed, CorrelationFailed, or TransportFailed,
+     * each already logged at the appropriate severity internally.
      *
-     * The platform-correlation subsystem is layered on top of, never a
-     * precondition for, the actual send: a misconfigured/unavailable
-     * PlatformNotificationCorrelationService (e.g. a missing HMAC key)
-     * must never silently swallow a password reset — this is exactly
-     * the "must never block a password reset" guarantee this docblock
-     * already stated, which an earlier version of this fix violated by
-     * letting isRecipientSuppressed()/correlate()'s own exceptions
-     * propagate up into FirmProvisioningService::dispatchOwnerInvitation()'s
-     * broad catch(Throwable), silently marking a genuine invitation as
-     * failed before notify() was ever reached.
+     * FirmProvisioningService::dispatchOwnerInvitation()/
+     * resendInvitation() are NOT anti-enumeration-sensitive (an
+     * authenticated platform admin already knows the firm/owner
+     * exists) — they call CorrelatedPasswordResetSenderService
+     * directly via sendResetLink()'s own `$callback` parameter instead
+     * of going through this method, passing the Firm they already
+     * have in hand rather than re-resolving it, and inspect the typed
+     * result to decide invitation success/failure.
      */
     public function sendPasswordResetNotification($token): void
     {
         $firm = $this->activeFirmUser()?->firm;
 
-        if ($firm === null) {
-            Log::alert('user_password_reset_no_firm_correlation', [
-                'user_id' => $this->id,
-            ]);
+        if ($firm !== null) {
+            app(CorrelatedPasswordResetSenderService::class)->sendForFirm(
+                $this,
+                $firm,
+                ConsentChannel::Email,
+                $this->email,
+                fn (string $correlationId) => (new FirmOwnerInvitationNotification($token))->withCorrelationId($correlationId),
+            );
 
-            $sent = false;
-
-            try {
-                $platformCorrelation = app(PlatformNotificationCorrelationService::class);
-
-                if ($platformCorrelation->isRecipientSuppressed($this->email)) {
-                    Log::warning('user_password_reset_skipped_platform_suppressed', [
-                        'user_id' => $this->id,
-                    ]);
-
-                    return;
-                }
-
-                $platformCorrelation->correlate(
-                    static::class,
-                    $this->id,
-                    'user_password_reset',
-                    $this->email,
-                    function (string $correlationId) use ($token, &$sent): void {
-                        $this->notify((new FirmOwnerInvitationNotification($token))->withCorrelationId($correlationId));
-                        $sent = true;
-                    },
-                );
-
-                return;
-            } catch (\Throwable $e) {
-                Log::error('user_password_reset_platform_correlation_unavailable', [
-                    'user_id' => $this->id,
-                    'exception' => $e::class,
-                    'message' => $e->getMessage(),
-                ]);
-
-                // Only send here if the closure above never actually
-                // ran notify() — the failure was in the platform-
-                // correlation bookkeeping BEFORE/AFTER the real send, not
-                // in the send itself, so falling back must never
-                // re-send and duplicate a password reset the recipient
-                // already received.
-                if (! $sent) {
-                    $this->notify(new FirmOwnerInvitationNotification($token));
-                }
-
-                return;
-            }
+            return;
         }
 
-        app(OutboundMailCorrelationService::class)->correlate(
-            $firm,
-            ConsentChannel::Email,
+        app(CorrelatedPasswordResetSenderService::class)->sendForUnresolvedFirm(
+            $this,
+            'user_password_reset',
             $this->email,
-            function (string $correlationId) use ($token): void {
-                $this->notify((new FirmOwnerInvitationNotification($token))->withCorrelationId($correlationId));
-            },
+            fn (string $correlationId) => (new FirmOwnerInvitationNotification($token))->withCorrelationId($correlationId),
         );
     }
 

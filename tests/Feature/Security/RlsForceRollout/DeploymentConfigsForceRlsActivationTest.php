@@ -827,6 +827,78 @@ class DeploymentConfigsForceRlsActivationTest extends TestCase
         'tests/Feature/Security/RlsForceRollout/SignatureRequestsForceRlsActivationTest.php',
         'tests/Feature/Security/SeedData/SeedDataAuditFirewallTest.php',
         'tests/Feature/Security/SupportAccess/EmergencySupportApprovalFirewallTest.php',
+        // Round 3 audit remediation (a later, distinct,
+        // independent security/architecture review requiring exact
+        // firm correlation for all tenant-owned email, with no
+        // platform-level or uncorrelated fallback) legitimately
+        // introduced CorrelatedPasswordResetSenderService as the
+        // single dedicated sender every password-reset/invitation
+        // send goes through, fixed a transaction-poisoning bug in
+        // both correlation services' before/post-send DB writes,
+        // and rewired FirmProvisioningService's owner-invitation
+        // dispatch through sendResetLink()'s own $callback
+        // parameter — plus its own new test files. Also
+        // mechanically added this exact const + filtering addition
+        // across all its sibling firewall test files touched by
+        // this same remediation.
+        '.env.example',
+        'app/Enums/CorrelatedSendResult.php',
+        'app/Exceptions/NotificationTransportFailedException.php',
+        'app/Models/ClientPortalUser.php',
+        'app/Models/User.php',
+        'app/Services/CorrelatedPasswordResetSenderService.php',
+        'app/Services/FirmProvisioningService.php',
+        'app/Services/OutboundMailCorrelationService.php',
+        'app/Services/PlatformNotificationCorrelationService.php',
+        'tests/Feature/Governance/AcceptanceTestMatrix/AcceptanceTestMatrixFirewallTest.php',
+        'tests/Feature/Governance/AdminControlCatalog/AdminControlFirewallTest.php',
+        'tests/Feature/Governance/AdminControlCatalog/AdminControlUiBoundaryTest.php',
+        'tests/Feature/Governance/EdgeCaseRiskHandling/EdgeCaseRiskFirewallTest.php',
+        'tests/Feature/Governance/EntityFieldCatalog/EntityFieldCatalogFirewallTest.php',
+        'tests/Feature/Governance/FinalExecutiveRecommendation/FinalExecutiveRecommendationFirewallTest.php',
+        'tests/Feature/Governance/PrePilotRemediationBacklog/PrePilotRemediationFirewallTest.php',
+        'tests/Feature/Governance/ProfessionalReviewGate/ProfessionalReviewFirewallTest.php',
+        'tests/Feature/Governance/WorkflowStateMachines/WorkflowStateMachineFirewallTest.php',
+        'tests/Feature/Notifications/OutboundMailCorrelationServiceTest.php',
+        'tests/Feature/Notifications/PasswordResetPlatformCorrelationFallbackTest.php',
+        'tests/Feature/Notifications/PlatformNotificationCorrelationServiceTest.php',
+        'tests/Feature/Security/RlsForceRollout/AccountingExportBatchesForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/AccountingExportLinesForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/AiApprovalEventsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/AiApprovalRequestsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/AiRetrievalIndexesForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/AiToolActionsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/AiUsageEventsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/ChartOfAccountsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/CustomerSuccessHealthScoresForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/DeploymentConfigsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/DocumentHashesForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/EmailAccountsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/EmailAttachmentsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/EmailMessageLinksForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/EmailMessagesForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/EmailSyncEventsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/EmailVisibilityRulesForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/ExpenseApprovalsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/ExpenseCategoriesForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/ExpenseReceiptsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/ExpensesForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/FirmAiProviderKeysForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/FirmAiSettingsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/FormDraftsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/FormReviewEventsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/GeneratedDocumentEventsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/GeneratedDocumentsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/MatterExpensesForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/PdfViewEventsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/PrivateEnterpriseSettingsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/SignatureCertificatesForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/SignatureEventsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/SignatureRequestRecipientsForceRlsActivationTest.php',
+        'tests/Feature/Security/RlsForceRollout/SignatureRequestsForceRlsActivationTest.php',
+        'tests/Feature/Security/SeedData/SeedDataAuditFirewallTest.php',
+        'tests/Feature/Security/SupportAccess/EmergencySupportApprovalFirewallTest.php',
+        'tests/Feature/Services/FirmProvisioningServiceTest.php',
     ];
 
     private function changedOrUntrackedPaths(string $scope): array

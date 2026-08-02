@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\ConsentChannel;
+use App\Exceptions\NotificationTransportFailedException;
 use App\Models\Firm;
 use App\Models\NotificationProviderCorrelation;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Mail\Events\MessageSent;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * OutboundMailCorrelationService — the outbound half of the SES bounce/
@@ -40,10 +43,22 @@ use Illuminate\Support\Str;
  *      and call NotificationDispatchService::recordSent() — the first
  *      live production caller of that previously-dormant method.
  *
- * If the send throws, no listener ever fires, no "sent" row is ever
- * written, and the exception propagates unchanged to the caller's own
- * existing error handling (e.g. FirmProvisioningService::
- * dispatchOwnerInvitation()'s own try/catch and structured logging).
+ * Failure contract (post-9722e88 audit remediation):
+ *   - BEFORE the send closure runs (creating the correlation row):
+ *     any failure propagates as a plain exception. Nothing has been
+ *     sent, so the caller must treat this as "do not send" — never a
+ *     reason to fall back to an uncorrelated send.
+ *   - DURING the send closure itself (the real ->notify() call):
+ *     a failure is wrapped in NotificationTransportFailedException so
+ *     the caller can distinguish "the transport itself failed" (no
+ *     email went out) from a correlation-bookkeeping failure.
+ *   - AFTER the send closure returns successfully (persisting the
+ *     confirmed provider message id, recording the Sent event): a
+ *     failure here is logged as a CRITICAL reconciliation incident
+ *     (never rethrown) — SES has already accepted the message, so
+ *     this method must never cause a second send, and must never
+ *     silently report a fully-correlated success when the
+ *     correlation itself is actually incomplete.
  *
  * Listener lifecycle (post-audit fix): the MessageSent listener
  * registered below is scoped to exactly one correlate() call. Laravel's
@@ -69,12 +84,22 @@ class OutboundMailCorrelationService
         $correlationId = (string) Str::uuid();
         $normalizedRecipient = $this->normalize($recipient);
 
-        NotificationProviderCorrelation::create([
-            'correlation_id' => $correlationId,
-            'firm_id' => $firm->id,
-            'channel' => $channel->value,
-            'recipient_normalized' => $normalizedRecipient,
-        ]);
+        // BEFORE-SEND: propagates as a plain exception on failure —
+        // nothing has been sent yet. Wrapped in its own DB::transaction()
+        // so a failure here can never poison a caller's own wrapping
+        // transaction (Postgres aborts the entire current transaction
+        // block on an uncommitted statement failure, not just the one
+        // statement) — Laravel automatically uses a SAVEPOINT here when
+        // already inside one, exactly like recordReceipt()'s own fix in
+        // SesEventConsumerService.
+        DB::transaction(function () use ($correlationId, $firm, $channel, $normalizedRecipient): void {
+            NotificationProviderCorrelation::create([
+                'correlation_id' => $correlationId,
+                'firm_id' => $firm->id,
+                'channel' => $channel->value,
+                'recipient_normalized' => $normalizedRecipient,
+            ]);
+        });
 
         $providerMessageId = null;
 
@@ -94,7 +119,11 @@ class OutboundMailCorrelationService
         $this->events->listen(MessageSent::class, $listener);
 
         try {
-            $send($correlationId);
+            try {
+                $send($correlationId);
+            } catch (Throwable $e) {
+                throw new NotificationTransportFailedException($e);
+            }
         } finally {
             $this->events->forget(MessageSent::class);
 
@@ -103,8 +132,14 @@ class OutboundMailCorrelationService
             }
         }
 
+        // POST-SEND: the transport call above did not throw — SES has
+        // already accepted the message (or, at minimum, Laravel's mail
+        // transport returned without error). Everything from here on
+        // is reconciliation bookkeeping only; a failure must never
+        // cause a second send and must never be silently swallowed as
+        // if correlation were complete.
         if ($providerMessageId === null) {
-            Log::warning('outbound_mail_correlation_no_provider_message_id', [
+            Log::critical('outbound_mail_correlation_sent_without_confirmed_provider_message_id', [
                 'correlation_id' => $correlationId,
                 'firm_id' => $firm->id,
                 'channel' => $channel->value,
@@ -113,10 +148,37 @@ class OutboundMailCorrelationService
             return;
         }
 
-        NotificationProviderCorrelation::where('correlation_id', $correlationId)
-            ->update(['provider_message_id' => $providerMessageId]);
+        try {
+            // Deliberately TWO separate DB::transaction() calls, not
+            // one: persisting provider_message_id is the critical piece
+            // for future bounce/complaint reconciliation ("preserve
+            // enough state to reconcile the SES message ID") and must
+            // survive even if recordSent() itself then fails — wrapping
+            // both in one transaction would roll the persisted
+            // provider_message_id back too on a recordSent() failure,
+            // losing exactly the state this is supposed to preserve.
+            // Each is independently wrapped so a caught failure in
+            // either can never poison a caller's own wrapping
+            // transaction (e.g. FirmProvisioningService's own
+            // $request->forceFill(...)->save() call immediately after
+            // dispatchOwnerInvitation() returns).
+            DB::transaction(function () use ($correlationId, $providerMessageId): void {
+                NotificationProviderCorrelation::where('correlation_id', $correlationId)
+                    ->update(['provider_message_id' => $providerMessageId]);
+            });
 
-        $this->dispatchService->recordSent($firm, $correlationId, $channel, $normalizedRecipient, null, null, null, $providerMessageId);
+            DB::transaction(function () use ($correlationId, $firm, $channel, $normalizedRecipient, $providerMessageId): void {
+                $this->dispatchService->recordSent($firm, $correlationId, $channel, $normalizedRecipient, null, null, null, $providerMessageId);
+            });
+        } catch (Throwable $e) {
+            Log::critical('outbound_mail_correlation_post_send_reconciliation_required', [
+                'correlation_id' => $correlationId,
+                'firm_id' => $firm->id,
+                'channel' => $channel->value,
+                'provider_message_id' => $providerMessageId,
+                'exception' => $e::class,
+            ]);
+        }
     }
 
     private function normalize(string $email): string

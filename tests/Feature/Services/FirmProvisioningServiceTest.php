@@ -24,6 +24,7 @@ use App\Models\FirmUser;
 use App\Models\Organization;
 use App\Models\Plan;
 use App\Models\PlatformAdmin;
+use App\Models\PlatformNotificationCorrelation;
 use App\Models\User;
 use App\Notifications\FirmOwnerInvitationNotification;
 use App\Services\FirmProvisioningService;
@@ -33,6 +34,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -313,6 +315,35 @@ final class FirmProvisioningServiceTest extends TestCase
         // The Firm/User/FirmUser records must still exist intact.
         $this->assertNotNull(Firm::query()->find($result->firm->id));
         $this->assertNotNull(User::query()->find($result->owner->id));
+    }
+
+    /**
+     * Post-9722e88 audit remediation requirement 4 (firm-owned email):
+     * a firm-owner invitation always passes its ALREADY-KNOWN Firm
+     * directly to CorrelatedPasswordResetSenderService::sendForFirm()
+     * — there is no firm-resolution step to "fail" at this call site,
+     * and no platform-level fallback available to it at all. When the
+     * firm-scope correlation itself fails (simulated here via a
+     * dropped table — Postgres supports transactional DDL, and
+     * RefreshDatabase's own wrapping transaction undoes this
+     * automatically), the invitation must send zero emails and must
+     * never attempt (or create any row via) the platform-scope path.
+     */
+    public function test_invitation_with_correlation_failure_sends_zero_emails_and_never_falls_back_to_platform_scope(): void
+    {
+        Notification::fake();
+
+        Schema::drop('notification_provider_correlations');
+
+        $result = $this->service()->provision($this->input(), $this->actor());
+
+        $this->assertSame(FirmProvisioningStatus::InvitationFailed, $result->status);
+        Notification::assertNothingSent();
+        $this->assertSame(
+            0,
+            PlatformNotificationCorrelation::query()->count(),
+            'A firm-owned invitation must never fall back to the platform-scope correlation path.'
+        );
     }
 
     public function test_resend_invitation_works_without_duplicating_tenant_records(): void

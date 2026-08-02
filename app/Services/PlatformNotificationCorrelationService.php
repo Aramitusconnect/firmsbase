@@ -5,13 +5,16 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\NotificationEventStatus;
+use App\Exceptions\NotificationTransportFailedException;
 use App\Models\PlatformNotificationCorrelation;
 use App\Models\PlatformNotificationSuppression;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Mail\Events\MessageSent;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Throwable;
 
 /**
  * PlatformNotificationCorrelationService — post-578ee98 audit
@@ -57,23 +60,47 @@ class PlatformNotificationCorrelationService
     {
         $fingerprint = $this->fingerprint($this->normalize($recipient));
 
-        return PlatformNotificationSuppression::query()
+        // Wrapped in DB::transaction() so a failure here (e.g. the
+        // table itself being unreachable) can never poison a caller's
+        // own wrapping transaction — a plain SELECT can still abort a
+        // Postgres transaction block just as an INSERT/UPDATE can.
+        return DB::transaction(fn () => PlatformNotificationSuppression::query()
             ->where('recipient_fingerprint', $fingerprint)
-            ->exists();
+            ->exists());
     }
 
+    /**
+     * Failure contract mirrors OutboundMailCorrelationService::correlate()
+     * exactly (post-9722e88 audit remediation): a before-send failure
+     * (creating the correlation row, the HMAC fingerprint itself)
+     * propagates as a plain exception; a failure in the $send closure
+     * itself is wrapped in NotificationTransportFailedException; a
+     * post-send bookkeeping failure is logged as a critical
+     * reconciliation incident and never rethrown, since the email has
+     * already been sent by that point.
+     */
     public function correlate(string $accountType, int $accountId, string $notificationType, string $recipient, \Closure $send): void
     {
         $correlationId = (string) Str::uuid();
+
+        // BEFORE-SEND: fingerprint() throws (missing/invalid HMAC key)
+        // and create() throws (DB failure) both propagate here, before
+        // anything is sent. Wrapped in its own DB::transaction() so a
+        // caught failure can never poison a caller's own wrapping
+        // transaction — identical fix to
+        // OutboundMailCorrelationService::correlate()'s own before-send
+        // step.
         $fingerprint = $this->fingerprint($this->normalize($recipient));
 
-        PlatformNotificationCorrelation::create([
-            'correlation_id' => $correlationId,
-            'account_type' => $accountType,
-            'account_id' => $accountId,
-            'notification_type' => $notificationType,
-            'recipient_fingerprint' => $fingerprint,
-        ]);
+        DB::transaction(function () use ($correlationId, $accountType, $accountId, $notificationType, $fingerprint): void {
+            PlatformNotificationCorrelation::create([
+                'correlation_id' => $correlationId,
+                'account_type' => $accountType,
+                'account_id' => $accountId,
+                'notification_type' => $notificationType,
+                'recipient_fingerprint' => $fingerprint,
+            ]);
+        });
 
         $providerMessageId = null;
 
@@ -93,7 +120,11 @@ class PlatformNotificationCorrelationService
         $this->events->listen(MessageSent::class, $listener);
 
         try {
-            $send($correlationId);
+            try {
+                $send($correlationId);
+            } catch (Throwable $e) {
+                throw new NotificationTransportFailedException($e);
+            }
         } finally {
             $this->events->forget(MessageSent::class);
 
@@ -102,8 +133,10 @@ class PlatformNotificationCorrelationService
             }
         }
 
+        // POST-SEND: the transport call above did not throw. Everything
+        // from here on is reconciliation bookkeeping only.
         if ($providerMessageId === null) {
-            Log::warning('platform_notification_correlation_no_provider_message_id', [
+            Log::critical('platform_notification_correlation_sent_without_confirmed_provider_message_id', [
                 'correlation_id' => $correlationId,
                 'account_type' => $accountType,
                 'account_id' => $accountId,
@@ -113,8 +146,21 @@ class PlatformNotificationCorrelationService
             return;
         }
 
-        PlatformNotificationCorrelation::where('correlation_id', $correlationId)
-            ->update(['provider_message_id' => $providerMessageId]);
+        try {
+            DB::transaction(function () use ($correlationId, $providerMessageId): void {
+                PlatformNotificationCorrelation::where('correlation_id', $correlationId)
+                    ->update(['provider_message_id' => $providerMessageId]);
+            });
+        } catch (Throwable $e) {
+            Log::critical('platform_notification_correlation_post_send_reconciliation_required', [
+                'correlation_id' => $correlationId,
+                'account_type' => $accountType,
+                'account_id' => $accountId,
+                'notification_type' => $notificationType,
+                'provider_message_id' => $providerMessageId,
+                'exception' => $e::class,
+            ]);
+        }
     }
 
     /**

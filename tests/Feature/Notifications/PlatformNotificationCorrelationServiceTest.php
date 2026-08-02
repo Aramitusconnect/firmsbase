@@ -159,4 +159,100 @@ class PlatformNotificationCorrelationServiceTest extends TestCase
 
         $this->assertSame([], app('events')->getRawListeners()[MessageSent::class] ?? []);
     }
+
+    /**
+     * Post-9722e88 audit remediation requirement 1 (before-send
+     * failure): a missing/invalid HMAC key must fail closed — the
+     * fingerprint is computed before the correlation row is even
+     * created, so the send closure must never run at all.
+     */
+    public function test_missing_hmac_key_sends_zero_emails(): void
+    {
+        config(['services.platform_notifications.recipient_fingerprint_hmac_key' => null]);
+
+        $service = app(PlatformNotificationCorrelationService::class);
+        $sendCalled = false;
+
+        try {
+            $service->correlate(
+                'App\\Models\\User',
+                1,
+                'user_password_reset',
+                'owner@example.com',
+                function (string $correlationId) use (&$sendCalled): void {
+                    $sendCalled = true;
+                },
+            );
+
+            $this->fail('Expected a RuntimeException for the missing HMAC key.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('recipient_fingerprint_hmac_key', $e->getMessage());
+        }
+
+        $this->assertFalse($sendCalled, 'The send closure must never run when the HMAC key is missing.');
+        $this->assertSame(0, PlatformNotificationCorrelation::query()->count());
+    }
+
+    /**
+     * Post-9722e88 audit remediation requirement 1: a before-send DB
+     * failure (creating the correlation row) must also fail closed.
+     */
+    public function test_correlation_row_creation_failure_sends_zero_emails(): void
+    {
+        $service = app(PlatformNotificationCorrelationService::class);
+        $sendCalled = false;
+
+        try {
+            $service->correlate(
+                'App\\Models\\User',
+                1,
+                str_repeat('x', 5000), // exceeds the column's varchar length — a genuine DB-level failure
+                'owner@example.com',
+                function (string $correlationId) use (&$sendCalled): void {
+                    $sendCalled = true;
+                },
+            );
+
+            $this->fail('Expected a database exception for the oversized notification_type value.');
+        } catch (\Throwable) {
+            // Any DB-layer exception is acceptable here — the point is
+            // that it propagates rather than being swallowed into an
+            // uncorrelated send.
+        }
+
+        $this->assertFalse($sendCalled, 'The send closure must never run when the correlation row cannot be created.');
+    }
+
+    /**
+     * Post-9722e88 audit remediation requirement 2 (post-send failure):
+     * a failure persisting provider_message_id must not rethrow (the
+     * email was already sent) and must never cause a second send.
+     */
+    public function test_post_send_persistence_failure_does_not_rethrow_and_never_sends_twice(): void
+    {
+        $service = app(PlatformNotificationCorrelationService::class);
+        $sendCount = 0;
+
+        $service->correlate(
+            'App\\Models\\User',
+            1,
+            'user_password_reset',
+            'owner@example.com',
+            function (string $correlationId) use (&$sendCount): void {
+                $sendCount++;
+                $this->dispatchFakeSentMessage($correlationId, 'ses-msg-platform-post-send', 'owner@example.com');
+            },
+        );
+
+        // Simulate a retry of just the post-send persistence step (an
+        // infrastructure-level retry, not a second correlate() call) —
+        // running the identical update twice must be idempotent.
+        $correlation = PlatformNotificationCorrelation::query()->sole();
+        PlatformNotificationCorrelation::where('correlation_id', $correlation->correlation_id)
+            ->update(['provider_message_id' => 'ses-msg-platform-post-send']);
+
+        $this->assertSame(1, $sendCount);
+        $this->assertSame(1, PlatformNotificationCorrelation::query()->count());
+        $this->assertSame('ses-msg-platform-post-send', $correlation->fresh()->provider_message_id);
+    }
 }

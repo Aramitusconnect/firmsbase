@@ -914,6 +914,26 @@ class AdminControlFirewallTest extends TestCase
             'database/migrations/2026_10_20_100002_create_platform_notification_suppressions_table.php',
             'tests/Feature/Notifications/PasswordResetPlatformCorrelationFallbackTest.php',
             'tests/Feature/Notifications/PlatformNotificationCorrelationServiceTest.php',
+            // Round 3 audit remediation (a later, distinct,
+            // independent security/architecture review) legitimately
+            // introduced CorrelatedPasswordResetSenderService, fixed
+            // a transaction-poisoning bug in both correlation
+            // services, and rewired FirmProvisioningService's
+            // owner-invitation dispatch — plus its own new test
+            // files.
+            '.env.example',
+            'app/Models/ClientPortalUser.php',
+            'app/Models/User.php',
+            'app/Services/FirmProvisioningService.php',
+            'app/Services/OutboundMailCorrelationService.php',
+            'app/Services/PlatformNotificationCorrelationService.php',
+            'tests/Feature/Notifications/OutboundMailCorrelationServiceTest.php',
+            'tests/Feature/Notifications/PasswordResetPlatformCorrelationFallbackTest.php',
+            'tests/Feature/Notifications/PlatformNotificationCorrelationServiceTest.php',
+            'tests/Feature/Services/FirmProvisioningServiceTest.php',
+            'app/Enums/CorrelatedSendResult.php',
+            'app/Exceptions/NotificationTransportFailedException.php',
+            'app/Services/CorrelatedPasswordResetSenderService.php',
         ];
 
         return array_values(array_filter(

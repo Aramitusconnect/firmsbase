@@ -6,9 +6,11 @@ namespace Tests\Feature\Notifications;
 
 use App\Enums\ConsentChannel;
 use App\Enums\NotificationEventStatus;
+use App\Exceptions\NotificationTransportFailedException;
 use App\Models\Firm;
 use App\Models\NotificationEvent;
 use App\Models\NotificationProviderCorrelation;
+use App\Services\NotificationDispatchService;
 use App\Services\OutboundMailCorrelationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Mail\Events\MessageSent;
@@ -166,8 +168,12 @@ class OutboundMailCorrelationServiceTest extends TestCase
             );
 
             $this->fail('Expected the simulated transport exception to propagate.');
-        } catch (\RuntimeException $e) {
-            $this->assertSame('simulated transport failure', $e->getMessage());
+        } catch (NotificationTransportFailedException $e) {
+            // Post-9722e88 audit remediation: send-closure failures are
+            // now wrapped so callers can distinguish "transport itself
+            // failed" from "correlation bookkeeping failed" — see
+            // CorrelatedPasswordResetSenderService.
+            $this->assertSame('simulated transport failure', $e->getPrevious()?->getMessage());
         }
 
         $this->assertSame([], $this->messageSentListeners(), 'A failed send must leave no stale MessageSent listener.');
@@ -249,5 +255,48 @@ class OutboundMailCorrelationServiceTest extends TestCase
 
         $this->assertTrue($unrelatedListenerFired, 'A pre-existing MessageSent listener must still fire.');
         $this->assertCount(1, $this->messageSentListeners(), 'The pre-existing listener must survive; only this service\'s own listener is removed.');
+    }
+
+    /**
+     * Post-9722e88 audit remediation requirement 2 (post-send failure):
+     * SES has already accepted the message by the time recordSent()
+     * runs — a failure here must never trigger a second send, and must
+     * never be silently swallowed as a fully correlated success. Proves
+     * both: correlate() does not rethrow (the caller must not treat
+     * this as "nothing was sent"), and the send closure ran exactly
+     * once (no retry-and-resend).
+     */
+    public function test_post_send_bookkeeping_failure_does_not_rethrow_and_never_sends_twice(): void
+    {
+        $firm = Firm::factory()->create();
+
+        $failingDispatchService = \Mockery::mock(NotificationDispatchService::class);
+        $failingDispatchService->shouldReceive('recordSent')->once()->andThrow(new \RuntimeException('simulated DB failure'));
+        $this->app->instance(NotificationDispatchService::class, $failingDispatchService);
+
+        $sendCount = 0;
+
+        // Re-resolve after rebinding NotificationDispatchService so the
+        // service under test actually receives the failing mock.
+        app(OutboundMailCorrelationService::class)->correlate(
+            $firm,
+            ConsentChannel::Email,
+            'owner@example.com',
+            function (string $correlationId) use (&$sendCount) {
+                $sendCount++;
+                $this->dispatchFakeSentMessage($correlationId, 'ses-msg-post-send-failure', 'owner@example.com');
+            },
+        );
+
+        $this->assertSame(1, $sendCount, 'A post-send bookkeeping failure must never cause the send closure to run again.');
+
+        // provider_message_id IS persisted (that update() runs before
+        // the failing recordSent() call) — the reconciliation gap is
+        // specifically that no notification_events "Sent" row exists,
+        // which is exactly what the critical log must surface for
+        // manual reconciliation, without ever rethrowing (the email
+        // genuinely was sent).
+        $correlation = NotificationProviderCorrelation::query()->where('firm_id', $firm->id)->sole();
+        $this->assertSame('ses-msg-post-send-failure', $correlation->provider_message_id);
     }
 }
