@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\ConsentChannel;
 use App\Enums\FirmActivationStatus;
 use App\Enums\FirmOrganizationProvisioningMode;
 use App\Enums\FirmProvisioningStatus;
@@ -25,6 +26,7 @@ use App\Models\Organization;
 use App\Models\Plan;
 use App\Models\PlatformAdmin;
 use App\Models\User;
+use App\Notifications\FirmOwnerInvitationNotification;
 use App\ValueObjects\FirmProvisioningInput;
 use App\ValueObjects\FirmProvisioningResult;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -175,7 +177,7 @@ final class FirmProvisioningService
             throw $e;
         }
 
-        $invitationSucceeded = $this->dispatchOwnerInvitation($owner);
+        $invitationSucceeded = $this->dispatchOwnerInvitation($owner, $firm);
 
         $request->forceFill([
             'status' => $invitationSucceeded ? FirmProvisioningStatus::Completed : FirmProvisioningStatus::InvitationFailed,
@@ -205,7 +207,7 @@ final class FirmProvisioningService
             throw new \RuntimeException('This firm has no resolvable owner to invite.');
         }
 
-        $succeeded = $this->dispatchOwnerInvitation($owner);
+        $succeeded = $this->dispatchOwnerInvitation($owner, $firm);
 
         if ($request !== null) {
             $request->forceFill([
@@ -384,10 +386,49 @@ final class FirmProvisioningService
         return new FirmProvisioningResult($existingRequest, $firm, $owner, $existingRequest->status, resumedFromExistingRequest: true);
     }
 
-    private function dispatchOwnerInvitation(User $owner): bool
+    /**
+     * Post-9722e88 audit remediation (requirement 4 — firm-owned email
+     * must require an exact firm correlation, no platform-level or
+     * uncorrelated fallback): $firm is the ALREADY-KNOWN Firm this
+     * owner belongs to — never re-resolved via User::activeFirmUser(),
+     * which is what User::sendPasswordResetNotification()'s own
+     * automatic hook would do if this call site went through it
+     * unmodified. Instead this uses
+     * Illuminate\Auth\Passwords\PasswordBroker::sendResetLink()'s own
+     * `$callback` parameter (a first-class Laravel extension point —
+     * see its own source: `return $callback($user, $token) ?? static::
+     * RESET_LINK_SENT;`) to reuse the broker's real token generation
+     * and throttling (`tokens->recentlyCreatedToken()`/`tokens->create()`)
+     * while calling CorrelatedPasswordResetSenderService::sendForFirm()
+     * directly and inspecting its typed CorrelatedSendResult — rather
+     * than falling through to the automatic
+     * `$user->sendPasswordResetNotification($token)` call, which exists
+     * specifically to serve the PUBLIC, anti-enumeration-sensitive
+     * "forgot password" flow and cannot report a typed result back
+     * through Laravel's void `CanResetPassword` contract. This
+     * authenticated, platform-admin-facing call site is not anti-
+     * enumeration-sensitive (the admin already knows this firm/owner
+     * exists — they just created or are re-inviting them), so it is
+     * free to inspect the real outcome and mark the invitation attempt
+     * failed accordingly.
+     */
+    private function dispatchOwnerInvitation(User $owner, Firm $firm): bool
     {
         try {
-            $status = Password::broker('users')->sendResetLink(['email' => $owner->email]);
+            $status = Password::broker('users')->sendResetLink(
+                ['email' => $owner->email],
+                function (User $user, string $token) use ($firm): ?string {
+                    $result = app(CorrelatedPasswordResetSenderService::class)->sendForFirm(
+                        $user,
+                        $firm,
+                        ConsentChannel::Email,
+                        $user->email,
+                        fn (string $correlationId) => (new FirmOwnerInvitationNotification($token))->withCorrelationId($correlationId),
+                    );
+
+                    return $result->wasSent() ? Password::RESET_LINK_SENT : 'firm_owner_invitation_correlation_failed';
+                },
+            );
 
             return $status === Password::RESET_LINK_SENT;
         } catch (Throwable) {

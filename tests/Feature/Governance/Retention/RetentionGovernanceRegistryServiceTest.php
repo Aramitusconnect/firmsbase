@@ -7,6 +7,7 @@ namespace Tests\Feature\Governance\Retention;
 use App\Services\RetentionGovernanceRegistryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 /**
@@ -26,7 +27,7 @@ class RetentionGovernanceRegistryServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new RetentionGovernanceRegistryService();
+        $this->service = new RetentionGovernanceRegistryService;
     }
 
     // ------------------------------------------------------------
@@ -93,14 +94,151 @@ class RetentionGovernanceRegistryServiceTest extends TestCase
         }
     }
 
-    public function test_sync_runs_and_sync_items_categories_are_configured_default_and_have_a_real_positive_current_default(): void
+    // sync_runs and sync_items are tested independently (not in a shared
+    // loop) so that a future regression in one is never masked by, or
+    // mistaken for, a failure in the other — see the type-normalization
+    // regression this checkpoint fixed, where CI's PHPUnit run stopped at
+    // sync_runs and sync_items was never actually exercised that run.
+
+    public function test_sync_runs_category_is_configured_default_and_has_a_real_positive_current_default(): void
     {
-        foreach (['sync_runs', 'sync_items'] as $category) {
-            $this->assertSame(RetentionGovernanceRegistryService::STATUS_CONFIGURED_DEFAULT, $this->service->statusFor($category));
-            $entry = $this->service->categoryFor($category);
-            $this->assertIsInt($entry['current_default']);
-            $this->assertGreaterThan(0, $entry['current_default']);
+        $this->assertSame(RetentionGovernanceRegistryService::STATUS_CONFIGURED_DEFAULT, $this->service->statusFor('sync_runs'));
+        $entry = $this->service->categoryFor('sync_runs');
+        $this->assertIsInt($entry['current_default']);
+        $this->assertGreaterThan(0, $entry['current_default']);
+    }
+
+    public function test_sync_items_category_is_configured_default_and_has_a_real_positive_current_default(): void
+    {
+        $this->assertSame(RetentionGovernanceRegistryService::STATUS_CONFIGURED_DEFAULT, $this->service->statusFor('sync_items'));
+        $entry = $this->service->categoryFor('sync_items');
+        $this->assertIsInt($entry['current_default']);
+        $this->assertGreaterThan(0, $entry['current_default']);
+    }
+
+    // ------------------------------------------------------------
+    // current_default type normalization — Laravel's env() helper
+    // returns a raw STRING for any environment variable that is
+    // actually present (only true/false/null/empty are special-cased),
+    // so config('integrations.sync_runs.retention_days') resolves to
+    // the string "180" the moment INTEGRATIONS_SYNC_RUNS_RETENTION_DAYS
+    // exists in the process environment at all — exactly what CI's
+    // schema-tenant-firewall.yml workflow triggers via `cp
+    // .env.example .env`, which materializes every key in
+    // .env.example (including this one) as a real environment string.
+    // These prove the registry normalizes at the config() boundary
+    // instead of ever surfacing that raw string.
+    // ------------------------------------------------------------
+
+    public function test_integer_config_value_normalizes_to_the_same_integer(): void
+    {
+        config(['integrations.sync_runs.retention_days' => 180]);
+        $this->assertSame(180, $this->service->categoryFor('sync_runs')['current_default']);
+    }
+
+    public function test_numeric_string_config_value_normalizes_to_an_integer(): void
+    {
+        config(['integrations.sync_runs.retention_days' => '180']);
+        $this->assertSame(180, $this->service->categoryFor('sync_runs')['current_default']);
+    }
+
+    public function test_empty_string_config_value_follows_the_existing_invalid_value_policy(): void
+    {
+        config(['integrations.sync_runs.retention_days' => '']);
+        $this->assertNull($this->service->categoryFor('sync_runs')['current_default']);
+    }
+
+    public function test_non_numeric_string_config_value_follows_the_existing_invalid_value_policy(): void
+    {
+        config(['integrations.sync_runs.retention_days' => 'abc']);
+        $this->assertNull($this->service->categoryFor('sync_runs')['current_default']);
+    }
+
+    public function test_decimal_string_config_value_follows_the_existing_invalid_value_policy(): void
+    {
+        config(['integrations.sync_runs.retention_days' => '180.5']);
+        $this->assertNull($this->service->categoryFor('sync_runs')['current_default']);
+    }
+
+    public function test_whitespace_padded_string_config_value_follows_the_existing_invalid_value_policy(): void
+    {
+        config(['integrations.sync_runs.retention_days' => ' 180 ']);
+        $this->assertNull($this->service->categoryFor('sync_runs')['current_default']);
+    }
+
+    public function test_non_numeric_suffixed_string_config_value_follows_the_existing_invalid_value_policy(): void
+    {
+        config(['integrations.sync_runs.retention_days' => '180days']);
+        $this->assertNull($this->service->categoryFor('sync_runs')['current_default']);
+    }
+
+    public function test_integer_zero_config_value_follows_the_existing_invalid_value_policy(): void
+    {
+        config(['integrations.sync_runs.retention_days' => 0]);
+        $this->assertNull($this->service->categoryFor('sync_runs')['current_default']);
+    }
+
+    public function test_string_zero_config_value_follows_the_existing_invalid_value_policy(): void
+    {
+        config(['integrations.sync_runs.retention_days' => '0']);
+        $this->assertNull($this->service->categoryFor('sync_runs')['current_default']);
+    }
+
+    public function test_negative_integer_config_value_follows_the_existing_invalid_value_policy(): void
+    {
+        config(['integrations.sync_runs.retention_days' => -1]);
+        $this->assertNull($this->service->categoryFor('sync_runs')['current_default']);
+    }
+
+    public function test_negative_string_config_value_follows_the_existing_invalid_value_policy(): void
+    {
+        config(['integrations.sync_runs.retention_days' => '-1']);
+        $this->assertNull($this->service->categoryFor('sync_runs')['current_default']);
+    }
+
+    public function test_null_config_value_follows_the_existing_invalid_value_policy(): void
+    {
+        config(['integrations.sync_runs.retention_days' => null]);
+        $this->assertNull($this->service->categoryFor('sync_runs')['current_default']);
+    }
+
+    public function test_missing_config_key_follows_the_existing_invalid_value_policy(): void
+    {
+        config(['integrations.sync_runs' => []]);
+        $this->assertNull($this->service->categoryFor('sync_runs')['current_default']);
+    }
+
+    public function test_array_config_value_follows_the_existing_invalid_value_policy(): void
+    {
+        config(['integrations.sync_runs.retention_days' => [180]]);
+        $this->assertNull($this->service->categoryFor('sync_runs')['current_default']);
+    }
+
+    public function test_boolean_config_value_follows_the_existing_invalid_value_policy(): void
+    {
+        config(['integrations.sync_runs.retention_days' => true]);
+        $this->assertNull($this->service->categoryFor('sync_runs')['current_default']);
+    }
+
+    public function test_every_configured_default_category_with_a_single_scalar_config_key_exposes_a_positive_integer_current_default(): void
+    {
+        $checked = 0;
+
+        foreach ($this->service->categories() as $category => $entry) {
+            if ($entry['status'] !== RetentionGovernanceRegistryService::STATUS_CONFIGURED_DEFAULT) {
+                continue;
+            }
+
+            if ($entry['config_key'] === null || str_contains($entry['config_key'], ' / ') || str_contains($entry['config_key'], ' (')) {
+                continue;
+            }
+
+            $this->assertIsInt($entry['current_default'], "{$category}'s current_default must be a real PHP int.");
+            $this->assertGreaterThan(0, $entry['current_default'], "{$category}'s current_default must be positive.");
+            $checked++;
         }
+
+        $this->assertGreaterThan(0, $checked, 'Expected at least one STATUS_CONFIGURED_DEFAULT category with a single-scalar config_key.');
     }
 
     public function test_category_for_an_unknown_category_returns_null(): void
@@ -175,7 +313,7 @@ class RetentionGovernanceRegistryServiceTest extends TestCase
             $this->assertSame(
                 $entry['legal_hold_coverage_unresolved'],
                 in_array($category, $flagged, true),
-                "categoriesWithUnresolvedLegalHoldCoverage() must be exactly the set of categories individually flagged true."
+                'categoriesWithUnresolvedLegalHoldCoverage() must be exactly the set of categories individually flagged true.'
             );
         }
     }
@@ -187,7 +325,7 @@ class RetentionGovernanceRegistryServiceTest extends TestCase
 
     public function test_no_retentionpolicy_row_is_seeded_for_any_integration_category(): void
     {
-        if (! \Illuminate\Support\Facades\Schema::hasTable('retention_policies')) {
+        if (! Schema::hasTable('retention_policies')) {
             $this->markTestSkipped('retention_policies table does not exist in this schema.');
         }
 

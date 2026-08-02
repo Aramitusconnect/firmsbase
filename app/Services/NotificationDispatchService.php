@@ -63,8 +63,7 @@ class NotificationDispatchService
         private NotificationTemplateService $templates,
         private SenderDomainVerificationService $domainVerification,
         private NotificationEligibilityService $eligibility,
-    ) {
-    }
+    ) {}
 
     public function dispatch(
         Firm $firm,
@@ -76,7 +75,7 @@ class NotificationDispatchService
         ?Model $subject = null,
         ?Matter $matter = null,
     ): NotificationDispatchResult {
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $client, $channel, $recipient, $templateKey, $language, $subject, $matter) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $client, $channel, $recipient, $templateKey, $language, $subject, $matter) {
             $correlationId = (string) Str::uuid();
 
             $this->recordEvent($firm, $correlationId, $channel, $recipient, NotificationEventStatus::Attempted, null, $client, $matter, null, $subject);
@@ -119,11 +118,15 @@ class NotificationDispatchService
 
     /**
      * Called by DispatchNotificationJob once it "sends" (never a real
-     * transport call).
+     * transport call), and — since feature/ses-event-consumer — by
+     * OutboundMailCorrelationService once a REAL send is confirmed by
+     * the mail transport, this time with a real $providerMessageId
+     * (the confirmed SES message id) so an inbound bounce/complaint
+     * can resolve back to this exact row.
      */
-    public function recordSent(Firm $firm, string $correlationId, ConsentChannel $channel, string $recipient, ?int $templateId, ?int $clientId, ?int $matterId): NotificationEvent
+    public function recordSent(Firm $firm, string $correlationId, ConsentChannel $channel, string $recipient, ?int $templateId, ?int $clientId, ?int $matterId, ?string $providerMessageId = null): NotificationEvent
     {
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => NotificationEvent::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => NotificationEvent::create([
             'firm_id' => $firm->id,
             'notification_template_id' => $templateId,
             'client_id' => $clientId,
@@ -131,13 +134,14 @@ class NotificationDispatchService
             'correlation_id' => $correlationId,
             'channel' => $channel,
             'recipient' => $recipient,
+            'provider_message_id' => $providerMessageId,
             'status' => NotificationEventStatus::Sent,
         ]));
     }
 
     public function recordFailed(Firm $firm, string $correlationId, ConsentChannel $channel, string $recipient, ?int $templateId, string $reason): NotificationEvent
     {
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => NotificationEvent::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => NotificationEvent::create([
             'firm_id' => $firm->id,
             'notification_template_id' => $templateId,
             'correlation_id' => $correlationId,

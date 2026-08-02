@@ -3,9 +3,11 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Enums\ConsentChannel;
 use App\Enums\FirmUserStatus;
 use App\Models\Concerns\HasPublicUuid;
 use App\Notifications\FirmOwnerInvitationNotification;
+use App\Services\CorrelatedPasswordResetSenderService;
 use App\Services\FirmUser2faPolicyService;
 use App\Services\LoginPolicyService;
 use App\Services\TenantContextService;
@@ -66,10 +68,54 @@ class User extends Authenticatable implements FilamentUser
      * docblock). Sent for every password reset, not only a brand-new
      * owner's first-time setup — mirrors ClientPortalUser's own
      * identical, non-special-cased override.
+     *
+     * Post-9722e88 audit remediation: delegates entirely to
+     * CorrelatedPasswordResetSenderService and discards its typed
+     * result. This is deliberate, not an oversight — this method's
+     * signature is fixed by Laravel's `CanResetPassword` contract
+     * (void), and it is reached by the PUBLIC, anti-enumeration-
+     * sensitive "forgot password" flow (`Illuminate\Auth\Passwords\
+     * PasswordBroker::sendResetLink()`, called with no custom
+     * callback) — that flow's HTTP response must never differ based on
+     * whether the internal send actually succeeded, or a failure here
+     * would become an observable side channel distinguishing "this
+     * email belongs to an account with an internal error" from "this
+     * email doesn't exist". The service itself never throws and never
+     * falls back to an uncorrelated send on any failure; it only
+     * returns Sent, Suppressed, CorrelationFailed, or TransportFailed,
+     * each already logged at the appropriate severity internally.
+     *
+     * FirmProvisioningService::dispatchOwnerInvitation()/
+     * resendInvitation() are NOT anti-enumeration-sensitive (an
+     * authenticated platform admin already knows the firm/owner
+     * exists) — they call CorrelatedPasswordResetSenderService
+     * directly via sendResetLink()'s own `$callback` parameter instead
+     * of going through this method, passing the Firm they already
+     * have in hand rather than re-resolving it, and inspect the typed
+     * result to decide invitation success/failure.
      */
     public function sendPasswordResetNotification($token): void
     {
-        $this->notify(new FirmOwnerInvitationNotification($token));
+        $firm = $this->activeFirmUser()?->firm;
+
+        if ($firm !== null) {
+            app(CorrelatedPasswordResetSenderService::class)->sendForFirm(
+                $this,
+                $firm,
+                ConsentChannel::Email,
+                $this->email,
+                fn (string $correlationId) => (new FirmOwnerInvitationNotification($token))->withCorrelationId($correlationId),
+            );
+
+            return;
+        }
+
+        app(CorrelatedPasswordResetSenderService::class)->sendForUnresolvedFirm(
+            $this,
+            'user_password_reset',
+            $this->email,
+            fn (string $correlationId) => (new FirmOwnerInvitationNotification($token))->withCorrelationId($correlationId),
+        );
     }
 
     /**

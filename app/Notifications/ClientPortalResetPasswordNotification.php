@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Notifications;
 
 use Illuminate\Auth\Notifications\ResetPassword;
+use Illuminate\Notifications\Messages\MailMessage;
 
 /**
  * ClientPortalResetPasswordNotification — Checkpoint 4 ("Plaid financial
@@ -23,11 +24,36 @@ use Illuminate\Auth\Notifications\ResetPassword;
  */
 class ClientPortalResetPasswordNotification extends ResetPassword
 {
+    /**
+     * SES event consumer (feature/ses-event-consumer) — see
+     * FirmOwnerInvitationNotification::withCorrelationId() for the
+     * full rationale; identical mechanism here.
+     */
+    private ?string $correlationId = null;
+
+    public function withCorrelationId(string $correlationId): static
+    {
+        $this->correlationId = $correlationId;
+
+        return $this;
+    }
+
     protected function resetUrl($notifiable)
     {
         return url(route('filament.client-portal.auth.password-reset.reset', [
             'email' => $notifiable->getEmailForPasswordReset(),
             'token' => $this->token,
         ], false));
+    }
+
+    public function toMail($notifiable): MailMessage
+    {
+        $message = parent::toMail($notifiable);
+
+        if ($this->correlationId !== null) {
+            $message->metadata('correlation_id', $this->correlationId);
+        }
+
+        return $message;
     }
 }

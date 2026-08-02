@@ -111,6 +111,19 @@ class EmergencySupportApprovalFirewallTest extends TestCase
         // stated reasons.
         'app/Services/DeploymentModeCoverageMappingService.php',
         'app/Services/TestCoverageMappingService.php',
+        // feature/ses-event-consumer (a later, distinct, wholly
+        // isolated mission: a production-safe SES bounce/complaint
+        // consumer) legitimately added these two new services.
+        'app/Services/OutboundMailCorrelationService.php',
+        'app/Services/SesEventConsumerService.php',
+        // Round 3 audit remediation legitimately added this new
+        // dedicated service.
+        'app/Services/CorrelatedPasswordResetSenderService.php',
+        // Retention governance type-normalization fix (a later,
+        // distinct remediation restoring CI's protected suite) fixed
+        // RetentionGovernanceRegistryService's current_default
+        // type-coercion boundary.
+        'app/Services/RetentionGovernanceRegistryService.php',
     ];
 
     /**
@@ -382,99 +395,99 @@ class EmergencySupportApprovalFirewallTest extends TestCase
             // platform_admin/web guard + Filament panel wiring, and
             // its own test files.
             'database/migrations/2026_08_10_900001_add_self_lookup_clause_to_firm_users_rls_policy.php',
-                // Section 39A-3I (a later, distinct staged-FORCE-
-                // activation branch) legitimately added a
-                // conflict_check_runs-only FORCE RLS migration.
-                'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php',
-                // Section 39A-3J (a later, distinct staged-FORCE-
-                // activation branch) legitimately added FORCE RLS
-                // migrations for lead_sources, consultation_outcomes,
-                // firm_leads, and consultations together, their
-                // factory context-hold fixes, and updated the tests
-                // it affected.
-                'database/migrations/2026_08_12_900001_force_rls_on_lead_sources_table.php',
-                'database/migrations/2026_08_13_900001_force_rls_on_consultation_outcomes_table.php',
-                'database/migrations/2026_08_14_900001_force_rls_on_firm_leads_table.php',
-                'database/migrations/2026_08_15_900001_force_rls_on_consultations_table.php',
-                'database/factories/LeadSourceFactory.php',
-                'database/factories/ConsultationOutcomeFactory.php',
-                'database/factories/FirmLeadFactory.php',
-                'database/factories/ConsultationFactory.php',
-                'tests/Feature/Leads/LeadConversionServiceTest.php',
-                'tests/Feature/Webhooks/Wiring/LeadCreatedWiringTest.php',
-                // Section 39A-3K (this batch, a later, distinct
-                // staged-FORCE-activation branch) legitimately added
-                // FORCE RLS migrations for firm_practice_areas,
-                // document_chase_rules, employee_rates, calendar_events,
-                // and client_communication_preferences together, their
-                // factory context-hold fixes, and updated the tests it
-                // affected.
-                'database/migrations/2026_08_20_920001_force_rls_on_firm_practice_areas_table.php',
-                'database/migrations/2026_08_20_920002_force_rls_on_document_chase_rules_table.php',
-                'database/migrations/2026_08_20_920003_force_rls_on_employee_rates_table.php',
-                'database/migrations/2026_08_20_920004_force_rls_on_calendar_events_table.php',
-                'database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php',
-                'database/factories/CalendarEventFactory.php',
-                'database/factories/ClientCommunicationPreferenceFactory.php',
-                'database/factories/DocumentChaseRuleFactory.php',
-                'database/factories/EmployeeRateFactory.php',
-                'database/factories/FirmPracticeAreaFactory.php',
-                'tests/Feature/Deadlines/CalendarEventServiceTest.php',
-                'tests/Feature/Deadlines/DeadlineServiceTest.php',
-                'tests/Feature/DocumentChase/DocumentChaseSchedulerServiceTest.php',
-                'tests/Feature/Rates/EmployeeRateServiceTest.php',
-                // Section 39A-3L, Checkpoint 10, Table Phase C (this
-                // batch, a later, distinct staged-FORCE-activation
-                // branch) legitimately added a document_requests-only
-                // FORCE RLS migration, a DocumentRequestFactory
-                // firm/client consistency + context-hold fix, wrapped
-                // DocumentRequestService's create() and its 7
-                // single-item mutators and DocumentChaseService's
-                // checkAndLog()/escalate()/pause()/resume() each in
-                // their own runWithFirmContext() call, and updated the
-                // tests it affected.
-                'database/migrations/2026_08_25_930010_force_rls_on_document_requests_table.php',
-                'database/factories/DocumentRequestFactory.php',
-                'app/Services/DocumentRequestService.php',
-                'app/Services/DocumentChaseService.php',
-                'app/Services/MobilePortalReadinessService.php',
-                'tests/Feature/Documents/DocumentRequestServiceTest.php',
-                'tests/Feature/DocumentChase/DocumentChaseServiceTest.php',
-                'tests/Feature/Readiness/MatterReadinessServiceTest.php',
-                'tests/Feature/Governance/MarketReadyValueMultipliers/FirmCommandCenterAggregationServiceTest.php',
-                // Section 39A-3L, Checkpoint 11, Table Phase C (this
-                // batch, a later, distinct staged-FORCE-activation
-                // branch) legitimately added a communication_consents-
-                // only FORCE RLS migration, wrapped ConsentService's
-                // capture()/revoke() in their own runWithFirmContext()
-                // call, moved ClientPortalService::invite()'s
-                // isGranted() precondition inside its existing
-                // runWithFirmContext() wrap, added a
-                // CommunicationConsentFactory context-hold fix, and
-                // updated the tests it affected.
-                'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php',
-                'database/factories/CommunicationConsentFactory.php',
-                'app/Services/ConsentService.php',
-                'tests/Feature/Activation/ConsentServiceTest.php',
-                'tests/Feature/PaymentPlans/PaymentPlanDunningServiceTest.php',
-                // Section 39A-3L, Checkpoint 12, Table Phase C (this
-                // batch, a later, distinct staged-FORCE-activation
-                // branch) legitimately added a
-                // communication_consent_events-only FORCE RLS
-                // migration, a CommunicationConsentEventFactory
-                // firm/consent consistency + context-hold fix, and
-                // fixed pre-existing bare-assertion-after-service-call
-                // gaps this batch's own FORCE activation exposed in
-                // ConsentServiceTest.php (already allowed above).
-                'database/migrations/2026_08_25_930012_force_rls_on_communication_consent_events_table.php',
-                'database/factories/CommunicationConsentEventFactory.php',
-                // Section 39A-3L, Checkpoint 13, Table Phase C (this
-                // batch, a later, distinct staged-FORCE-activation
-                // branch) legitimately added an intake_submissions-only
-                // FORCE RLS migration and an IntakeSubmissionFactory
-                // firm/client consistency + context-hold fix.
-                'database/migrations/2026_08_25_930013_force_rls_on_intake_submissions_table.php',
-                'database/factories/IntakeSubmissionFactory.php',
+            // Section 39A-3I (a later, distinct staged-FORCE-
+            // activation branch) legitimately added a
+            // conflict_check_runs-only FORCE RLS migration.
+            'database/migrations/2026_08_11_900001_force_rls_on_conflict_check_runs_table.php',
+            // Section 39A-3J (a later, distinct staged-FORCE-
+            // activation branch) legitimately added FORCE RLS
+            // migrations for lead_sources, consultation_outcomes,
+            // firm_leads, and consultations together, their
+            // factory context-hold fixes, and updated the tests
+            // it affected.
+            'database/migrations/2026_08_12_900001_force_rls_on_lead_sources_table.php',
+            'database/migrations/2026_08_13_900001_force_rls_on_consultation_outcomes_table.php',
+            'database/migrations/2026_08_14_900001_force_rls_on_firm_leads_table.php',
+            'database/migrations/2026_08_15_900001_force_rls_on_consultations_table.php',
+            'database/factories/LeadSourceFactory.php',
+            'database/factories/ConsultationOutcomeFactory.php',
+            'database/factories/FirmLeadFactory.php',
+            'database/factories/ConsultationFactory.php',
+            'tests/Feature/Leads/LeadConversionServiceTest.php',
+            'tests/Feature/Webhooks/Wiring/LeadCreatedWiringTest.php',
+            // Section 39A-3K (this batch, a later, distinct
+            // staged-FORCE-activation branch) legitimately added
+            // FORCE RLS migrations for firm_practice_areas,
+            // document_chase_rules, employee_rates, calendar_events,
+            // and client_communication_preferences together, their
+            // factory context-hold fixes, and updated the tests it
+            // affected.
+            'database/migrations/2026_08_20_920001_force_rls_on_firm_practice_areas_table.php',
+            'database/migrations/2026_08_20_920002_force_rls_on_document_chase_rules_table.php',
+            'database/migrations/2026_08_20_920003_force_rls_on_employee_rates_table.php',
+            'database/migrations/2026_08_20_920004_force_rls_on_calendar_events_table.php',
+            'database/migrations/2026_08_20_920005_force_rls_on_client_communication_preferences_table.php',
+            'database/factories/CalendarEventFactory.php',
+            'database/factories/ClientCommunicationPreferenceFactory.php',
+            'database/factories/DocumentChaseRuleFactory.php',
+            'database/factories/EmployeeRateFactory.php',
+            'database/factories/FirmPracticeAreaFactory.php',
+            'tests/Feature/Deadlines/CalendarEventServiceTest.php',
+            'tests/Feature/Deadlines/DeadlineServiceTest.php',
+            'tests/Feature/DocumentChase/DocumentChaseSchedulerServiceTest.php',
+            'tests/Feature/Rates/EmployeeRateServiceTest.php',
+            // Section 39A-3L, Checkpoint 10, Table Phase C (this
+            // batch, a later, distinct staged-FORCE-activation
+            // branch) legitimately added a document_requests-only
+            // FORCE RLS migration, a DocumentRequestFactory
+            // firm/client consistency + context-hold fix, wrapped
+            // DocumentRequestService's create() and its 7
+            // single-item mutators and DocumentChaseService's
+            // checkAndLog()/escalate()/pause()/resume() each in
+            // their own runWithFirmContext() call, and updated the
+            // tests it affected.
+            'database/migrations/2026_08_25_930010_force_rls_on_document_requests_table.php',
+            'database/factories/DocumentRequestFactory.php',
+            'app/Services/DocumentRequestService.php',
+            'app/Services/DocumentChaseService.php',
+            'app/Services/MobilePortalReadinessService.php',
+            'tests/Feature/Documents/DocumentRequestServiceTest.php',
+            'tests/Feature/DocumentChase/DocumentChaseServiceTest.php',
+            'tests/Feature/Readiness/MatterReadinessServiceTest.php',
+            'tests/Feature/Governance/MarketReadyValueMultipliers/FirmCommandCenterAggregationServiceTest.php',
+            // Section 39A-3L, Checkpoint 11, Table Phase C (this
+            // batch, a later, distinct staged-FORCE-activation
+            // branch) legitimately added a communication_consents-
+            // only FORCE RLS migration, wrapped ConsentService's
+            // capture()/revoke() in their own runWithFirmContext()
+            // call, moved ClientPortalService::invite()'s
+            // isGranted() precondition inside its existing
+            // runWithFirmContext() wrap, added a
+            // CommunicationConsentFactory context-hold fix, and
+            // updated the tests it affected.
+            'database/migrations/2026_08_25_930011_force_rls_on_communication_consents_table.php',
+            'database/factories/CommunicationConsentFactory.php',
+            'app/Services/ConsentService.php',
+            'tests/Feature/Activation/ConsentServiceTest.php',
+            'tests/Feature/PaymentPlans/PaymentPlanDunningServiceTest.php',
+            // Section 39A-3L, Checkpoint 12, Table Phase C (this
+            // batch, a later, distinct staged-FORCE-activation
+            // branch) legitimately added a
+            // communication_consent_events-only FORCE RLS
+            // migration, a CommunicationConsentEventFactory
+            // firm/consent consistency + context-hold fix, and
+            // fixed pre-existing bare-assertion-after-service-call
+            // gaps this batch's own FORCE activation exposed in
+            // ConsentServiceTest.php (already allowed above).
+            'database/migrations/2026_08_25_930012_force_rls_on_communication_consent_events_table.php',
+            'database/factories/CommunicationConsentEventFactory.php',
+            // Section 39A-3L, Checkpoint 13, Table Phase C (this
+            // batch, a later, distinct staged-FORCE-activation
+            // branch) legitimately added an intake_submissions-only
+            // FORCE RLS migration and an IntakeSubmissionFactory
+            // firm/client consistency + context-hold fix.
+            'database/migrations/2026_08_25_930013_force_rls_on_intake_submissions_table.php',
+            'database/factories/IntakeSubmissionFactory.php',
             'config/auth.php',
             'app/Models/User.php',
             'app/Models/PlatformAdmin.php',
@@ -596,6 +609,94 @@ class EmergencySupportApprovalFirewallTest extends TestCase
             'tests/Feature/Security/RlsEnforcement/QueueConsoleTenantContextTest.php',
             'tests/Feature/Security/SeedData/SecretPatternScanTest.php',
             'tests/Feature/Integrations/Ui/FirmIntegrationSuperAdminBoundaryStructuralTest.php',
+            // feature/ses-event-consumer (a later, distinct, wholly
+            // isolated mission: a production-safe SES bounce/
+            // complaint consumer) legitimately added a
+            // notification-provider correlation ledger + idempotency
+            // ledger (both exempted, no-RLS, registered in
+            // RowLevelSecurityCoverageMappingService per the same
+            // integration_webhook_routing_index/
+            // integration_platform_provider_health_summaries
+            // precedent pattern), a dedicated SQS consumer command,
+            // real-send correlation wiring in User/ClientPortalUser
+            // password-reset notifications, and its own new test
+            // files.
+            'app/Models/ClientPortalUser.php',
+            'app/Models/NotificationEvent.php',
+            'app/Models/User.php',
+            'app/Notifications/ClientPortalResetPasswordNotification.php',
+            'app/Notifications/FirmOwnerInvitationNotification.php',
+            'app/Providers/AppServiceProvider.php',
+            'app/Services/NotificationDispatchService.php',
+            'app/Services/RowLevelSecurityCoverageMappingService.php',
+            'config/mail.php',
+            'config/services.php',
+            'tests/Feature/Governance/DataModelContract/RowLevelSecurityCoverageMappingServiceTest.php',
+            'tests/Feature/Security/SeedData/SecretPatternScanTest.php',
+            'app/Console/Commands/ConsumeSesEventsCommand.php',
+            'app/Enums/SesBounceType.php',
+            'app/Enums/SesEventType.php',
+            'app/Models/NotificationProviderCorrelation.php',
+            'app/Models/SesEventReceipt.php',
+            'app/Services/OutboundMailCorrelationService.php',
+            'app/Services/SesEventConsumerService.php',
+            'database/migrations/2026_10_15_100001_add_provider_message_id_to_notification_events_table.php',
+            'database/migrations/2026_10_15_100002_create_notification_provider_correlations_table.php',
+            'database/migrations/2026_10_15_100003_create_ses_event_receipts_table.php',
+            'tests/Feature/Notifications/ConsumeSesEventsCommandTest.php',
+            'tests/Feature/Notifications/OutboundMailCorrelationServiceTest.php',
+            'tests/Feature/Notifications/SesEventConsumerServiceTest.php',
+            // post-578ee98 audit remediation (a later, distinct,
+            // independent security/architecture review of the SES
+            // event consumer feature) legitimately fixed a
+            // MessageSent listener leak, an uncaught-exception
+            // crash risk, a receipt-write concurrency race, a
+            // complaint recipient-mismatch hard-reject, and added a
+            // new platform-scope correlation/suppression subsystem
+            // for password-reset sends that cannot resolve a firm —
+            // plus its own new test files.
+            'app/Console/Commands/ConsumeSesEventsCommand.php',
+            'app/Models/ClientPortalUser.php',
+            'app/Models/User.php',
+            'app/Services/OutboundMailCorrelationService.php',
+            'app/Services/RowLevelSecurityCoverageMappingService.php',
+            'app/Services/SesEventConsumerService.php',
+            'app/Services/SuppressionService.php',
+            'config/services.php',
+            'database/migrations/2026_10_15_100002_create_notification_provider_correlations_table.php',
+            'tests/Feature/Governance/DataModelContract/RowLevelSecurityCoverageMappingServiceTest.php',
+            'tests/Feature/Mail/SesMailerTransportTest.php',
+            'tests/Feature/Notifications/ConsumeSesEventsCommandTest.php',
+            'tests/Feature/Notifications/OutboundMailCorrelationServiceTest.php',
+            'tests/Feature/Notifications/SesEventConsumerServiceTest.php',
+            'tests/Feature/Notifications/SuppressionServiceTest.php',
+            'app/Models/PlatformNotificationCorrelation.php',
+            'app/Models/PlatformNotificationSuppression.php',
+            'app/Services/PlatformNotificationCorrelationService.php',
+            'database/migrations/2026_10_20_100001_create_platform_notification_correlations_table.php',
+            'database/migrations/2026_10_20_100002_create_platform_notification_suppressions_table.php',
+            'tests/Feature/Notifications/PasswordResetPlatformCorrelationFallbackTest.php',
+            'tests/Feature/Notifications/PlatformNotificationCorrelationServiceTest.php',
+            // Round 3 audit remediation (a later, distinct,
+            // independent security/architecture review) legitimately
+            // introduced CorrelatedPasswordResetSenderService, fixed
+            // a transaction-poisoning bug in both correlation
+            // services, and rewired FirmProvisioningService's
+            // owner-invitation dispatch — plus its own new test
+            // files.
+            '.env.example',
+            'app/Models/ClientPortalUser.php',
+            'app/Models/User.php',
+            'app/Services/FirmProvisioningService.php',
+            'app/Services/OutboundMailCorrelationService.php',
+            'app/Services/PlatformNotificationCorrelationService.php',
+            'tests/Feature/Notifications/OutboundMailCorrelationServiceTest.php',
+            'tests/Feature/Notifications/PasswordResetPlatformCorrelationFallbackTest.php',
+            'tests/Feature/Notifications/PlatformNotificationCorrelationServiceTest.php',
+            'tests/Feature/Services/FirmProvisioningServiceTest.php',
+            'app/Enums/CorrelatedSendResult.php',
+            'app/Exceptions/NotificationTransportFailedException.php',
+            'app/Services/CorrelatedPasswordResetSenderService.php',
         ];
 
         return array_values(array_filter(

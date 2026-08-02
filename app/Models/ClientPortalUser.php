@@ -3,8 +3,10 @@
 namespace App\Models;
 
 use App\Enums\ClientPortalStatus;
+use App\Enums\ConsentChannel;
 use App\Models\Concerns\HasPublicUuid;
 use App\Notifications\ClientPortalResetPasswordNotification;
+use App\Services\CorrelatedPasswordResetSenderService;
 use App\Services\TenantContextService;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
@@ -101,10 +103,40 @@ class ClientPortalUser extends Authenticatable implements FilamentUser
      * its reset URL via `route('password.reset', ...)` — a route this app
      * does not have (see ClientPortalResetPasswordNotification's own
      * docblock).
+     *
+     * Post-9722e88 audit remediation: delegates entirely to
+     * CorrelatedPasswordResetSenderService and discards its typed
+     * result — see User::sendPasswordResetNotification()'s own
+     * docblock for the full "must preserve the public, anti-
+     * enumeration-sensitive forgot-password flow's void contract"
+     * reasoning this mirrors exactly.
      */
     public function sendPasswordResetNotification($token): void
     {
-        $this->notify(new ClientPortalResetPasswordNotification($token));
+        $tenantContext = app(TenantContextService::class);
+        $firm = $tenantContext->withClientSelfLookupContext(
+            $this->client_id,
+            fn () => Client::query()->find($this->client_id)?->firm,
+        );
+
+        if ($firm !== null) {
+            app(CorrelatedPasswordResetSenderService::class)->sendForFirm(
+                $this,
+                $firm,
+                ConsentChannel::Email,
+                $this->email,
+                fn (string $correlationId) => (new ClientPortalResetPasswordNotification($token))->withCorrelationId($correlationId),
+            );
+
+            return;
+        }
+
+        app(CorrelatedPasswordResetSenderService::class)->sendForUnresolvedFirm(
+            $this,
+            'client_portal_password_reset',
+            $this->email,
+            fn (string $correlationId) => (new ClientPortalResetPasswordNotification($token))->withCorrelationId($correlationId),
+        );
     }
 
     /**

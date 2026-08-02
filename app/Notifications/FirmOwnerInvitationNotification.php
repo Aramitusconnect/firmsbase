@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Notifications;
 
 use Illuminate\Auth\Notifications\ResetPassword;
+use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Support\Facades\URL;
 
 /**
@@ -53,11 +54,47 @@ use Illuminate\Support\Facades\URL;
  */
 class FirmOwnerInvitationNotification extends ResetPassword
 {
+    /**
+     * SES event consumer (feature/ses-event-consumer) — set via
+     * withCorrelationId() by OutboundMailCorrelationService before this
+     * notification is dispatched. Null means "sent without
+     * correlation" (e.g. a caller that hasn't been wired to the
+     * correlation service yet) — toMail() below tolerates that
+     * gracefully rather than requiring it.
+     */
+    private ?string $correlationId = null;
+
+    public function withCorrelationId(string $correlationId): static
+    {
+        $this->correlationId = $correlationId;
+
+        return $this;
+    }
+
     protected function resetUrl($notifiable)
     {
         return URL::signedRoute('filament.firm.auth.password-reset.reset', [
             'email' => $notifiable->getEmailForPasswordReset(),
             'token' => $this->token,
         ]);
+    }
+
+    /**
+     * Only adds an SES message tag (via Laravel's own MailMessage::
+     * metadata(), which Illuminate\Mail\Transport\SesTransport
+     * translates into a real SES Tag on the SendRawEmail call) when a
+     * correlation id has actually been set — every other behavior
+     * (subject/body/action button) is unchanged from the parent
+     * ResetPassword::toMail().
+     */
+    public function toMail($notifiable): MailMessage
+    {
+        $message = parent::toMail($notifiable);
+
+        if ($this->correlationId !== null) {
+            $message->metadata('correlation_id', $this->correlationId);
+        }
+
+        return $message;
     }
 }

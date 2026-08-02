@@ -515,6 +515,74 @@ class PermissionBoundaryFirewallTest extends TestCase
             'tests/Feature/Security/RlsEnforcement/QueueConsoleTenantContextTest.php',
             'tests/Feature/Security/SeedData/SecretPatternScanTest.php',
             'tests/Feature/Integrations/Ui/FirmIntegrationSuperAdminBoundaryStructuralTest.php',
+            // feature/ses-event-consumer (a later, distinct, wholly
+            // isolated mission: a production-safe SES bounce/
+            // complaint consumer) legitimately added a
+            // notification-provider correlation ledger + idempotency
+            // ledger (both exempted, no-RLS, registered in
+            // RowLevelSecurityCoverageMappingService per the same
+            // integration_webhook_routing_index/
+            // integration_platform_provider_health_summaries
+            // precedent pattern), a dedicated SQS consumer command,
+            // real-send correlation wiring in User/ClientPortalUser
+            // password-reset notifications, and its own new test
+            // files.
+            'app/Models/ClientPortalUser.php',
+            'app/Models/NotificationEvent.php',
+            'app/Models/User.php',
+            'app/Notifications/ClientPortalResetPasswordNotification.php',
+            'app/Notifications/FirmOwnerInvitationNotification.php',
+            'app/Providers/AppServiceProvider.php',
+            'app/Services/NotificationDispatchService.php',
+            'app/Services/RowLevelSecurityCoverageMappingService.php',
+            'config/mail.php',
+            'config/services.php',
+            'tests/Feature/Governance/DataModelContract/RowLevelSecurityCoverageMappingServiceTest.php',
+            'tests/Feature/Security/SeedData/SecretPatternScanTest.php',
+            'app/Console/Commands/ConsumeSesEventsCommand.php',
+            'app/Enums/SesBounceType.php',
+            'app/Enums/SesEventType.php',
+            'app/Models/NotificationProviderCorrelation.php',
+            'app/Models/SesEventReceipt.php',
+            'app/Services/OutboundMailCorrelationService.php',
+            'app/Services/SesEventConsumerService.php',
+            'database/migrations/2026_10_15_100001_add_provider_message_id_to_notification_events_table.php',
+            'database/migrations/2026_10_15_100002_create_notification_provider_correlations_table.php',
+            'database/migrations/2026_10_15_100003_create_ses_event_receipts_table.php',
+            'tests/Feature/Notifications/ConsumeSesEventsCommandTest.php',
+            'tests/Feature/Notifications/OutboundMailCorrelationServiceTest.php',
+            'tests/Feature/Notifications/SesEventConsumerServiceTest.php',
+            // post-578ee98 audit remediation (a later, distinct,
+            // independent security/architecture review of the SES
+            // event consumer feature) legitimately fixed a
+            // MessageSent listener leak, an uncaught-exception
+            // crash risk, a receipt-write concurrency race, a
+            // complaint recipient-mismatch hard-reject, and added a
+            // new platform-scope correlation/suppression subsystem
+            // for password-reset sends that cannot resolve a firm —
+            // plus its own new test files.
+            'app/Console/Commands/ConsumeSesEventsCommand.php',
+            'app/Models/ClientPortalUser.php',
+            'app/Models/User.php',
+            'app/Services/OutboundMailCorrelationService.php',
+            'app/Services/RowLevelSecurityCoverageMappingService.php',
+            'app/Services/SesEventConsumerService.php',
+            'app/Services/SuppressionService.php',
+            'config/services.php',
+            'database/migrations/2026_10_15_100002_create_notification_provider_correlations_table.php',
+            'tests/Feature/Governance/DataModelContract/RowLevelSecurityCoverageMappingServiceTest.php',
+            'tests/Feature/Mail/SesMailerTransportTest.php',
+            'tests/Feature/Notifications/ConsumeSesEventsCommandTest.php',
+            'tests/Feature/Notifications/OutboundMailCorrelationServiceTest.php',
+            'tests/Feature/Notifications/SesEventConsumerServiceTest.php',
+            'tests/Feature/Notifications/SuppressionServiceTest.php',
+            'app/Models/PlatformNotificationCorrelation.php',
+            'app/Models/PlatformNotificationSuppression.php',
+            'app/Services/PlatformNotificationCorrelationService.php',
+            'database/migrations/2026_10_20_100001_create_platform_notification_correlations_table.php',
+            'database/migrations/2026_10_20_100002_create_platform_notification_suppressions_table.php',
+            'tests/Feature/Notifications/PasswordResetPlatformCorrelationFallbackTest.php',
+            'tests/Feature/Notifications/PlatformNotificationCorrelationServiceTest.php',
         ];
 
         return array_values(array_filter(

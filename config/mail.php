@@ -51,6 +51,18 @@ return [
 
         'ses' => [
             'transport' => 'ses',
+            // SES event consumer (feature/ses-event-consumer): without
+            // an attached configuration set, SES never publishes
+            // Bounce/Complaint/Reject/RenderingFailure/DeliveryDelay
+            // events to the SNS topic feeding the consumer's SQS queue
+            // at all — a real, previously-invisible gap found while
+            // inspecting this file for this feature. Passed straight
+            // through to Aws\Ses\SesClient::sendRawEmail() by
+            // Illuminate\Mail\Transport\SesTransport as
+            // 'ConfigurationSetName'.
+            'options' => [
+                'ConfigurationSetName' => env('SES_CONFIGURATION_SET', 'my-first-configuration-set'),
+            ],
         ],
 
         'postmark' => [
