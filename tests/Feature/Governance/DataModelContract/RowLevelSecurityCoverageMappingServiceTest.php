@@ -373,7 +373,13 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // added to EXEMPT_TABLES (36 -> 38). Both classified Global
         // (never DirectTenant), so tenantOwnedTables()/preparedTables()
         // are unaffected.
-        $this->assertCount(38, $this->service->exemptTables());
+        // Narrowly updated AGAIN by post-578ee98 audit remediation
+        // (finding H1) — platform_notification_correlations and
+        // platform_notification_suppressions, both ordinary "no
+        // firm_id" exemptions, added to EXEMPT_TABLES (38 -> 40). Both
+        // classified Global, so tenantOwnedTables()/preparedTables()
+        // are unaffected.
+        $this->assertCount(40, $this->service->exemptTables());
         $this->assertCount(147, $this->service->tenantOwnedTables());
         $forceMigrationFiles = glob(
             database_path('migrations/*_force_rls_on_*_table.php')
@@ -809,7 +815,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // notification_provider_correlations and ses_event_receipts,
         // both Global (see FULL_TABLE_INVENTORY_EXTRA's own notes for
         // each) — 59 -> 61.
-        $this->assertSame(61, $summary[TenantOwnershipClassification::Global->value]);
+        // Narrowly updated AGAIN by post-578ee98 audit remediation
+        // (finding H1) — platform_notification_correlations and
+        // platform_notification_suppressions, both Global — 61 -> 63.
+        $this->assertSame(63, $summary[TenantOwnershipClassification::Global->value]);
         $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
         // 9 -> 10: client_portal_users' corrected System classification
         // (see the InheritedTenant/System comment above this method's
@@ -869,8 +878,12 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Provisioning workflow — +1 Global (firm_provisioning_requests):
         // 258 -> 259. Narrowly updated AGAIN by feature/ses-event-consumer
         // — +2 Global (notification_provider_correlations,
-        // ses_event_receipts): 259 -> 261. No other bucket affected.
-        $this->assertSame(261, array_sum($summary));
+        // ses_event_receipts): 259 -> 261. Narrowly updated AGAIN by
+        // post-578ee98 audit remediation (finding H1) — +2 Global
+        // (platform_notification_correlations,
+        // platform_notification_suppressions): 261 -> 263. No other
+        // bucket affected.
+        $this->assertSame(263, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

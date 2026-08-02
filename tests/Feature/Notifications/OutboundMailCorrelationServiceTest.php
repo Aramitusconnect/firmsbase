@@ -124,4 +124,130 @@ class OutboundMailCorrelationServiceTest extends TestCase
         $correlation = NotificationProviderCorrelation::query()->where('firm_id', $firm->id)->sole();
         $this->assertNull($correlation->provider_message_id);
     }
+
+    /**
+     * @return array<int, mixed>
+     */
+    private function messageSentListeners(): array
+    {
+        return app('events')->getRawListeners()[MessageSent::class] ?? [];
+    }
+
+    public function test_listener_is_removed_after_a_successful_send(): void
+    {
+        $firm = Firm::factory()->create();
+
+        $this->assertSame([], $this->messageSentListeners());
+
+        app(OutboundMailCorrelationService::class)->correlate(
+            $firm,
+            ConsentChannel::Email,
+            'owner@example.com',
+            function (string $correlationId) {
+                $this->dispatchFakeSentMessage($correlationId, 'ses-msg-listener-1', 'owner@example.com');
+            },
+        );
+
+        $this->assertSame([], $this->messageSentListeners(), 'correlate() must leave no MessageSent listener registered after a successful send.');
+    }
+
+    public function test_listener_is_removed_after_the_send_throws(): void
+    {
+        $firm = Firm::factory()->create();
+
+        try {
+            app(OutboundMailCorrelationService::class)->correlate(
+                $firm,
+                ConsentChannel::Email,
+                'owner@example.com',
+                function (string $correlationId): void {
+                    throw new \RuntimeException('simulated transport failure');
+                },
+            );
+
+            $this->fail('Expected the simulated transport exception to propagate.');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('simulated transport failure', $e->getMessage());
+        }
+
+        $this->assertSame([], $this->messageSentListeners(), 'A failed send must leave no stale MessageSent listener.');
+    }
+
+    public function test_two_sequential_correlate_calls_in_the_same_process_do_not_accumulate_listeners(): void
+    {
+        $firm = Firm::factory()->create();
+
+        app(OutboundMailCorrelationService::class)->correlate(
+            $firm,
+            ConsentChannel::Email,
+            'first@example.com',
+            function (string $correlationId) {
+                $this->dispatchFakeSentMessage($correlationId, 'ses-msg-first', 'first@example.com');
+            },
+        );
+
+        $this->assertCount(0, $this->messageSentListeners());
+
+        app(OutboundMailCorrelationService::class)->correlate(
+            $firm,
+            ConsentChannel::Email,
+            'second@example.com',
+            function (string $correlationId) {
+                $this->dispatchFakeSentMessage($correlationId, 'ses-msg-second', 'second@example.com');
+            },
+        );
+
+        $this->assertCount(0, $this->messageSentListeners(), 'A long-running process calling correlate() repeatedly must never accumulate listeners.');
+    }
+
+    public function test_two_sequential_correlate_calls_do_not_cross_correlate_the_provider_message_id(): void
+    {
+        $firm = Firm::factory()->create();
+
+        app(OutboundMailCorrelationService::class)->correlate(
+            $firm,
+            ConsentChannel::Email,
+            'first@example.com',
+            function (string $correlationId) {
+                $this->dispatchFakeSentMessage($correlationId, 'ses-msg-cross-1', 'first@example.com');
+            },
+        );
+
+        app(OutboundMailCorrelationService::class)->correlate(
+            $firm,
+            ConsentChannel::Email,
+            'second@example.com',
+            function (string $correlationId) {
+                $this->dispatchFakeSentMessage($correlationId, 'ses-msg-cross-2', 'second@example.com');
+            },
+        );
+
+        $first = NotificationProviderCorrelation::query()->where('recipient_normalized', 'first@example.com')->sole();
+        $second = NotificationProviderCorrelation::query()->where('recipient_normalized', 'second@example.com')->sole();
+
+        $this->assertSame('ses-msg-cross-1', $first->provider_message_id);
+        $this->assertSame('ses-msg-cross-2', $second->provider_message_id);
+    }
+
+    public function test_correlate_does_not_remove_a_pre_existing_unrelated_message_sent_listener(): void
+    {
+        $firm = Firm::factory()->create();
+
+        $unrelatedListenerFired = false;
+        Event::listen(MessageSent::class, function () use (&$unrelatedListenerFired): void {
+            $unrelatedListenerFired = true;
+        });
+
+        app(OutboundMailCorrelationService::class)->correlate(
+            $firm,
+            ConsentChannel::Email,
+            'owner@example.com',
+            function (string $correlationId) {
+                $this->dispatchFakeSentMessage($correlationId, 'ses-msg-unrelated', 'owner@example.com');
+            },
+        );
+
+        $this->assertTrue($unrelatedListenerFired, 'A pre-existing MessageSent listener must still fire.');
+        $this->assertCount(1, $this->messageSentListeners(), 'The pre-existing listener must survive; only this service\'s own listener is removed.');
+    }
 }

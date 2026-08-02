@@ -5,9 +5,13 @@ declare(strict_types=1);
 namespace Tests\Feature\Notifications;
 
 use App\Enums\ConsentChannel;
+use App\Enums\SesEventType;
 use App\Models\Firm;
 use App\Models\NotificationProviderCorrelation;
+use App\Models\PlatformNotificationCorrelation;
+use App\Models\PlatformNotificationSuppression;
 use App\Models\SesEventReceipt;
+use App\Services\PlatformNotificationCorrelationService;
 use App\Services\SesEventConsumerService;
 use App\Services\SuppressionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -32,6 +36,8 @@ class SesEventConsumerServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        config(['services.platform_notifications.recipient_fingerprint_hmac_key' => 'test-fingerprint-hmac-key']);
 
         $this->consumer = app(SesEventConsumerService::class);
         $this->suppression = app(SuppressionService::class);
@@ -244,6 +250,102 @@ class SesEventConsumerServiceTest extends TestCase
             $firm,
             fn () => $this->suppression->isSuppressed($firm, 'owner@example.com', ConsentChannel::Email),
         ));
+    }
+
+    /**
+     * Post-578ee98 audit finding B4: an ISP feedback loop is known to
+     * redact/broaden complainedRecipients — provider_message_id is
+     * already authoritative, so a Complaint must still suppress even
+     * when the reported recipient doesn't literally match. Contrast
+     * with the Bounce test above, which correctly keeps the hard
+     * reject (bounces come directly from SES, not a third-party
+     * feedback loop).
+     */
+    public function test_complaint_with_a_redacted_or_mismatched_recipient_still_suppresses(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->correlate($firm, 'owner@example.com', 'msg-redacted-1');
+
+        $result = $this->consumer->process('sqs-1', $this->complaintEvent('msg-redacted-1', ['redacted-by-isp@example.com']));
+
+        $this->assertTrue($result);
+        $this->assertTrue($this->runWithFirmContext(
+            $firm,
+            fn () => $this->suppression->isSuppressed($firm, 'owner@example.com', ConsentChannel::Email),
+        ));
+    }
+
+    /**
+     * Post-578ee98 audit finding B3: the receipt write is the actual
+     * concurrency gate. Reflection is used to invoke the private
+     * recordReceipt() method directly with a pre-existing conflicting
+     * row — the only reliable way to exercise a genuine unique-
+     * constraint race in a single-threaded test, since a second
+     * process() call would simply see the first call's row via the
+     * ordinary exists() pre-check rather than racing past it.
+     */
+    public function test_a_receipt_unique_constraint_race_is_handled_without_throwing(): void
+    {
+        SesEventReceipt::create([
+            'idempotency_key' => 'Bounce:race-key-1',
+            'event_type' => 'Bounce',
+            'ses_message_id' => 'msg-race-1',
+            'sqs_message_id' => 'sqs-winner',
+            'processed_at' => now(),
+        ]);
+
+        $method = new \ReflectionMethod(SesEventConsumerService::class, 'recordReceipt');
+        $method->setAccessible(true);
+
+        $eventType = SesEventType::Bounce;
+
+        $result = $method->invoke($this->consumer, 'Bounce:race-key-1', $eventType, 'msg-race-1', 'sqs-loser');
+
+        $this->assertTrue($result, 'A unique-violation on the receipt insert must be treated as a safe duplicate, not thrown.');
+        $this->assertSame(1, SesEventReceipt::query()->where('idempotency_key', 'Bounce:race-key-1')->count());
+    }
+
+    public function test_platform_scope_correlation_resolves_a_permanent_bounce_without_touching_suppression_service(): void
+    {
+        $service = app(PlatformNotificationCorrelationService::class);
+
+        $correlation = PlatformNotificationCorrelation::create([
+            'correlation_id' => (string) Str::uuid(),
+            'account_type' => 'App\\Models\\User',
+            'account_id' => 1,
+            'notification_type' => 'user_password_reset',
+            'recipient_fingerprint' => $service->fingerprintFor('owner@example.com'),
+            'provider_message_id' => 'msg-platform-1',
+        ]);
+
+        $result = $this->consumer->process('sqs-1', $this->bounceEvent('msg-platform-1', 'Permanent', ['owner@example.com']));
+
+        $this->assertTrue($result);
+        $this->assertTrue($service->isRecipientSuppressed('owner@example.com'));
+
+        $suppression = PlatformNotificationSuppression::query()->sole();
+        $this->assertSame($correlation->correlation_id, $suppression->correlation_id);
+        $this->assertSame('bounced', $suppression->status->value);
+    }
+
+    public function test_platform_scope_correlation_is_checked_only_after_firm_scope_correlation_misses(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->correlate($firm, 'owner@example.com', 'msg-firm-wins');
+
+        // A platform-scope correlation for the SAME provider_message_id
+        // should never be reachable in practice (provider_message_id is
+        // unique per table), but this proves the firm-scope table is
+        // always tried first and, once it resolves, the firm-scoped
+        // SuppressionService path is used — never the platform one.
+        $result = $this->consumer->process('sqs-1', $this->bounceEvent('msg-firm-wins', 'Permanent', ['owner@example.com']));
+
+        $this->assertTrue($result);
+        $this->assertTrue($this->runWithFirmContext(
+            $firm,
+            fn () => $this->suppression->isSuppressed($firm, 'owner@example.com', ConsentChannel::Email),
+        ));
+        $this->assertSame(0, PlatformNotificationSuppression::query()->count());
     }
 
     public function test_rls_tenant_context_is_cleared_after_processing(): void

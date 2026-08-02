@@ -464,7 +464,17 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== 'database/migrations/2026_10_15_100003_create_ses_event_receipts_table.php'
                 && $path !== 'tests/Feature/Notifications/ConsumeSesEventsCommandTest.php'
                 && $path !== 'tests/Feature/Notifications/OutboundMailCorrelationServiceTest.php'
-                && $path !== 'tests/Feature/Notifications/SesEventConsumerServiceTest.php',
+                && $path !== 'tests/Feature/Notifications/SesEventConsumerServiceTest.php'
+                // post-578ee98 audit remediation — new platform-scope
+                // correlation/suppression subsystem + its own test
+                // files, plus the real-resolved-SES-transport test.
+                && $path !== 'app/Models/PlatformNotificationCorrelation.php'
+                && $path !== 'app/Models/PlatformNotificationSuppression.php'
+                && $path !== 'database/migrations/2026_10_20_100001_create_platform_notification_correlations_table.php'
+                && $path !== 'database/migrations/2026_10_20_100002_create_platform_notification_suppressions_table.php'
+                && $path !== 'tests/Feature/Mail/SesMailerTransportTest.php'
+                && $path !== 'tests/Feature/Notifications/PasswordResetPlatformCorrelationFallbackTest.php'
+                && $path !== 'tests/Feature/Notifications/PlatformNotificationCorrelationServiceTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

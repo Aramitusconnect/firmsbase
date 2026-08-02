@@ -7,6 +7,7 @@ use App\Enums\ConsentChannel;
 use App\Models\Concerns\HasPublicUuid;
 use App\Notifications\ClientPortalResetPasswordNotification;
 use App\Services\OutboundMailCorrelationService;
+use App\Services\PlatformNotificationCorrelationService;
 use App\Services\TenantContextService;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
@@ -14,6 +15,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Log;
 
 /**
  * ClientPortalUser — Checkpoint 4 ("Plaid financial evidence add-on"),
@@ -108,9 +110,20 @@ class ClientPortalUser extends Authenticatable implements FilamentUser
      * owning firm via the identical one-hop self-lookup bootstrap
      * canAccessPanel() already established
      * (TenantContextService::withClientSelfLookupContext()), never
-     * from the email address itself. Falls back to the original,
-     * uncorrelated send if the client/firm cannot be resolved (must
-     * never block a password reset from being attempted).
+     * from the email address itself. This must never block a password
+     * reset from being attempted, so a client/firm that cannot be
+     * resolved still gets one — but never uncorrelated and untracked
+     * (post-578ee98 audit finding H1): PlatformNotificationCorrelationService
+     * gives it a tenant-agnostic correlation instead, identical
+     * treatment to User::sendPasswordResetNotification()'s own fallback,
+     * including the operational alert — a ClientPortalUser is likewise
+     * expected to resolve an owning firm (via its Client), so a miss
+     * here (e.g. a detached/deleted Client record) is anomalous too.
+     *
+     * The platform-correlation subsystem is layered on top of, never a
+     * precondition for, the actual send — see
+     * User::sendPasswordResetNotification()'s own docblock for the
+     * full "must never block a password reset" reasoning this mirrors.
      */
     public function sendPasswordResetNotification($token): void
     {
@@ -121,9 +134,48 @@ class ClientPortalUser extends Authenticatable implements FilamentUser
         );
 
         if ($firm === null) {
-            $this->notify(new ClientPortalResetPasswordNotification($token));
+            Log::alert('client_portal_user_password_reset_no_firm_correlation', [
+                'client_portal_user_id' => $this->id,
+            ]);
 
-            return;
+            $sent = false;
+
+            try {
+                $platformCorrelation = app(PlatformNotificationCorrelationService::class);
+
+                if ($platformCorrelation->isRecipientSuppressed($this->email)) {
+                    Log::warning('client_portal_user_password_reset_skipped_platform_suppressed', [
+                        'client_portal_user_id' => $this->id,
+                    ]);
+
+                    return;
+                }
+
+                $platformCorrelation->correlate(
+                    static::class,
+                    $this->id,
+                    'client_portal_password_reset',
+                    $this->email,
+                    function (string $correlationId) use ($token, &$sent): void {
+                        $this->notify((new ClientPortalResetPasswordNotification($token))->withCorrelationId($correlationId));
+                        $sent = true;
+                    },
+                );
+
+                return;
+            } catch (\Throwable $e) {
+                Log::error('client_portal_user_password_reset_platform_correlation_unavailable', [
+                    'client_portal_user_id' => $this->id,
+                    'exception' => $e::class,
+                    'message' => $e->getMessage(),
+                ]);
+
+                if (! $sent) {
+                    $this->notify(new ClientPortalResetPasswordNotification($token));
+                }
+
+                return;
+            }
         }
 
         app(OutboundMailCorrelationService::class)->correlate(

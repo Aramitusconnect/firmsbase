@@ -7,8 +7,8 @@ namespace App\Services;
 use App\Enums\ConsentChannel;
 use App\Models\Firm;
 use App\Models\NotificationProviderCorrelation;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Mail\Events\MessageSent;
-use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -44,11 +44,24 @@ use Illuminate\Support\Str;
  * written, and the exception propagates unchanged to the caller's own
  * existing error handling (e.g. FirmProvisioningService::
  * dispatchOwnerInvitation()'s own try/catch and structured logging).
+ *
+ * Listener lifecycle (post-audit fix): the MessageSent listener
+ * registered below is scoped to exactly one correlate() call. Laravel's
+ * event dispatcher has no "remove this one closure" primitive, so this
+ * uses the save/restore pattern instead: snapshot whatever MessageSent
+ * listeners already exist, register ours, then in a finally block
+ * (guaranteed to run whether $send() returns or throws) call
+ * Dispatcher::forget() to clear ALL MessageSent listeners and
+ * re-register exactly the ones that were there before. This guarantees
+ * zero net listener growth per call — a hard requirement for a
+ * long-running SQS/queue-worker process that may call correlate()
+ * thousands of times without ever restarting.
  */
 class OutboundMailCorrelationService
 {
     public function __construct(
         private readonly NotificationDispatchService $dispatchService,
+        private readonly Dispatcher $events,
     ) {}
 
     public function correlate(Firm $firm, ConsentChannel $channel, string $recipient, \Closure $send): void
@@ -76,9 +89,19 @@ class OutboundMailCorrelationService
             $providerMessageId = $idHeader?->getBodyAsString();
         };
 
-        Event::listen(MessageSent::class, $listener);
+        $previousListeners = $this->events->getRawListeners()[MessageSent::class] ?? [];
 
-        $send($correlationId);
+        $this->events->listen(MessageSent::class, $listener);
+
+        try {
+            $send($correlationId);
+        } finally {
+            $this->events->forget(MessageSent::class);
+
+            foreach ($previousListeners as $previousListener) {
+                $this->events->listen(MessageSent::class, $previousListener);
+            }
+        }
 
         if ($providerMessageId === null) {
             Log::warning('outbound_mail_correlation_no_provider_message_id', [

@@ -30,6 +30,20 @@ use App\Models\NotificationEvent;
  * and recordComplaint() have no production caller at all (confirmed
  * via repository-wide search); this wiring is added now anyway so
  * neither becomes a landmine for whoever wires a live caller in next.
+ *
+ * Post-578ee98 audit finding B3: recordBounce()/recordComplaint() are
+ * now the SES event consumer's live callers, and SesEventConsumerService's
+ * OWN concurrency gate (the ses_event_receipts unique constraint) can
+ * theoretically be raced past by two concurrent consumer processes
+ * before either commits its receipt. firstOrCreate() on
+ * [correlation_id, status] makes a duplicate/racing call here a safe
+ * no-op (returns the existing row instead of inserting a second one) —
+ * this table's own idempotency guard, independent of and in addition
+ * to the receipt ledger (defense in depth). Keyed on status as well as
+ * correlation_id because a single correlation legitimately could, in
+ * principle, accumulate both a Bounced and a Complained row over time
+ * (rare, but not a duplicate) — only a second call for the SAME status
+ * is treated as a repeat.
  */
 class SuppressionService
 {
@@ -49,25 +63,33 @@ class SuppressionService
 
     public function recordBounce(Firm $firm, string $recipient, ConsentChannel $channel, string $correlationId, ?string $reason = null): NotificationEvent
     {
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => NotificationEvent::create([
-            'firm_id' => $firm->id,
-            'correlation_id' => $correlationId,
-            'channel' => $channel,
-            'recipient' => $recipient,
-            'status' => NotificationEventStatus::Bounced,
-            'reason' => $reason,
-        ]));
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => NotificationEvent::query()->firstOrCreate(
+            [
+                'correlation_id' => $correlationId,
+                'status' => NotificationEventStatus::Bounced,
+            ],
+            [
+                'firm_id' => $firm->id,
+                'channel' => $channel,
+                'recipient' => $recipient,
+                'reason' => $reason,
+            ],
+        ));
     }
 
     public function recordComplaint(Firm $firm, string $recipient, ConsentChannel $channel, string $correlationId, ?string $reason = null): NotificationEvent
     {
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => NotificationEvent::create([
-            'firm_id' => $firm->id,
-            'correlation_id' => $correlationId,
-            'channel' => $channel,
-            'recipient' => $recipient,
-            'status' => NotificationEventStatus::Complained,
-            'reason' => $reason,
-        ]));
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => NotificationEvent::query()->firstOrCreate(
+            [
+                'correlation_id' => $correlationId,
+                'status' => NotificationEventStatus::Complained,
+            ],
+            [
+                'firm_id' => $firm->id,
+                'channel' => $channel,
+                'recipient' => $recipient,
+                'reason' => $reason,
+            ],
+        ));
     }
 }

@@ -75,4 +75,59 @@ final class SesMailerTransportTest extends TestCase
 
         $this->assertInstanceOf(SesTransport::class, $mailer->getSymfonyTransport());
     }
+
+    /**
+     * Post-578ee98 audit (Area 1): confirms the ACTUAL Laravel 13
+     * runtime path for SES transmission options against the real,
+     * resolved transport instance — not merely the config array.
+     * Illuminate\Mail\MailManager::createSesTransport() merges
+     * services.ses first, then mail.mailers.ses (which wins on any
+     * overlapping key, including 'options') — so ConfigurationSetName
+     * belongs under mail.mailers.ses.options, never services.ses.options
+     * (config/services.php's own 'ses' block has no 'options' key at
+     * all, and even if it did, mail.mailers.ses would still win the
+     * merge). This resolves SesTransport::getOptions() from the real
+     * container-built mailer, proving the value actually reaches the
+     * transport SES::sendRawEmail() will receive it from — not just
+     * that some config array contains it.
+     */
+    public function test_the_resolved_ses_transport_carries_the_configuration_set_name(): void
+    {
+        config([
+            'mail.default' => 'ses',
+            'services.ses.key' => null,
+            'services.ses.secret' => null,
+            'services.ses.region' => 'us-east-1',
+            'mail.mailers.ses.options.ConfigurationSetName' => 'my-first-configuration-set',
+        ]);
+
+        $transport = Mail::mailer('ses')->getSymfonyTransport();
+
+        $this->assertInstanceOf(SesTransport::class, $transport);
+        $this->assertSame('my-first-configuration-set', $transport->getOptions()['ConfigurationSetName'] ?? null);
+    }
+
+    /**
+     * Proves the audit's stated premise wrong by direct experiment:
+     * setting ConfigurationSetName under services.ses.options (which
+     * this app does NOT do) has no effect at all on the resolved
+     * transport, because mail.mailers.ses is merged after — and wins
+     * over — services.ses in MailManager::createSesTransport().
+     */
+    public function test_configuration_set_name_under_services_ses_options_has_no_effect(): void
+    {
+        config([
+            'mail.default' => 'ses',
+            'services.ses.key' => null,
+            'services.ses.secret' => null,
+            'services.ses.region' => 'us-east-1',
+            'services.ses.options' => ['ConfigurationSetName' => 'wrong-location'],
+            'mail.mailers.ses.options' => [],
+        ]);
+
+        $transport = Mail::mailer('ses')->getSymfonyTransport();
+
+        $this->assertInstanceOf(SesTransport::class, $transport);
+        $this->assertArrayNotHasKey('ConfigurationSetName', $transport->getOptions());
+    }
 }

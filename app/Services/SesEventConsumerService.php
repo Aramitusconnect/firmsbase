@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\NotificationEventStatus;
 use App\Enums\SesBounceType;
 use App\Enums\SesEventType;
 use App\Models\Firm;
 use App\Models\NotificationProviderCorrelation;
+use App\Models\PlatformNotificationCorrelation;
 use App\Models\SesEventReceipt;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -49,6 +53,7 @@ class SesEventConsumerService
     public function __construct(
         private readonly SuppressionService $suppressionService,
         private readonly TenantContextService $tenantContext,
+        private readonly PlatformNotificationCorrelationService $platformCorrelation,
     ) {}
 
     public function process(string $sqsMessageId, string $rawBody): bool
@@ -122,11 +127,77 @@ class SesEventConsumerService
             return true;
         }
 
+        $normalizedRecipients = array_map(
+            static fn (string $r): string => mb_strtolower(trim($r)),
+            $recipients,
+        );
+
         $correlation = NotificationProviderCorrelation::query()
             ->where('provider_message_id', $mailMessageId)
             ->first();
 
-        if ($correlation === null) {
+        if ($correlation !== null) {
+            // provider_message_id is the authoritative resolution key —
+            // a Complaint's own recipient list is not (post-578ee98
+            // audit finding B4): ISP feedback loops are known to
+            // redact/broaden complainedRecipients, and a mismatch there
+            // must not throw away an otherwise-authoritative complaint.
+            // Bounce events come directly from SES itself, not a
+            // third-party feedback loop, so that redaction risk does
+            // not apply the same way — a bounce mismatch remains a hard
+            // reject.
+            if (! in_array($correlation->recipient_normalized, $normalizedRecipients, true)) {
+                if ($eventType === SesEventType::Complaint) {
+                    Log::warning('ses_event_complaint_recipient_mismatch_defense_in_depth_only', [
+                        'sqs_message_id' => $sqsMessageId,
+                        'correlation_id' => $correlation->correlation_id,
+                    ]);
+                } else {
+                    Log::error('ses_event_recipient_mismatch', [
+                        'sqs_message_id' => $sqsMessageId,
+                        'event_type' => $eventType->value,
+                        'correlation_id' => $correlation->correlation_id,
+                    ]);
+
+                    return false;
+                }
+            }
+
+            $firm = Firm::query()->find($correlation->firm_id);
+
+            if ($firm === null) {
+                Log::error('ses_event_firm_not_found', [
+                    'sqs_message_id' => $sqsMessageId,
+                    'correlation_id' => $correlation->correlation_id,
+                    'firm_id' => $correlation->firm_id,
+                ]);
+
+                return false;
+            }
+
+            $this->applyOutcome($firm, $eventType, $bounceType, $correlation);
+
+            Log::info('ses_event_processed', [
+                'event_type' => $eventType->value,
+                'ses_message_id' => $mailMessageId,
+                'sqs_message_id' => $sqsMessageId,
+                'correlation_id' => $correlation->correlation_id,
+                'bounce_type' => $bounceType?->value,
+            ]);
+
+            return $this->recordReceipt($idempotencyKey, $eventType, $mailMessageId, $sqsMessageId);
+        }
+
+        // No firm-scoped correlation — try the platform-scope table
+        // (post-578ee98 audit finding H1) before giving up. Never
+        // touches SuppressionService/notification_events (firm-scoped,
+        // FORCE-RLS): a platform-scope correlation exists precisely
+        // because no firm could be resolved at send time.
+        $platformCorrelation = PlatformNotificationCorrelation::query()
+            ->where('provider_message_id', $mailMessageId)
+            ->first();
+
+        if ($platformCorrelation === null) {
             Log::warning('ses_event_unresolved_correlation', [
                 'sqs_message_id' => $sqsMessageId,
                 'event_type' => $eventType->value,
@@ -136,52 +207,96 @@ class SesEventConsumerService
             return false;
         }
 
-        $normalizedRecipients = array_map(
-            static fn (string $r): string => mb_strtolower(trim($r)),
-            $recipients,
+        $normalizedRecipientFingerprints = array_map(
+            fn (string $r): string => $this->platformCorrelation->fingerprintFor($r),
+            $normalizedRecipients,
         );
 
-        if (! in_array($correlation->recipient_normalized, $normalizedRecipients, true)) {
-            Log::error('ses_event_recipient_mismatch', [
-                'sqs_message_id' => $sqsMessageId,
-                'event_type' => $eventType->value,
-                'correlation_id' => $correlation->correlation_id,
-            ]);
+        if (! in_array($platformCorrelation->recipient_fingerprint, $normalizedRecipientFingerprints, true)) {
+            if ($eventType === SesEventType::Complaint) {
+                Log::warning('ses_event_platform_complaint_recipient_mismatch_defense_in_depth_only', [
+                    'sqs_message_id' => $sqsMessageId,
+                    'correlation_id' => $platformCorrelation->correlation_id,
+                ]);
+            } else {
+                Log::error('ses_event_platform_recipient_mismatch', [
+                    'sqs_message_id' => $sqsMessageId,
+                    'event_type' => $eventType->value,
+                    'correlation_id' => $platformCorrelation->correlation_id,
+                ]);
 
-            return false;
+                return false;
+            }
         }
 
-        $firm = Firm::query()->find($correlation->firm_id);
-
-        if ($firm === null) {
-            Log::error('ses_event_firm_not_found', [
-                'sqs_message_id' => $sqsMessageId,
-                'correlation_id' => $correlation->correlation_id,
-                'firm_id' => $correlation->firm_id,
-            ]);
-
-            return false;
-        }
-
-        $this->applyOutcome($firm, $eventType, $bounceType, $correlation);
+        $this->applyPlatformOutcome($eventType, $bounceType, $platformCorrelation);
 
         Log::info('ses_event_processed', [
             'event_type' => $eventType->value,
             'ses_message_id' => $mailMessageId,
             'sqs_message_id' => $sqsMessageId,
-            'correlation_id' => $correlation->correlation_id,
+            'correlation_id' => $platformCorrelation->correlation_id,
             'bounce_type' => $bounceType?->value,
+            'scope' => 'platform',
         ]);
 
-        SesEventReceipt::create([
-            'idempotency_key' => $idempotencyKey,
-            'event_type' => $eventType->value,
-            'ses_message_id' => $mailMessageId,
-            'sqs_message_id' => $sqsMessageId,
-            'processed_at' => now(),
-        ]);
+        return $this->recordReceipt($idempotencyKey, $eventType, $mailMessageId, $sqsMessageId);
+    }
+
+    /**
+     * The actual concurrency gate (post-578ee98 audit finding B3): the
+     * unique constraint on ses_event_receipts.idempotency_key is what
+     * makes this safe under concurrent processing, not the earlier
+     * exists() pre-check alone (which is a plain SELECT and cannot
+     * prevent two processes racing past it simultaneously). A unique-
+     * violation here means another process already durably recorded
+     * this exact event — our own outcome call above is itself
+     * idempotent (SuppressionService/PlatformNotificationCorrelationService
+     * both upsert-or-guard on write), so losing this race is a safe,
+     * harmless no-op: still safe to delete the SQS message.
+     */
+    private function recordReceipt(string $idempotencyKey, SesEventType $eventType, string $mailMessageId, string $sqsMessageId): bool
+    {
+        try {
+            // Wrapped in its own DB::transaction() specifically so a
+            // caught unique-violation below never poisons any
+            // surrounding transaction: on Postgres, an uncommitted
+            // statement failure aborts the entire current transaction
+            // block, not just the one statement — every later query in
+            // that same transaction would then fail with "current
+            // transaction is aborted" even though this exception is
+            // caught. Laravel automatically issues a SAVEPOINT for a
+            // transaction opened while already inside one (e.g. a
+            // caller's own wrapping transaction, or a test's
+            // RefreshDatabase transaction), so a rollback here is
+            // scoped to just this insert.
+            DB::transaction(function () use ($idempotencyKey, $eventType, $mailMessageId, $sqsMessageId): void {
+                SesEventReceipt::create([
+                    'idempotency_key' => $idempotencyKey,
+                    'event_type' => $eventType->value,
+                    'ses_message_id' => $mailMessageId,
+                    'sqs_message_id' => $sqsMessageId,
+                    'processed_at' => now(),
+                ]);
+            });
+        } catch (QueryException $e) {
+            if (! $this->isUniqueViolation($e)) {
+                throw $e;
+            }
+
+            Log::info('ses_event_receipt_race_lost_safe_duplicate', [
+                'sqs_message_id' => $sqsMessageId,
+                'event_type' => $eventType->value,
+                'ses_message_id' => $mailMessageId,
+            ]);
+        }
 
         return true;
+    }
+
+    private function isUniqueViolation(QueryException $e): bool
+    {
+        return ($e->errorInfo[0] ?? null) === '23505';
     }
 
     /**
@@ -230,6 +345,34 @@ class SesEventConsumerService
                 'ses_complaint',
             );
         });
+    }
+
+    /**
+     * Platform-scope analogue of applyOutcome() — identical narrow
+     * bounce-type/event-type gating, but never touches SuppressionService
+     * or notification_events (no firm exists to scope them to). Writes
+     * to platform_notification_suppressions via
+     * PlatformNotificationCorrelationService::recordOutcome() instead.
+     */
+    private function applyPlatformOutcome(SesEventType $eventType, ?SesBounceType $bounceType, PlatformNotificationCorrelation $correlation): void
+    {
+        if ($eventType === SesEventType::Bounce && $bounceType !== SesBounceType::Permanent) {
+            return;
+        }
+
+        if (! in_array($eventType, [SesEventType::Bounce, SesEventType::Complaint], true)) {
+            return;
+        }
+
+        $status = $eventType === SesEventType::Bounce
+            ? NotificationEventStatus::Bounced
+            : NotificationEventStatus::Complained;
+
+        $this->platformCorrelation->recordOutcome(
+            $correlation,
+            $status,
+            $eventType === SesEventType::Bounce ? 'ses_bounce_permanent' : 'ses_complaint',
+        );
     }
 
     /**

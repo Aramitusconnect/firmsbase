@@ -62,7 +62,10 @@ return new class extends Migration
             $table->timestamps();
 
             $table->index('firm_id');
-            $table->index('provider_message_id');
+            // provider_message_id already has a unique index from
+            // ->unique() above — a separate ->index() call here would
+            // be a redundant second index on the identical column
+            // (post-578ee98 audit finding M2).
         });
     }
 

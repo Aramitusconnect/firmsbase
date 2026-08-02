@@ -10,6 +10,7 @@ use App\Notifications\FirmOwnerInvitationNotification;
 use App\Services\FirmUser2faPolicyService;
 use App\Services\LoginPolicyService;
 use App\Services\OutboundMailCorrelationService;
+use App\Services\PlatformNotificationCorrelationService;
 use App\Services\TenantContextService;
 use Database\Factories\UserFactory;
 use Filament\Models\Contracts\FilamentUser;
@@ -21,6 +22,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Log;
 
 #[Fillable(['name', 'email', 'password'])]
 #[Hidden(['password', 'remember_token'])]
@@ -74,18 +76,82 @@ class User extends Authenticatable implements FilamentUser
      * (never from the email address itself) and, only when that
      * succeeds, routes the send through OutboundMailCorrelationService
      * so a later bounce/complaint can be resolved back to the correct
-     * firm. Falls back to the original, uncorrelated send when no
-     * active FirmUser membership resolves (e.g. mid-deactivation) —
-     * this must never block a password reset from being attempted.
+     * firm. This must never block a password reset from being
+     * attempted, so a User with no resolvable firm still gets one —
+     * but never uncorrelated and untracked (post-578ee98 audit finding
+     * H1): PlatformNotificationCorrelationService gives it a
+     * tenant-agnostic correlation instead, so a later bounce/complaint
+     * can still be recorded, and a permanently-bad address stops being
+     * retried. Every User is expected to resolve an active firm — one
+     * that doesn't is itself anomalous (mid-deactivation is the only
+     * legitimate case), so this branch also emits an operational alert
+     * distinct from ClientPortalUser's own identical fallback, which
+     * has more benign causes (a detached Client record).
+     *
+     * The platform-correlation subsystem is layered on top of, never a
+     * precondition for, the actual send: a misconfigured/unavailable
+     * PlatformNotificationCorrelationService (e.g. a missing HMAC key)
+     * must never silently swallow a password reset — this is exactly
+     * the "must never block a password reset" guarantee this docblock
+     * already stated, which an earlier version of this fix violated by
+     * letting isRecipientSuppressed()/correlate()'s own exceptions
+     * propagate up into FirmProvisioningService::dispatchOwnerInvitation()'s
+     * broad catch(Throwable), silently marking a genuine invitation as
+     * failed before notify() was ever reached.
      */
     public function sendPasswordResetNotification($token): void
     {
         $firm = $this->activeFirmUser()?->firm;
 
         if ($firm === null) {
-            $this->notify(new FirmOwnerInvitationNotification($token));
+            Log::alert('user_password_reset_no_firm_correlation', [
+                'user_id' => $this->id,
+            ]);
 
-            return;
+            $sent = false;
+
+            try {
+                $platformCorrelation = app(PlatformNotificationCorrelationService::class);
+
+                if ($platformCorrelation->isRecipientSuppressed($this->email)) {
+                    Log::warning('user_password_reset_skipped_platform_suppressed', [
+                        'user_id' => $this->id,
+                    ]);
+
+                    return;
+                }
+
+                $platformCorrelation->correlate(
+                    static::class,
+                    $this->id,
+                    'user_password_reset',
+                    $this->email,
+                    function (string $correlationId) use ($token, &$sent): void {
+                        $this->notify((new FirmOwnerInvitationNotification($token))->withCorrelationId($correlationId));
+                        $sent = true;
+                    },
+                );
+
+                return;
+            } catch (\Throwable $e) {
+                Log::error('user_password_reset_platform_correlation_unavailable', [
+                    'user_id' => $this->id,
+                    'exception' => $e::class,
+                    'message' => $e->getMessage(),
+                ]);
+
+                // Only send here if the closure above never actually
+                // ran notify() — the failure was in the platform-
+                // correlation bookkeeping BEFORE/AFTER the real send, not
+                // in the send itself, so falling back must never
+                // re-send and duplicate a password reset the recipient
+                // already received.
+                if (! $sent) {
+                    $this->notify(new FirmOwnerInvitationNotification($token));
+                }
+
+                return;
+            }
         }
 
         app(OutboundMailCorrelationService::class)->correlate(

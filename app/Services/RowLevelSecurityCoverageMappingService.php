@@ -857,6 +857,13 @@ class RowLevelSecurityCoverageMappingService
         // per already-processed SES event, never a per-firm row. See
         // EXEMPT_TABLE_METADATA below.
         'ses_event_receipts',
+        // post-578ee98 audit remediation (finding H1) — platform-scope
+        // correlation/suppression ledgers for governed real sends that
+        // cannot resolve a firm. Ordinary "no firm_id at all"
+        // exemptions, identical shape to ses_event_receipts. See
+        // EXEMPT_TABLE_METADATA below.
+        'platform_notification_correlations',
+        'platform_notification_suppressions',
     ];
 
     /**
@@ -1788,6 +1795,28 @@ class RowLevelSecurityCoverageMappingService
                 .'only by SesEventConsumerService after the corresponding suppression/business logic has already '
                 .'succeeded durably. See database/migrations/2026_10_15_100003_create_ses_event_receipts_table.php.',
         ],
+        // post-578ee98 audit remediation (finding H1) — no firm_id
+        // column at all; ordinary "no firm_id" Global exemption,
+        // structurally identical to ses_event_receipts.
+        'platform_notification_correlations' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Global, no RLS, no firm_id column at all — the platform-scope correlation ledger for '
+                .'governed real sends (today: password-reset notifications) that could not resolve an owning firm '
+                .'at send time. Uses a plain account_type/account_id morph pair to identify which User/'
+                .'ClientPortalUser a correlation belongs to, never a firm. recipient_fingerprint is a keyed '
+                .'HMAC-SHA256, never plaintext. Written only by PlatformNotificationCorrelationService::correlate(). '
+                .'See database/migrations/2026_10_20_100001_create_platform_notification_correlations_table.php.',
+        ],
+        'platform_notification_suppressions' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Global, no RLS, no firm_id column at all — the platform-scope analogue of a suppressed '
+                .'recipient, independent of SuppressionService/notification_events (firm-scoped, FORCE-RLS). One '
+                .'row per suppressed recipient_fingerprint (a keyed HMAC, never plaintext), upserted by '
+                .'PlatformNotificationCorrelationService::recordOutcome(). See '
+                .'database/migrations/2026_10_20_100002_create_platform_notification_suppressions_table.php.',
+        ],
     ];
 
     /**
@@ -2269,6 +2298,45 @@ class RowLevelSecurityCoverageMappingService
             ],
             'authorized_writers' => [
                 'App\\Services\\SesEventConsumerService — the sole writer, and only after the corresponding suppression/business logic for that event has already succeeded durably',
+            ],
+        ],
+        // post-578ee98 audit remediation (finding H1) — platform-scope
+        // correlation ledger for governed real sends that could not
+        // resolve an owning firm.
+        'platform_notification_correlations' => [
+            'reason' => 'post-578ee98 audit remediation (finding H1): an ordinary "no firm_id" Global exemption — '
+                .'no firm_id column exists at all (confirmed via the create migration). Solves the same '
+                .'pre-tenant-context bootstrap problem notification_provider_correlations solves, for the narrow '
+                .'case where a governed real send (password-reset notifications on User/ClientPortalUser) '
+                .'genuinely cannot resolve an owning firm. Uses account_type/account_id (a plain morph pair '
+                .'identifying which User/ClientPortalUser, never a firm) instead of firm_id. '
+                .'recipient_fingerprint is a keyed HMAC-SHA256 of the normalized recipient, never plaintext — a '
+                .'dedicated, platform-wide secret (never APP_KEY), mirroring '
+                .'App\\Integrations\\Support\\GmailMailboxRoutingService\'s own established "keyed HMAC, not a '
+                .'plain hash" discipline. See '
+                .'database/migrations/2026_10_20_100001_create_platform_notification_correlations_table.php.',
+            'expected_readers' => [
+                'App\\Services\\SesEventConsumerService — the sole pre-tenant-context read, resolving an inbound SES event\'s mail.messageId to an account/notification-type tuple (or null) when no firm-scoped correlation exists',
+            ],
+            'authorized_writers' => [
+                'App\\Services\\PlatformNotificationCorrelationService::correlate() — the sole writer: creates the row before the real send is attempted, then persists provider_message_id only after the mail transport confirms a successful send',
+            ],
+        ],
+        // post-578ee98 audit remediation (finding H1) — the platform-
+        // scope analogue of a suppressed recipient.
+        'platform_notification_suppressions' => [
+            'reason' => 'post-578ee98 audit remediation (finding H1): an ordinary "no firm_id" Global exemption — '
+                .'no firm_id column exists at all, by construction (there is no firm to scope it to). Independent '
+                .'of SuppressionService/notification_events, which is firm-scoped and FORCE-RLS-protected. One '
+                .'row per suppressed recipient_fingerprint (a keyed HMAC, never plaintext) — a current-state '
+                .'table, not an append-only event log — so a permanently-bad address stops being retried on the '
+                .'uncorrelated-firm password-reset fallback path. See '
+                .'database/migrations/2026_10_20_100002_create_platform_notification_suppressions_table.php.',
+            'expected_readers' => [
+                'App\\Models\\User::sendPasswordResetNotification()/App\\Models\\ClientPortalUser::sendPasswordResetNotification() — via PlatformNotificationCorrelationService::isRecipientSuppressed(), checked before attempting a real send on the uncorrelated-firm fallback path',
+            ],
+            'authorized_writers' => [
+                'App\\Services\\PlatformNotificationCorrelationService::recordOutcome() — the sole writer, called only by SesEventConsumerService once a platform-scope correlation resolves a permanent bounce or complaint',
             ],
         ],
     ];

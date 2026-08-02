@@ -8,6 +8,7 @@ use App\Services\SesEventConsumerService;
 use Aws\Exception\AwsException;
 use Aws\Sqs\SqsClient;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -96,7 +97,24 @@ class ConsumeSesEventsCommand extends Command
     {
         $sqsMessageId = $message['MessageId'] ?? 'unknown';
 
-        $safeToDelete = $this->consumer->process($sqsMessageId, $message['Body'] ?? '');
+        // An unexpected exception from process() (a DB error, a
+        // concurrent-processing race, etc.) is a single-message
+        // processing failure, not a reason to crash this long-running
+        // loop — audit-fixed: this used to propagate uncaught, killing
+        // the whole consumer process on the first unlucky message.
+        // Never deleted in this branch, so SQS's own visibility-timeout
+        // redelivery and redrive-to-DLQ policy still apply.
+        try {
+            $safeToDelete = $this->consumer->process($sqsMessageId, $message['Body'] ?? '');
+        } catch (Throwable $e) {
+            Log::error('ses_event_processing_exception', [
+                'sqs_message_id' => $sqsMessageId,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+
+            return;
+        }
 
         if (! $safeToDelete) {
             return;

@@ -7,6 +7,7 @@ namespace Tests\Feature\Notifications;
 use App\Enums\ConsentChannel;
 use App\Models\Firm;
 use App\Models\NotificationProviderCorrelation;
+use App\Services\SesEventConsumerService;
 use Aws\Result;
 use Aws\Sqs\SqsClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -94,6 +95,37 @@ class ConsumeSesEventsCommandTest extends TestCase
         $sqs->shouldNotReceive('deleteMessage');
 
         $this->app->instance(SqsClient::class, $sqs);
+
+        $this->artisan('ses:consume-events', ['--max-iterations' => 1])
+            ->assertExitCode(0);
+    }
+
+    /**
+     * Post-578ee98 audit finding B2: an unexpected exception from
+     * SesEventConsumerService::process() (a DB error, a concurrent-
+     * processing race, etc.) is a single-message processing failure,
+     * never a reason to crash this long-running loop — this used to
+     * propagate uncaught and kill the whole consumer process.
+     */
+    public function test_an_unexpected_exception_from_process_does_not_crash_the_command(): void
+    {
+        $sqs = Mockery::mock(SqsClient::class);
+        $sqs->shouldReceive('receiveMessage')
+            ->once()
+            ->andReturn(new Result([
+                'Messages' => [[
+                    'MessageId' => 'sqs-cmd-3',
+                    'ReceiptHandle' => 'receipt-3',
+                    'Body' => $this->bounceBody('msg-cmd-3', 'Permanent', 'owner@example.com'),
+                ]],
+            ]));
+        $sqs->shouldNotReceive('deleteMessage');
+
+        $this->app->instance(SqsClient::class, $sqs);
+
+        $consumer = Mockery::mock(SesEventConsumerService::class);
+        $consumer->shouldReceive('process')->once()->andThrow(new \RuntimeException('simulated DB error'));
+        $this->app->instance(SesEventConsumerService::class, $consumer);
 
         $this->artisan('ses:consume-events', ['--max-iterations' => 1])
             ->assertExitCode(0);

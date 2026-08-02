@@ -682,6 +682,37 @@ class QualityGateFirewallTest extends TestCase
             'tests/Feature/Notifications/ConsumeSesEventsCommandTest.php',
             'tests/Feature/Notifications/OutboundMailCorrelationServiceTest.php',
             'tests/Feature/Notifications/SesEventConsumerServiceTest.php',
+            // post-578ee98 audit remediation (a later, distinct,
+            // independent security/architecture review of the SES
+            // event consumer feature) legitimately fixed a
+            // MessageSent listener leak, an uncaught-exception
+            // crash risk, a receipt-write concurrency race, a
+            // complaint recipient-mismatch hard-reject, and added a
+            // new platform-scope correlation/suppression subsystem
+            // for password-reset sends that cannot resolve a firm —
+            // plus its own new test files.
+            'app/Console/Commands/ConsumeSesEventsCommand.php',
+            'app/Models/ClientPortalUser.php',
+            'app/Models/User.php',
+            'app/Services/OutboundMailCorrelationService.php',
+            'app/Services/RowLevelSecurityCoverageMappingService.php',
+            'app/Services/SesEventConsumerService.php',
+            'app/Services/SuppressionService.php',
+            'config/services.php',
+            'database/migrations/2026_10_15_100002_create_notification_provider_correlations_table.php',
+            'tests/Feature/Governance/DataModelContract/RowLevelSecurityCoverageMappingServiceTest.php',
+            'tests/Feature/Mail/SesMailerTransportTest.php',
+            'tests/Feature/Notifications/ConsumeSesEventsCommandTest.php',
+            'tests/Feature/Notifications/OutboundMailCorrelationServiceTest.php',
+            'tests/Feature/Notifications/SesEventConsumerServiceTest.php',
+            'tests/Feature/Notifications/SuppressionServiceTest.php',
+            'app/Models/PlatformNotificationCorrelation.php',
+            'app/Models/PlatformNotificationSuppression.php',
+            'app/Services/PlatformNotificationCorrelationService.php',
+            'database/migrations/2026_10_20_100001_create_platform_notification_correlations_table.php',
+            'database/migrations/2026_10_20_100002_create_platform_notification_suppressions_table.php',
+            'tests/Feature/Notifications/PasswordResetPlatformCorrelationFallbackTest.php',
+            'tests/Feature/Notifications/PlatformNotificationCorrelationServiceTest.php',
         ];
 
         return array_values(array_filter(

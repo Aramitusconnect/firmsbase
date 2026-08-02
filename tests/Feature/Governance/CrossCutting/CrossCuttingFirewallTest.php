@@ -232,7 +232,12 @@ class CrossCuttingFirewallTest extends TestCase
                 // (notification_provider_correlations, ses_event_receipts).
                 && $path !== 'database/migrations/2026_10_15_100001_add_provider_message_id_to_notification_events_table.php'
                 && $path !== 'database/migrations/2026_10_15_100002_create_notification_provider_correlations_table.php'
-                && $path !== 'database/migrations/2026_10_15_100003_create_ses_event_receipts_table.php',
+                && $path !== 'database/migrations/2026_10_15_100003_create_ses_event_receipts_table.php'
+                // post-578ee98 audit remediation legitimately added two
+                // more migrations (platform-scope correlation/
+                // suppression subsystem).
+                && $path !== 'database/migrations/2026_10_20_100001_create_platform_notification_correlations_table.php'
+                && $path !== 'database/migrations/2026_10_20_100002_create_platform_notification_suppressions_table.php',
         ));
     }
 

@@ -44,6 +44,18 @@ return [
         'max_messages' => (int) env('SES_EVENTS_MAX_MESSAGES', 10),
     ],
 
+    // SES event consumer remediation (post-578ee98 audit, finding H1).
+    // recipient_fingerprint_hmac_key is a NEW, DEDICATED, platform-wide
+    // secret for PlatformNotificationCorrelationService's keyed
+    // HMAC-SHA256 lookup — mirrors
+    // integrations.oauth_apps.googleworkspace.gmail_mailbox_routing_hmac_key's
+    // own "WHY A KEYED HMAC, NOT A PLAIN HASH" discipline exactly.
+    // Never APP_KEY, never reused across purposes, fail-closed if
+    // missing (see PlatformNotificationCorrelationService::hmacKey()).
+    'platform_notifications' => [
+        'recipient_fingerprint_hmac_key' => env('PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY'),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
