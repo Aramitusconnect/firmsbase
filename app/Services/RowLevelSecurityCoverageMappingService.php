@@ -840,6 +840,23 @@ class RowLevelSecurityCoverageMappingService
         // EXEMPT_TABLE_METADATA below and the create migration's own
         // docblock.
         'provider_operation_attempts',
+        // feature/ses-event-consumer addition — notification_provider_correlations,
+        // the outbound-send correlation ledger the SES bounce/complaint
+        // consumer uses to resolve an inbound event back to the correct
+        // firm. Has a real NOT NULL firm_id column (like
+        // integration_webhook_routing_index/integration_gmail_mailbox_routes),
+        // exempted for the identical structural reason: it must be
+        // queryable during SesEventConsumerService's pre-tenant-context
+        // firm-resolution step, before app.current_firm_id can be set.
+        // See EXEMPT_TABLE_METADATA below.
+        'notification_provider_correlations',
+        // feature/ses-event-consumer addition — ses_event_receipts, the
+        // idempotency ledger for the SES bounce/complaint consumer. An
+        // ordinary "no firm_id at all" exemption (structurally identical
+        // to integration_platform_provider_health_summaries) — one row
+        // per already-processed SES event, never a per-firm row. See
+        // EXEMPT_TABLE_METADATA below.
+        'ses_event_receipts',
     ];
 
     /**
@@ -1742,6 +1759,35 @@ class RowLevelSecurityCoverageMappingService
                 .'firm_id. Operational evidence only — never a source of truth for money owed. See '
                 .'EXEMPT_TABLE_METADATA and the create migration\'s own docblock.',
         ],
+        // feature/ses-event-consumer addition — real NOT NULL firm_id
+        // column, exempted anyway — see EXEMPT_TABLES/EXEMPT_TABLE_METADATA.
+        'notification_provider_correlations' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'DISCLAIMER: Global, no RLS — but NOT a "no firm_id" exemption either: this table '
+                .'genuinely carries a NOT NULL firm_id column, by deliberate design, and is exempted from RLS '
+                .'anyway (see EXEMPT_TABLE_METADATA). Structural sibling of integration_webhook_routing_index/'
+                .'integration_gmail_mailbox_routes, for the identical reason: it must be readable before any '
+                .'tenant context exists at all, to bootstrap SesEventConsumerService\'s firm resolution when an '
+                .'SES bounce/complaint event arrives on the shared SQS queue. Populated at outbound-send time by '
+                .'App\\Services\\OutboundMailCorrelationService::correlate(). Carries no secret material — only '
+                .'{correlation_id (opaque uuid), firm_id, channel, recipient_normalized, provider_message_id}. '
+                .'See database/migrations/2026_10_15_100002_create_notification_provider_correlations_table.php.',
+        ],
+        // feature/ses-event-consumer addition — no firm_id column at
+        // all; ordinary "no firm_id" Global exemption, structurally
+        // identical to integration_platform_provider_health_summaries.
+        'ses_event_receipts' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Global, no RLS, no firm_id column at all — the durable idempotency ledger for the SES '
+                .'bounce/complaint consumer (SesEventConsumerService), keyed by {eventType}:{feedbackId ?? '
+                .'mail.messageId} so a retried SQS delivery of the same underlying SES event is never processed '
+                .'twice. One row per already-processed event; carries no PII, no email content, and no secret '
+                .'material — only event-type, provider/queue message ids, and a processed_at timestamp. Written '
+                .'only by SesEventConsumerService after the corresponding suppression/business logic has already '
+                .'succeeded durably. See database/migrations/2026_10_15_100003_create_ses_event_receipts_table.php.',
+        ],
     ];
 
     /**
@@ -2170,6 +2216,59 @@ class RowLevelSecurityCoverageMappingService
             'authorized_writers' => [
                 'App\\Integrations\\Billing\\ProviderOperationAttemptService — the sole writer (claim/lease CAS, markAttemptStarted before the send, outcome classification after it, local-processing and reconciliation transitions); no controller, Livewire component, Filament resource, or firm user ever writes this table',
                 'platform admins only, and only through an explicit audited reconciliation resolution on a reconciliation_required row — never a direct edit',
+            ],
+        ],
+        // feature/ses-event-consumer addition — the outbound-send
+        // correlation ledger the SES bounce/complaint consumer uses to
+        // resolve an inbound event back to the correct firm.
+        'notification_provider_correlations' => [
+            'reason' => 'feature/ses-event-consumer: this table genuinely carries a NOT NULL firm_id column '
+                .'($table->foreignId(\'firm_id\')->constrained(\'firms\')->cascadeOnDelete(), per '
+                .'database/migrations/2026_10_15_100002_create_notification_provider_correlations_table.php) — it '
+                .'is exempt from RLS despite that, not because it lacks it, for the identical reason '
+                .'integration_webhook_routing_index/integration_gmail_mailbox_routes are exempt: (1) it MUST be '
+                .'queryable in a genuinely pre-tenant-context bootstrap step — an inbound SES bounce/complaint '
+                .'event arrives on ONE shared SQS queue for every firm, with no firm identity attached beyond the '
+                .'SES provider message id, so app.current_firm_id cannot be SET LOCAL before '
+                .'SesEventConsumerService resolves which firm the event belongs to via this table\'s '
+                .'provider_message_id -> firm_id lookup; (2) it holds no secret or credential material — only '
+                .'{correlation_id (an opaque uuid, deliberately never a sequential id), firm_id, channel, '
+                .'recipient_normalized, provider_message_id}; and (3) the firm_id read back from this table is '
+                .'never treated as authoritative on its own for anything beyond resolving which firm context to '
+                .'enter — SesEventConsumerService immediately re-establishes real tenant context via the ordinary, '
+                .'unmodified TenantContextService::runWithFirmContext() before calling '
+                .'SuppressionService::recordBounce()/recordComplaint(), so this table\'s firm_id is a '
+                .'non-authoritative routing pointer only, never a security boundary. Written once, at outbound-send '
+                .'time, by App\\Services\\OutboundMailCorrelationService::correlate() — never updated afterward '
+                .'except to attach the confirmed provider_message_id once SES accepts the send. See '
+                .'database/migrations/2026_10_15_100002_create_notification_provider_correlations_table.php.',
+            'expected_readers' => [
+                'App\\Services\\SesEventConsumerService — the sole pre-tenant-context read, resolving an inbound SES event\'s mail.messageId to a {firm_id, channel, recipient_normalized} tuple (or null) before any RLS-protected table is touched',
+            ],
+            'authorized_writers' => [
+                'App\\Services\\OutboundMailCorrelationService::correlate() — the sole writer: creates the row before the real send is attempted, then persists provider_message_id only after the mail transport confirms a successful send via Illuminate\\Mail\\Events\\MessageSent',
+            ],
+        ],
+        // feature/ses-event-consumer addition — the idempotency ledger
+        // for the SES bounce/complaint consumer.
+        'ses_event_receipts' => [
+            'reason' => 'feature/ses-event-consumer: an ordinary "no firm_id" Global exemption — no firm_id '
+                .'column exists at all (confirmed via the create migration), structurally identical in shape to '
+                .'integration_platform_provider_health_summaries. SES/SNS delivery to SQS is at-least-once, and '
+                .'the consumer must be idempotent: this table is a durable ledger keyed by '
+                .'{eventType}:{feedbackId ?? mail.messageId} (deliberately never the SQS message id, since a '
+                .'retried SNS/SQS delivery of the identical underlying SES event can arrive as a genuinely '
+                .'different SQS message). A row is written only after the corresponding suppression/business '
+                .'logic for that event has already succeeded durably, so a crash between business-logic success '
+                .'and the SQS delete never causes the event to be silently skipped on retry. No PII, no email '
+                .'content, and no secret material is ever stored — only event-type, provider/queue message ids, '
+                .'and a processed_at timestamp. See '
+                .'database/migrations/2026_10_15_100003_create_ses_event_receipts_table.php.',
+            'expected_readers' => [
+                'App\\Services\\SesEventConsumerService — the sole reader, checking whether an inbound event\'s idempotency key has already been processed before applying any suppression outcome',
+            ],
+            'authorized_writers' => [
+                'App\\Services\\SesEventConsumerService — the sole writer, and only after the corresponding suppression/business logic for that event has already succeeded durably',
             ],
         ],
     ];

@@ -223,7 +223,16 @@ class CrossCuttingFirewallTest extends TestCase
                 // FIRMSVAULT — STAGING ADMIN STABILIZATION (a later,
                 // independently reviewed mission) legitimately added
                 // one migration (code/description columns on `plans`).
-                && $path !== 'database/migrations/2026_10_10_100001_add_code_and_description_to_plans_table.php',
+                && $path !== 'database/migrations/2026_10_10_100001_add_code_and_description_to_plans_table.php'
+                // feature/ses-event-consumer (a later, distinct, wholly
+                // isolated mission: a production-safe SES bounce/
+                // complaint consumer) legitimately added three
+                // migrations: a provider_message_id column on
+                // notification_events, and two new no-RLS tables
+                // (notification_provider_correlations, ses_event_receipts).
+                && $path !== 'database/migrations/2026_10_15_100001_add_provider_message_id_to_notification_events_table.php'
+                && $path !== 'database/migrations/2026_10_15_100002_create_notification_provider_correlations_table.php'
+                && $path !== 'database/migrations/2026_10_15_100003_create_ses_event_receipts_table.php',
         ));
     }
 

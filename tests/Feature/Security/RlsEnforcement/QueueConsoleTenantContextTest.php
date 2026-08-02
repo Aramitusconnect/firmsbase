@@ -144,6 +144,20 @@ class QueueConsoleTenantContextTest extends TestCase
             'RenewProviderWebhookSubscriptionsCommand.php',
             'ProvisionFirmCommand.php',
             'BootstrapStagingSandboxPlanCommand.php',
+            // feature/ses-event-consumer added ConsumeSesEventsCommand
+            // (ses:consume-events) — reviewed and safe: it never sets
+            // app.current_firm_id or touches a FORCE-RLS table directly
+            // itself. It long-polls a plain SQS queue via
+            // Aws\Sqs\SqsClient (no database access at all), delegates
+            // all parsing/business logic to SesEventConsumerService,
+            // which resolves the firm via the non-RLS
+            // notification_provider_correlations routing table (never
+            // from the recipient email alone), then performs every
+            // FORCE-RLS-protected read/write (SuppressionService::
+            // recordBounce()/recordComplaint()) inside
+            // TenantContextService::runWithFirmContext() for that
+            // resolved firm.
+            'ConsumeSesEventsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

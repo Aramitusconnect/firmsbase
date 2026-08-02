@@ -8,6 +8,7 @@ use App\Models\PlatformAdmin;
 use App\Models\SecurityEvent;
 use App\Models\User;
 use App\Services\TenantContextService;
+use Aws\Sqs\SqsClient;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\PasswordReset;
@@ -23,7 +24,38 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // SES event consumer (feature/ses-event-consumer). A container
+        // binding (not a bare `new SqsClient(...)` inside the command)
+        // so tests can swap in a mock via $this->app->instance() without
+        // ever touching a live SQS queue. 'key'/'secret' both default to
+        // null — the AWS SDK's default credential provider chain then
+        // falls back to the ECS task role's own temporary credentials,
+        // identical in intent to how Illuminate\Mail\Transport\SesTransport
+        // is already configured. Never introduces a static access key.
+        $this->app->singleton(SqsClient::class, function () {
+            $config = config('services.ses_events');
+
+            $clientConfig = [
+                'version' => 'latest',
+                'region' => $config['region'],
+            ];
+
+            // Matches Illuminate\Mail\MailManager::addSesCredentials()'s
+            // own established pattern exactly: the 'credentials' key is
+            // only ever set when a static key/secret is actually
+            // configured. Left unset (never set to an explicit null),
+            // the AWS SDK falls back to its own default credential
+            // provider chain, which resolves the ECS task role's
+            // temporary credentials automatically.
+            if (! empty($config['key']) && ! empty($config['secret'])) {
+                $clientConfig['credentials'] = [
+                    'key' => $config['key'],
+                    'secret' => $config['secret'],
+                ];
+            }
+
+            return new SqsClient($clientConfig);
+        });
     }
 
     /**

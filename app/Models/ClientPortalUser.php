@@ -3,8 +3,10 @@
 namespace App\Models;
 
 use App\Enums\ClientPortalStatus;
+use App\Enums\ConsentChannel;
 use App\Models\Concerns\HasPublicUuid;
 use App\Notifications\ClientPortalResetPasswordNotification;
+use App\Services\OutboundMailCorrelationService;
 use App\Services\TenantContextService;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
@@ -101,10 +103,37 @@ class ClientPortalUser extends Authenticatable implements FilamentUser
      * its reset URL via `route('password.reset', ...)` — a route this app
      * does not have (see ClientPortalResetPasswordNotification's own
      * docblock).
+     *
+     * SES event consumer (feature/ses-event-consumer) — resolves the
+     * owning firm via the identical one-hop self-lookup bootstrap
+     * canAccessPanel() already established
+     * (TenantContextService::withClientSelfLookupContext()), never
+     * from the email address itself. Falls back to the original,
+     * uncorrelated send if the client/firm cannot be resolved (must
+     * never block a password reset from being attempted).
      */
     public function sendPasswordResetNotification($token): void
     {
-        $this->notify(new ClientPortalResetPasswordNotification($token));
+        $tenantContext = app(TenantContextService::class);
+        $firm = $tenantContext->withClientSelfLookupContext(
+            $this->client_id,
+            fn () => Client::query()->find($this->client_id)?->firm,
+        );
+
+        if ($firm === null) {
+            $this->notify(new ClientPortalResetPasswordNotification($token));
+
+            return;
+        }
+
+        app(OutboundMailCorrelationService::class)->correlate(
+            $firm,
+            ConsentChannel::Email,
+            $this->email,
+            function (string $correlationId) use ($token): void {
+                $this->notify((new ClientPortalResetPasswordNotification($token))->withCorrelationId($correlationId));
+            },
+        );
     }
 
     /**

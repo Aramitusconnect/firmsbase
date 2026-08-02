@@ -160,6 +160,13 @@ class SecretPatternScanTest extends TestCase
         // local/testing without --confirm-staging and refused
         // unconditionally in production, identically to
         // ProvisionFirmCommand.
+        // feature/ses-event-consumer added ConsumeSesEventsCommand
+        // (ses:consume-events) — reviewed and safe: it seeds nothing at
+        // all. It only reads from the SES bounce/complaint SQS queue
+        // and, for each message, either records a real inbound
+        // bounce/complaint via the existing SuppressionService or
+        // leaves the message unacknowledged — no demo/placeholder/
+        // synthetic data of any kind is ever created.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
@@ -174,6 +181,7 @@ class SecretPatternScanTest extends TestCase
             'RenewProviderWebhookSubscriptionsCommand.php',
             'ProvisionFirmCommand.php',
             'BootstrapStagingSandboxPlanCommand.php',
+            'ConsumeSesEventsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

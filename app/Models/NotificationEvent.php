@@ -30,6 +30,7 @@ class NotificationEvent extends Model
         'correlation_id',
         'channel',
         'recipient',
+        'provider_message_id',
         'status',
         'reason',
         'subject_type',

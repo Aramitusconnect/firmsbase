@@ -28,6 +28,22 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    // SES event consumer (feature/ses-event-consumer). 'key'/'secret'
+    // both default to null, identical in intent to the 'ses' block
+    // above — the ECS task role's own temporary credentials are used
+    // via the AWS SDK's default credential provider chain. Never set
+    // AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY as static long-lived
+    // credentials for this queue.
+    'ses_events' => [
+        'queue_url' => env('SES_EVENTS_QUEUE_URL'),
+        'region' => env('SES_EVENTS_QUEUE_REGION', env('AWS_DEFAULT_REGION', 'us-east-1')),
+        'key' => env('SES_EVENTS_AWS_ACCESS_KEY_ID'),
+        'secret' => env('SES_EVENTS_AWS_SECRET_ACCESS_KEY'),
+        'wait_time_seconds' => (int) env('SES_EVENTS_WAIT_TIME_SECONDS', 20),
+        'visibility_timeout_seconds' => (int) env('SES_EVENTS_VISIBILITY_TIMEOUT_SECONDS', 60),
+        'max_messages' => (int) env('SES_EVENTS_MAX_MESSAGES', 10),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

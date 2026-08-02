@@ -437,7 +437,34 @@ class AdminControlUiBoundaryTest extends TestCase
                 && $path !== 'tests/Feature/Security/RlsContextRollout/QueueConsoleContextRolloutTest.php'
                 && $path !== 'tests/Feature/Security/RlsEnforcement/QueueConsoleTenantContextTest.php'
                 && $path !== 'tests/Feature/Security/SeedData/SecretPatternScanTest.php'
-                && $path !== 'tests/Feature/Integrations/Ui/FirmIntegrationSuperAdminBoundaryStructuralTest.php',
+                && $path !== 'tests/Feature/Integrations/Ui/FirmIntegrationSuperAdminBoundaryStructuralTest.php'
+                // feature/ses-event-consumer (a later, distinct, wholly
+                // isolated mission: a production-safe SES bounce/
+                // complaint consumer) legitimately added a
+                // notification-provider correlation ledger + idempotency
+                // ledger, a dedicated SQS consumer command, real-send
+                // correlation wiring in User/ClientPortalUser
+                // password-reset notifications, and its own new test
+                // files.
+                && $path !== 'app/Models/ClientPortalUser.php'
+                && $path !== 'app/Models/NotificationEvent.php'
+                && $path !== 'app/Models/User.php'
+                && $path !== 'app/Notifications/ClientPortalResetPasswordNotification.php'
+                && $path !== 'app/Notifications/FirmOwnerInvitationNotification.php'
+                && $path !== 'app/Providers/AppServiceProvider.php'
+                && $path !== 'config/mail.php'
+                && $path !== 'config/services.php'
+                && $path !== 'app/Enums/SesBounceType.php'
+                && $path !== 'app/Enums/SesEventType.php'
+                && $path !== 'app/Models/NotificationProviderCorrelation.php'
+                && $path !== 'app/Models/SesEventReceipt.php'
+                && $path !== 'app/Console/Commands/ConsumeSesEventsCommand.php'
+                && $path !== 'database/migrations/2026_10_15_100001_add_provider_message_id_to_notification_events_table.php'
+                && $path !== 'database/migrations/2026_10_15_100002_create_notification_provider_correlations_table.php'
+                && $path !== 'database/migrations/2026_10_15_100003_create_ses_event_receipts_table.php'
+                && $path !== 'tests/Feature/Notifications/ConsumeSesEventsCommandTest.php'
+                && $path !== 'tests/Feature/Notifications/OutboundMailCorrelationServiceTest.php'
+                && $path !== 'tests/Feature/Notifications/SesEventConsumerServiceTest.php',
         ));
 
         $this->assertEmpty($nonServiceNonTestChanges, 'Section 34 must only add/modify app/Services mapping services and governance tests, but found: '.implode(', ', $nonServiceNonTestChanges));

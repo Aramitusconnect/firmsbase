@@ -3,11 +3,13 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Enums\ConsentChannel;
 use App\Enums\FirmUserStatus;
 use App\Models\Concerns\HasPublicUuid;
 use App\Notifications\FirmOwnerInvitationNotification;
 use App\Services\FirmUser2faPolicyService;
 use App\Services\LoginPolicyService;
+use App\Services\OutboundMailCorrelationService;
 use App\Services\TenantContextService;
 use Database\Factories\UserFactory;
 use Filament\Models\Contracts\FilamentUser;
@@ -66,10 +68,34 @@ class User extends Authenticatable implements FilamentUser
      * docblock). Sent for every password reset, not only a brand-new
      * owner's first-time setup — mirrors ClientPortalUser's own
      * identical, non-special-cased override.
+     *
+     * SES event consumer (feature/ses-event-consumer) — resolves this
+     * user's own firm via the existing activeFirmUser() self-lookup
+     * (never from the email address itself) and, only when that
+     * succeeds, routes the send through OutboundMailCorrelationService
+     * so a later bounce/complaint can be resolved back to the correct
+     * firm. Falls back to the original, uncorrelated send when no
+     * active FirmUser membership resolves (e.g. mid-deactivation) —
+     * this must never block a password reset from being attempted.
      */
     public function sendPasswordResetNotification($token): void
     {
-        $this->notify(new FirmOwnerInvitationNotification($token));
+        $firm = $this->activeFirmUser()?->firm;
+
+        if ($firm === null) {
+            $this->notify(new FirmOwnerInvitationNotification($token));
+
+            return;
+        }
+
+        app(OutboundMailCorrelationService::class)->correlate(
+            $firm,
+            ConsentChannel::Email,
+            $this->email,
+            function (string $correlationId) use ($token): void {
+                $this->notify((new FirmOwnerInvitationNotification($token))->withCorrelationId($correlationId));
+            },
+        );
     }
 
     /**
