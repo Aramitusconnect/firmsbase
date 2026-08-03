@@ -32,8 +32,10 @@ use App\ValueObjects\FirmProvisioningResult;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
+use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Throwable;
 
 /**
@@ -177,10 +179,11 @@ final class FirmProvisioningService
             throw $e;
         }
 
-        $invitationSucceeded = $this->dispatchOwnerInvitation($owner, $firm);
+        $invitationFailureCategory = $this->dispatchOwnerInvitation($owner, $firm);
 
         $request->forceFill([
-            'status' => $invitationSucceeded ? FirmProvisioningStatus::Completed : FirmProvisioningStatus::InvitationFailed,
+            'status' => $invitationFailureCategory === null ? FirmProvisioningStatus::Completed : FirmProvisioningStatus::InvitationFailed,
+            'failure_category' => $invitationFailureCategory,
         ])->save();
 
         return new FirmProvisioningResult($request->fresh(), $firm, $owner, $request->status, resumedFromExistingRequest: false);
@@ -207,11 +210,13 @@ final class FirmProvisioningService
             throw new \RuntimeException('This firm has no resolvable owner to invite.');
         }
 
-        $succeeded = $this->dispatchOwnerInvitation($owner, $firm);
+        $failureCategory = $this->dispatchOwnerInvitation($owner, $firm);
+        $succeeded = $failureCategory === null;
 
         if ($request !== null) {
             $request->forceFill([
                 'status' => $succeeded ? FirmProvisioningStatus::Completed : FirmProvisioningStatus::InvitationFailed,
+                'failure_category' => $failureCategory,
             ])->save();
         }
 
@@ -411,8 +416,32 @@ final class FirmProvisioningService
      * exists — they just created or are re-inviting them), so it is
      * free to inspect the real outcome and mark the invitation attempt
      * failed accordingly.
+     *
+     * FIRMSVAULT — REAL STAGING STABILIZATION, Objective A / Phase 3:
+     * this previously caught every Throwable silently
+     * (`catch (Throwable) { return false; }`) with no trace of WHY a
+     * send failed — which is exactly what let a real infrastructure
+     * problem (the ECS task role missing `ses:SendRawEmail` on the
+     * sender identity, confirmed live via a direct diagnostic
+     * invocation of this same Password::broker()->sendResetLink() call)
+     * masquerade as an ambiguous "invitation failed to send" with no
+     * operator-visible cause. Every failure is now logged with a safe,
+     * non-secret category plus the exception class and a scrubbed
+     * message (see scrubMessageForLogging()) — never the reset token,
+     * the signed URL, or the raw recipient address, none of which ever
+     * appear in this method's own local scope to begin with (the token
+     * is generated and consumed entirely inside Password::broker(),
+     * never returned here — and the correlation callback above only
+     * ever returns Password::RESET_LINK_SENT or a safe fixed-string
+     * category, never anything derived from the correlation result's
+     * own detail). The same safe category is also returned to the
+     * caller so it can be persisted onto the FirmProvisioningRequest's
+     * own `failure_category` column — an operator reviewing a stuck
+     * request no longer has to go find the corresponding log line.
+     *
+     * @return string|null the safe failure category, or null on success
      */
-    private function dispatchOwnerInvitation(User $owner, Firm $firm): bool
+    private function dispatchOwnerInvitation(User $owner, Firm $firm): ?string
     {
         try {
             $status = Password::broker('users')->sendResetLink(
@@ -430,10 +459,61 @@ final class FirmProvisioningService
                 },
             );
 
-            return $status === Password::RESET_LINK_SENT;
-        } catch (Throwable) {
-            return false;
+            if ($status === Password::RESET_LINK_SENT) {
+                return null;
+            }
+
+            $category = 'password_broker_status_'.Str::after($status, 'passwords.');
+
+            Log::warning('firm_owner_invitation_not_sent', [
+                'owner_email_redacted' => $this->redactEmail($owner->email),
+                'password_broker_status' => $status,
+            ]);
+
+            return $category;
+        } catch (Throwable $e) {
+            $category = $this->safeInvitationFailureCategory($e);
+
+            Log::error('firm_owner_invitation_failed', [
+                'owner_email_redacted' => $this->redactEmail($owner->email),
+                'exception_class' => get_class($e),
+                'failure_category' => $category,
+                'exception_message' => $this->scrubMessageForLogging($e->getMessage()),
+            ]);
+
+            return $category;
         }
+    }
+
+    /**
+     * Distinguishes the specific, actionable categories this mission's
+     * own diagnosis actually encountered (a mail-transport-layer
+     * AccessDenied is an infrastructure/IAM problem an operator can fix
+     * without ever touching application code) from a generic bucket —
+     * mirrors safeFailureCategory()'s own established convention below.
+     */
+    private function safeInvitationFailureCategory(Throwable $e): string
+    {
+        return match (true) {
+            str_contains($e->getMessage(), 'AccessDenied') => 'mail_transport_access_denied',
+            $e instanceof TransportExceptionInterface => 'mail_transport_error',
+            default => 'unexpected_error',
+        };
+    }
+
+    /**
+     * Defense-in-depth for Log::error() context above: strips anything
+     * that looks like an email address from an exception message before
+     * it is logged, in case some future mailer/SES exception type
+     * embeds the recipient (unlike the AccessDenied case this mission
+     * diagnosed, which only ever references AWS ARNs/resource names,
+     * never the recipient). Never touches a reset token or signed URL —
+     * neither ever appears in a Password broker/mail transport
+     * exception message.
+     */
+    private function scrubMessageForLogging(string $message): string
+    {
+        return (string) preg_replace('/[^\s@]+@[^\s@]+\.[^\s@]+/', '[redacted-email]', $message);
     }
 
     private function isUniqueViolation(QueryException $e): bool
