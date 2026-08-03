@@ -28,6 +28,12 @@ db_database              = "firmsbase_staging"
 # a local `terraform validate`/`plan` dry run.
 app_image_digest = "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/firmsbase-app@sha256:REPLACE_ME"
 
+# Bare secret ARNs only — do NOT append a ":<json-key>::" selector here.
+# Each of these three live secrets is a JSON blob with multiple keys;
+# main.tf's local.shared_secrets derives the exact ECS valueFrom selector
+# (":APP_KEY::", ":password::", ":REDIS_PASSWORD::" respectively)
+# automatically from the bare ARN below. See
+# docs/ecs/staging-variable-inventory.md.
 app_key_secret_arn          = "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:firmsbase/staging/app-key-REPLACE_ME"
 db_password_secret_arn       = "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:firmsbase/staging/db-password-REPLACE_ME"
 redis_auth_token_secret_arn   = "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:firmsbase/staging/redis-auth-token-REPLACE_ME"
@@ -87,9 +93,11 @@ ecr_repository_name           = "firmsbase-staging"
 elasticache_subnet_group_name = "firmsbase-staging-cache-subnets"
 elasticache_engine            = "valkey"
 elasticache_parameter_group_name = "default.valkey7"
-# engine_version (already existed) must also be overridden to match the
-# live Valkey 7.2 line — do not leave it at the module's "7.1" (Redis)
-# default: engine_version = "7.2"
+# Live replication group's exact reported engine version is 7.2.6 (aws
+# elasticache describe-cache-clusters .EngineVersion) — but AWS's
+# aws_elasticache_replication_group requires major.minor-only format for
+# Redis v6+/Valkey and rejects "7.2.6" outright; supply "7.2" here.
+elasticache_engine_version        = "7.2"
 iam_task_execution_role_name  = "firmsbase-staging-ecs-execution-role"
 
 # ALB target-group health check — these three values match the currently

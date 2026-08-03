@@ -17,3 +17,7 @@ output "subnet_group_name" {
 output "engine" {
   value = aws_elasticache_replication_group.this.engine
 }
+
+output "engine_version" {
+  value = aws_elasticache_replication_group.this.engine_version
+}

@@ -58,6 +58,7 @@ module "elasticache" {
 
   subnet_group_name    = coalesce(var.elasticache_subnet_group_name, "${var.name_prefix}-redis")
   engine               = var.elasticache_engine
+  engine_version       = var.elasticache_engine_version
   parameter_group_name = var.elasticache_parameter_group_name
 }
 
@@ -87,6 +88,10 @@ module "iam" {
   # literal-named one).
   log_group_arns = [for lg in aws_cloudwatch_log_group.app : "${trimsuffix(lg.arn, ":*")}:*"]
 
+  # Bare ARNs only — never a ":<json-key>::" selector. IAM's
+  # secretsmanager:GetSecretValue grant applies to the whole secret; the
+  # JSON-key selector ECS needs is derived separately, only for the
+  # `secrets` valueFrom entries below (local.shared_secrets/local.hmac_secret).
   secret_arns = [
     var.app_key_secret_arn,
     var.db_password_secret_arn,
@@ -155,10 +160,20 @@ locals {
     MAIL_FROM_NAME    = "FirmsVault"
   }
 
+  # Each live secret is a JSON blob with multiple keys — ECS's `secrets`
+  # `valueFrom` needs the exact ":<json-key>::" selector appended, while
+  # module.iam's secret_arns list (below) must keep receiving the bare ARN
+  # unchanged, since an IAM secretsmanager:GetSecretValue Resource entry is
+  # scoped to the whole secret and must never carry a JSON-key selector
+  # suffix. Deriving the selector here (rather than asking the operator to
+  # supply two separately-formatted values for the same secret) means
+  # var.app_key_secret_arn/var.db_password_secret_arn/
+  # var.redis_auth_token_secret_arn each need to be set exactly once, as a
+  # bare ARN. See docs/ecs/staging-variable-inventory.md.
   shared_secrets = {
-    APP_KEY        = var.app_key_secret_arn
-    DB_PASSWORD    = var.db_password_secret_arn
-    REDIS_PASSWORD = var.redis_auth_token_secret_arn
+    APP_KEY        = "${var.app_key_secret_arn}:APP_KEY::"
+    DB_PASSWORD    = "${var.db_password_secret_arn}:password::"
+    REDIS_PASSWORD = "${var.redis_auth_token_secret_arn}:REDIS_PASSWORD::"
   }
 
   # Role-specific — deliberately NOT folded into shared_secrets above.
