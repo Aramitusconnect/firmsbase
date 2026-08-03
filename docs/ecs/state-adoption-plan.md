@@ -109,8 +109,8 @@ established across prior missions.
 
 | Classification | Count | Meaning |
 |---|---:|---|
-| `import_unchanged` | 11 | Live resource exists and field-matches; ready to import once blocked prerequisites (mostly permission gaps, not config gaps) clear |
-| `import_then_migrate` | 11 | Live resource exists, but Terraform needs a code fix (naming) and/or a design decision (permission shape, engine) before import is clean |
+| `import_unchanged` | 10 | Live resource exists and field-matches; ready to import once blocked prerequisites (mostly permission gaps, not config gaps) clear |
+| `import_then_migrate` | 12 | Live resource exists, but Terraform needs a code fix (naming) and/or a design decision (permission shape, engine, health-check values) before import is clean |
 | `new` | 66 | No live counterpart; Terraform will create it (Phase B) |
 | `unmanaged` | 0 | (bucket reserved; see note below — this repo currently has none) |
 | `do_not_import` | 6 | Live resource exists, but deliberately not imported (all 6 are the pinned ECS task definitions — §6) |
@@ -474,14 +474,19 @@ was written for it" as equivalent to "Terraform cannot touch it."
    the review — see the script's own header for its exact checks and
    documented bypass limitation), never the bare `terraform` binary.
 
-### Phase A2 — resources proven configuration-equivalent (`import_unchanged`, 11 addresses)
+### Phase A2 — resources proven configuration-equivalent (`import_unchanged`, 10 addresses)
 
 Security groups (`alb`, `ecs_tasks`, `redis`) and their field-matching
-rules, the ALB + target group + both listeners. Import commands are fully
-prepared in the manifest; 4 of the 11 are marked `import_id: "BLOCKED"`
+rules, the ALB itself + both listeners. Import commands are fully
+prepared in the manifest; 4 of the 10 are marked `import_id: "BLOCKED"`
 pending `ec2:DescribeSecurityGroupRules` access (`AccessDenied` for this
 operator — the SG/rule *content* is already confirmed matching, only the
 AWS-internal rule ID needed for the literal import command is unresolved).
+The executable A2 set is therefore **six** resources, not seven: the 3
+security groups, the ALB, and both listeners. The target group
+(`module.alb.aws_lb_target_group.web`) is **not** in this phase — it has
+three real health-check-field mismatches against live (§9.5) and has been
+moved to Phase A3 (`import_then_migrate`) below.
 
 ```bash
 terraform -chdir=infrastructure/ecs/environments/staging import \
@@ -492,8 +497,6 @@ terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.elasticache.aws_security_group.redis' 'sg-0da3ea50262a9d20d'
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.alb.aws_lb.this' 'arn:aws:elasticloadbalancing:us-east-1:603013471426:loadbalancer/app/firmsbase-staging-alb/79a16ccaf391d71b'
-terraform -chdir=infrastructure/ecs/environments/staging import \
-  'module.alb.aws_lb_target_group.web' 'arn:aws:elasticloadbalancing:us-east-1:603013471426:targetgroup/firmsbase-staging-tg/1830c01b9aaac37d'
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.alb.aws_lb_listener.https' 'arn:aws:elasticloadbalancing:us-east-1:603013471426:listener/app/firmsbase-staging-alb/79a16ccaf391d71b/f8dc4575154478ca'
 terraform -chdir=infrastructure/ecs/environments/staging import \
@@ -507,7 +510,7 @@ terraform -chdir=infrastructure/ecs/environments/staging import \
 # elevated read access — not guessed. ---
 ```
 
-### Phase A3 — resources requiring a temporary live-state-compatible configuration first (`import_then_migrate`, 11 addresses)
+### Phase A3 — resources requiring a temporary live-state-compatible configuration first (`import_then_migrate`, 12 addresses)
 
 **Every command below is BLOCKED until its named code fix/decision lands**
 — none of these are guesses; each is marked in the manifest with an
@@ -539,6 +542,20 @@ terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.iam.aws_iam_role.task_execution' 'firmsbase-staging-ecs-execution-role'
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.iam.aws_iam_role_policy.task_execution' 'firmsbase-staging-ecs-execution-role:FirmsBaseStagingSecretsAccess'
+
+# BLOCKED — Requires: var.alb_health_check_path = "/up", var.alb_health_check_interval_seconds = 30,
+# and var.alb_health_check_matcher = "200-399" (see terraform.tfvars.example) all actually supplied
+# at apply time, matching the live target group exactly (§9.5). None of the three mismatches force
+# replacement (health_check.* and matcher are in-place-updatable per the AWS provider's documented
+# resource schema for aws_lb_target_group — not re-verified live via `terraform providers schema`
+# in this pass, which this mission does not authorize against the real initialized backend), but
+# importing with any of them still at the module's original default would silently diverge from
+# live health-check behavior on the very next apply. Any future proposal to instead change this
+# target group's identity-defining fields (port/protocol/vpc_id/target_type) — which would force
+# replacement — is a stop condition requiring explicit human review before either import or apply
+# proceeds; nothing here authorizes that.
+terraform -chdir=infrastructure/ecs/environments/staging import \
+  'module.alb.aws_lb_target_group.web' 'arn:aws:elasticloadbalancing:us-east-1:603013471426:targetgroup/firmsbase-staging-tg/1830c01b9aaac37d'
 
 # Requires: assign_public_ip=true is in effect (default, §7) for all four — DO NOT apply with private_egress_ready=true until real NAT egress exists
 terraform -chdir=infrastructure/ecs/environments/staging import \
@@ -649,12 +666,50 @@ services). `var.ecr_repository_name` closes this the same way.
   post-import plan doesn't show a permanent diff or attempt a disruptive
   in-place rotation.
 
-### 9.5 ALB target-group health-check path
+### 9.5 ALB target-group health-check adoption (path, interval, matcher)
 
-Unchanged from the original finding: live `/up` (liveness) vs. Terraform's
-default `/readyz` (readiness) — a real semantic difference, not a naming
-one. Non-destructive to change (in-place update), but flagged for an
-explicit human decision (§11), not silently adopted either direction.
+**Corrected in this pass** — the original finding covered only the
+health-check path; a closer re-comparison against the live target group
+(`aws elbv2 describe-target-groups` / `describe-target-group-attributes`)
+found two further mismatches on the same resource that were never
+previously documented:
+
+1. **Health-check path**: live `/up` (liveness) vs. Terraform's default
+   `/readyz` (readiness) — a real semantic difference, not a naming one.
+2. **Health-check interval**: live `30` seconds vs. Terraform's default
+   `15` seconds.
+3. **Matcher**: live `"200-399"` vs. Terraform's default `"200"` (an exact
+   match) — previously hardcoded in `modules/alb/main.tf` with no variable
+   at all, so no override was even possible until `var.health_check_matcher`
+   was added in this pass.
+
+All three are non-destructive to change — `health_check.*` and `matcher`
+are in-place-updatable fields on `aws_lb_target_group` per the AWS
+provider's documented resource schema (`name`/`port`/`protocol`/`vpc_id`/
+`target_type` are the fields that force replacement, and none of those
+differ from live). **This was not re-verified live via `terraform
+providers schema` in this pass** — that command does not honor
+`-backend=false` and would contact the real, now-initialized S3 backend,
+which this mission does not authorize; the in-place-update conclusion
+rests on established AWS/Terraform provider documentation, not a fresh
+live schema read.
+
+`var.alb_health_check_path`, `var.alb_health_check_interval_seconds`, and
+`var.alb_health_check_matcher` (all in
+`infrastructure/ecs/environments/staging/variables.tf`, wired into
+`module "alb"` in `main.tf`) now let all three be set to their live values
+before import — see `terraform.tfvars.example` for the exact override
+values (`"/up"`, `30`, `"200-399"`). The target group is classified
+`import_then_migrate` (not `import_unchanged`) and marked **BLOCKED** in
+`import-manifest.json` until all three are actually supplied at apply
+time, not merely present as variables. A later migration back to this
+module's original readiness-check design (`/readyz`, 15s, exact `200`) —
+or any other change to these values — must be a separate, deliberately
+reviewed deployment, never a side effect of the import itself. Any future
+proposal that would instead touch this target group's replacement-forcing
+fields (port/protocol/vpc_id/target_type) is a stop condition requiring
+explicit human review before either import or apply proceeds — see §11
+item 4.
 
 ### 9.6 Security-group rule granularity
 
@@ -703,9 +758,16 @@ Terraform (`.tf`), a Terraform test (`.tftest.hcl`), documentation
    the live role's permissions on first apply — a real, reviewable
    change, not a no-op). The naming variable (§6 of variables.tf) does not
    resolve this; it only makes the role importable by address.
-4. ALB target-group health-check path (§9.5): adopt `/up`, keep `/readyz`
-   and accept the live behavior change, or expose both as separate
-   checks.
+4. ALB target-group health-check adoption (§9.5, expanded this revision to
+   cover all three mismatches, not just the path): adopt live's values
+   (`/up`, 30s interval, matcher `200-399`) via the new
+   `alb_health_check_path`/`alb_health_check_interval_seconds`/
+   `alb_health_check_matcher` variables before import, or accept a
+   deliberate one-time behavior change to the module's original design
+   values (`/readyz`, 15s, `200`) instead. Either way this is a human
+   decision, not a default to silently import against; the resource
+   remains BLOCKED (`import_then_migrate`) until the live-compatible
+   values are actually supplied.
 5. ElastiCache engine/version (§9.4, new this revision): confirm
    `elasticache_engine = "valkey"` and an appropriate `engine_version` for
    the live 7.2 line before any replication-group import is attempted —

@@ -189,3 +189,38 @@ run "private_egress_ready_without_nat_gateway_ids_fails_validation" {
     var.nat_gateway_ids,
   ]
 }
+
+# --- ALB target-group health-check adoption (path/interval/matcher) ------
+#
+# Terraform's test framework only exposes a called module's declared
+# outputs to `assert` conditions in the root run block, not its nested
+# resources (module.alb.aws_lb_target_group.web is not a valid expression
+# here even though it's a valid state/CLI address) — so these two runs
+# only prove staging can plan cleanly with each variable set. The actual
+# value-wiring proof is split across two other, more targeted tests: the
+# module's own tests/health_check_overrides.tftest.hcl (infrastructure/ecs
+# /modules/alb) proves the module resource honors health_check_matcher (and
+# by the same var.* pattern, path/interval), and
+# tests/Feature/Ecs/AlbTargetGroupAdoptionTest.php proves this file's
+# module "alb" call actually passes var.alb_health_check_* through by
+# reading the real committed HCL.
+
+run "alb_health_check_defaults_plan_cleanly" {
+  # No assert block: module.alb's outputs (e.g. target_group_arn) are
+  # unknown at plan time under mock_provider (only module.networking and
+  # module.iam are overridden with known values in this file) — this run
+  # only needs to prove the plan itself succeeds with the default
+  # (unset) health-check variables, which a failing `run` already checks
+  # without any assertion.
+  command = plan
+}
+
+run "alb_health_check_overrides_plan_cleanly" {
+  command = plan
+
+  variables {
+    alb_health_check_path             = "/up"
+    alb_health_check_interval_seconds = 30
+    alb_health_check_matcher          = "200-399"
+  }
+}

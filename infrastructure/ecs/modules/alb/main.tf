@@ -41,7 +41,7 @@ resource "aws_lb_target_group" "web" {
     timeout             = var.health_check_timeout_seconds
     healthy_threshold   = var.healthy_threshold_count
     unhealthy_threshold = var.unhealthy_threshold_count
-    matcher             = "200"
+    matcher             = var.health_check_matcher
   }
 
   tags = var.tags

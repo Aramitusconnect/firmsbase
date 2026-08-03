@@ -18,8 +18,8 @@
   },
   "summary": {
     "new": 66,
-    "import_then_migrate": 11,
-    "import_unchanged": 11,
+    "import_then_migrate": 12,
+    "import_unchanged": 10,
     "do_not_import": 6,
     "total": 94
   },
@@ -449,11 +449,11 @@
     },
     {
       "address": "module.alb.aws_lb_target_group.web",
-      "classification": "import_unchanged",
+      "classification": "import_then_migrate",
       "import_id": "arn:aws:elasticloadbalancing:us-east-1:603013471426:targetgroup/firmsbase-staging-tg/1830c01b9aaac37d",
-      "prerequisite": null,
+      "prerequisite": "Code fix required (now landed): var.alb_health_check_path, var.alb_health_check_interval_seconds, and var.alb_health_check_matcher must all be set to their live-matching values (\"/up\", 30, \"200-399\" - see terraform.tfvars.example) before import. BLOCKED until those three values are actually supplied at apply time; the variables/wiring existing in source is not by itself sufficient.",
       "live_reference": null,
-      "notes": "Live health-check path is /up (liveness); Terraform's default is /readyz (readiness) - a real behavior difference flagged for a human decision in the plan doc, not blocking import (target-group health-check config updates in place, no replacement).",
+      "notes": "CORRECTED in this pass - previously misclassified import_unchanged based on only one of three real mismatches. All three are in-place-updatable (health_check.* and matcher are never ForceNew on aws_lb_target_group per the AWS provider's documented resource schema - this was not re-verified live via `terraform providers schema` in this pass, which is out of scope for a read-only worktree with a real backend configured), so the target group itself is not at replacement risk - but importing with any of the three still at their Terraform default would silently diverge from the live target group's actual health-check behavior on the very next apply. Mismatches: (1) health-check path: live /up (liveness) vs. Terraform default /readyz (readiness); (2) health-check interval: live 30s vs. Terraform default 15s; (3) matcher: live \"200-399\" vs. Terraform default \"200\". See docs/ecs/state-adoption-plan.md §9.5.",
       "live_existence_confirmed": true
     },
     {

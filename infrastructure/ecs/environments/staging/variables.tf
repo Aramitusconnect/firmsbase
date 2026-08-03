@@ -312,3 +312,37 @@ variable "nat_gateway_ids" {
     error_message = "private_egress_ready = true requires at least one nat_gateway_ids entry. Do not set private_egress_ready = true without real, verified NAT egress in place — see docs/ecs/state-adoption-plan.md §9.1 (this VPC currently has no NAT gateway at all; disabling assign_public_ip without one cuts off all outbound connectivity for every ECS service)."
   }
 }
+
+# ---------------------------------------------------------------------------
+# ALB target-group health-check adoption overrides — see
+# docs/ecs/state-adoption-plan.md §9.5/§11. All default to this module's
+# original design values, so a brand-new environment is unaffected. THIS
+# staging environment's live target group differs on all three fields
+# (confirmed via aws elbv2 describe-target-groups/describe-target-group-
+# attributes) — see terraform.tfvars.example for the exact live-matching
+# override values, which must be supplied before
+# module.alb.aws_lb_target_group.web can be imported.
+# ---------------------------------------------------------------------------
+
+variable "alb_health_check_path" {
+  description = "See infrastructure/ecs/modules/alb's readiness_health_check_path. Default \"/readyz\" matches this module's original readiness-check design; this staging environment's live target group actually probes \"/up\" (liveness) — see docs/ecs/state-adoption-plan.md §9.5."
+  type        = string
+  default     = "/readyz"
+}
+
+variable "alb_health_check_interval_seconds" {
+  description = "See infrastructure/ecs/modules/alb's health_check_interval_seconds. Default 15 matches this module's original design; this staging environment's live target group actually uses 30 — see docs/ecs/state-adoption-plan.md §9.5."
+  type        = number
+  default     = 15
+}
+
+variable "alb_health_check_matcher" {
+  description = "See infrastructure/ecs/modules/alb's health_check_matcher. Default \"200\" matches this module's original design; this staging environment's live target group actually uses \"200-399\" — see docs/ecs/state-adoption-plan.md §9.5."
+  type        = string
+  default     = "200"
+
+  validation {
+    condition     = can(regex("^[0-9]{3}(-[0-9]{3})?(,[0-9]{3}(-[0-9]{3})?)*$", var.alb_health_check_matcher))
+    error_message = "alb_health_check_matcher must be an ALB-compatible HTTP code or range such as 200 or 200-399."
+  }
+}

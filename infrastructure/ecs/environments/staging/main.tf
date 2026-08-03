@@ -109,6 +109,10 @@ module "alb" {
   public_subnet_ids   = var.public_subnet_ids
   security_group_id   = module.security_groups.alb_security_group_id
   acm_certificate_arn = var.acm_certificate_arn
+
+  readiness_health_check_path   = var.alb_health_check_path
+  health_check_interval_seconds = var.alb_health_check_interval_seconds
+  health_check_matcher          = var.alb_health_check_matcher
 }
 
 locals {

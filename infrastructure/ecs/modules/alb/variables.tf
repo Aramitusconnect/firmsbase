@@ -63,6 +63,17 @@ variable "unhealthy_threshold_count" {
   default = 3
 }
 
+variable "health_check_matcher" {
+  description = "HTTP status-code matcher accepted by the ALB target-group health check."
+  type        = string
+  default     = "200"
+
+  validation {
+    condition     = can(regex("^[0-9]{3}(-[0-9]{3})?(,[0-9]{3}(-[0-9]{3})?)*$", var.health_check_matcher))
+    error_message = "health_check_matcher must be an ALB-compatible HTTP code or range such as 200 or 200-399."
+  }
+}
+
 variable "enable_deletion_protection" {
   description = "Should stay false for staging (mission does not provision production infra), left as a variable so a future production environment can override it."
   type        = bool
