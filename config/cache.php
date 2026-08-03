@@ -131,6 +131,30 @@ return [
     |
     */
 
+    // FIRMSVAULT — REAL STAGING STABILIZATION, Objective A / Phase 2:
+    // this framework default (`false`) was the actual root cause of the
+    // real staging Platform Admin dashboard HTTP 500
+    // (PlatformSecurityDashboardService::recentSecurityEvents():
+    // __PHP_Incomplete_Class) — with `false`,
+    // Illuminate\Cache\RedisStore::unserialize() calls
+    // `unserialize($value, ['allowed_classes' => false])` on every cache
+    // read, silently substituting ANY object class with
+    // __PHP_Incomplete_Class instead of throwing. Confirmed live against
+    // the real ElastiCache instance: the underlying cached bytes were
+    // never corrupted (they unserialize correctly with
+    // `allowed_classes => true`), it was purely this option rejecting
+    // every class on read.
+    //
+    // This value stays at the framework default deliberately — arbitrary
+    // PHP object deserialization from cache remains disabled. The actual
+    // fix is at the call site: PlatformSecurityDashboardService (and
+    // every other affected dashboard cache read) now caches only scalar
+    // arrays (strings/ints/bools/null, dates as ISO-8601 strings) and
+    // reconstructs any Collection/Carbon value only after reading the
+    // scalar payload back out — see that class's own docblock. A scalar
+    // array serializes with zero class references, so this setting
+    // never has anything to reject on a legitimate read regardless of
+    // its own value.
     'serializable_classes' => false,
 
 ];
