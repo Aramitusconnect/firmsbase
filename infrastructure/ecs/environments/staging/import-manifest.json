@@ -1,105 +1,874 @@
 {
-  "_comment": "Identifiers only — no credentials or secret values. See docs/ecs/state-adoption-plan.md for full context, ordering, and preconditions. Nothing in this file has been imported; it is a reference manifest for Phase A execution, not a record of work done.",
+  "_comment": "Identifiers only - no credentials or secret values. See docs/ecs/state-adoption-plan.md for full context, ordering, and preconditions. Nothing in this file has been imported; it is a reference manifest for Phase A execution, not a record of work done. Every resource address parsed from infrastructure/ecs/environments/staging and its child modules appears exactly once below.",
   "generated_from_account": "603013471426",
   "generated_from_region": "us-east-1",
-  "requires_code_fix_before_import": [
-    {
-      "resource_address": "module.ecs_cluster.aws_ecs_cluster.this",
-      "issue": "cluster_name computes to firmsbase-staging, live cluster is firmsbase-staging-cluster",
-      "fix": "add overridable ecs_cluster_name variable, set to firmsbase-staging-cluster"
-    },
-    {
-      "resource_address": "module.ecr.aws_ecr_repository.app",
-      "issue": "repository_name hardcoded to firmsbase-app, live repository is firmsbase-staging",
-      "fix": "correct hardcoded value to firmsbase-staging"
-    }
-  ],
-  "import_batches": [
-    {
-      "batch": 1,
-      "resources": [
-        { "address": "module.ecs_cluster.aws_ecs_cluster.this", "id": "firmsbase-staging-cluster" },
-        { "address": "module.ecs_cluster.aws_ecs_cluster_capacity_providers.this", "id": "firmsbase-staging-cluster" }
-      ]
-    },
-    {
-      "batch": 3,
-      "resources": [
-        { "address": "module.security_groups.aws_security_group.alb", "id": "sg-02a26ff122a9a1d29" },
-        { "address": "module.security_groups.aws_security_group.ecs_tasks", "id": "sg-0db14e50ea5c5466c" },
-        { "address": "module.security_groups.aws_security_group_rule.alb_ingress_https", "id": null, "id_note": "resolve exact SG-rule ID at execution time via aws ec2 describe-security-group-rules" },
-        { "address": "module.security_groups.aws_security_group_rule.ecs_tasks_ingress_from_alb", "id": null, "id_note": "same" },
-        { "address": "module.security_groups.aws_security_group_rule.rds_ingress_from_ecs_tasks[0]", "id": null, "id_note": "same; confirmed matching live rule exists on sg-0d4c5eedb2ee21743" }
-      ]
-    },
-    {
-      "batch": 4,
-      "resources": [
-        { "address": "module.elasticache.aws_elasticache_replication_group.this", "id": "firmsbase-staging-redis", "precondition": "add lifecycle { ignore_changes = [auth_token] } before import" }
-      ]
-    },
-    {
-      "batch": 5,
-      "resources": [
-        { "address": "module.alb.aws_lb.this", "id": null, "id_note": "read live ALB ARN via aws elbv2 describe-load-balancers at execution time" },
-        { "address": "module.alb.aws_lb_target_group.web", "id": null, "id_note": "read live target-group ARN at execution time" },
-        { "address": "module.alb.aws_lb_listener.https", "id": null, "id_note": "read live 443 listener ARN at execution time" },
-        { "address": "module.alb.aws_lb_listener.http_redirect", "id": null, "id_note": "read live 80 listener ARN at execution time" }
-      ]
-    },
-    {
-      "batch": 6,
-      "resources": [
-        { "address": "module.web.aws_ecs_task_definition.this", "id": "firmsbase-staging-web:9" },
-        { "address": "module.worker.aws_ecs_task_definition.this", "id": "firmsbase-staging-worker:8" },
-        { "address": "module.critical_worker.aws_ecs_task_definition.this", "id": "firmsbase-staging-critical-worker:8" },
-        { "address": "module.scheduler.aws_ecs_task_definition.this", "id": "firmsbase-staging-scheduler:8" }
-      ],
-      "deferred": [
-        { "address": "module.migrate.aws_ecs_task_definition.this", "id": "firmsbase-staging-migrate:<latest>", "reason": "confirm live container definition matches Terraform's before importing" },
-        { "address": "module.maintenance.aws_ecs_task_definition.this", "id": "firmsbase-staging-maintenance:<latest>", "reason": "same" }
-      ]
-    },
-    {
-      "batch": 7,
-      "precondition": "assign_public_ip must be true in infrastructure/ecs/modules/ecs_service before any apply touches these — see docs/ecs/state-adoption-plan.md §9.1",
-      "resources": [
-        { "address": "module.web.aws_ecs_service.this[0]", "id": "firmsbase-staging-cluster/web" },
-        { "address": "module.worker.aws_ecs_service.this[0]", "id": "firmsbase-staging-cluster/worker" },
-        { "address": "module.critical_worker.aws_ecs_service.this[0]", "id": "firmsbase-staging-cluster/critical-worker" },
-        { "address": "module.scheduler.aws_ecs_service.this[0]", "id": "firmsbase-staging-cluster/scheduler" }
-      ]
-    }
-  ],
-  "not_imported_by_this_plan": {
-    "unmanaged_classification_d": [
-      "arn:aws:iam::603013471426:role/firmsbase-staging-ecs-task-role",
-      "arn:aws:iam::603013471426:role/firmsbase-staging-ecs-execution-role",
-      "/ecs/firmsbase-staging/app (CloudWatch log group)",
-      "firmsbase-staging-db-bootstrap (task definition family)",
-      "firmsbase-staging-diagnostic (task definition family)",
-      "firmsbase-staging-image-inspection (task definition family)"
+  "counting_methodology": {
+    "explanation": "Terraform's resource count is variable-dependent (count/for_each conditionals). This manifest counts the resource graph that results when every REQUIRED (no-default) variable is set to the value needed to describe this specific live environment, and every OPTIONAL (has-a-default) variable is left at its current repository default. This is the only way to produce a single deterministic total; a different tfvars file could produce a different count.",
+    "required_vars_assumed_set_to_live_values": [
+      "vpc_id, public_subnet_ids, private_subnet_ids (live default VPC and its subnets)",
+      "rds_security_group_id (sg-0d4c5eedb2ee21743, enables the 2 count-gated postgres SG rules)",
+      "redis_auth_token (required, no default, sourced from Secrets Manager - enables the replication group)",
+      "ses_events_queue_arn, ses_events_queue_url, ses_events_dlq_arn (enables ses_consumer's SQS IAM policy and the 3 SQS-based alarm resources)",
+      "ses_sending_identity_arn, ses_authorized_from_address (enables the web task role's SES-send policy)",
+      "alarm_sns_topic_arn (has no default; required for the cloudwatch_alarms module to be usable at all)"
     ],
-    "new_resources_classification_c": [
-      "module.kms.aws_kms_key.this",
-      "module.kms.aws_kms_alias.this",
-      "module.s3_documents.*",
-      "module.ecr.aws_ecr_lifecycle_policy.app",
-      "module.security_groups.aws_security_group_rule.alb_egress_to_ecs_tasks",
-      "module.security_groups.aws_security_group_rule.ecs_tasks_egress_https",
-      "module.security_groups.aws_security_group_rule.ecs_tasks_egress_postgres[0]",
-      "module.elasticache.aws_security_group.redis",
-      "module.elasticache.aws_security_group_rule.redis_ingress_from_ecs_tasks",
-      "module.elasticache.aws_elasticache_subnet_group.this",
-      "module.ses_consumer.*",
-      "module.iam.aws_iam_role.task[*] and all associated aws_iam_role_policy.*",
-      "aws_cloudwatch_log_group.app[*] (7 per-role groups)",
-      "module.cloudwatch_alarms.* (19 resources — existence unconfirmed, cloudwatch:DescribeAlarms was AccessDenied)"
-    ],
-    "out_of_scope_classification_e": [
-      "vpc-0fd81b688155ded2b and all subnets/route tables/IGW",
-      "RDS instance firmsbase-staging-db and its security group sg-0d4c5eedb2ee21743",
-      "Secrets Manager secrets firmsbase/staging/{app-key,redis-auth-token,database-app,database-migrator}"
+    "optional_vars_left_at_repository_default": [
+      "enable_custom_metric_alarms = false (repository default; app-level custom-metric emission does not exist yet) - excludes 4 alarm resource addresses (queue_depth_high, oldest_queued_job_age_high, failed_jobs_high, scheduler_heartbeat_missing) from the total entirely, since their count expression evaluates to 0"
     ]
-  }
+  },
+  "summary": {
+    "new": 66,
+    "import_then_migrate": 11,
+    "import_unchanged": 11,
+    "do_not_import": 6,
+    "total": 94
+  },
+  "resources": [
+    {
+      "address": "module.networking.null_resource.subnet_vpc_membership_guard",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Terraform-internal plan-time precondition guard; no AWS resource, no live analog possible.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.kms.aws_kms_key.this",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Confirmed absent live via aws kms describe-key --key-id alias/firmsbase-staging-app -> NotFoundException.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.kms.aws_kms_alias.this",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Confirmed absent live (see key above).",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.ecr.aws_ecr_repository.app",
+      "classification": "import_then_migrate",
+      "import_id": "firmsbase-staging",
+      "prerequisite": "Code fix required: main.tf hardcodes repository_name=\"firmsbase-app\"; live repository is \"firmsbase-staging\" (confirmed via aws ecr describe-repositories). Must correct before import.",
+      "live_reference": null,
+      "notes": "ECR repo rename is destructive (deletes all existing image tags/digests) - do not rename live, fix Terraform instead.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.ecr.aws_ecr_lifecycle_policy.app",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Confirmed absent live via aws ecr get-lifecycle-policy -> LifecyclePolicyNotFoundException.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.security_groups.aws_security_group.alb",
+      "classification": "import_unchanged",
+      "import_id": "sg-02a26ff122a9a1d29",
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Live name 'firmsbase-staging-alb-sg'; Terraform uses name_prefix so exact string match is not required for import.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.security_groups.aws_security_group.ecs_tasks",
+      "classification": "import_unchanged",
+      "import_id": "sg-0db14e50ea5c5466c",
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Live name 'firmsbase-staging-ecs-sg'; name_prefix-based, same reasoning as ALB SG.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.security_groups.aws_security_group_rule.alb_ingress_https",
+      "classification": "import_unchanged",
+      "import_id": "BLOCKED",
+      "prerequisite": "Exact SecurityGroupRuleId unresolved: ec2:DescribeSecurityGroupRules was AccessDenied for this operator. Live rule (443 ingress from configured CIDRs) exists and field-matches; resolve the rule ID with elevated read access before running the import.",
+      "live_reference": null,
+      "notes": "Field content confirmed matching live (443/tcp ingress from 0.0.0.0/0, matching var.alb_ingress_cidr_blocks intent) via aws_security_group ingress listing; only the AWS-internal rule ID is unresolved.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.security_groups.aws_security_group_rule.alb_egress_to_ecs_tasks",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Live ALB SG egress is a single unrestricted -1/0.0.0.0/0 rule; no rule matching this narrower (container-port, SG-scoped) definition exists to import.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.security_groups.aws_security_group_rule.ecs_tasks_ingress_from_alb",
+      "classification": "import_unchanged",
+      "import_id": "BLOCKED",
+      "prerequisite": "Same ec2:DescribeSecurityGroupRules AccessDenied as above.",
+      "live_reference": null,
+      "notes": "Field content confirmed matching live (8080/tcp ingress from ALB SG) via aws_security_group ingress listing.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.security_groups.aws_security_group_rule.ecs_tasks_egress_https",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Live ECS-tasks SG egress is a single unrestricted -1/0.0.0.0/0 rule; no rule matching this narrower (443-only) definition exists to import.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.security_groups.aws_security_group_rule.ecs_tasks_egress_postgres[0]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Same reasoning as ecs_tasks_egress_https - covered by the live broad egress rule, no distinct 5432-scoped egress rule exists.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.security_groups.aws_security_group_rule.rds_ingress_from_ecs_tasks[0]",
+      "classification": "import_unchanged",
+      "import_id": "BLOCKED",
+      "prerequisite": "Same ec2:DescribeSecurityGroupRules AccessDenied as above.",
+      "live_reference": null,
+      "notes": "Field content confirmed matching live: RDS SG sg-0d4c5eedb2ee21743 already has exactly this rule (5432/tcp ingress from ECS-tasks SG).",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.s3_documents.aws_s3_bucket.documents",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Confirmed absent live via aws s3api head-bucket --bucket firmsbase-staging-documents -> 404 Not Found.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.s3_documents.aws_s3_bucket_public_access_block.documents",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Confirmed absent live via aws s3api head-bucket --bucket firmsbase-staging-documents -> 404 Not Found.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.s3_documents.aws_s3_bucket_versioning.documents",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Confirmed absent live via aws s3api head-bucket --bucket firmsbase-staging-documents -> 404 Not Found.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.s3_documents.aws_s3_bucket_server_side_encryption_configuration.documents",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Confirmed absent live via aws s3api head-bucket --bucket firmsbase-staging-documents -> 404 Not Found.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.s3_documents.aws_s3_bucket_ownership_controls.documents",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Confirmed absent live via aws s3api head-bucket --bucket firmsbase-staging-documents -> 404 Not Found.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.elasticache.aws_security_group.redis",
+      "classification": "import_unchanged",
+      "import_id": "sg-0da3ea50262a9d20d",
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Live name 'firmsbase-staging-redis-sg', attached to the live cache cluster; name_prefix-based, ingress rule confirmed matching (6379 from ECS-tasks SG).",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.elasticache.aws_security_group_rule.redis_ingress_from_ecs_tasks",
+      "classification": "import_unchanged",
+      "import_id": "BLOCKED",
+      "prerequisite": "Same ec2:DescribeSecurityGroupRules AccessDenied.",
+      "live_reference": null,
+      "notes": "Field content confirmed matching live (6379/tcp ingress from ECS-tasks SG) via aws_security_group ingress listing on sg-0da3ea50262a9d20d.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.elasticache.aws_elasticache_subnet_group.this",
+      "classification": "import_then_migrate",
+      "import_id": "firmsbase-staging-cache-subnets",
+      "prerequisite": "Code fix required: module computes name=\"${name_prefix}-redis\"=\"firmsbase-staging-redis\"; live subnet group (referenced by the live replication group) is named \"firmsbase-staging-cache-subnets\" (confirmed via aws elasticache describe-cache-clusters + describe-cache-subnet-groups). aws elasticache describe-cache-subnet-groups --cache-subnet-group-name firmsbase-staging-redis returned CacheSubnetGroupNotFoundFault.",
+      "live_reference": null,
+      "notes": "Previously misclassified as 'new' before this audit - a live subnet group does exist, just under a different name.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.elasticache.aws_elasticache_replication_group.this",
+      "classification": "import_then_migrate",
+      "import_id": "firmsbase-staging-redis",
+      "prerequisite": "Code fix required, and material: live engine is \"valkey\" (confirmed via aws elasticache describe-replication-groups .Engine), Terraform hardcodes engine=\"redis\". Engine cannot be changed in place - this is a REPLACEMENT-triggering mismatch, previously missed entirely in the prior audit. Also: live engine_version=\"7.2.6\" vs Terraform default \"7.1\" (a Redis version string, meaningless for Valkey); live parameter group family is \"default.valkey7\" vs Terraform's hardcoded \"default.redis7\". All three must be corrected together before import. Additionally add lifecycle { ignore_changes = [auth_token] } (write-only attribute, AWS never returns it).",
+      "live_reference": null,
+      "notes": "CORRECTED in this audit: previously classified import_unchanged. That was wrong - engine family mismatch was not checked in the prior pass.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.ecs_cluster.aws_ecs_cluster.this",
+      "classification": "import_then_migrate",
+      "import_id": "firmsbase-staging-cluster",
+      "prerequisite": "Code fix required: cluster_name=var.name_prefix=\"firmsbase-staging\"; live cluster is \"firmsbase-staging-cluster\". ECS cluster names cannot be changed post-creation (any apply without this fix plans a full cluster + all 4 services replacement). Add an explicit, overridable ecs_cluster_name variable.",
+      "live_reference": null,
+      "notes": "Confirmed via aws ecs describe-clusters.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.ecs_cluster.aws_ecs_cluster_capacity_providers.this",
+      "classification": "import_then_migrate",
+      "import_id": "firmsbase-staging-cluster",
+      "prerequisite": "Depends on the cluster name fix above (same underlying identifier). Capacity-provider strategy itself (FARGATE+FARGATE_SPOT, 100/0 weight) already matches the live default and needs no further change once the name is fixed.",
+      "live_reference": null,
+      "notes": "",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role.task_execution",
+      "classification": "import_then_migrate",
+      "import_id": "firmsbase-staging-ecs-execution-role",
+      "prerequisite": "Code fix + design decision required: Terraform computes name=\"${name_prefix}-task-execution\"=\"firmsbase-staging-task-execution\"; live role is \"firmsbase-staging-ecs-execution-role\" (confirmed via aws iam get-role). Beyond the name, live grants execution permissions via the AWS-managed policy AmazonECSTaskExecutionRolePolicy plus one narrow inline policy (secrets only); Terraform's task_execution module builds one broader custom inline policy (ECR pull + logs + secrets + KMS) with no managed-policy attachment. These are two different permission-delivery shapes for the same role, not just a naming difference - requires an explicit reviewed decision on which shape to standardize on before import.",
+      "live_reference": null,
+      "notes": "Unlike the 7 per-service task roles (structurally new, no live analog), this execution role IS a 1:1 shared-role match with a live resource - corrected from the prior audit's blanket 'no per-role mapping, all unmanaged' treatment, which incorrectly lumped the execution role in with the task role.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role_policy.task_execution",
+      "classification": "import_then_migrate",
+      "import_id": "firmsbase-staging-ecs-execution-role:FirmsBaseStagingSecretsAccess",
+      "prerequisite": "Paired with the role above. Terraform names this inline policy \"firmsbase-staging-task-execution\"; live inline policy is named \"FirmsBaseStagingSecretsAccess\" and only grants secretsmanager:GetSecretValue on 4 specific secret ARNs (confirmed via aws iam get-role-policy) - it does not include the ECR/logs/KMS statements Terraform's version does, because those come from the attached managed policy live. Must be reconciled together with the role's design decision above.",
+      "live_reference": null,
+      "notes": "",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role.task[\"web\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Live environment has exactly one shared generic task role (firmsbase-staging-ecs-task-role) used by all 4 running services; there is no live per-service task role to import into any of these 7 addresses. Genuinely new resources, created in Phase B alongside the role-specific IAM redesign.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role.task[\"worker\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Live environment has exactly one shared generic task role (firmsbase-staging-ecs-task-role) used by all 4 running services; there is no live per-service task role to import into any of these 7 addresses. Genuinely new resources, created in Phase B alongside the role-specific IAM redesign.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role.task[\"critical_worker\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Live environment has exactly one shared generic task role (firmsbase-staging-ecs-task-role) used by all 4 running services; there is no live per-service task role to import into any of these 7 addresses. Genuinely new resources, created in Phase B alongside the role-specific IAM redesign.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role.task[\"scheduler\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Live environment has exactly one shared generic task role (firmsbase-staging-ecs-task-role) used by all 4 running services; there is no live per-service task role to import into any of these 7 addresses. Genuinely new resources, created in Phase B alongside the role-specific IAM redesign.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role.task[\"migrate\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Live environment has exactly one shared generic task role (firmsbase-staging-ecs-task-role) used by all 4 running services; there is no live per-service task role to import into any of these 7 addresses. Genuinely new resources, created in Phase B alongside the role-specific IAM redesign.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role.task[\"maintenance\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Live environment has exactly one shared generic task role (firmsbase-staging-ecs-task-role) used by all 4 running services; there is no live per-service task role to import into any of these 7 addresses. Genuinely new resources, created in Phase B alongside the role-specific IAM redesign.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role.task[\"ses_consumer\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Live environment has exactly one shared generic task role (firmsbase-staging-ecs-task-role) used by all 4 running services; there is no live per-service task role to import into any of these 7 addresses. Genuinely new resources, created in Phase B alongside the role-specific IAM redesign.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role_policy.task_s3_documents[\"web\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Attached to a new (not-yet-existing) per-service task role; also references the not-yet-existing S3 documents bucket. No live counterpart possible.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role_policy.task_s3_documents[\"worker\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Attached to a new (not-yet-existing) per-service task role; also references the not-yet-existing S3 documents bucket. No live counterpart possible.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role_policy.task_s3_documents[\"critical_worker\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Attached to a new (not-yet-existing) per-service task role; also references the not-yet-existing S3 documents bucket. No live counterpart possible.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role_policy.task_s3_documents[\"maintenance\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Attached to a new (not-yet-existing) per-service task role; also references the not-yet-existing S3 documents bucket. No live counterpart possible.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role_policy.task_metrics[\"web\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Attached to a new (not-yet-existing) per-service task role. No live counterpart possible.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role_policy.task_metrics[\"worker\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Attached to a new (not-yet-existing) per-service task role. No live counterpart possible.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role_policy.task_metrics[\"critical_worker\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Attached to a new (not-yet-existing) per-service task role. No live counterpart possible.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role_policy.task_metrics[\"scheduler\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Attached to a new (not-yet-existing) per-service task role. No live counterpart possible.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role_policy.task_metrics[\"migrate\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Attached to a new (not-yet-existing) per-service task role. No live counterpart possible.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role_policy.task_metrics[\"maintenance\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Attached to a new (not-yet-existing) per-service task role. No live counterpart possible.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role_policy.task_metrics[\"ses_consumer\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Attached to a new (not-yet-existing) per-service task role. No live counterpart possible.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role_policy.task_ses_consumer_sqs[0]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Attached to the new ses_consumer task role, which has no live counterpart (ses-consumer is not deployed live yet).",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role_policy.task_web_ses_send[0]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Attached to the new 'web' task role (no live counterpart). The live SES-send permission (inline policy FirmsVaultStagingSesSend, granting both ses:SendEmail and ses:SendRawEmail) is instead attached to the shared generic task role, which has no Terraform address at all - documented separately as a live-only resource, not part of this manifest's 94 addresses.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.alb.aws_lb.this",
+      "classification": "import_unchanged",
+      "import_id": "arn:aws:elasticloadbalancing:us-east-1:603013471426:loadbalancer/app/firmsbase-staging-alb/79a16ccaf391d71b",
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Live name 'firmsbase-staging-alb'; matches Terraform's name_prefix pattern.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.alb.aws_lb_target_group.web",
+      "classification": "import_unchanged",
+      "import_id": "arn:aws:elasticloadbalancing:us-east-1:603013471426:targetgroup/firmsbase-staging-tg/1830c01b9aaac37d",
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Live health-check path is /up (liveness); Terraform's default is /readyz (readiness) - a real behavior difference flagged for a human decision in the plan doc, not blocking import (target-group health-check config updates in place, no replacement).",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.alb.aws_lb_listener.https",
+      "classification": "import_unchanged",
+      "import_id": "arn:aws:elasticloadbalancing:us-east-1:603013471426:listener/app/firmsbase-staging-alb/79a16ccaf391d71b/f8dc4575154478ca",
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "443, forwards to the target group above - matches.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.alb.aws_lb_listener.http_redirect",
+      "classification": "import_unchanged",
+      "import_id": "arn:aws:elasticloadbalancing:us-east-1:603013471426:listener/app/firmsbase-staging-alb/79a16ccaf391d71b/371edb36d1b49e2c",
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "80 -> 301 redirect to 443 - matches. This listener is why the ALB SG's live port-80 ingress rule (unmanaged, see plan doc) must never be revoked.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "aws_cloudwatch_log_group.app[\"web\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Only one live ECS-related log group was found: /ecs/firmsbase-staging/app (single, shared across all 4 running services, retention 30d, no KMS). It does not match any of the 7 per-role names Terraform expects (/ecs/firmsbase-staging/{role}). No live counterpart for any of the 7 addresses.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "aws_cloudwatch_log_group.app[\"worker\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Only one live ECS-related log group was found: /ecs/firmsbase-staging/app (single, shared across all 4 running services, retention 30d, no KMS). It does not match any of the 7 per-role names Terraform expects (/ecs/firmsbase-staging/{role}). No live counterpart for any of the 7 addresses.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "aws_cloudwatch_log_group.app[\"critical-worker\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Only one live ECS-related log group was found: /ecs/firmsbase-staging/app (single, shared across all 4 running services, retention 30d, no KMS). It does not match any of the 7 per-role names Terraform expects (/ecs/firmsbase-staging/{role}). No live counterpart for any of the 7 addresses.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "aws_cloudwatch_log_group.app[\"scheduler\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Only one live ECS-related log group was found: /ecs/firmsbase-staging/app (single, shared across all 4 running services, retention 30d, no KMS). It does not match any of the 7 per-role names Terraform expects (/ecs/firmsbase-staging/{role}). No live counterpart for any of the 7 addresses.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "aws_cloudwatch_log_group.app[\"migrate\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Only one live ECS-related log group was found: /ecs/firmsbase-staging/app (single, shared across all 4 running services, retention 30d, no KMS). It does not match any of the 7 per-role names Terraform expects (/ecs/firmsbase-staging/{role}). No live counterpart for any of the 7 addresses.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "aws_cloudwatch_log_group.app[\"maintenance\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Only one live ECS-related log group was found: /ecs/firmsbase-staging/app (single, shared across all 4 running services, retention 30d, no KMS). It does not match any of the 7 per-role names Terraform expects (/ecs/firmsbase-staging/{role}). No live counterpart for any of the 7 addresses.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "aws_cloudwatch_log_group.app[\"ses-consumer\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Only one live ECS-related log group was found: /ecs/firmsbase-staging/app (single, shared across all 4 running services, retention 30d, no KMS). It does not match any of the 7 per-role names Terraform expects (/ecs/firmsbase-staging/{role}). No live counterpart for any of the 7 addresses.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.web.aws_ecs_task_definition.this",
+      "classification": "do_not_import",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": "firmsbase-staging-web:9",
+      "notes": "Live task definition family exists and is currently in use, but its taskRoleArn is arn:aws:iam::603013471426:role/firmsbase-staging-ecs-task-role (the shared generic role) - Terraform models a role-specific task role for every service, so the two configurations are not field-equivalent. Per mission decision (Option B): do not import historical task-definition resources. Services remain pinned to their current live revision (ignore_changes=[task_definition] on aws_ecs_service.this already covers this) until Terraform registers a controlled replacement revision in Phase B, after the role-specific IAM roles exist and services are deliberately cut over.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.worker.aws_ecs_task_definition.this",
+      "classification": "do_not_import",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": "firmsbase-staging-worker:8",
+      "notes": "Live task definition family exists and is currently in use, but its taskRoleArn is arn:aws:iam::603013471426:role/firmsbase-staging-ecs-task-role (the shared generic role) - Terraform models a role-specific task role for every service, so the two configurations are not field-equivalent. Per mission decision (Option B): do not import historical task-definition resources. Services remain pinned to their current live revision (ignore_changes=[task_definition] on aws_ecs_service.this already covers this) until Terraform registers a controlled replacement revision in Phase B, after the role-specific IAM roles exist and services are deliberately cut over.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.critical_worker.aws_ecs_task_definition.this",
+      "classification": "do_not_import",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": "firmsbase-staging-critical-worker:8",
+      "notes": "Live task definition family exists and is currently in use, but its taskRoleArn is arn:aws:iam::603013471426:role/firmsbase-staging-ecs-task-role (the shared generic role) - Terraform models a role-specific task role for every service, so the two configurations are not field-equivalent. Per mission decision (Option B): do not import historical task-definition resources. Services remain pinned to their current live revision (ignore_changes=[task_definition] on aws_ecs_service.this already covers this) until Terraform registers a controlled replacement revision in Phase B, after the role-specific IAM roles exist and services are deliberately cut over.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.scheduler.aws_ecs_task_definition.this",
+      "classification": "do_not_import",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": "firmsbase-staging-scheduler:8",
+      "notes": "Live task definition family exists and is currently in use, but its taskRoleArn is arn:aws:iam::603013471426:role/firmsbase-staging-ecs-task-role (the shared generic role) - Terraform models a role-specific task role for every service, so the two configurations are not field-equivalent. Per mission decision (Option B): do not import historical task-definition resources. Services remain pinned to their current live revision (ignore_changes=[task_definition] on aws_ecs_service.this already covers this) until Terraform registers a controlled replacement revision in Phase B, after the role-specific IAM roles exist and services are deliberately cut over.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.migrate.aws_ecs_task_definition.this",
+      "classification": "do_not_import",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": "firmsbase-staging-migrate:<latest live revision, family confirmed via list-task-definition-families>",
+      "notes": "Live task definition family exists and is currently in use, but its taskRoleArn is arn:aws:iam::603013471426:role/firmsbase-staging-ecs-task-role (the shared generic role) - Terraform models a role-specific task role for every service, so the two configurations are not field-equivalent. Per mission decision (Option B): do not import historical task-definition resources. Services remain pinned to their current live revision (ignore_changes=[task_definition] on aws_ecs_service.this already covers this) until Terraform registers a controlled replacement revision in Phase B, after the role-specific IAM roles exist and services are deliberately cut over.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.maintenance.aws_ecs_task_definition.this",
+      "classification": "do_not_import",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": "firmsbase-staging-maintenance:<latest live revision, family confirmed via list-task-definition-families>",
+      "notes": "Live task definition family exists and is currently in use, but its taskRoleArn is arn:aws:iam::603013471426:role/firmsbase-staging-ecs-task-role (the shared generic role) - Terraform models a role-specific task role for every service, so the two configurations are not field-equivalent. Per mission decision (Option B): do not import historical task-definition resources. Services remain pinned to their current live revision (ignore_changes=[task_definition] on aws_ecs_service.this already covers this) until Terraform registers a controlled replacement revision in Phase B, after the role-specific IAM roles exist and services are deliberately cut over.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.ses_consumer.aws_ecs_task_definition.this",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "No live task-definition family named firmsbase-staging-ses-consumer exists at all (confirmed via aws ecs list-task-definition-families) - ses-consumer has never been deployed to this live environment. Genuinely new, not a do_not_import case.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.web.aws_ecs_service.this[0]",
+      "classification": "import_then_migrate",
+      "import_id": "firmsbase-staging-cluster/web",
+      "prerequisite": "Hard stop before any apply (not just import): live service runs assignPublicIp=ENABLED with no NAT gateway anywhere in this VPC (confirmed - default VPC, all-public subnets, sole route table has only an IGW route). Terraform's ecs_service module hardcodes assign_public_ip=false. Applying that in place would cut off all internet egress (ECR/Secrets Manager/CloudWatch Logs/SES/SQS) for every task in the service. Must not apply until the module is fixed to assign_public_ip=true (matching live) or the environment gains real private subnets + NAT. Also: live uses launchType=FARGATE with no capacityProviderStrategy; Terraform uses capacity_provider_strategy exclusively - confirmed non-destructive in-place field swap, safe to accept. Task definition stays pinned per the do_not_import decision above (lifecycle.ignore_changes=[task_definition] already present in the module).",
+      "live_reference": null,
+      "notes": "Corrected from the prior audit's import_unchanged classification.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.worker.aws_ecs_service.this[0]",
+      "classification": "import_then_migrate",
+      "import_id": "firmsbase-staging-cluster/worker",
+      "prerequisite": "Hard stop before any apply (not just import): live service runs assignPublicIp=ENABLED with no NAT gateway anywhere in this VPC (confirmed - default VPC, all-public subnets, sole route table has only an IGW route). Terraform's ecs_service module hardcodes assign_public_ip=false. Applying that in place would cut off all internet egress (ECR/Secrets Manager/CloudWatch Logs/SES/SQS) for every task in the service. Must not apply until the module is fixed to assign_public_ip=true (matching live) or the environment gains real private subnets + NAT. Also: live uses launchType=FARGATE with no capacityProviderStrategy; Terraform uses capacity_provider_strategy exclusively - confirmed non-destructive in-place field swap, safe to accept. Task definition stays pinned per the do_not_import decision above (lifecycle.ignore_changes=[task_definition] already present in the module).",
+      "live_reference": null,
+      "notes": "Corrected from the prior audit's import_unchanged classification.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.critical_worker.aws_ecs_service.this[0]",
+      "classification": "import_then_migrate",
+      "import_id": "firmsbase-staging-cluster/critical-worker",
+      "prerequisite": "Hard stop before any apply (not just import): live service runs assignPublicIp=ENABLED with no NAT gateway anywhere in this VPC (confirmed - default VPC, all-public subnets, sole route table has only an IGW route). Terraform's ecs_service module hardcodes assign_public_ip=false. Applying that in place would cut off all internet egress (ECR/Secrets Manager/CloudWatch Logs/SES/SQS) for every task in the service. Must not apply until the module is fixed to assign_public_ip=true (matching live) or the environment gains real private subnets + NAT. Also: live uses launchType=FARGATE with no capacityProviderStrategy; Terraform uses capacity_provider_strategy exclusively - confirmed non-destructive in-place field swap, safe to accept. Task definition stays pinned per the do_not_import decision above (lifecycle.ignore_changes=[task_definition] already present in the module).",
+      "live_reference": null,
+      "notes": "Corrected from the prior audit's import_unchanged classification.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.scheduler.aws_ecs_service.this[0]",
+      "classification": "import_then_migrate",
+      "import_id": "firmsbase-staging-cluster/scheduler",
+      "prerequisite": "Hard stop before any apply (not just import): live service runs assignPublicIp=ENABLED with no NAT gateway anywhere in this VPC (confirmed - default VPC, all-public subnets, sole route table has only an IGW route). Terraform's ecs_service module hardcodes assign_public_ip=false. Applying that in place would cut off all internet egress (ECR/Secrets Manager/CloudWatch Logs/SES/SQS) for every task in the service. Must not apply until the module is fixed to assign_public_ip=true (matching live) or the environment gains real private subnets + NAT. Also: live uses launchType=FARGATE with no capacityProviderStrategy; Terraform uses capacity_provider_strategy exclusively - confirmed non-destructive in-place field swap, safe to accept. Task definition stays pinned per the do_not_import decision above (lifecycle.ignore_changes=[task_definition] already present in the module).",
+      "live_reference": null,
+      "notes": "Corrected from the prior audit's import_unchanged classification.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.ses_consumer.aws_ecs_service.this[0]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "No live ses-consumer service exists in the cluster (confirmed via aws ecs list-services) - this is the actual Phase B deployment goal, not an adoption target.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.web.aws_appautoscaling_target.this[0]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "application-autoscaling:DescribeScalableTargets was AccessDenied for this operator - live existence could not be confirmed or ruled out. Classified 'new' as the best available inference (live services currently show plain FARGATE launch type with no visible autoscaling wiring in the data available), but flagged unconfirmed. If a live scalable target already exists under a different registration, creating this one would fail cleanly at apply time (AlreadyExists-style error), not silently duplicate - a safe failure mode either way.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.web.aws_appautoscaling_policy.cpu[0]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Same AccessDenied/unconfirmed caveat as the scalable target above.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.worker.aws_appautoscaling_target.this[0]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "application-autoscaling:DescribeScalableTargets was AccessDenied for this operator - live existence could not be confirmed or ruled out. Classified 'new' as the best available inference (live services currently show plain FARGATE launch type with no visible autoscaling wiring in the data available), but flagged unconfirmed. If a live scalable target already exists under a different registration, creating this one would fail cleanly at apply time (AlreadyExists-style error), not silently duplicate - a safe failure mode either way.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.worker.aws_appautoscaling_policy.cpu[0]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Same AccessDenied/unconfirmed caveat as the scalable target above.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.alb_5xx",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "cloudwatch:DescribeAlarms was AccessDenied for this operator - could not confirm whether an alarm with this computed name already exists live. Classified 'new' pending that confirmation; a name collision would fail cleanly at apply time (alarm update in place is actually how CloudWatch alarms behave, so this is lower-risk than most 'new' classifications - if one already exists under this exact name, apply would simply adopt/overwrite its definition, not create a duplicate). Flagged for verification before Phase B, not a blocker for Phase A (no alarm resource is scheduled for import in Phase A).",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.alb_target_response_time",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "cloudwatch:DescribeAlarms was AccessDenied for this operator - could not confirm whether an alarm with this computed name already exists live. Classified 'new' pending that confirmation; a name collision would fail cleanly at apply time (alarm update in place is actually how CloudWatch alarms behave, so this is lower-risk than most 'new' classifications - if one already exists under this exact name, apply would simply adopt/overwrite its definition, not create a duplicate). Flagged for verification before Phase B, not a blocker for Phase A (no alarm resource is scheduled for import in Phase A).",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.target_unhealthy",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "cloudwatch:DescribeAlarms was AccessDenied for this operator - could not confirm whether an alarm with this computed name already exists live. Classified 'new' pending that confirmation; a name collision would fail cleanly at apply time (alarm update in place is actually how CloudWatch alarms behave, so this is lower-risk than most 'new' classifications - if one already exists under this exact name, apply would simply adopt/overwrite its definition, not create a duplicate). Flagged for verification before Phase B, not a blocker for Phase A (no alarm resource is scheduled for import in Phase A).",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.rds_cpu",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "cloudwatch:DescribeAlarms was AccessDenied for this operator - could not confirm whether an alarm with this computed name already exists live. Classified 'new' pending that confirmation; a name collision would fail cleanly at apply time (alarm update in place is actually how CloudWatch alarms behave, so this is lower-risk than most 'new' classifications - if one already exists under this exact name, apply would simply adopt/overwrite its definition, not create a duplicate). Flagged for verification before Phase B, not a blocker for Phase A (no alarm resource is scheduled for import in Phase A).",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.rds_storage_low",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "cloudwatch:DescribeAlarms was AccessDenied for this operator - could not confirm whether an alarm with this computed name already exists live. Classified 'new' pending that confirmation; a name collision would fail cleanly at apply time (alarm update in place is actually how CloudWatch alarms behave, so this is lower-risk than most 'new' classifications - if one already exists under this exact name, apply would simply adopt/overwrite its definition, not create a duplicate). Flagged for verification before Phase B, not a blocker for Phase A (no alarm resource is scheduled for import in Phase A).",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.rds_connections_high",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "cloudwatch:DescribeAlarms was AccessDenied for this operator - could not confirm whether an alarm with this computed name already exists live. Classified 'new' pending that confirmation; a name collision would fail cleanly at apply time (alarm update in place is actually how CloudWatch alarms behave, so this is lower-risk than most 'new' classifications - if one already exists under this exact name, apply would simply adopt/overwrite its definition, not create a duplicate). Flagged for verification before Phase B, not a blocker for Phase A (no alarm resource is scheduled for import in Phase A).",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.redis_memory_high",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "cloudwatch:DescribeAlarms was AccessDenied for this operator - could not confirm whether an alarm with this computed name already exists live. Classified 'new' pending that confirmation; a name collision would fail cleanly at apply time (alarm update in place is actually how CloudWatch alarms behave, so this is lower-risk than most 'new' classifications - if one already exists under this exact name, apply would simply adopt/overwrite its definition, not create a duplicate). Flagged for verification before Phase B, not a blocker for Phase A (no alarm resource is scheduled for import in Phase A).",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.redis_connections_high",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "cloudwatch:DescribeAlarms was AccessDenied for this operator - could not confirm whether an alarm with this computed name already exists live. Classified 'new' pending that confirmation; a name collision would fail cleanly at apply time (alarm update in place is actually how CloudWatch alarms behave, so this is lower-risk than most 'new' classifications - if one already exists under this exact name, apply would simply adopt/overwrite its definition, not create a duplicate). Flagged for verification before Phase B, not a blocker for Phase A (no alarm resource is scheduled for import in Phase A).",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.ecs_service_running_count[\"web\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Same AccessDenied/unconfirmed caveat as the simple alarms above.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.ecs_service_cpu_high[\"web\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Same AccessDenied/unconfirmed caveat as the simple alarms above.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.ecs_service_running_count[\"general_worker\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Same AccessDenied/unconfirmed caveat as the simple alarms above.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.ecs_service_cpu_high[\"general_worker\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Same AccessDenied/unconfirmed caveat as the simple alarms above.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.ecs_service_running_count[\"critical_worker\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Same AccessDenied/unconfirmed caveat as the simple alarms above.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.ecs_service_cpu_high[\"critical_worker\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Same AccessDenied/unconfirmed caveat as the simple alarms above.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.ecs_service_running_count[\"ses_consumer\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Same AccessDenied/unconfirmed caveat as the simple alarms above.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.ecs_service_cpu_high[\"ses_consumer\"]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Same AccessDenied/unconfirmed caveat as the simple alarms above.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.ses_events_queue_backlog_high[0]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Same AccessDenied/unconfirmed caveat as the simple alarms above.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.ses_events_oldest_message_age_high[0]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Same AccessDenied/unconfirmed caveat as the simple alarms above.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.ses_events_dlq_messages_present[0]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Same AccessDenied/unconfirmed caveat as the simple alarms above.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_log_metric_filter.ses_consumer_errors[0]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "cloudwatch:DescribeAlarms denial doesn't directly cover metric filters (a logs: permission would), but no read permission for logs:DescribeMetricFilters was tested either - treated conservatively as unconfirmed.",
+      "live_existence_confirmed": false
+    },
+    {
+      "address": "module.cloudwatch_alarms.aws_cloudwatch_metric_alarm.ses_consumer_errors_high[0]",
+      "classification": "new",
+      "import_id": null,
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "Same AccessDenied/unconfirmed caveat as the simple alarms above.",
+      "live_existence_confirmed": false
+    }
+  ]
 }

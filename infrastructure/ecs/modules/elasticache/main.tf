@@ -34,7 +34,7 @@ resource "aws_security_group_rule" "redis_ingress_from_ecs_tasks" {
 }
 
 resource "aws_elasticache_subnet_group" "this" {
-  name       = "${var.name_prefix}-redis"
+  name       = coalesce(var.subnet_group_name, "${var.name_prefix}-redis")
   subnet_ids = var.private_subnet_ids
 }
 
@@ -42,12 +42,12 @@ resource "aws_elasticache_replication_group" "this" {
   replication_group_id = "${var.name_prefix}-redis"
   description          = "FirmsBase staging Redis — cache/session/queue/locks (see docs/ecs/queue-and-redis-architecture.md)"
 
-  engine               = "redis"
+  engine               = var.engine
   engine_version       = var.engine_version
   node_type            = var.node_type
   num_cache_clusters   = 1 # single node, no read replica — see module header comment
   port                 = 6379
-  parameter_group_name = "default.redis7"
+  parameter_group_name = var.parameter_group_name
 
   subnet_group_name  = aws_elasticache_subnet_group.this.name
   security_group_ids = [aws_security_group.redis.id]
@@ -65,4 +65,12 @@ resource "aws_elasticache_replication_group" "this" {
   apply_immediately = false
 
   tags = var.tags
+
+  lifecycle {
+    # auth_token is a write-only argument — AWS never returns it via any
+    # read API, so a post-import plan would otherwise show a permanent
+    # diff (or attempt a disruptive in-place auth-token rotation) every
+    # time. See docs/ecs/state-adoption-plan.md §9.4.
+    ignore_changes = [auth_token]
+  }
 }

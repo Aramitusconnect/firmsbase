@@ -1,335 +1,499 @@
 # Staging Terraform State Adoption Plan
 
 **Status: planning only. Nothing in this document has been executed.**
-No `terraform apply`, `terraform import`, or AWS-modifying command has been
-run as part of producing this plan. See §10 for exactly what *was* run
-(local/static only) and §11 for what still requires a human decision before
-any import can begin.
+No `terraform apply`, `terraform import`, `terraform refresh`, `terraform`
+state command, or AWS-modifying command has been run as part of producing
+this plan or its correction. See §10 for exactly what *was* run
+(local/static only) and §11 for what still requires a human decision
+before any import can begin.
 
-## 0. Why this document exists
+## 0. Why this document exists, and what changed in this revision
 
 `infrastructure/ecs/environments/staging` was written to describe the
 staging ECS environment, but the environment it describes already exists —
-it was stood up manually/out-of-band before this Terraform config existed
-(confirmed below). `versions.tf` has never had a backend configured, and
-[staging-readiness-report.md](staging-readiness-report.md) §5 lists the
-remote-state backend as **"Requires human approval — not chosen by this
-branch."** No `.terraform/` directory, local `.tfstate`, or remote state of
-any kind was found in this repository or worktree.
+it was stood up manually/out-of-band before this Terraform config existed.
+No backend has ever been configured; see §5.
 
-Running `terraform apply` today, from empty state, against this live
-environment would not "sync" anything — it would try to **create a second
-copy** of resources that already exist (a new ECS cluster with a
-name-collision, a second ALB, duplicate security groups, etc.), and in at
-least one case (§9.1) would actively break connectivity for the live
-services if it partially succeeded. That is the exact failure mode this
-plan exists to prevent. `infrastructure/ecs/environments/staging/scripts/tf-guard.sh`
-(§6) enforces this mechanically; this document is the human-readable plan
-the guard's error message points to.
+**This is a corrected revision.** An independent review of the first
+version of this plan (commit `0734429`) found material inconsistencies —
+summarized here for transparency, since an audit document that hides its
+own prior mistakes isn't trustworthy:
+
+1. **Resource count**: the first version claimed "~85" resources but its
+   own classification table only accounted for 58. This revision parses
+   every resource address from source (root module + every child module,
+   expanding every `for_each`/`count`) and classifies every one of them —
+   see §2 and §3 for the exact, reproducible total: **94**.
+2. **ECS task definitions were wrongly called import-unchanged.** Live
+   task definitions use the shared generic role
+   `arn:aws:iam::603013471426:role/firmsbase-staging-ecs-task-role`;
+   Terraform models a role-specific task role per service. These are not
+   field-equivalent. Corrected in §3/§6.
+3. **ECS services were wrongly called import-unchanged.** Live services
+   run `assignPublicIp=ENABLED`, `launchType=FARGATE` with no capacity
+   provider strategy, and reference the (not-field-equivalent) task
+   definitions above. Corrected in §3/§7, with a code-level guard added
+   (§7) so the dangerous case — disabling public IPs with no NAT gateway
+   in place — cannot happen by accident.
+4. **The networking module's resources were asserted safe without a
+   field-level comparison.** This revision adds the full VPC/subnet/route/
+   security-group compatibility matrix in §4.
+5. **Two additional real mismatches were found in the course of this
+   correction that neither version originally caught**: the ElastiCache
+   subnet group name (Terraform computes `firmsbase-staging-redis`; live
+   is `firmsbase-staging-cache-subnets`) and, more seriously, the
+   ElastiCache **engine** itself — live runs **Valkey**, not Redis
+   (`engine = "valkey"`, confirmed via
+   `aws elasticache describe-replication-groups`), while Terraform
+   hardcoded `engine = "redis"`. Engine is not changeable in place; this
+   was a real, previously-undetected replacement/data-loss stop condition.
+   Both are fixed in §6/§9.4.
+6. **The IAM task-execution role was previously lumped in with the task
+   role as "no mapping possible."** That's wrong for the execution role
+   specifically: live has exactly one shared execution role, and Terraform
+   also models exactly one shared execution role — a genuine 1:1 naming
+   mismatch fixable with a variable, not a structural non-mapping. The
+   *task* role genuinely has no live per-service equivalent and remains
+   correctly classified as new. See §3/§6.
 
 ## 1. Current state (verified)
 
 - Worktree: `/home/ubuntu/firmsbase-ses-staging-deployment-prep`, branch
-  `feature/ses-staging-deployment-prep`, HEAD `51282b5`, clean tree.
+  `feature/ses-staging-deployment-prep`.
 - No Terraform state, local or remote, exists anywhere in this repository.
 - `infrastructure/ecs/environments/staging/versions.tf` has no `backend`
-  block — this is documented in the file itself as a deliberate, not-yet-made
-  decision.
+  block — a deliberate, not-yet-made decision (see §5).
 - The live AWS environment (account `603013471426`, region `us-east-1`) is
-  real, running, and serving traffic: ECS cluster `firmsbase-staging-cluster`
-  with 4 active services, an ALB, RDS Postgres, ElastiCache Redis, SES
-  sending, and an SES-events SQS pipeline.
+  real, running, and serving traffic.
 
 **Why an empty-state `plan`/`apply` is unsafe:** every resource this
-Terraform config declares maps to a *name* or *identifier* Terraform itself
-computes (e.g. `aws_ecs_cluster.this.name = var.name_prefix`). Where that
-computed identifier collides with a live resource, `apply` fails outright
-(e.g. ECS cluster names must be unique — this one doesn't collide because
-of a naming mismatch, see §9.2, but others do). Where it doesn't collide,
-`apply` **succeeds** and creates a duplicate resource with the same purpose
-as one already running, splitting traffic/config across two untracked
-copies of the same system. Neither outcome is acceptable, which is why this
-plan exists before any `apply` is attempted.
+config declares maps to a name/identifier Terraform itself computes. Where
+that computed identifier collides with a live resource, `apply` either
+fails outright or — worse — succeeds and silently diverges from live
+config in a way that breaks the running service (§9.1 is the most severe
+example: an in-place `assignPublicIp` flip that would cut off all internet
+egress for every ECS task, since this VPC has no NAT gateway). This is why
+`infrastructure/ecs/environments/staging/scripts/tf-guard.sh` mechanically
+refuses `plan`/`apply` until specific, checkable preconditions hold — see
+§7.
 
-## 2. Resource inventory
+## 2. Resource inventory and counting methodology
 
-Full `resource` block inventory across every module, by module:
+Every `resource` address in `infrastructure/ecs/environments/staging` and
+its child modules is enumerated in
+[`import-manifest.json`](../../infrastructure/ecs/environments/staging/import-manifest.json),
+one entry per address (every `for_each`/`count` instance counted
+individually, never as one block). That file is the single source of
+truth for counts; this document summarizes it and must not drift from it —
+enforced by
+[`scripts/validate-import-manifest.py`](../../infrastructure/ecs/environments/staging/scripts/validate-import-manifest.py)
+(§10).
 
-| Module | Resources |
-|---|---|
-| `networking` | none (data sources only: `aws_vpc`, `aws_subnet` ×2 `for_each`; one `null_resource` precondition guard) |
-| `kms` | `aws_kms_key.this`, `aws_kms_alias.this` |
-| `ecr` | `aws_ecr_repository.app`, `aws_ecr_lifecycle_policy.app` |
-| `security_groups` | `aws_security_group.alb`, `aws_security_group.ecs_tasks`, `aws_security_group_rule.alb_ingress_https`, `aws_security_group_rule.alb_egress_to_ecs_tasks`, `aws_security_group_rule.ecs_tasks_ingress_from_alb`, `aws_security_group_rule.ecs_tasks_egress_https`, `aws_security_group_rule.ecs_tasks_egress_postgres[0]`, `aws_security_group_rule.rds_ingress_from_ecs_tasks[0]` |
-| `s3_documents` | `aws_s3_bucket.documents`, `aws_s3_bucket_public_access_block.documents`, `aws_s3_bucket_versioning.documents`, `aws_s3_bucket_server_side_encryption_configuration.documents`, `aws_s3_bucket_ownership_controls.documents` |
-| `elasticache` | `aws_security_group.redis`, `aws_security_group_rule.redis_ingress_from_ecs_tasks`, `aws_elasticache_subnet_group.this`, `aws_elasticache_replication_group.this` |
-| `ecs_cluster` | `aws_ecs_cluster.this`, `aws_ecs_cluster_capacity_providers.this` |
-| `iam` | `aws_iam_role.task_execution`, `aws_iam_role_policy.task_execution`, `aws_iam_role.task["web"\|"worker"\|"critical_worker"\|"scheduler"\|"migrate"\|"maintenance"\|"ses_consumer"]` (7), `aws_iam_role_policy.task_s3_documents[for web/worker/critical_worker/maintenance]`, `aws_iam_role_policy.task_metrics[for all 7]`, `aws_iam_role_policy.task_ses_consumer_sqs[0]`, `aws_iam_role_policy.task_web_ses_send[0]` |
-| `alb` | `aws_lb.this`, `aws_lb_target_group.web`, `aws_lb_listener.https`, `aws_lb_listener.http_redirect` |
-| top-level (`main.tf`) | `aws_cloudwatch_log_group.app["web"\|"worker"\|"critical-worker"\|"scheduler"\|"migrate"\|"maintenance"\|"ses-consumer"]` (7) |
-| `ecs_service` ×7 (`web`,`worker`,`critical_worker`,`scheduler`,`migrate`,`maintenance`,`ses_consumer`) | each: `aws_ecs_task_definition.this`, `aws_ecs_service.this[0 or absent]`, `aws_appautoscaling_target.this[…]`, `aws_appautoscaling_policy.cpu[…]` |
-| `cloudwatch_alarms` | 17 × `aws_cloudwatch_metric_alarm.*`, `aws_cloudwatch_log_metric_filter.ses_consumer_errors`, `aws_cloudwatch_metric_alarm.ses_consumer_errors_high` (19 total) |
+Terraform's resource count is variable-dependent (`count`/`for_each`
+conditionals) — there is no single "the" resource count independent of
+what values the variables take. The manifest's `counting_methodology`
+block documents exactly which variables are treated as set (every
+required, no-default variable — `vpc_id`, `rds_security_group_id`,
+`redis_auth_token`, the `ses_*` ARNs, `alarm_sns_topic_arn`, etc. — since
+the config cannot describe this specific environment at all without
+them) versus left at their repository default (`enable_custom_metric_alarms
+= false`, which zeroes out 4 alarm resource addresses entirely). A
+different tfvars file could produce a different total; this manifest's 94
+is the count for *this* environment, deployed with the values already
+established across prior missions.
 
-Total managed resource addresses (counting every `for_each`/`count`
-instance individually): **~85**, spanning 10 modules plus the environment
-root.
+**Exact totals** (validator-verified, not approximate):
+
+| Classification | Count | Meaning |
+|---|---:|---|
+| `import_unchanged` | 11 | Live resource exists and field-matches; ready to import once blocked prerequisites (mostly permission gaps, not config gaps) clear |
+| `import_then_migrate` | 11 | Live resource exists, but Terraform needs a code fix (naming) and/or a design decision (permission shape, engine) before import is clean |
+| `new` | 66 | No live counterpart; Terraform will create it (Phase B) |
+| `unmanaged` | 0 | (bucket reserved; see note below — this repo currently has none) |
+| `do_not_import` | 6 | Live resource exists, but deliberately not imported (all 6 are the pinned ECS task definitions — §6) |
+| **Total** | **94** | |
+
+Note on `unmanaged` = 0: several *live* resources have no Terraform
+resource address at all — the two generic IAM roles, the shared
+`/ecs/firmsbase-staging/app` log group, three ad-hoc task-definition
+families. These are documented in §3's "live resources with no Terraform
+address" list, but they cannot appear in the 94-address manifest because
+there is no address to classify — Terraform's graph simply doesn't
+declare a resource for them. `unmanaged` remains a valid classification
+value for a future resource that does have an address but is deliberately
+left unmanaged; none exists in this repository today.
 
 ## 3. Ownership classification
 
-Legend: **A** = import unchanged (live resource exists, matches Terraform's
-computed identity and config, no code change needed first) · **B** = import
-blocked pending a Terraform code fix (live resource exists but Terraform's
-computed identity/config doesn't match it yet) · **C** = new (nothing live
-to import; Terraform will create it) · **D** = intentionally unmanaged
-(retained outside Terraform, on purpose, for now) · **E** = out of
-Terraform's ownership model entirely, by design (data source or
-external-ARN reference, never a managed resource).
+Full detail — every one of the 94 addresses, with its live identity (or
+absence), exact classification, import ID (or `"BLOCKED"` with a
+documented reason), and any code-fix prerequisite — is in
+[`import-manifest.json`](../../infrastructure/ecs/environments/staging/import-manifest.json).
+This section summarizes the material findings only.
 
-### A — Import unchanged
+### Live resources with no Terraform address at all (not in the 94)
 
-| Resource address | Live identity |
+| Resource | Why it has no address |
 |---|---|
-| `module.ecs_cluster.aws_ecs_cluster.this` | `firmsbase-staging-cluster` — **only after the code fix in §3B item 1** |
-| `module.ecs_cluster.aws_ecs_cluster_capacity_providers.this` | same cluster, FARGATE+FARGATE_SPOT already the live default strategy |
-| `module.security_groups.aws_security_group.alb` | `sg-02a26ff122a9a1d29` ("firmsbase-staging-alb-sg") |
-| `module.security_groups.aws_security_group.ecs_tasks` | `sg-0db14e50ea5c5466c` ("firmsbase-staging-ecs-sg") |
-| `module.security_groups.aws_security_group_rule.alb_ingress_https` | live 443 ingress from 0.0.0.0/0 — exact match |
-| `module.security_groups.aws_security_group_rule.ecs_tasks_ingress_from_alb` | live 8080 ingress from ALB SG — exact match |
-| `module.security_groups.aws_security_group_rule.rds_ingress_from_ecs_tasks[0]` | RDS SG `sg-0d4c5eedb2ee21743` already has this exact 5432-from-ECS-SG ingress rule |
-| `module.elasticache.aws_elasticache_replication_group.this` | `firmsbase-staging-redis`, `cache.t4g.micro`, transit+at-rest encryption on — name and config match `"${name_prefix}-redis"` exactly. **Requires `lifecycle { ignore_changes = [auth_token] }`, see §9.4** |
-| `module.alb.aws_lb.this` | live ALB matches `name_prefix` pattern |
-| `module.alb.aws_lb_target_group.web` | live target group matches `name_prefix` pattern (health check *path* differs — see §9.5, not blocking) |
-| `module.alb.aws_lb_listener.https` | 443, forwards to target group — matches |
-| `module.alb.aws_lb_listener.http_redirect` | 80 → 301 to 443 — matches |
-| `module.web.aws_ecs_task_definition.this` | family `firmsbase-staging-web`, live revision 9 |
-| `module.worker.aws_ecs_task_definition.this` | family `firmsbase-staging-worker`, live revision 8 |
-| `module.critical_worker.aws_ecs_task_definition.this` | family `firmsbase-staging-critical-worker`, live revision 8 |
-| `module.scheduler.aws_ecs_task_definition.this` | family `firmsbase-staging-scheduler`, live revision 8 |
-| `module.web.aws_ecs_service.this[0]` | service `web` — **blocked on §9.1 (assign_public_ip) before apply, safe to import as-is** |
-| `module.worker.aws_ecs_service.this[0]` | service `worker` — same caveat |
-| `module.critical_worker.aws_ecs_service.this[0]` | service `critical-worker` — same caveat |
-| `module.scheduler.aws_ecs_service.this[0]` | service `scheduler` — same caveat |
+| IAM role `firmsbase-staging-ecs-task-role` | One shared generic role live vs. Terraform's per-service model (7 task roles: `module.iam.aws_iam_role.task[*]`, all classified `new`). No 1:1 mapping exists. Retire only after every task definition is cut over to the new per-role roles (Phase B) and nothing references it. |
+| CloudWatch log group `/ecs/firmsbase-staging/app` | Shared by all 4 live services; doesn't match any of the 7 per-role addresses Terraform expects. Retained until services cut over (Phase B). |
+| Task-definition families `firmsbase-staging-db-bootstrap`, `-diagnostic`, `-image-inspection` | Ad-hoc operational one-offs, no Terraform module models them at all. Out of scope entirely. |
 
-### B — Import blocked pending a Terraform code fix
+### Corrected: IAM task-execution role IS a 1:1 naming fix, not a non-mapping
 
-| Resource address | Problem | Required fix before import |
+Unlike the 7 per-service task roles (genuinely new — live has no
+per-service equivalent), the **execution role** is a 1:1 shared-role match
+on both sides: live has exactly one (`firmsbase-staging-ecs-execution-role`),
+Terraform models exactly one (`module.iam.aws_iam_role.task_execution`).
+The mismatch is naming (fixed via the new `iam_task_execution_role_name`
+variable — §6) *and* permission shape: live grants execution permissions
+via the AWS-managed `AmazonECSTaskExecutionRolePolicy` plus one narrow
+inline policy (`FirmsBaseStagingSecretsAccess`, secrets-read only,
+confirmed via `aws iam get-role-policy`); Terraform's module builds one
+broader custom inline policy (ECR pull + logs + secrets + KMS) with no
+managed-policy attachment. The naming variable makes the *role* importable
+by address; it does not by itself make the *policy content* match — that
+permission-shape reconciliation is a separate, explicit decision item
+(§11).
+
+### Corrected: ElastiCache — subnet group name AND engine
+
+- Subnet group: Terraform computed `"${name_prefix}-redis"` =
+  `"firmsbase-staging-redis"`. Live (confirmed via
+  `aws elasticache describe-cache-clusters` → `CacheSubnetGroupName`, and
+  independently `aws elasticache describe-cache-subnet-groups
+  --cache-subnet-group-name firmsbase-staging-redis` returning
+  `CacheSubnetGroupNotFoundFault`) is `firmsbase-staging-cache-subnets`.
+- Engine: Terraform hardcoded `engine = "redis"`. Live
+  (`aws elasticache describe-replication-groups` → `Engine`) is
+  `"valkey"`, version `7.2.6`, parameter group `default.valkey7` — none of
+  which match Terraform's `engine_version = "7.1"` (a Redis version
+  string) or hardcoded `parameter_group_name = "default.redis7"`. Engine
+  cannot be changed in place; this was the most severe previously-missed
+  finding in this correction pass (§9.4).
+- The dedicated Redis security group (`sg-0da3ea50262a9d20d`, live name
+  `firmsbase-staging-redis-sg`) **does exist** — the first version of this
+  plan incorrectly assumed no dedicated SG existed and classified it
+  `new`. Corrected to `import_unchanged`; its one ingress rule (6379 from
+  the ECS-tasks SG) field-matches live exactly.
+
+### Task definitions and services — see §6/§7 for the full corrected treatment
+
+## 4. Networking compatibility matrix (exact field-level comparison)
+
+Per-field live-vs-Terraform comparison for every networking-adjacent
+resource. The `networking` module itself creates zero real resources (data
+sources + a precondition guard only — see its own header comment); the
+comparison below is "what the live VPC actually looks like" vs. "what this
+config's data-source lookups and dependent modules assume," since that's
+what actually matters for safety.
+
+| Field | Live value | Terraform assumption | Match? |
+|---|---|---|---|
+| VPC ID | `vpc-0fd81b688155ded2b` | `var.vpc_id` (must be supplied to match) | Match once supplied |
+| VPC CIDR | `172.31.0.0/16` | Not asserted anywhere in this config | N/A — config doesn't check |
+| Default VPC | `true` (confirmed via `aws ec2 describe-vpcs`) | Not asserted; module treats it as "an existing VPC" generically | **Material**: see below |
+| DNS support (`enableDnsSupport`) | Unconfirmed — `ec2:DescribeVpcAttribute` was `UnauthorizedOperation` for this operator. AWS's own default-VPC behavior sets this `true`; not independently verified here. | Not asserted | Unconfirmed, documented as a gap, not assumed |
+| DNS hostnames (`enableDnsHostnames`) | Same as above — unconfirmed via API, AWS default-VPC behavior sets this `true` | Not asserted | Unconfirmed |
+| Subnet count | 6 (one per AZ: `us-east-1{a,b,c,d,e,f}`) | `var.public_subnet_ids` + `var.private_subnet_ids`, count/exact IDs must be supplied | Match once supplied |
+| Subnet CIDRs | `172.31.0.0/20` … `172.31.80.0/20` (6 × /20, standard default-VPC layout) | Not asserted | N/A |
+| Subnet `MapPublicIpOnLaunch` | `true` on **all 6** subnets, no exceptions (confirmed via `aws ec2 describe-subnets`) | The config's own variable split (`public_subnet_ids` vs `private_subnet_ids`) implies some subnets are "private" | **Material — see below** |
+| Route tables | Exactly 1: `rtb-0eab211e9f94a0cad`, the VPC's **main** table (implicit association — `Main: true`, no explicit subnet associations at all, meaning it applies to every subnet with no override) | Not asserted; module never inspects route tables | N/A — config doesn't check |
+| Routes | Exactly 2: `172.31.0.0/16 → local`, `0.0.0.0/0 → igw-05e77a70d5f18aff9` | Not asserted | **Material — see below** |
+| Route-table associations | None explicit; every subnet inherits the main table | Not asserted | N/A |
+| Internet Gateway | `igw-05e77a70d5f18aff9`, attached, state `available` | Not asserted | Confirms public routing |
+| NAT Gateway | **None** — `ec2:DescribeNatGateways` was denied (`UnauthorizedOperation`), but independently proven absent: the sole route table has no `0.0.0.0/0 → nat-*` route, only the IGW route above, and there is exactly one route table for the whole VPC | Not asserted; `ecs_service` module hardcoded `assign_public_ip = false`, which presumes NAT-routed private subnets exist | **Material — this is §9.1, the headline stop condition** |
+| ALB security group | `sg-02a26ff122a9a1d29` (`firmsbase-staging-alb-sg`), ingress 80+443 from `0.0.0.0/0`, egress `-1/0.0.0.0/0` | `module.security_groups.aws_security_group.alb`, ingress 443 only (443-only rule field-matches; port 80 and the broad egress are live-only, unmanaged — see §3 of the original inventory) | Partial — see manifest for the exact per-rule breakdown |
+| ECS-tasks security group | `sg-0db14e50ea5c5466c` (`firmsbase-staging-ecs-sg`), ingress 8080 from ALB SG, egress `-1/0.0.0.0/0` | `module.security_groups.aws_security_group.ecs_tasks`, ingress 8080 from ALB SG (matches exactly), narrower declared egress rules (443, 5432 — live-broader egress is unmanaged) | Partial — see manifest |
+| Redis security group | `sg-0da3ea50262a9d20d` (`firmsbase-staging-redis-sg`), ingress 6379 from ECS-tasks SG, egress `-1/0.0.0.0/0` | `module.elasticache.aws_security_group.redis`, ingress 6379 from ECS-tasks SG (matches exactly) | Match on the declared rule |
+| RDS security group | `sg-0d4c5eedb2ee21743` (`firmsbase-staging-rds-sg`), ingress 5432 from ECS-tasks SG, egress `-1/0.0.0.0/0` | No `aws_security_group` resource for RDS in this config at all (out of scope by design — §3E); the one declared rule (`rds_ingress_from_ecs_tasks`) field-matches the live ingress rule exactly | Match on the declared rule; the SG resource itself is out of scope |
+
+### Material finding 1: this is the AWS account's default VPC
+
+`IsDefault: true`. This config's `networking` module is written generically
+("an existing VPC, ideally one with real private subnets" per its own
+header comment) but is being pointed at the account's default VPC, which
+has none of the private-subnet/NAT architecture the module's naming
+(`public_subnet_ids` / `private_subnet_ids`) implies. This is not a
+resource-import risk by itself (the `networking` module creates nothing to
+import — §3E) but it is the root cause of finding 2 below and of §9.1.
+
+### Material finding 2: "private" subnets are, today, not actually private
+
+Every one of the 6 subnets in this VPC has `MapPublicIpOnLaunch = true`
+and there is no NAT-routed alternative anywhere in the VPC (one route
+table, no NAT route). Whatever subnet IDs this environment's tfvars pass
+as `private_subnet_ids`, those subnets are physically identical to the
+"public" ones — same route table, same public-IP-on-launch behavior, no
+distinct routing. The "public"/"private" split in this config's variables
+is, for this specific environment, a **labeling convention with no
+network-layer backing**, not a real security boundary. This is exactly why
+`assign_public_ip` must default to `true` regardless of which subnet list
+a service is placed in (§9.1, §7) — placing a task in the "private" subnet
+list here does not, by itself, change how that task reaches the internet.
+
+### Recommendation (per the mission's explicit options)
+
+Given the above, the three options laid out in the mission brief:
+
+- **(a) Parameterize the module to adopt the live default VPC safely** —
+  this is what the `networking` module already does today (data-source
+  lookups only, no resource creation, no assumption the VPC is
+  purpose-built). The gap isn't the module's *ownership* of the VPC (it
+  correctly owns nothing) — it's the *downstream* modules
+  (`ecs_service`, and formerly `elasticache`'s implicit subnet-group
+  naming) that silently assumed NAT-routed private subnets existed. §6/§7
+  close that gap for `ecs_service`. **Recommended**: keep the default VPC
+  entirely unmanaged (already true) and keep `private_egress_ready`
+  defaulted `false` (§7) until a deliberate decision is made to build real
+  private subnets.
+- **(b) Leave the default VPC/networking unmanaged temporarily** — already
+  the case, by construction (§3E), and this plan does not propose changing
+  it.
+- **(c) Build a new VPC and migrate services later** — a legitimate future
+  path (real private subnets + NAT would let `private_egress_ready = true`
+  ever be safely set), but a separate, explicitly human-approved project,
+  not something this plan schedules or assumes.
+
+No VPC/subnet/route resource is imported by this plan (there are none to
+import — the module has no such resources), and none is classified
+`import_unchanged` without the field-level comparison above.
+
+## 5. Backend — a candidate, not an approved decision
+
+**No existing backend was found, approved, or referenced anywhere.**
+`versions.tf` has no `backend` block, and no prior mission or document
+records a backend decision having been made for this environment.
+
+This plan does **not** present any option as already chosen. Two
+candidates exist, both requiring an owner decision before either is
+implemented — this plan implements neither:
+
+1. **S3 + DynamoDB** (native Terraform, most common for this kind of
+   setup): a new versioned + encrypted S3 bucket for state, a DynamoDB
+   table for locking (`LockID` hash key), and an IAM policy scoped to
+   exactly `s3:GetObject`/`PutObject` on the state key and
+   `dynamodb:GetItem`/`PutItem`/`DeleteItem` on the lock table.
+2. **Terraform Cloud / HCP Terraform workspace**: no AWS resources to
+   create, but requires an organization/workspace decision and a way to
+   supply AWS credentials to the run (dynamic provider credentials or a
+   service-account key) — itself a decision this plan does not make.
+3. **Any other repository-supported alternative** the owner prefers is
+   equally in scope — this list is not exhaustive, only the two candidates
+   evaluated so far.
+
+**Required properties, regardless of which candidate is chosen** (a
+checklist for whoever makes this decision, not an instruction to this
+plan):
+
+- Encrypted remote state (at rest, and in transit for any state-access
+  API).
+- Versioning (so a bad apply's prior state is recoverable).
+- Locking (concurrent `apply`/`plan` protection).
+- Least-privilege access — scoped to exactly the state object(s)/lock
+  table this environment needs, not a shared bucket with broad access.
+- Backup/recovery process independent of Terraform itself (e.g. S3
+  versioning + a documented restore procedure, or the backend's
+  equivalent).
+- State is never committed to Git, under any circumstance.
+
+**This plan does not create the bucket, table, workspace, or IAM policy**
+for either candidate. `tf-guard.sh` (§6) refuses `plan`/`apply` outright
+until a `backend` block actually exists in `versions.tf` — this is a
+structural precondition, not a suggestion.
+
+## 6. Corrected: ECS task-definition strategy (Option B, chosen and documented)
+
+Live task definitions for `web`, `worker`, `critical-worker`, and
+`scheduler` (and also `migrate`, `maintenance` — same generic role) use
+`taskRoleArn = arn:aws:iam::603013471426:role/firmsbase-staging-ecs-task-role`.
+Terraform models a role-specific task role per service
+(`module.iam.aws_iam_role.task["web"]`, etc.). These are not
+field-equivalent — the review is correct that the prior version's
+`import_unchanged` classification for these 6 task definitions was wrong.
+
+**Decision: Option B.** Do not import the 6 historical task-definition
+resources (`module.{web,worker,critical_worker,scheduler,migrate,maintenance}.aws_ecs_task_definition.this`).
+They are classified `do_not_import` in the manifest, each carrying a
+`live_reference` (the exact family:revision that exists live) for
+traceability, but no `import_id` (no import command is ever generated for
+them).
+
+Why Option B over Option A (a staging adoption mode that fakes the live
+generic role first, then migrates later): Option A would require adding a
+whole second code path to the `iam`/`ecs_service` modules whose entire
+purpose is to be deleted again almost immediately after adoption — real
+implementation and testing cost for a state that's only ever meant to be
+transient. Option B costs nothing in code and is honest about the actual
+state: these task definitions are **not currently managed by Terraform at
+all**, on purpose, until Phase B deliberately replaces them.
+
+**How services stay pinned in the meantime**: every `aws_ecs_service.this`
+resource already has `lifecycle { ignore_changes = [task_definition] }`
+(present in `infrastructure/ecs/modules/ecs_service/main.tf` since the
+module was first written — not new). Once a service is imported (§7,
+Phase A3), Terraform will record whatever task-definition revision the
+service is actually running at import time and never propose changing it,
+specifically *because* of this `ignore_changes` entry — combined with
+`do_not_import` on the task-definition resource itself, this means
+Terraform has no opinion at all about the task definition until Phase B
+registers a new one on purpose and a human removes the pin (or updates the
+`app_image_digest`/task-definition inputs and lets a real, reviewed
+`apply` create a new revision).
+
+`module.ses_consumer.aws_ecs_task_definition.this` is different: no live
+family named `firmsbase-staging-ses-consumer` exists at all (confirmed via
+`aws ecs list-task-definition-families`) — ses-consumer has never been
+deployed here. It is genuinely `new`, not `do_not_import` — there is
+nothing live to decline importing.
+
+## 7. Corrected: ECS service strategy + the public-IP/NAT structural guard
+
+The 4 live, running services (`web`, `worker`, `critical-worker`,
+`scheduler`) are classified `import_then_migrate`, not `import_unchanged`.
+Confirmed differences:
+
+| Field | Live | Terraform (before this fix) |
 |---|---|---|
-| `module.ecs_cluster.aws_ecs_cluster.this` | Terraform computes `cluster_name = var.name_prefix` = `"firmsbase-staging"`; live cluster is `"firmsbase-staging-cluster"`. ECS cluster names can't be renamed post-creation. | Add an explicit `ecs_cluster_name` variable (default `var.name_prefix`, overridable) and set it to `"firmsbase-staging-cluster"` for this environment. **Owner decision needed**: keep the live name forever, or accept a one-time cluster replacement to standardize on `name_prefix`? This plan assumes "keep the live name" since renaming means a full cluster/service recreation (see §9.2). |
-| `module.ecr.aws_ecr_repository.app` | `main.tf` hardcodes `repository_name = "firmsbase-app"`; live repository is `"firmsbase-staging"` (confirmed via `aws ecr describe-repositories`). | Change the hardcoded value (or make it a variable) to `"firmsbase-staging"` before import. |
+| `assignPublicIp` | `ENABLED` | hardcoded `false` |
+| Launch mechanism | `launchType: FARGATE` | `capacity_provider_strategy` (mutually exclusive with `launchType`; confirmed non-destructive in-place field swap) |
+| `taskRoleArn` | generic shared role | role-specific (see §6) |
+| Task definition | pinned live revision | would be a newly-created role-specific revision absent the `do_not_import`/`ignore_changes` treatment in §6 |
 
-### C — New (nothing live; Terraform creates it)
+`module.ses_consumer.aws_ecs_service.this[0]` has no live counterpart at
+all (confirmed via `aws ecs list-services`) — classified `new`, the actual
+Phase B deployment goal, not an adoption target.
 
-| Resource address | Confirmed absent via |
-|---|---|
-| `module.kms.aws_kms_key.this`, `module.kms.aws_kms_alias.this` | `aws kms describe-key --key-id alias/firmsbase-staging-app` → `NotFoundException` |
-| `module.s3_documents.*` (all 5 resources) | `aws s3api head-bucket --bucket firmsbase-staging-documents` → `404 Not Found` |
-| `module.ecr.aws_ecr_lifecycle_policy.app` | `aws ecr get-lifecycle-policy` → `LifecyclePolicyNotFoundException` (no live lifecycle policy on the repo once §3B's name fix lands) |
-| `module.security_groups.aws_security_group_rule.alb_egress_to_ecs_tasks` | live ALB SG egress is a single unrestricted `-1/0.0.0.0/0` rule, not this narrower container-port-scoped one — no matching live rule exists to import |
-| `module.security_groups.aws_security_group_rule.ecs_tasks_egress_https` | live ECS-tasks SG egress is a single unrestricted `-1/0.0.0.0/0` rule — no matching narrower live rule exists |
-| `module.security_groups.aws_security_group_rule.ecs_tasks_egress_postgres[0]` | same reason — covered by the live broad egress rule, no distinct 5432-scoped rule exists to import |
-| `module.elasticache.aws_security_group.redis`, `aws_security_group_rule.redis_ingress_from_ecs_tasks` | ElastiCache replication group exists (§3A) but no dedicated Redis security group was found among the inspected SGs — Redis ingress is presumably folded into the ECS-tasks SG's broad egress today; a dedicated Redis SG is new |
-| `module.elasticache.aws_elasticache_subnet_group.this` | not inspected directly (operator lacks a targeted permission check for this call); treated as new pending confirmation — low risk either way since subnet groups are cheap/idempotent to create if one already exists under a different name (would then surface as a plan-time "already exists" error, not a silent duplicate) |
-| `module.ses_consumer.*` (task definition, service, autoscaling) | Mission E/F work — not yet deployed to this live environment at all |
-| `module.migrate.aws_ecs_task_definition.this`, `module.maintenance.aws_ecs_task_definition.this` | Live families `firmsbase-staging-migrate` and `firmsbase-staging-maintenance` **do exist** (confirmed via `list-task-definition-families`) — reclassify as **A** if the current live revision's container definition matches Terraform's; not diffed line-by-line in this pass. Flagged here as needing that diff before Phase A import, not assumed new. |
-| `module.iam.aws_iam_role.task[*]` (7), all associated `aws_iam_role_policy.*` | No live role uses this per-role naming (`firmsbase-staging-task-web`, etc.) — see §3D, the two live generic roles cannot map onto these addresses at all |
-| `module.cloudwatch_alarms.*` (19 resources) | `aws cloudwatch describe-alarms` was denied (`AccessDenied`) for this operator — **existence unconfirmed, assumed new**. Must be verified with elevated read access before import to rule out pre-existing alarms with colliding names |
-| `aws_cloudwatch_log_group.app["web"\|"worker"\|"critical-worker"\|"scheduler"\|"migrate"\|"maintenance"\|"ses-consumer"]` (7) | Only one live ECS-related log group was found: `/ecs/firmsbase-staging/app` (single, shared, retention 30d, no KMS). It does not match any of the 7 per-role names Terraform expects (`/ecs/firmsbase-staging/web`, etc.) — nothing to import for any of the 7 addresses. See §3D for what happens to the existing `/app` group. |
+### The `assign_public_ip` hard stop — now enforced in code, not just documented
 
-### D — Intentionally unmanaged (retained, for now)
+This VPC has no NAT gateway anywhere (§4). `assignPublicIp=ENABLED` is the
+*only* way any task reaches the internet — ECR pulls, Secrets Manager,
+CloudWatch Logs, SES, SQS, all of it. The `ecs_service` module used to
+hardcode `assign_public_ip = false`; applying that against any imported
+service would flip it in place (no replacement needed — just a silent,
+simultaneous outage for every task in that service).
 
-| Resource | Why |
-|---|---|
-| Live IAM roles `firmsbase-staging-ecs-task-role` and `firmsbase-staging-ecs-execution-role` | One shared generic role live vs. Terraform's per-ECS-role model (7 task roles + 1 execution role) — no 1:1 resource address exists to import into. All 4 running services currently use these two generic roles. Retire only after every task definition has been cut over to the new per-role roles (Phase B, not this plan) and nothing references the generic roles anymore. |
-| CloudWatch log group `/ecs/firmsbase-staging/app` | Doesn't match Terraform's per-role naming; the 4 live task definitions currently log to it. Retained until task definitions are cut over to the new per-role log groups (Phase B) — deleting or orphaning it first would break live log delivery. |
-| ECS task-definition families `firmsbase-staging-db-bootstrap`, `firmsbase-staging-diagnostic`, `firmsbase-staging-image-inspection` | Ad-hoc operational one-off task definitions with no Terraform module or resource address at all. Out of this Terraform config's scope entirely; leave alone. |
-| Extra live security-group rules not mirrored in Terraform (ALB SG's port-80 ingress from 0.0.0.0/0; ALB SG's and ECS-tasks SG's broad `-1/0.0.0.0/0` egress) | These are separate `aws_security_group_rule` resources in AWS terms, and this module uses the per-rule resource pattern (not inline `ingress`/`egress` blocks on the `aws_security_group` itself) — a live rule with no corresponding Terraform resource is simply never touched by `plan`/`apply`, not destroyed. Safe to leave unmanaged. Note: the port-80 ingress rule is *necessary* — it's what lets the ALB's `http_redirect` listener receive the traffic it redirects to 443 — so it must stay, whether or not it's ever brought under Terraform management. |
+Fixed structurally, not just by writing this down:
 
-### E — Out of Terraform's ownership model by design
+1. `infrastructure/ecs/modules/ecs_service/variables.tf` now declares
+   `variable "assign_public_ip" { type = bool }` with **no default** —
+   every caller must decide explicitly; there is no silent fallback to the
+   old hardcoded value anymore.
+2. `infrastructure/ecs/environments/staging/variables.tf` adds
+   `private_egress_ready` (bool, default `false`) and `nat_gateway_ids`
+   (list, default `[]`), with a **cross-variable validation** on
+   `nat_gateway_ids`:
+   ```
+   condition = !var.private_egress_ready || length(var.nat_gateway_ids) > 0
+   ```
+   `private_egress_ready` cannot be set `true` without also supplying at
+   least one real NAT gateway ID — this fails `terraform validate`/`plan`
+   outright, not just a design-doc warning. (`nat_gateway_ids` isn't
+   consumed by any resource yet — the `networking` module remains
+   data-source-only by design, §3E — its only job is to make "NAT egress
+   genuinely exists" a checkable fact tied to the boolean, not a bare
+   assertion.)
+3. `main.tf` computes `local.assign_public_ip = !var.private_egress_ready`
+   and passes it into every one of the 7 `ecs_service` module calls.
+4. Proven with `terraform test` (mocked provider, no AWS):
+   [`tests/adoption_naming.tftest.hcl`](../../infrastructure/ecs/environments/staging/tests/adoption_naming.tftest.hcl) —
+   `public_ip_stays_enabled_by_default_no_nat_gateway_exists` (default
+   `false` → `assign_public_ip = true` for every service),
+   `public_ip_can_be_disabled_only_with_nat_gateway_ids_supplied` (`true` +
+   real NAT IDs → `assign_public_ip = false`), and
+   `private_egress_ready_without_nat_gateway_ids_fails_validation`
+   (`true` + empty NAT IDs → `terraform plan` itself fails validation,
+   proven via `expect_failures`). All three pass — see §10.
 
-| Resource | Why |
-|---|---|
-| VPC `vpc-0fd81b688155ded2b`, all subnets, route tables, Internet Gateway | `networking` module is data-source-only by design (see its own header comment) — this Terraform config never creates or imports VPC/subnet/routing resources |
-| RDS instance `firmsbase-staging-db` and its security group `sg-0d4c5eedb2ee21743` (the SG resource itself, not the rule added to it — that rule is §3A) | No `aws_db_instance` or `aws_security_group` resource for RDS exists anywhere in this Terraform config; referenced only via `var.existing_rds_security_group_id` |
-| 4 Secrets Manager secrets (`firmsbase/staging/app-key`, `redis-auth-token`, `database-app`, `database-migrator`) | No `aws_secretsmanager_secret` resource exists in this config at all — every module that needs a secret takes its ARN as an input variable. Confirmed via `grep -rn aws_secretsmanager_secret` across all modules: zero matches for the resource type, only `data.aws_secretsmanager_secret_version` mentioned in a comment as the caller's responsibility |
+The live services are never modified by any of this (§10/§13 confirm no
+AWS resource was touched) — this is a guard against a *future* apply doing
+the wrong thing, verified now while the stakes are zero.
 
-## 4. Live AWS findings (Phase 4 detail)
+## 8. Ordered import plan (documented only — never executed)
 
-Gathered via `AWS_PROFILE=firmsbase-staging-operator-login AWS_REGION=us-east-1`,
-read-only calls only. No secret **values** were ever printed — only ARNs,
-names, and non-sensitive metadata.
+Restructured into four phases per the review's requested structure.
 
-Confirmed to exist and match Terraform's computed identity/config (beyond
-what's in §3A): ECS cluster (name mismatch aside), 4 ECS services, ALB +
-target group + 2 listeners, both security groups, ElastiCache replication
-group, RDS instance + its security group.
+### Phase A1 — backend and state safety
 
-Confirmed **not** to exist: KMS key/alias, S3 documents bucket,
-ses-consumer's task definition/service (expected — not deployed yet), ECR
-lifecycle policy.
+1. §5's backend decided and provisioned by a human (not this plan);
+   `backend "s3" {}` (or equivalent) block added to `versions.tf`.
+2. `terraform -chdir=infrastructure/ecs/environments/staging init`
+   against the real backend (the one `init` in this whole plan that talks
+   to AWS — it only creates/reads the state *object*, never an application
+   resource).
+3. Encrypted backup of the (still-empty) initial state immediately after
+   step 2, before any import:
+   `terraform state pull > state-backups/pre-import-$(date +%Y%m%dT%H%M%S).tfstate.json.gpg`.
+4. `terraform show` confirms 0 resources, as expected, before the first
+   import.
+5. From this point on, every `plan`/`apply` in this environment goes
+   through `scripts/tf-guard.sh` (§6 of the original plan / hardened per
+   the review — see the script's own header for its exact checks and
+   documented bypass limitation), never the bare `terraform` binary.
 
-Confirmed **mismatched**: ECS cluster name, ECR repository name, CloudWatch
-log group naming/cardinality (1 shared vs. 7 per-role expected), ALB target
-group health-check path (live `/up`, Terraform default `/readyz` — a real
-semantic difference between a liveness and a readiness check, not just a
-string diff — flagged for reviewed decision, not auto-changed here),
-security-group rule granularity (live has 3 broad rules where Terraform
-declares narrower per-purpose rules — see §3C/§3D).
+### Phase A2 — resources proven configuration-equivalent (`import_unchanged`, 11 addresses)
 
-`AccessDenied` encountered and accepted per the mission's own instruction
-(documented here, no broader permissions requested):
-
-| Call | Result |
-|---|---|
-| `ec2:DescribeNatGateways` | `UnauthorizedOperation` — worked around by proving "no NAT gateway" independently via the sole route table having only an IGW route |
-| `s3:ListAllMyBuckets` | `AccessDenied` — worked around with a targeted `head-bucket` on the specific expected name instead |
-| `kms:ListAliases` | `AccessDenied` — worked around with a targeted `describe-key --key-id alias/...` instead |
-| `sqs:GetQueueAttributes` | `AccessDenied` — relied on the queue settings already supplied as known facts, unverified independently in this pass |
-| `iam:GetRolePolicy` on `FirmsVaultStagingSesSend` | `AccessDenied` — relied on the policy document already supplied as a known fact; confirmed independently that the role has exactly one inline policy by that name via `list-role-policies` |
-| `cloudwatch:DescribeAlarms` | `AccessDenied` — cannot confirm whether any of the 19 planned alarm resources already exist under colliding names; treated as an open risk in §3C, not silently assumed safe |
-| `sns:ListTopics` | `AccessDenied` — no SNS topic inventory available; `cloudwatch_alarms` module's alarm-action wiring (SNS topic ARNs, if any) not independently verified in this pass |
-
-Successfully read (not denied) and useful beyond what's already in §3:
-the live task role's trust policy has two `Condition` blocks
-(`aws:SourceAccount` + `aws:SourceArn` `ArnLike` restricting which ECS
-resources in this account may assume it) that Terraform's
-`ecs_tasks_assume_role` policy document does not currently include — a
-minor hardening gap in the *new* per-role trust policies relative to the
-existing generic role, worth carrying forward when Phase B's roles are
-written, not a blocker for this plan.
-
-## 5. Backend recommendation
-
-**No existing backend was found, approved, or referenced anywhere** —
-confirmed by `versions.tf`'s own comment and by
-[staging-readiness-report.md](staging-readiness-report.md) §5 explicitly
-listing the backend as "Requires human approval — not chosen by this
-branch." This rules out "Option 1: adopt an existing approved backend" —
-there isn't one to adopt.
-
-**Option 2 (the only real option today): provision a new backend.**
-Two concrete choices, neither created by this plan:
-
-1. **S3 + DynamoDB** (native Terraform, most common for this kind of setup):
-   requires a new versioned+encrypted S3 bucket for state, a DynamoDB table
-   for locking (`LockID` hash key), and an IAM policy granting this
-   environment's Terraform operators exactly `s3:GetObject`/`PutObject` on
-   the state key and `dynamodb:GetItem`/`PutItem`/`DeleteItem` on the lock
-   table — nothing broader.
-2. **Terraform Cloud/HCP Terraform workspace**: no AWS resources to create,
-   but requires an organization/workspace decision and a way to supply AWS
-   credentials to the run (dynamic provider credentials or a service-account
-   key), which is itself a decision this plan doesn't make.
-
-Recommendation: **Option 2.1 (S3 + DynamoDB)**, consistent with this
-project's existing AWS-native tooling and the fact that no external SaaS
-account (Terraform Cloud) currently exists for this org. This is a
-recommendation for a human to approve and provision — **this plan does not
-create the bucket, table, or IAM policy**, per the mission's explicit
-constraint.
-
-## 6. Repository guard against accidental empty-state apply
-
-Added: [`infrastructure/ecs/environments/staging/scripts/tf-guard.sh`](../../infrastructure/ecs/environments/staging/scripts/tf-guard.sh).
-
-A thin wrapper that `exec`s the real `terraform` binary unchanged for every
-subcommand except `apply`, and even for `apply` only intervenes when local
-state currently resolves to zero resources (via `terraform show -json`) —
-refusing with a pointer to this document, unless
-`TF_GUARD_ALLOW_EMPTY_STATE_APPLY=yes-i-am-sure` is explicitly set.
-`terraform validate` (including `-backend=false`), `plan`, `fmt`, `import`,
-and every other subcommand pass through untouched. Verified by hand (§10):
-`validate -backend=false` passes through; `apply` with no `.terraform`
-directory present is refused with exit code 1.
-
-## 7. Ordered import plan (documented only — never executed)
-
-**Phase A scope**: adopt existing infrastructure into state. No new AWS
-resource is created except where explicitly marked "new" below, and even
-those are deferred to right before the specific dependent import that needs
-them, never batched. **No `terraform apply` runs during Phase A** except
-the narrow, reviewed applies explicitly called out at each checkpoint (new
-resources like KMS/S3, which have no live counterpart to collide with).
-
-Preconditions before step 1 can begin:
-1. §5's backend provisioned and approved by a human; `backend "s3" {}` block
-   added to `versions.tf` (Terraform code change, not covered by this plan).
-2. §3B's two code fixes applied (`ecr_repository_name` corrected to
-   `"firmsbase-staging"`; a new overridable `ecs_cluster_name` variable
-   added and set to `"firmsbase-staging-cluster"`), reviewed and merged.
-3. `terraform -chdir=infrastructure/ecs/environments/staging init` run
-   against the real backend (not `-backend=false`) — this is the one
-   `init` in this whole plan that talks to AWS, and it only creates/reads
-   the state *object*, not any application resource.
-4. **Encrypted backup of the (still-empty) initial state** taken
-   immediately after step 3, before any import — e.g.
-   `terraform state pull > state-backups/pre-import-$(date +%Y%m%dT%H%M%S).tfstate.json.gpg`
-   (encrypted at rest; state can contain sensitive attribute values).
-5. `terraform -chdir=infrastructure/ecs/environments/staging show` confirms
-   0 resources, as expected, before the first import.
-
-Ordered commands (foundational → dependent; a `terraform plan` checkpoint
-after each batch, diffed against expectations, before continuing):
+Security groups (`alb`, `ecs_tasks`, `redis`) and their field-matching
+rules, the ALB + target group + both listeners. Import commands are fully
+prepared in the manifest; 5 of the 11 are marked `import_id: "BLOCKED"`
+pending `ec2:DescribeSecurityGroupRules` access (`AccessDenied` for this
+operator — the SG/rule *content* is already confirmed matching, only the
+AWS-internal rule ID needed for the literal import command is unresolved).
 
 ```bash
-# Batch 1 — cluster, IAM (generic roles are D, not imported), KMS is new not imported
-terraform -chdir=infrastructure/ecs/environments/staging import \
-  'module.ecs_cluster.aws_ecs_cluster.this' 'firmsbase-staging-cluster'
-terraform -chdir=infrastructure/ecs/environments/staging import \
-  'module.ecs_cluster.aws_ecs_cluster_capacity_providers.this' 'firmsbase-staging-cluster'
-# --- plan checkpoint: expect near-zero diff on the cluster; KMS/S3 show as planned creates, review and apply those two in isolation before continuing ---
-
-# Batch 2 — networking has nothing to import (data-source only, §3E)
-
-# Batch 3 — security groups (must precede ALB/ECS-service import; both depend on SG IDs)
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.security_groups.aws_security_group.alb' 'sg-02a26ff122a9a1d29'
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.security_groups.aws_security_group.ecs_tasks' 'sg-0db14e50ea5c5466c'
 terraform -chdir=infrastructure/ecs/environments/staging import \
-  'module.security_groups.aws_security_group_rule.alb_ingress_https' \
-  'sgrule-<computed — derive via `terraform import` interactive resolution or `aws ec2 describe-security-group-rules` at execution time, not fabricated here>'
+  'module.elasticache.aws_security_group.redis' 'sg-0da3ea50262a9d20d'
 terraform -chdir=infrastructure/ecs/environments/staging import \
-  'module.security_groups.aws_security_group_rule.ecs_tasks_ingress_from_alb' \
-  '<same caveat>'
+  'module.alb.aws_lb.this' 'arn:aws:elasticloadbalancing:us-east-1:603013471426:loadbalancer/app/firmsbase-staging-alb/79a16ccaf391d71b'
 terraform -chdir=infrastructure/ecs/environments/staging import \
-  'module.security_groups.aws_security_group_rule.rds_ingress_from_ecs_tasks[0]' \
-  '<same caveat>'
-# --- plan checkpoint: expect the 3 new narrower rules (alb_egress_to_ecs_tasks, ecs_tasks_egress_https, ecs_tasks_egress_postgres) to show as planned creates (§3C) — review whether to apply them now (adds rules alongside the existing broad ones, non-destructive) or defer to Phase B ---
+  'module.alb.aws_lb_target_group.web' 'arn:aws:elasticloadbalancing:us-east-1:603013471426:targetgroup/firmsbase-staging-tg/1830c01b9aaac37d'
+terraform -chdir=infrastructure/ecs/environments/staging import \
+  'module.alb.aws_lb_listener.https' 'arn:aws:elasticloadbalancing:us-east-1:603013471426:listener/app/firmsbase-staging-alb/79a16ccaf391d71b/f8dc4575154478ca'
+terraform -chdir=infrastructure/ecs/environments/staging import \
+  'module.alb.aws_lb_listener.http_redirect' 'arn:aws:elasticloadbalancing:us-east-1:603013471426:listener/app/firmsbase-staging-alb/79a16ccaf391d71b/371edb36d1b49e2c'
+# --- plan checkpoint: MUST show zero destroy/replace. The 5 BLOCKED SG-rule
+# imports (see import-manifest.json) run here too, once their rule IDs are
+# resolved with elevated read access — not guessed. ---
+```
 
-# Batch 4 — RDS's own SG is E (not imported); ElastiCache
+### Phase A3 — resources requiring a temporary live-state-compatible configuration first (`import_then_migrate`, 11 addresses)
+
+**Every command below is BLOCKED until its named code fix/decision lands**
+— none of these are guesses; each is marked in the manifest with an
+explicit `prerequisite` field.
+
+```bash
+# Requires: main.tf's ecr_repository_name resolves to "firmsbase-staging" (now wired via var.ecr_repository_name — see §6/§9.5 of variables.tf)
+terraform -chdir=infrastructure/ecs/environments/staging import \
+  'module.ecr.aws_ecr_repository.app' 'firmsbase-staging'
+
+# Requires: var.ecs_cluster_name = "firmsbase-staging-cluster"
+terraform -chdir=infrastructure/ecs/environments/staging import \
+  'module.ecs_cluster.aws_ecs_cluster.this' 'firmsbase-staging-cluster'
+terraform -chdir=infrastructure/ecs/environments/staging import \
+  'module.ecs_cluster.aws_ecs_cluster_capacity_providers.this' 'firmsbase-staging-cluster'
+
+# Requires: var.elasticache_subnet_group_name = "firmsbase-staging-cache-subnets"
+terraform -chdir=infrastructure/ecs/environments/staging import \
+  'module.elasticache.aws_elasticache_subnet_group.this' 'firmsbase-staging-cache-subnets'
+
+# Requires: var.elasticache_engine = "valkey", var.elasticache_parameter_group_name = "default.valkey7",
+# engine_version aligned to the live 7.2 line, and the module's ignore_changes=[auth_token] (already added)
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.elasticache.aws_elasticache_replication_group.this' 'firmsbase-staging-redis'
-# add `lifecycle { ignore_changes = [auth_token] }` to this resource BEFORE this import, per §9.4 — otherwise every subsequent plan shows a spurious auth_token diff
-# --- plan checkpoint ---
 
-# Batch 5 — ALB (depends on batch 3's SGs)
+# Requires: var.iam_task_execution_role_name = "firmsbase-staging-ecs-execution-role"
+# PLUS a separate, explicit decision on permission-shape reconciliation (managed-policy vs custom-inline) — see §11 item 3. Do not import until that decision is made; a name-only fix imports a role whose Terraform-declared permissions don't match what's actually attached live.
 terraform -chdir=infrastructure/ecs/environments/staging import \
-  'module.alb.aws_lb.this' '<live ALB ARN — read via `aws elbv2 describe-load-balancers` at execution time>'
+  'module.iam.aws_iam_role.task_execution' 'firmsbase-staging-ecs-execution-role'
 terraform -chdir=infrastructure/ecs/environments/staging import \
-  'module.alb.aws_lb_target_group.web' '<live target-group ARN>'
-terraform -chdir=infrastructure/ecs/environments/staging import \
-  'module.alb.aws_lb_listener.https' '<live 443 listener ARN>'
-terraform -chdir=infrastructure/ecs/environments/staging import \
-  'module.alb.aws_lb_listener.http_redirect' '<live 80 listener ARN>'
-# --- plan checkpoint: review the health-check-path diff (§9.5) explicitly before continuing ---
+  'module.iam.aws_iam_role_policy.task_execution' 'firmsbase-staging-ecs-execution-role:FirmsBaseStagingSecretsAccess'
 
-# Batch 6 — task definitions (must precede service import)
-terraform -chdir=infrastructure/ecs/environments/staging import \
-  'module.web.aws_ecs_task_definition.this' 'firmsbase-staging-web:9'
-terraform -chdir=infrastructure/ecs/environments/staging import \
-  'module.worker.aws_ecs_task_definition.this' 'firmsbase-staging-worker:8'
-terraform -chdir=infrastructure/ecs/environments/staging import \
-  'module.critical_worker.aws_ecs_task_definition.this' 'firmsbase-staging-critical-worker:8'
-terraform -chdir=infrastructure/ecs/environments/staging import \
-  'module.scheduler.aws_ecs_task_definition.this' 'firmsbase-staging-scheduler:8'
-# migrate/maintenance: import only after confirming their live container definition matches Terraform's (§3C note) — otherwise leave as D pending a follow-up diff
-# --- plan checkpoint ---
-
-# Batch 7 — ECS services LAST, and only after cluster + IAM (roles referenced by
-# the task definition) + networking (SG/subnet IDs) + logging + ALB are all
-# already represented in state. Do NOT import ses-consumer's service (it has
-# none live yet — that's Phase B, §8). Do NOT let this batch's plan show any
-# replacement — assign_public_ip is the specific thing to check (§9.1).
+# Requires: assign_public_ip=true is in effect (default, §7) for all four — DO NOT apply with private_egress_ready=true until real NAT egress exists
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.web.aws_ecs_service.this[0]' 'firmsbase-staging-cluster/web'
 terraform -chdir=infrastructure/ecs/environments/staging import \
@@ -338,154 +502,153 @@ terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.critical_worker.aws_ecs_service.this[0]' 'firmsbase-staging-cluster/critical-worker'
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.scheduler.aws_ecs_service.this[0]' 'firmsbase-staging-cluster/scheduler'
-# --- final plan checkpoint: MUST show zero destroy/replace actions anywhere. If it shows any replacement, stop — do not apply — re-diagnose. ---
+# --- final plan checkpoint: MUST show zero destroy/replace anywhere, and
+# the diff for assign_public_ip specifically must be empty (already true,
+# already matching live) — if it shows a change to assign_public_ip, STOP,
+# do not apply, re-diagnose before touching anything further. ---
 ```
 
-Explicitly **not** imported by this plan, ever, without a separate future
-decision: the two generic IAM roles (§3D), the shared `/app` log group
-(§3D), the 3 ad-hoc task-definition families (§3D), and anything under
-`module.ses_consumer` (Phase B, §8) or `module.cloudwatch_alarms` (blocked
-on the `AccessDenied` in §4 until verified).
+Explicitly **not** imported, ever, without a separate future decision: the
+6 pinned task definitions (§6, `do_not_import`), the two generic IAM
+roles / shared log group / 3 ad-hoc task-def families (no address exists —
+§3), and `module.cloudwatch_alarms.*` (existence unconfirmed —
+`cloudwatch:DescribeAlarms` denied, §11 item 6).
 
-## 8. Phase A vs. Phase B
+### Phase B — intentional migrations (deliberately out of scope for this plan; listed for sequencing only)
 
-- **Phase A — state adoption** (this document's scope): bring Terraform's
-  state in line with what's already running, with **zero functional
-  change** to the live environment. Ends with `terraform plan` showing no
-  pending changes for every resource imported in §7 (the narrow, reviewed
-  new-resource creates called out at each checkpoint are the only
-  exceptions, and each is additive/non-disruptive).
-- **Phase B — SES consumer deployment** (out of scope here; this is the
-  actual goal Mission E/F's Terraform changes were written for): deploy
-  `module.ses_consumer`'s task definition and service for the first time,
-  cut the 4 existing services over from the generic IAM roles to their new
-  per-role roles and from the shared `/app` log group to their per-role log
-  groups, retire the generic roles and shared log group once nothing
-  references them, and reconcile the security-group/health-check-path/
-  cluster-naming decisions flagged in §9. Phase B cannot safely start until
-  Phase A's state adoption is complete and its final `plan` is clean.
+- Role-specific task roles (`module.iam.aws_iam_role.task[*]`) created,
+  IAM permission-shape reconciliation for the execution role resolved.
+- New, role-specific task-definition revisions registered for
+  `web`/`worker`/`critical-worker`/`scheduler`/`migrate`/`maintenance`,
+  replacing the `do_not_import` pin from §6 deliberately, with a human
+  reviewing the diff.
+- SES policy tightening: reconcile the live `FirmsVaultStagingSesSend`
+  inline policy (grants both `ses:SendEmail` and `ses:SendRawEmail`) with
+  Terraform's `task_web_ses_send` policy (only `ses:SendRawEmail`, per
+  Mission F's already-completed tightening work) — see
+  `docs/ecs/iam-matrix.md`.
+- Public-to-private networking, if ever pursued: only after real private
+  subnets + NAT gateway exist and are verified (§4 recommendation (c)),
+  and only by explicitly setting `private_egress_ready = true` with real
+  `nat_gateway_ids` (§7) — never as a side effect of anything else.
+  `ses-consumer` creation (`module.ses_consumer.*`, all currently `new`).
+- Retirement of the two generic IAM roles and the shared log group, only
+  after nothing references them anymore.
 
-## 9. Drift / replacement analysis — stop conditions
+## 9. Drift / replacement / stop-condition analysis
 
-### 9.1 `assign_public_ip` — the headline finding, outage risk
+### 9.1 `assign_public_ip` — headline finding, now structurally guarded (§7)
 
-The live VPC (`vpc-0fd81b688155ded2b`) is the account's **default VPC**;
-every subnet has `MapPublicIpOnLaunch: true`, and the sole route table has
-only a direct Internet Gateway route — **no NAT gateway exists anywhere in
-this VPC** (independently confirmed via route-table inspection after
-`ec2:DescribeNatGateways` was denied). All 4 live ECS services currently run
-with `assignPublicIp: ENABLED` — that public IP is the *only* way these
-tasks reach the internet (ECR pulls, Secrets Manager, CloudWatch Logs, SES,
-SQS — all of it).
+Unchanged from the original finding, now fixed in code rather than only
+documented: this VPC has no NAT gateway (§4); disabling `assignPublicIp`
+would cut off all internet egress for every task in that service
+simultaneously. §7 makes this impossible to do silently — every caller of
+`ecs_service` must pass `assign_public_ip` explicitly, and the
+environment-level default can only flip to `false` if `nat_gateway_ids` is
+non-empty.
 
-`infrastructure/ecs/modules/ecs_service/main.tf` hardcodes
-`network_configuration.assign_public_ip = false`. If Phase A's service
-import is followed by any `apply` that doesn't first address this, Terraform
-will flip it to `false` in place — **no replacement needed for Terraform to
-do this, just an in-place service update** — and all 4 services will lose
-all internet connectivity simultaneously. This is the single most severe
-risk identified in this plan.
+### 9.2 ECS cluster rename — stop condition, fixed via variable (§6 of variables.tf)
 
-**Stop condition**: do not `apply` against any imported `aws_ecs_service`
-until this module hardcodes `assign_public_ip = true` (matching the live,
-NAT-less reality) or the environment gains real private subnets + a NAT
-gateway and the module is parameterized instead. Either fix is a Phase B
-decision, not something this plan makes unilaterally.
+Renaming an ECS cluster requires deleting and recreating it — and every
+service on it. `var.ecs_cluster_name` (default `null`, falls back to
+`name_prefix`) removes this stop condition once set to the live value;
+until then, it remains a hard block (any apply without the fix plans a
+full cluster + all-4-services replacement).
 
-### 9.2 ECS cluster rename
+### 9.3 ECR repository rename — stop condition, fixed via variable
 
-Covered in §3B. Renaming an ECS cluster requires deleting and recreating
-it — which means deleting and recreating every service on it. **Any
-`apply` that doesn't first fix `cluster_name` to the live value will plan a
-full cluster + all-4-services replacement.** Confirmed as a stop condition;
-the code fix in §3B must land before any cluster/service import.
+Same shape, lower blast radius (loses image tags/digests, not running
+services). `var.ecr_repository_name` closes this the same way.
 
-### 9.3 ECR repository rename
+### 9.4 ElastiCache — TWO stop conditions, both newly found in this correction pass and both fixed via variables
 
-Same shape as §9.2 but lower blast radius: an ECR repository rename means
-deleting and recreating the repo, losing all existing image tags/digests
-(the currently-deployed digests would become unpullable). Confirmed stop
-condition; code fix in §3B required first.
-
-### 9.4 ElastiCache `auth_token`
-
-`aws_elasticache_replication_group.auth_token` is required, sensitive, and
-**write-only — AWS never returns it via any read API**, so Terraform cannot
-verify it post-import and will show a permanent diff (or, worse, attempt an
-in-place auth-token rotation, which is disruptive to every connected
-client) on every plan unless `lifecycle { ignore_changes = [auth_token] }`
-is added before import, or the exact live token is supplied as `-var` on
-every single plan/apply forever. Recommendation: add the `ignore_changes`
-lifecycle block — it's the standard, low-risk fix for this well-known
-Terraform/ElastiCache interaction. Not a stop condition once that one-line
-fix lands; flagged so it isn't missed.
+- **Engine mismatch** (`redis` vs. live `valkey`) — the most severe,
+  previously-undetected finding in this whole correction. Engine cannot be
+  changed in place; applying with the old hardcoded `engine = "redis"`
+  against the live Valkey replication group would plan a full,
+  data-losing replacement. Fixed via `var.elasticache_engine`
+  (`"redis"` default / must be `"valkey"` for this environment) and
+  `var.elasticache_parameter_group_name`.
+- **Subnet group name mismatch** — fixed via `var.elasticache_subnet_group_name`.
+- **`auth_token`** (pre-existing, unrelated to the above): write-only,
+  never returned by any read API — `lifecycle { ignore_changes =
+  [auth_token] }` added to `aws_elasticache_replication_group.this` so a
+  post-import plan doesn't show a permanent diff or attempt a disruptive
+  in-place rotation.
 
 ### 9.5 ALB target-group health-check path
 
-Live: `/up` (liveness — "is the process alive"). Terraform default:
-`/readyz` (readiness — "is the process ready to serve, including
-dependency checks"). These are semantically different checks, not just a
-naming difference (confirmed by reading
-`app/Http/Controllers/...` — not re-verified in this pass, relying on the
-module's own variable documentation and prior mission context). Changing
-this is not destructive (target groups update health-check config
-in-place, no replacement), but it **does change what "unhealthy" means**
-for live traffic routing — a behavior change serious enough to call out
-explicitly for a human decision before including it in any apply, not a
-silent adoption.
+Unchanged from the original finding: live `/up` (liveness) vs. Terraform's
+default `/readyz` (readiness) — a real semantic difference, not a naming
+one. Non-destructive to change (in-place update), but flagged for an
+explicit human decision (§11), not silently adopted either direction.
 
 ### 9.6 Security-group rule granularity
 
-Covered in §3C/§3D. Not a stop condition — additive-only, no rule is ever
-implicitly revoked by Terraform's per-rule resource model — but flagged
-because it means the live environment will end up **more permissive than
-Terraform's declared rules** even after Phase A (the extra broad rules
-remain, unmanaged, alongside the new narrower ones) unless someone
-explicitly revokes them in a follow-up, out of scope here.
+Unchanged: additive-only, no live rule is ever implicitly revoked by this
+module's per-rule (`aws_security_group_rule`) pattern. The live
+environment remains more permissive than Terraform's declared rules after
+Phase A unless a human explicitly revokes the extra broad rules in a
+follow-up — out of scope here.
 
 ### 9.7 `launch_type` vs. `capacity_provider_strategy`
 
-Confirmed, non-destructive: live services use the legacy `launchType:
-FARGATE` field; Terraform's module uses `capacity_provider_strategy`
-exclusively (the two are mutually exclusive on `aws_ecs_service`, and
-Terraform will show this as an in-place field swap, not a replacement,
-per the AWS provider's own documented behavior for this attribute pair).
-Confirmed safe to accept on first apply.
+Unchanged, confirmed non-destructive: an in-place field swap per the AWS
+provider's documented behavior for this attribute pair.
 
 ## 10. Validation performed (local/static only)
 
 | Check | Result |
 |---|---|
-| `terraform fmt -recursive -check infrastructure/ecs` | see git diff — run before commit |
-| `terraform -chdir=infrastructure/ecs/environments/staging init -backend=false` + `terraform validate` | see git diff — run before commit |
-| `tf-guard.sh` manual test: `validate -help` passthrough | passed |
-| `tf-guard.sh` manual test: `apply` with no `.terraform/` present | refused, exit 1, correct guidance printed |
-| AWS-backed `terraform plan` against empty state | **not run** — explicitly prohibited by this mission |
-| `terraform apply` / `terraform import` | **not run** — explicitly prohibited by this mission |
+| `terraform fmt -recursive -check infrastructure/ecs` | Pass |
+| `terraform -chdir=infrastructure/ecs/environments/staging init -backend=false` + `terraform validate` | Pass |
+| `terraform -chdir=infrastructure/ecs/environments/staging test` | 9/9 pass — naming-override fallback/override for cluster, ECR, ElastiCache subnet group + engine; `assign_public_ip` default-true, override-to-false-with-NAT-IDs, and validation-failure-without-NAT-IDs |
+| `terraform -chdir=infrastructure/ecs/modules/iam test` | 2/2 pass — `task_execution_role_name` fallback/override (isolated from the root module's other data-source complications via `override_data` on the assume-role/execution/metrics policy documents, since those need real JSON a blanket `mock_provider` can't produce) |
+| `python3 infrastructure/ecs/environments/staging/scripts/validate-import-manifest.py` | Pass — 94 addresses, all uniquely classified, summary counts match a fresh recount; verified to correctly FAIL on each of the 5 violation types the review required (missing classification, duplicate address, wrong totals, import-classified entry missing an import_id, new/unmanaged/do_not_import entry incorrectly carrying an import_id) |
+| `tf-guard.sh` manual tests | `validate`/`fmt` passthrough confirmed; `plan`/`apply` correctly refused with no backend configured (today's real state); with a temporary mock backend block, correctly refused on wrong region, then correctly refused on empty state with correct account+region — all 4 checks independently verified to fire |
+| AWS-backed `terraform plan` against empty state | **Not run** — explicitly prohibited |
+| `terraform apply` / `terraform import` / `terraform refresh` / any `terraform state` subcommand | **Not run** — explicitly prohibited |
+
+Governance/PHP test suite: not run. No `app/`, `tests/`, or other
+PHP/application file changed in this correction — every change is
+Terraform (`.tf`), a Terraform test (`.tftest.hcl`), documentation
+(`.md`), a JSON manifest, or a shell script confined to
+`infrastructure/ecs/`. Confirmed via `git diff --stat` before commit (§13).
 
 ## 11. Remaining approvals / information required before state adoption can begin
 
-1. Backend choice (§5) — S3+DynamoDB vs. Terraform Cloud — and, if
-   S3+DynamoDB, provisioning of that bucket/table/IAM policy (not this
-   plan's job).
-2. Decision on the ECS cluster name (§3B, §9.2): keep the live
-   `firmsbase-staging-cluster` name (this plan's assumption) or accept a
-   one-time cluster replacement to standardize naming.
-3. Decision on the ALB target-group health-check path (§9.5): adopt `/up`
-   as the managed value, keep `/readyz` and accept the live behavior change,
-   or expose both as separate checks.
-4. `assign_public_ip` fix (§9.1) merged and reviewed — hard blocker for any
-   service-level `apply`, not just import.
-5. `ecs_tasks_egress_postgres`/`alb_egress_to_ecs_tasks`/`ecs_tasks_egress_https`
-   decision (§3C/§9.6): apply the narrower rules alongside the existing
-   broad ones now, or defer until the broad rules are revoked in the same
-   change (avoiding a permanently inconsistent state).
-6. Elevated (or one-time delegated) read access for `cloudwatch:DescribeAlarms`
-   and `sns:ListTopics` to close the one real unknown in §3C/§4 — whether any
-   of the 19 planned alarms or an SNS topic already exist under a colliding
-   name. Not requested automatically, per the mission's constraint.
-7. Confirmation of `module.migrate`/`module.maintenance` task-definition
-   content match (§3C note) — currently unclassified between A and C
-   pending a line-by-line diff against the live revisions.
-8. Human sign-off to actually begin executing §7's import commands — this
+1. Backend choice (§5) and its provisioning — not this plan's job.
+2. ECS cluster name: keep live `firmsbase-staging-cluster` (this plan's
+   assumption, via `ecs_cluster_name`) vs. accept a one-time replacement
+   to standardize on `name_prefix`.
+3. **IAM execution-role permission-shape decision** (§3, new this
+   revision): keep the live AWS-managed-policy + narrow-inline-policy
+   approach (would require restructuring `modules/iam`'s
+   `task_execution` resource to attach `AmazonECSTaskExecutionRolePolicy`
+   instead of building a custom inline policy), or accept Terraform's
+   broader custom-inline-policy approach as the new standard (would widen
+   the live role's permissions on first apply — a real, reviewable
+   change, not a no-op). The naming variable (§6 of variables.tf) does not
+   resolve this; it only makes the role importable by address.
+4. ALB target-group health-check path (§9.5): adopt `/up`, keep `/readyz`
+   and accept the live behavior change, or expose both as separate
+   checks.
+5. ElastiCache engine/version (§9.4, new this revision): confirm
+   `elasticache_engine = "valkey"` and an appropriate `engine_version` for
+   the live 7.2 line before any replication-group import is attempted —
+   this is now a required variable override, not optional.
+6. Security-group rule reconciliation timing (§9.6): apply the narrower
+   declared rules alongside the existing broad ones now, or defer until
+   the broad rules are revoked in the same change.
+7. Elevated (or one-time delegated) read access for
+   `ec2:DescribeSecurityGroupRules` (blocks 5 of the 11 `import_unchanged`
+   commands — the SG *content* is already confirmed matching, only the
+   literal rule ID is missing), `cloudwatch:DescribeAlarms`, and
+   `sns:ListTopics` — not requested automatically, per the mission's
+   constraint.
+8. Confirmation of `module.migrate`/`module.maintenance` task-definition
+   content — both are covered by the uniform `do_not_import` decision in
+   §6 regardless, so this is informational for Phase B planning, not a
+   Phase A blocker.
+9. Human sign-off to actually begin executing §8's import commands — this
    plan prepares them, it does not run them.

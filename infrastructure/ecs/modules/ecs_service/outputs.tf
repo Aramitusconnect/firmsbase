@@ -9,3 +9,7 @@ output "task_definition_family" {
 output "service_name" {
   value = var.create_service ? aws_ecs_service.this[0].name : null
 }
+
+output "assign_public_ip" {
+  value = var.assign_public_ip
+}
