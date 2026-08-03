@@ -1,6 +1,7 @@
 *.tfstate
 *.tfstate.*
 *.tfplan
+*.tflock
 .terraform/
 terraform.tfvars
 *.auto.tfvars
