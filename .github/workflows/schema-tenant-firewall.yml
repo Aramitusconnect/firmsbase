@@ -96,6 +96,24 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
+      # Isolated, ephemeral, job-exclusive Redis for
+      # tests/Feature/PlatformAdmin/DashboardRedisCacheSerializationTest.php
+      # (real-Redis regression coverage for the dashboard cache
+      # serialization fix — see that test's own docblock). This container
+      # is created fresh for this job run, reachable only via the runner's
+      # own loopback port mapping below, requires no password, and is
+      # destroyed automatically with the job — never staging/production
+      # Redis, never a shared instance. No persistent volume is declared,
+      # so no data survives past this job.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
 
     steps:
       - name: Checkout
@@ -212,6 +230,18 @@ jobs:
           DB_DATABASE: ${{ env.CI_DB_NAME }}
           DB_USERNAME: rls_test_runner_39a3l
           DB_PASSWORD: ${{ env.CI_DB_PASSWORD }}
+          # config/database.php's real Redis connection variables (see
+          # that file — there is no REDIS_SCHEME variable anywhere in
+          # this codebase, so none is set here). These point at the
+          # isolated `redis` service container defined above — never
+          # ElastiCache, never a staging/production host, never a real
+          # credential. REDIS_CACHE_DB/REDIS_PREFIX are deliberately left
+          # at config/database.php's own defaults: this container is
+          # exclusive to this job, so there is nothing else to collide
+          # with inside it.
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+          REDIS_PASSWORD: null
         run: php artisan test
 
       - name: Destroy the disposable CI database

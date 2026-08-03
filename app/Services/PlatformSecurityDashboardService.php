@@ -9,6 +9,7 @@ use App\Models\PlatformAdmin;
 use App\Models\PlatformRole;
 use App\Models\SecurityEvent;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use RuntimeException;
@@ -114,16 +115,35 @@ class PlatformSecurityDashboardService
     }
 
     /**
+     * FIRMSVAULT — REAL STAGING STABILIZATION, Objective A / Phase 2
+     * correction: config/cache.php's `serializable_classes` stays at
+     * its safe framework default (`false`, arbitrary object
+     * deserialization from cache remains disabled). The cached closure
+     * below therefore returns a PLAIN array of scalar
+     * (string/int/bool/null) values only — `created_at` is serialized
+     * to an ISO-8601 string, matching this codebase's own established
+     * convention (see e.g. RlsSecurityReportService::generate(), which
+     * already returns "clean, page-renderable structured data" for the
+     * identical reason) — never a Carbon instance, never the Collection
+     * itself. A plain scalar array serializes with zero class
+     * references, so there is nothing for `serializable_classes` to
+     * reject on any legitimate read, regardless of its own value. The
+     * Collection (and each row's real Carbon `created_at`) is
+     * reconstructed AFTER reading the scalar payload back out of cache —
+     * on both the fresh-compute path and every subsequent cache-hit
+     * path — so callers' return-type contract is unchanged.
+     *
      * @return Collection<int, array<string, mixed>>
      */
     public function recentSecurityEvents(PlatformAdmin $admin, int $limit = 50): Collection
     {
         $this->assertCanAccess($admin);
 
-        return Cache::remember(
+        /** @var array<int, array<string, mixed>> $scalarRows */
+        $scalarRows = Cache::remember(
             self::CACHE_KEY.'.'.$limit,
             self::CACHE_TTL_SECONDS,
-            function () use ($limit): Collection {
+            function () use ($limit): array {
                 // See PlatformFirmUserDirectoryService::listAll()'s own
                 // note: runWithFirmContext() below needs every column
                 // TenantContextResolver::resolveForFirm() reads
@@ -161,7 +181,14 @@ class PlatformSecurityDashboardService
                             'actor_id' => $event->actor_id,
                             'event_type' => $event->event_type,
                             'category' => $event->category,
-                            'created_at' => $event->created_at,
+                            // Scalar ISO-8601 string only — see this
+                            // method's own docblock above. app.timezone
+                            // is fixed to UTC (config/app.php), so this
+                            // format is also fixed-width and sorts
+                            // lexicographically identically to
+                            // chronological order — the sort below
+                            // remains correct operating on the string.
+                            'created_at' => $event->created_at?->toIso8601String(),
                         ]);
                     }
                 }
@@ -175,9 +202,18 @@ class PlatformSecurityDashboardService
                     ->sort(fn (array $a, array $b): int => [$b['created_at'], $b['id']] <=> [$a['created_at'], $a['id']])
                     ->take($limit)
                     ->values()
-                    ->map(fn (array $row): array => Arr::except($row, ['id']));
+                    ->map(fn (array $row): array => Arr::except($row, ['id']))
+                    ->all();
             }
         );
+
+        return collect($scalarRows)->map(function (array $row): array {
+            $row['created_at'] = $row['created_at'] !== null
+                ? Carbon::parse($row['created_at'])
+                : null;
+
+            return $row;
+        });
     }
 
     /**
