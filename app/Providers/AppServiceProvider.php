@@ -35,9 +35,32 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(SqsClient::class, function () {
             $config = config('services.ses_events');
 
+            // Bounds the worst-case time ConsumeSesEventsCommand's
+            // graceful-shutdown handling can be blocked inside a single
+            // receiveMessage() call — confirmed necessary by a real
+            // container-level smoke test (feature/ses-consumer-ecs-
+            // wiring): pcntl's async signal dispatch cannot interrupt a
+            // C-library network call already in flight (e.g. a hung
+            // TCP connect during a network partition), so without an
+            // explicit ceiling here, SIGTERM could be delayed well past
+            // ECS's stopTimeout, forcing a SIGKILL instead of a clean
+            // exit. 'connect_timeout' bounds the TCP handshake phase
+            // alone (5s is generous for a reachable AWS endpoint, fast-
+            // fails on an unreachable one); 'timeout' bounds the whole
+            // request including the long-poll wait itself, so it is
+            // deliberately derived from the configured
+            // wait_time_seconds (+10s margin for TLS/transfer) rather
+            // than a flat constant, so a legitimate near-20s long poll
+            // is never cut short.
+            $waitTimeSeconds = (int) ($config['wait_time_seconds'] ?? 20);
+
             $clientConfig = [
                 'version' => 'latest',
                 'region' => $config['region'],
+                'http' => [
+                    'connect_timeout' => 5,
+                    'timeout' => $waitTimeSeconds + 10,
+                ],
             ];
 
             // Matches Illuminate\Mail\MailManager::addSesCredentials()'s

@@ -49,6 +49,24 @@ Verified above: `schedule:work` exits cleanly on `SIGTERM` in milliseconds when 
 | ECS scheduler task `stopTimeout` | 30s | Idle-loop process, no in-flight work of consequence to drain (confirmed near-instant exit above) — no reason for a long budget. |
 | Deployment configuration | `minimumHealthyPercent=0`, `maximumPercent=100` for this one service only | With `desiredCount=1`, the default rolling-update behavior (`100/200`) would briefly run two scheduler instances simultaneously during a deploy. Since no `Schedule::` entries exist yet (see audit §3) there is no overlap risk to actually observe today, but the setting is prepared correctly now rather than left at a default that would cause duplicate-execution risk once schedule entries exist. `withoutOverlapping()` (cache-lock-based, see [queue-and-redis-architecture.md](queue-and-redis-architecture.md)) is the second, independent layer of protection for individual scheduled commands regardless of this setting. |
 
+## SES consumer
+
+`ses:consume-events` (`App\Console\Commands\ConsumeSesEventsCommand`) is a plain `Illuminate\Console\Command` long-polling an SQS queue — it is not `queue:work`/`schedule:work`, so it does not inherit either of those Laravel components' built-in signal handling. It installs its own: `pcntl_async_signals(true)` + `pcntl_signal(SIGTERM, ...)`/`pcntl_signal(SIGINT, ...)` register a handler that only ever sets an in-memory `$shouldStop` flag (never touches the database, SQS, or logs anything beyond a generic "signal received" line — no message content, no recipient, no secret). That flag is checked in exactly two places:
+
+1. The top of the outer receive loop — never starts another `receiveMessage()` cycle once set.
+2. Immediately after each message in a received batch finishes processing (and, if applicable, is deleted) — stops advancing to the next message in that same batch as soon as possible, but never abandons a message already being processed mid-way.
+
+Verified directly (`tests/Feature/Notifications/ConsumeSesEventsCommandTest.php`): a real `SIGTERM` sent to the test process itself (`posix_kill(posix_getpid(), SIGTERM)`) from inside a mocked message-processing callback, mid-batch, proves — via Mockery's own call-count expectations, not a re-implementation of the logic — that a second message in the same batch is never processed and a second `receiveMessage()` call never happens, while the first message's successful processing still results in its SQS message being deleted (delete-only-after-durable-success is unaffected by the shutdown signal).
+
+The handler is reset to the OS default (`SIG_DFL`) in a `finally` block after the loop exits, purely as defensive hygiene — this is a single, per-process handler for this command's own one-shot execution (the process exits right after), so there is no cross-invocation listener-leak risk in normal ECS operation the way a shared long-lived process' event listeners could have.
+
+| Setting | Value | Rationale |
+|---|---|---|
+| `SES_EVENTS_WAIT_TIME_SECONDS` | 20 (SQS's own maximum) | Long-poll wait per `receiveMessage()` call — bounds the worst-case delay before the loop next checks the shutdown flag, even in the theoretical case where the signal isn't delivered until the blocking call itself returns (pcntl async signals are expected to interrupt it directly in the common case). |
+| ECS `ses-consumer` task `stopTimeout` | 30s (`var.ses_consumer_stop_timeout`) | The realistic drain time is bounded by a single message's own processing time (fast: a handful of DB reads/writes), not a full batch, since the flag is checked between messages — 30s leaves ample headroom without approaching ECS's 120s ceiling, matching the scheduler role's own budget for the same "idle/lightweight loop" reasoning. |
+
+Redelivery safety after a shutdown-induced early exit (or any other undeleted message) is unaffected: `SesEventReceipt`'s unique `idempotency_key` constraint makes reprocessing the same event a safe, cheap no-op (see `SesEventConsumerService::recordReceipt()`), and `SuppressionService`/`PlatformNotificationCorrelationService`'s own upsert-or-guard writes mean no duplicate suppression action is ever produced by redelivery.
+
 ## Deployment drain behavior (summary across roles)
 
 1. New task definition revision registered (new image digest, see [container-architecture.md](container-architecture.md) "Image tagging").

@@ -38,3 +38,31 @@ redis_auth_token_secret_arn   = "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:sec
 alarm_sns_topic_arn = "arn:aws:sns:us-east-1:ACCOUNT_ID:REPLACE_ME"
 
 enable_custom_metric_alarms = false
+
+# --- SES bounce/complaint SQS consumer (ses-consumer role) — the queue
+# URL/ARN and DLQ ARN below are resource IDENTIFIERS, not secrets, so this
+# example shows the expected real staging naming/format directly (only the
+# account ID is a placeholder, matching the rest of this file). The HMAC
+# secret ARN below is likewise just an identifier — but the secret VALUE it
+# points at must never appear here, in any tfvars file, in Terraform state,
+# or in any Terraform output. See docs/ecs/iam-matrix.md and
+# CorrelatedPasswordResetSenderService/PlatformNotificationCorrelationService.
+ses_events_queue_url = "https://sqs.us-east-1.amazonaws.com/ACCOUNT_ID/firmsvault-staging-ses-events"
+ses_events_queue_arn = "arn:aws:sqs:us-east-1:ACCOUNT_ID:firmsvault-staging-ses-events"
+ses_events_dlq_arn   = "arn:aws:sqs:us-east-1:ACCOUNT_ID:firmsvault-staging-ses-events-dlq"
+
+# Generate this secret OUTSIDE Terraform (e.g. `aws secretsmanager
+# create-secret` from a value produced by
+# `php artisan tinker --execute="echo bin2hex(random_bytes(32));"`) and
+# supply only its ARN here — never the value itself.
+platform_notifications_recipient_fingerprint_hmac_key_secret_arn = "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:firmsbase/staging/platform-notifications-hmac-key-REPLACE_ME"
+
+# Consumer tuning — safe defaults already match config/services.php's own
+# env() fallbacks; only listed here for visibility/override.
+ses_events_wait_time_seconds           = 20
+ses_events_visibility_timeout_seconds  = 60
+ses_events_max_messages                = 10
+ses_consumer_desired_count             = 1
+ses_consumer_cpu                       = 256
+ses_consumer_memory                    = 512
+ses_consumer_stop_timeout              = 30

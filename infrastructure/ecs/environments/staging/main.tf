@@ -1,5 +1,5 @@
 locals {
-  roles = ["web", "worker", "critical-worker", "scheduler", "migrate", "maintenance"]
+  roles = ["web", "worker", "critical-worker", "scheduler", "migrate", "maintenance", "ses-consumer"]
 }
 
 module "networking" {
@@ -74,10 +74,12 @@ module "iam" {
     var.app_key_secret_arn,
     var.db_password_secret_arn,
     var.redis_auth_token_secret_arn,
+    var.platform_notifications_recipient_fingerprint_hmac_key_secret_arn,
   ]
 
   kms_key_arn             = module.kms.key_arn
   s3_documents_bucket_arn = module.s3_documents.bucket_arn
+  ses_events_queue_arn    = var.ses_events_queue_arn
 }
 
 module "alb" {
@@ -135,6 +137,28 @@ locals {
     DB_PASSWORD    = var.db_password_secret_arn
     REDIS_PASSWORD = var.redis_auth_token_secret_arn
   }
+
+  # Role-specific — deliberately NOT folded into shared_secrets above.
+  # Password-reset/owner-invitation notifications are sent synchronously
+  # from the web request path (no ShouldQueue) and the ses-consumer
+  # resolves platform_notification_correlations rows keyed by a
+  # fingerprint derived from this same key; no other role calls that code
+  # path today, so no other role receives it (see docs/ecs/iam-matrix.md
+  # and CorrelatedPasswordResetSenderService/PlatformNotificationCorrelationService).
+  hmac_secret = {
+    PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY = var.platform_notifications_recipient_fingerprint_hmac_key_secret_arn
+  }
+
+  # Plain (non-secret) SES consumer tuning — shared by web (which doesn't
+  # use it) intentionally excluded; only ses-consumer's own environment
+  # merges this in, below.
+  ses_events_environment = {
+    SES_EVENTS_QUEUE_URL                  = var.ses_events_queue_url
+    SES_EVENTS_QUEUE_REGION               = var.aws_region
+    SES_EVENTS_WAIT_TIME_SECONDS          = tostring(var.ses_events_wait_time_seconds)
+    SES_EVENTS_VISIBILITY_TIMEOUT_SECONDS = tostring(var.ses_events_visibility_timeout_seconds)
+    SES_EVENTS_MAX_MESSAGES               = tostring(var.ses_events_max_messages)
+  }
 }
 
 module "web" {
@@ -152,7 +176,7 @@ module "web" {
   task_role_arn      = module.iam.task_role_arns["web"]
 
   environment = local.shared_environment
-  secrets     = local.shared_secrets
+  secrets     = merge(local.shared_secrets, local.hmac_secret)
 
   log_group_name = aws_cloudwatch_log_group.app["web"].name
   aws_region     = var.aws_region
@@ -345,6 +369,41 @@ module "maintenance" {
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
 }
 
+module "ses_consumer" {
+  source = "../../modules/ecs_service"
+
+  name    = "ses-consumer"
+  family  = "${var.name_prefix}-ses-consumer"
+  image   = var.app_image_digest
+  command = ["ses-consumer"]
+  cpu     = var.ses_consumer_cpu
+  memory  = var.ses_consumer_memory
+
+  execution_role_arn = module.iam.task_execution_role_arn
+  task_role_arn      = module.iam.task_role_arns["ses_consumer"]
+
+  environment = merge(local.shared_environment, local.ses_events_environment)
+  secrets     = merge(local.shared_secrets, local.hmac_secret)
+
+  log_group_name = aws_cloudwatch_log_group.app["ses-consumer"].name
+  aws_region     = var.aws_region
+
+  stop_timeout_seconds = var.ses_consumer_stop_timeout
+
+  # No container_health_check_command — a non-HTTP, non-request-serving
+  # process has no endpoint to probe; ECS's own task-exit detection (the
+  # ecs_service_running_count alarm below) is this service's liveness
+  # signal, same rationale as worker/critical-worker/scheduler.
+  create_service     = true
+  desired_count      = var.ses_consumer_desired_count
+  cluster_id         = module.ecs_cluster.cluster_id
+  subnet_ids         = var.private_subnet_ids
+  security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
+  # No target_group_arn — never behind the ALB (not an HTTP service).
+
+  enable_autoscaling = false # single long-polling consumer; SQS's own visibility timeout already prevents duplicate concurrent processing of one message.
+}
+
 module "cloudwatch_alarms" {
   source = "../../modules/cloudwatch_alarms"
 
@@ -359,6 +418,11 @@ module "cloudwatch_alarms" {
   critical_worker_service_name = module.critical_worker.service_name
   rds_instance_id              = var.rds_instance_id
   redis_cluster_id             = "${var.name_prefix}-redis"
+
+  ses_consumer_service_name   = module.ses_consumer.service_name
+  ses_events_queue_name       = element(split("/", var.ses_events_queue_url), length(split("/", var.ses_events_queue_url)) - 1)
+  ses_events_dlq_name         = element(split(":", var.ses_events_dlq_arn), 5)
+  ses_consumer_log_group_name = aws_cloudwatch_log_group.app["ses-consumer"].name
 
   enable_custom_metric_alarms = var.enable_custom_metric_alarms
 }

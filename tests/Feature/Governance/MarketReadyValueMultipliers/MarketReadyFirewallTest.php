@@ -153,6 +153,10 @@ class MarketReadyFirewallTest extends TestCase
             fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/')
                 && ! str_starts_with($path, 'tests/Feature/Security/')
                 && ! str_starts_with($path, 'tests/Feature/SupportAccess/')
+                // feature/ses-consumer-ecs-wiring (a later, distinct ECS/IAM
+                // wiring mission) legitimately added its own new test
+                // directory entries under tests/Feature/Ecs/.
+                && ! str_starts_with($path, 'tests/Feature/Ecs/')
                 // Section 39A-2 legitimately added test helper methods
                 // to tests/TestCase.php.
                 && $path !== 'tests/TestCase.php'

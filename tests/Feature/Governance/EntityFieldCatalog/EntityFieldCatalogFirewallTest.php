@@ -141,6 +141,17 @@ class EntityFieldCatalogFirewallTest extends TestCase
         'tests/Feature/Ai/Entitlement/AiEntitlementAndModeBlockingTest.php',
         'tests/Feature/Ai/Foundation/AiModeEnumReplacementTest.php',
         'tests/Feature/Ai/Usage/AiUsageRecorderServiceTest.php',
+        // feature/ses-consumer-ecs-wiring (a later, distinct ECS/IAM
+        // wiring mission) legitimately added docker/entrypoint.sh's
+        // ses-consumer role dispatch, a new docker/commands/ses-
+        // consumer.sh, Terraform IAM/ECS-service/CloudWatch-alarm
+        // wiring for that role, and its own new test directory.
+        'docker/entrypoint.sh',
+        'docker/commands/ses-consumer.sh',
+        'infrastructure/ecs/',
+        'tests/Feature/Ecs/',
+        // feature/ses-consumer-ecs-wiring also bounded the SqsClient's HTTP connect/overall timeouts here, confirmed necessary by a real container-level graceful-shutdown smoke test.
+        'app/Providers/AppServiceProvider.php',
     ];
 
     /**
@@ -254,6 +265,10 @@ class EntityFieldCatalogFirewallTest extends TestCase
             fn (string $path) => ! str_starts_with($path, 'tests/Feature/Governance/')
                 && ! str_starts_with($path, 'tests/Feature/Security/')
                 && ! str_starts_with($path, 'tests/Feature/SupportAccess/')
+                // feature/ses-consumer-ecs-wiring (a later, distinct ECS/IAM
+                // wiring mission) legitimately added its own new test
+                // directory entries under tests/Feature/Ecs/.
+                && ! str_starts_with($path, 'tests/Feature/Ecs/')
                 // Section 39A-2 legitimately added test helper methods
                 // to tests/TestCase.php.
                 && $path !== 'tests/TestCase.php'

@@ -76,6 +76,18 @@ class AdminControlUiBoundaryTest extends TestCase
                 // PREPARED_TABLES — a governance-doc update, not a
                 // catalog/UI change.
                 && $path !== 'docs/governance/rls-gap-registry.md'
+                // feature/ses-consumer-ecs-wiring (a later, distinct
+                // ECS/IAM wiring mission) legitimately added docker/
+                // entrypoint.sh's ses-consumer role dispatch, a new
+                // docker/commands/ses-consumer.sh, Terraform IAM/ECS-
+                // service/CloudWatch-alarm wiring, its own docs/ecs/
+                // updates, and its own new test directory.
+                && $path !== 'docker/entrypoint.sh'
+                && $path !== 'docker/commands/ses-consumer.sh'
+                && ! str_starts_with($path, 'infrastructure/ecs/')
+                && ! str_starts_with($path, 'tests/Feature/Ecs/')
+                && ! str_starts_with($path, 'docs/ecs/')
+                && $path !== 'app/Providers/AppServiceProvider.php'
                 && ! str_starts_with($path, 'app/Services/')
                 && ! str_starts_with($path, 'tests/Feature/Governance/')
                 && ! str_starts_with($path, 'tests/Feature/Security/')

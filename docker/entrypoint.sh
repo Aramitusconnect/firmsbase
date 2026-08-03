@@ -19,6 +19,20 @@ fail() {
 }
 
 # ---------------------------------------------------------------------------
+# 0. Resolve the role early — before any required-variable validation — so
+# that validation can be role-specific (e.g. SES_EVENTS_QUEUE_URL only
+# matters to the ses-consumer role; PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY
+# only matters to web and ses-consumer). Only captures the value here —
+# deliberately does NOT fail yet if empty; that check stays at the
+# dispatch step below (its original location), so this block stays a
+# pure, side-effect-free variable assignment. `shift` here, once, so the
+# remaining "$@" (any extra arguments, e.g. maintenance's Artisan
+# subcommand) reaches the command script unchanged at dispatch time below.
+# ---------------------------------------------------------------------------
+role="${1:-}"
+shift || true
+
+# ---------------------------------------------------------------------------
 # 1. Fail fast on missing required environment variables.
 # Shell-level, deliberately before any PHP/Composer autoload runs, so a
 # misconfigured task fails in milliseconds with a clear message rather than
@@ -31,6 +45,26 @@ required_vars=(APP_KEY APP_ENV DB_CONNECTION DB_HOST DB_DATABASE DB_USERNAME DB_
 # their `database` defaults has no Redis dependency to validate.
 if [[ "${CACHE_STORE:-}" == "redis" || "${SESSION_DRIVER:-}" == "redis" || "${QUEUE_CONNECTION:-}" == "redis" ]]; then
   required_vars+=(REDIS_HOST)
+fi
+
+# ses-consumer is the only role that polls the SES bounce/complaint SQS
+# queue — SES_EVENTS_QUEUE_URL has no meaning to, and must not be demanded
+# of, any other role.
+if [[ "$role" == "ses-consumer" ]]; then
+  required_vars+=(SES_EVENTS_QUEUE_URL)
+fi
+
+# PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY is required only by
+# the two roles that can actually reach CorrelatedPasswordResetSenderService's
+# platform-scope path: web (synchronous password-reset/owner-invitation
+# sends from the request path — these do not implement ShouldQueue) and
+# ses-consumer (resolves platform_notification_correlations rows keyed by
+# a fingerprint derived from this same key). worker/critical-worker/
+# scheduler/migrate/maintenance never call that code path today and must
+# not be made to depend on a secret they don't need — see
+# docs/ecs/iam-matrix.md.
+if [[ "$role" == "web" || "$role" == "ses-consumer" ]]; then
+  required_vars+=(PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY)
 fi
 
 missing=()
@@ -107,12 +141,13 @@ done
 # 4. Dispatch to the role-specific command script. `exec` replaces this
 # script's process (PID 1) with the target process, so SIGTERM sent by
 # ECS/Docker reaches the real application process directly instead of being
-# absorbed by a shell wrapper.
+# absorbed by a shell wrapper. `role` was already resolved (and shifted out
+# of "$@") in step 0 above so the required-variable validation in step 1
+# could be role-specific; the empty-role check stays here (its original
+# location) rather than in step 0, so step 0 remains a pure assignment.
 # ---------------------------------------------------------------------------
-role="${1:-}"
-
 if [[ -z "$role" ]]; then
-  fail "no role/command given — expected one of: web, worker, scheduler, migrate, maintenance"
+  fail "no role/command given — expected one of: web, worker, scheduler, migrate, maintenance, ses-consumer"
 fi
 
 command_script="docker/commands/${role}.sh"
@@ -121,6 +156,5 @@ if [[ ! -f "$command_script" ]]; then
   fail "unknown role '${role}' — no such command script '${command_script}'"
 fi
 
-shift || true
 log "starting role '${role}' (APP_ENV=${APP_ENV})"
 exec "$command_script" "$@"

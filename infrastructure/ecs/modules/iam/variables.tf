@@ -35,6 +35,12 @@ variable "s3_documents_bucket_arn" {
   default     = null
 }
 
+variable "ses_events_queue_arn" {
+  description = "ARN of the SES bounce/complaint SQS queue. Grants ONLY the ses_consumer task role sqs:ReceiveMessage/sqs:DeleteMessage on exactly this ARN — never the DLQ, never all queues, never any other task role. Null (the default) omits the statement entirely, matching this module's existing 'no grant until the ARN exists' convention (see s3_documents_bucket_arn above)."
+  type        = string
+  default     = null
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

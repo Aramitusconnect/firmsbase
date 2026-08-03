@@ -12,13 +12,17 @@ Mirrors `infrastructure/ecs/modules/cloudwatch_alarms/main.tf` exactly — keep 
 | `alb-5xx` | `AWS/ApplicationELB HTTPCode_Target_5XX_Count` (Sum) | > 10/min | 3 consecutive minutes | Sustained upstream error rate, not a single blip. |
 | `alb-latency-p90` | `AWS/ApplicationELB TargetResponseTime` (p90) | > 2s | 3 consecutive minutes | Degraded responsiveness across the fleet, not one slow request. |
 | `target-unhealthy` | `AWS/ApplicationELB UnHealthyHostCount` (Max) | > 0 | 2 consecutive minutes | Any web task failing `/readyz` — see [container-architecture.md](container-architecture.md). |
-| `<role>-running-count-low` (web / general worker / critical worker) | `ECS/ContainerInsights RunningTaskCount` (Avg) | < 1 | 3 consecutive minutes, **missing data treated as breaching** | Crash loop or failed deployment — a role with zero running tasks is never acceptable, so "no data at all" is alarmed just as hard as "0." |
-| `<role>-cpu-high` (web / general worker / critical worker) | `AWS/ECS CPUUtilization` (Avg) | > 85% | 5 consecutive minutes | Approaching the task's CPU limit — a leading indicator before throttling/latency shows up elsewhere. |
+| `<role>-running-count-low` (web / general worker / critical worker / **ses_consumer**) | `ECS/ContainerInsights RunningTaskCount` (Avg) | < 1 | 3 consecutive minutes, **missing data treated as breaching** | Crash loop or failed deployment — a role with zero running tasks is never acceptable, so "no data at all" is alarmed just as hard as "0." |
+| `<role>-cpu-high` (web / general worker / critical worker / **ses_consumer**) | `AWS/ECS CPUUtilization` (Avg) | > 85% | 5 consecutive minutes | Approaching the task's CPU limit — a leading indicator before throttling/latency shows up elsewhere. |
 | `rds-cpu-high` | `AWS/RDS CPUUtilization` (Avg) | > 80% | 5 consecutive minutes | |
 | `rds-storage-low` | `AWS/RDS FreeStorageSpace` (Min) | < 5 GiB | 1 period (5 min) | Storage exhaustion is urgent and doesn't need multiple confirming periods. |
 | `rds-connections-high` | `AWS/RDS DatabaseConnections` (Avg) | > 80 | 3 consecutive minutes | Placeholder threshold — must be tuned against the actual instance class's `max_connections` once one is chosen (see [infrastructure-architecture.md](infrastructure-architecture.md)); flagged as "Ready with configuration" in the readiness report. |
 | `redis-memory-high` | `AWS/ElastiCache DatabaseMemoryUsagePercentage` (Avg) | > 80% | 3 consecutive minutes | |
 | `redis-connections-high` | `AWS/ElastiCache CurrConnections` (Avg) | > 500 | 3 consecutive minutes | Placeholder threshold — tune against `cache.t4g.micro`'s real connection ceiling under staging load. |
+| `ses-events-queue-backlog-high` | `AWS/SQS ApproximateNumberOfMessagesVisible` (Avg), primary queue | > 100 | 3 consecutive periods of 5 min | ses-consumer may be down or falling behind. |
+| `ses-events-oldest-message-age-high` | `AWS/SQS ApproximateAgeOfOldestMessage` (Max), primary queue | > 1800s (30 min) | 3 consecutive periods of 5 min | Events are not being consumed in a timely manner. |
+| `ses-events-dlq-messages-present` | `AWS/SQS ApproximateNumberOfMessagesVisible` (Max), dead-letter queue | > 0 | 1 period (5 min) | SQS's own redrive policy moved a message there after repeated failed processing attempts — ses-consumer has no IAM permission on the DLQ, so this is read-only detection, not a remediation path. |
+| `ses-consumer-errors-high` | `FirmsBase/SesConsumer SesConsumerErrorCount` (Sum), via a CloudWatch Logs metric filter on the `ses-consumer` log group matching existing `Log::error()`/`Log::warning()` event names (no new application code) | > 10 | 1 period (5 min) | Malformed payloads, unresolved correlations, recipient mismatches, or processing exceptions accumulating. |
 
 ## Deployment failure
 

@@ -105,7 +105,7 @@ locals {
 }
 
 resource "aws_iam_role" "task" {
-  for_each = toset(["web", "worker", "critical_worker", "scheduler", "migrate", "maintenance"])
+  for_each = toset(["web", "worker", "critical_worker", "scheduler", "migrate", "maintenance", "ses_consumer"])
 
   name               = "${var.name_prefix}-task-${replace(each.value, "_", "-")}"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
@@ -173,4 +173,36 @@ resource "aws_iam_role_policy" "task_metrics" {
   name   = "${var.name_prefix}-task-${each.key}-metrics"
   role   = each.value.id
   policy = data.aws_iam_policy_document.task_metrics.json
+}
+
+# ---------------------------------------------------------------------------
+# ses_consumer task role — SQS receive/delete on the SES bounce/complaint
+# queue ONLY. Deliberately narrower than every other grant pattern in this
+# file: exactly two actions (sqs:ReceiveMessage, sqs:DeleteMessage — the
+# only two SQS calls App\Console\Commands\ConsumeSesEventsCommand actually
+# makes, confirmed by direct code inspection), on exactly one resource (the
+# primary queue ARN, never the DLQ — SQS's own redrive policy moves a
+# message there automatically; this consumer has no business reading or
+# deleting from the DLQ directly), granted to no role other than
+# ses_consumer. No sqs:GetQueueAttributes, sqs:ChangeMessageVisibility,
+# sqs:SendMessage, sqs:PurgeQueue, sqs:SetQueueAttributes, sqs:GetQueueUrl,
+# or sqs:* wildcard — none of these are called anywhere in
+# ConsumeSesEventsCommand or SesEventConsumerService.
+# ---------------------------------------------------------------------------
+data "aws_iam_policy_document" "task_ses_consumer_sqs" {
+  count = var.ses_events_queue_arn == null ? 0 : 1
+
+  statement {
+    sid       = "ReceiveAndDeleteSesEventQueueMessages"
+    actions   = ["sqs:ReceiveMessage", "sqs:DeleteMessage"]
+    resources = [var.ses_events_queue_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "task_ses_consumer_sqs" {
+  count = var.ses_events_queue_arn == null ? 0 : 1
+
+  name   = "${var.name_prefix}-task-ses-consumer-sqs"
+  role   = aws_iam_role.task["ses_consumer"].id
+  policy = data.aws_iam_policy_document.task_ses_consumer_sqs[0].json
 }
