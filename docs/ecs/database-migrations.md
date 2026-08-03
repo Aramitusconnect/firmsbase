@@ -5,7 +5,9 @@
 
 ## Migrations never run automatically
 
-No ECS task — web, worker, scheduler — runs `php artisan migrate` as a side effect of starting. `docker/entrypoint.sh` explicitly does not run migrations (see [container-architecture.md](container-architecture.md) "Entrypoint behavior," step 2). The **only** way a migration runs is the dedicated `migrate` one-off task (`docker/commands/migrate.sh`, `infrastructure/ecs/environments/staging/main.tf`'s `module.migrate`, `create_service = false`), invoked explicitly via ECS `RunTask` — by a human operator or by the CI/CD pipeline's deploy step (see [ci-cd pipeline](../../.github/workflows/ecs-pipeline.yml)), never automatically by a web/worker task starting or scaling.
+No ECS task — web, worker, scheduler, ses-consumer — runs `php artisan migrate` as a side effect of starting. `docker/entrypoint.sh` explicitly does not run migrations (see [container-architecture.md](container-architecture.md) "Entrypoint behavior," step 3). The **only** way a migration runs is the dedicated `migrate` one-off task (`docker/commands/migrate.sh`, `infrastructure/ecs/environments/staging/main.tf`'s `module.migrate`, `create_service = false`), invoked explicitly via ECS `RunTask` — by a human operator or by the CI/CD pipeline's deploy step (see [ci-cd pipeline](../../.github/workflows/ecs-pipeline.yml)), never automatically by a web/worker/ses-consumer task starting or scaling.
+
+`ses-consumer` in particular depends on `notification_provider_correlations`, `ses_event_receipts`, `platform_notification_correlations`, and `platform_notification_suppressions` already existing — its own service must therefore start **after**, never before or concurrently with, the first `migrate` task that creates them (see the deployment sequence in [runbooks/deployment-runbook.md](runbooks/deployment-runbook.md)).
 
 ## `docker/commands/migrate.sh` behavior
 

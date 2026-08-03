@@ -89,3 +89,144 @@ variable "enable_custom_metric_alarms" {
   type        = bool
   default     = false
 }
+
+# --- SES bounce/complaint SQS consumer (ses-consumer role) — see
+# docs/ecs/container-architecture.md and docs/ecs/iam-matrix.md. -----------
+variable "ses_events_queue_url" {
+  description = "The SES bounce/complaint SQS queue URL (SES_EVENTS_QUEUE_URL). Plain, non-secret environment — a queue URL is an identifier, not a credential."
+  type        = string
+
+  validation {
+    condition     = length(var.ses_events_queue_url) > 0 && can(regex("^https://sqs\\.[a-z0-9-]+\\.amazonaws\\.com/[0-9]{12}/[a-zA-Z0-9_-]+$", var.ses_events_queue_url))
+    error_message = "ses_events_queue_url must be a non-empty, structurally plausible SQS queue URL: https://sqs.<region>.amazonaws.com/<12-digit-account-id>/<queue-name>."
+  }
+}
+
+variable "ses_events_queue_arn" {
+  description = "ARN of the same SQS queue ses_events_queue_url points at. Passed to the iam module so the ses_consumer task role's policy references var.ses_events_queue_arn rather than a hardcoded ARN — see infrastructure/ecs/modules/iam/main.tf."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws:sqs:[a-z0-9-]+:[0-9]{12}:[a-zA-Z0-9_-]+$", var.ses_events_queue_arn))
+    error_message = "ses_events_queue_arn must be a valid SQS ARN: arn:aws:sqs:<region>:<12-digit-account-id>:<queue-name>."
+  }
+}
+
+variable "ses_events_dlq_arn" {
+  description = "ARN of the SES bounce/complaint dead-letter queue — used ONLY for the DLQ-backlog CloudWatch alarm (infrastructure/ecs/modules/cloudwatch_alarms). Never passed to the iam module and never granted to any task role: SQS's own redrive policy delivers to the DLQ automatically, and ses-consumer has no need to read from, or delete from, it directly."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws:sqs:[a-z0-9-]+:[0-9]{12}:[a-zA-Z0-9_-]+$", var.ses_events_dlq_arn))
+    error_message = "ses_events_dlq_arn must be a valid SQS ARN: arn:aws:sqs:<region>:<12-digit-account-id>:<queue-name>."
+  }
+}
+
+variable "ses_sending_identity_arn" {
+  description = "ARN of the verified SES identity (domain or email address) web sends outbound mail from — arn:aws:ses:<region>:<account-id>:identity/<domain>. Passed to the iam module so ONLY the web task role's policy references var.ses_sending_identity_arn rather than a hardcoded ARN. Confirmed by direct code inspection (Illuminate\\Mail\\Transport\\SesTransport, synchronous from the request path — no ShouldQueue mailable/notification exists) that web is the only role that sends mail; see infrastructure/ecs/modules/iam/main.tf and docs/ecs/iam-matrix.md."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws:ses:[a-z0-9-]+:[0-9]{12}:identity/.+$", var.ses_sending_identity_arn))
+    error_message = "ses_sending_identity_arn must be a valid SES identity ARN: arn:aws:ses:<region>:<12-digit-account-id>:identity/<domain-or-email>."
+  }
+}
+
+variable "ses_authorized_from_address" {
+  description = "The exact From address web's SES send is authorized for — must match MAIL_FROM_ADDRESS in local.shared_environment (main.tf) exactly. Enforced as a ses:FromAddress IAM condition, not just documentation, so the grant cannot be used to send as a different address even though it can reach ses:SendRawEmail."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.ses_authorized_from_address))
+    error_message = "ses_authorized_from_address must look like a real email address (local-part@domain)."
+  }
+}
+
+variable "platform_notifications_recipient_fingerprint_hmac_key_secret_arn" {
+  description = "Secrets Manager ARN of the dedicated PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY secret — a new, dedicated secret, never APP_KEY. Delivered as an ECS `secrets` entry (resolved by the task execution role at task start) to exactly the web and ses-consumer services; never worker/critical-worker/scheduler/migrate/maintenance. Marked sensitive here because Terraform has no narrower way to flag \"handle this value carefully\" — the ARN itself is an identifier, not the secret value, which never enters Terraform state, a tfvars file, or any output."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$", var.platform_notifications_recipient_fingerprint_hmac_key_secret_arn))
+    error_message = "platform_notifications_recipient_fingerprint_hmac_key_secret_arn must be a Secrets Manager ARN: arn:aws:secretsmanager:<region>:<12-digit-account-id>:secret:<name>."
+  }
+}
+
+variable "ses_events_wait_time_seconds" {
+  description = "SES_EVENTS_WAIT_TIME_SECONDS — SQS ReceiveMessage long-poll wait. SQS itself supports 0-20 seconds; see config('services.ses_events.wait_time_seconds')."
+  type        = number
+  default     = 20
+
+  validation {
+    condition     = var.ses_events_wait_time_seconds >= 0 && var.ses_events_wait_time_seconds <= 20
+    error_message = "ses_events_wait_time_seconds must be within SQS's own supported range: 0 to 20 seconds."
+  }
+}
+
+variable "ses_events_visibility_timeout_seconds" {
+  description = "SES_EVENTS_VISIBILITY_TIMEOUT_SECONDS — how long a received-but-undeleted message stays invisible to other receivers. SQS's own ceiling is 12 hours (43200s)."
+  type        = number
+  default     = 60
+
+  validation {
+    condition     = var.ses_events_visibility_timeout_seconds > 0 && var.ses_events_visibility_timeout_seconds <= 43200
+    error_message = "ses_events_visibility_timeout_seconds must be positive and at most 43200 (SQS's 12-hour maximum)."
+  }
+}
+
+variable "ses_events_max_messages" {
+  description = "SES_EVENTS_MAX_MESSAGES — ReceiveMessage's MaxNumberOfMessages. SQS itself caps this at 10 per call."
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = var.ses_events_max_messages >= 1 && var.ses_events_max_messages <= 10
+    error_message = "ses_events_max_messages must be within SQS's own supported range: 1 to 10."
+  }
+}
+
+variable "ses_consumer_desired_count" {
+  description = "ses-consumer ECS service desired task count. 1 by default (a single long-polling consumer is sufficient — SQS's own visibility timeout already prevents two receivers from processing the same message concurrently); 0 is a valid, deliberate way to stop the service (see docs/ecs/runbooks/rollback-runbook.md) without destroying it."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.ses_consumer_desired_count >= 0
+    error_message = "ses_consumer_desired_count must be non-negative."
+  }
+}
+
+variable "ses_consumer_cpu" {
+  description = "ses-consumer task CPU units (Fargate). 256 (the smallest Fargate size) — an SQS long-poll loop plus a handful of DB writes per event is not CPU-intensive, matching the scheduler role's own sizing."
+  type        = number
+  default     = 256
+}
+
+variable "ses_consumer_memory" {
+  description = "ses-consumer task memory in MiB (Fargate). 512 — matches the scheduler role's own sizing for the same reason (single lightweight PHP process, no request concurrency)."
+  type        = number
+  default     = 512
+}
+
+variable "ses_consumer_stop_timeout" {
+  description = "ses-consumer ECS stopTimeout. Must always exceed the SqsClient's own derived HTTP request timeout (var.ses_events_wait_time_seconds + 10s margin — see app/Providers/AppServiceProvider.php) plus real headroom for the consumer's own shutdown-flag check and any in-flight message's processing/delete — otherwise ECS could SIGKILL the task before its own AwsException-driven clean exit ever fires. 45s default: 20s (default wait_time_seconds) + 10s (client margin) + 15s (processing/shutdown headroom), comfortably under ECS's 120s ceiling."
+  type        = number
+  default     = 45
+
+  validation {
+    condition     = var.ses_consumer_stop_timeout > 0 && var.ses_consumer_stop_timeout <= 120
+    error_message = "ses_consumer_stop_timeout must be positive and at most 120 (ECS's own stopTimeout ceiling)."
+  }
+
+  validation {
+    # Terraform 1.9+ allows a validation condition to reference other
+    # input variables. Mirrors the exact relationship
+    # AppServiceProvider's SqsClient binding establishes at runtime
+    # (derived HTTP timeout = wait_time_seconds + 10) plus a minimum
+    # 5s of real headroom, so this fails plan/apply rather than
+    # silently shipping a stopTimeout that could force a SIGKILL.
+    condition     = var.ses_consumer_stop_timeout > (var.ses_events_wait_time_seconds + 10 + 5)
+    error_message = "ses_consumer_stop_timeout must exceed ses_events_wait_time_seconds + 10 (the SqsClient's derived HTTP request timeout) by at least 5 seconds of headroom, so ECS never needs to SIGKILL the task before its own clean exit."
+  }
+}

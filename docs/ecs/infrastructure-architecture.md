@@ -76,7 +76,7 @@ This is deliberately not decided by this branch — see [staging-readiness-repor
 
 ## ECS task definitions summary
 
-All six roles use the **same image digest** (`var.app_image_digest`, enforced by a Terraform variable validation rule requiring `@sha256:...`), differing only in command/role/sizing — see [container-architecture.md](container-architecture.md).
+All seven roles use the **same image digest** (`var.app_image_digest`, enforced by a Terraform variable validation rule requiring `@sha256:...`), differing only in command/role/sizing — see [container-architecture.md](container-architecture.md).
 
 | Role | Command | CPU | Memory | Port | Service? | Desired count | Autoscaling | Task role |
 |---|---|---|---|---|---|---|---|---|
@@ -86,6 +86,7 @@ All six roles use the **same image digest** (`var.app_image_digest`, enforced by
 | scheduler | `["scheduler"]` | 256 | 512 | — | Yes | **1 fixed** | none | `task-scheduler` |
 | migrate | `["migrate"]` | 512 | 1024 | — | **No — RunTask only** | n/a | n/a | `task-migrate` |
 | maintenance | `["maintenance", ...]` | 512 | 1024 | — | **No — RunTask only** | n/a | n/a | `task-maintenance` |
+| ses-consumer | `["ses-consumer"]` | 256 (`var.ses_consumer_cpu`) | 512 (`var.ses_consumer_memory`) | — | Yes | **1 default** (`var.ses_consumer_desired_count`) | none — a single long-polling consumer; SQS's own visibility timeout already prevents duplicate concurrent processing of one message | `task-ses-consumer` |
 
 CPU/memory values are conservative starting points appropriate for staging load, not load-tested — flagged in [staging-readiness-report.md](staging-readiness-report.md) as "Ready with configuration" (needs a real load test to tune before production).
 

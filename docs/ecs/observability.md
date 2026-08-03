@@ -5,7 +5,7 @@
 
 ## Logging
 
-All application logs go to stdout/stderr — no log file on local disk in any ECS environment. This requires exactly one environment variable change, no code change (see [ec2-dependency-audit.md](ec2-dependency-audit.md) §10): `LOG_CHANNEL=stderr`, which resolves to a channel already defined in `config/logging.php:97-106` (`Monolog\Handler\StreamHandler` → `php://stderr`). ECS's `awslogs` log driver (configured per-container in every `docker/commands/*` role via `modules/ecs_service`'s `logConfiguration` block) picks up stdout/stderr and ships it to the per-role CloudWatch log group (`/ecs/<prefix>/{web,worker,critical-worker,scheduler,migrate,maintenance}`, one group per role so a single noisy role never drowns out another's log stream in the same group).
+All application logs go to stdout/stderr — no log file on local disk in any ECS environment. This requires exactly one environment variable change, no code change (see [ec2-dependency-audit.md](ec2-dependency-audit.md) §10): `LOG_CHANNEL=stderr`, which resolves to a channel already defined in `config/logging.php:97-106` (`Monolog\Handler\StreamHandler` → `php://stderr`). ECS's `awslogs` log driver (configured per-container in every `docker/commands/*` role via `modules/ecs_service`'s `logConfiguration` block) picks up stdout/stderr and ships it to the per-role CloudWatch log group (`/ecs/<prefix>/{web,worker,critical-worker,scheduler,migrate,maintenance,ses-consumer}`, one group per role so a single noisy role never drowns out another's log stream in the same group).
 
 Access logs (FrankenPHP/Caddy) are configured to `output stdout` with `format json` in `docker/web/Caddyfile` — structured JSON, one line per request, alongside the application's own log lines in the same stream.
 
@@ -26,6 +26,21 @@ Prepared (task-role IAM grant for `cloudwatch:PutMetricData` scoped to this name
 ## Metrics (AWS-native, available today without any code change)
 
 Every alarm in [alarm-inventory.md](alarm-inventory.md) that is **not** gated behind `enable_custom_metric_alarms` uses a metric AWS emits automatically the moment the corresponding resource exists: ALB request/latency/5xx metrics, ECS service CPU/running-task-count, RDS CPU/connections/storage, ElastiCache memory/connections. No application code involvement required for these.
+
+## SES consumer detection (how operators find out something's wrong)
+
+All of the below are real, implemented Terraform alarms (`infrastructure/ecs/modules/cloudwatch_alarms`), not just documentation of an intent — gated only behind the relevant queue/DLQ/log-group name actually being supplied (mirrors this module's existing "no ARN yet, no alarm" pattern), never behind `enable_custom_metric_alarms` (all are AWS-native metrics, available the moment the resource exists, same category as the ALB/ECS/RDS/Redis alarms above).
+
+| Condition | Mechanism | Alarm |
+|---|---|---|
+| ECS desired count not running | `AWS/ECS`/`ECS/ContainerInsights` `RunningTaskCount`, same mechanism already used for web/worker/critical-worker | `ecs_service_running_count["ses_consumer"]` (extends the existing per-service alarm map with a 4th key) |
+| Repeated task restarts | Same running-count alarm — a crash-loop manifests as sustained `RunningTaskCount < 1`, exactly as already documented for the other roles above | Same alarm as above |
+| Consumer errors (malformed payload, unresolved correlation, recipient mismatch, processing exception) | A CloudWatch Logs metric filter over the dedicated `ses-consumer` log group, matching the exact `Log::error()`/`Log::warning()` event names `SesEventConsumerService`/`ConsumeSesEventsCommand` already emit today (`ses_event_processing_exception`, `ses_event_malformed_json`, `ses_event_malformed_sns_wrapped_message`, `ses_event_invalid_structure`, `ses_event_recipient_mismatch`, `ses_event_firm_not_found`, `ses_event_platform_recipient_mismatch`) — no new application logging code required | `aws_cloudwatch_log_metric_filter.ses_consumer_errors` → `ses_consumer_errors_high` (>10 in 5 minutes) |
+| SQS visible-message backlog | `AWS/SQS` `ApproximateNumberOfMessagesVisible` on the primary queue | `ses_events_queue_backlog_high` (>100 for 15 minutes) |
+| SQS age of oldest message | `AWS/SQS` `ApproximateAgeOfOldestMessage` on the primary queue | `ses_events_oldest_message_age_high` (>30 minutes) |
+| Messages reaching the DLQ | `AWS/SQS` `ApproximateNumberOfMessagesVisible` on the dead-letter queue (read-only CloudWatch metric — this module grants `ses_consumer` no IAM permission on the DLQ at all) | `ses_events_dlq_messages_present` (any message present) |
+
+No new secret- or recipient-bearing content is ever logged by any of this: the metric filter matches on literal, already-existing, safe event-name strings (see the `Log::error()` calls in `SesEventConsumerService` — none include recipient addresses or message bodies), and the SQS/ECS metrics above carry no message content at all, only counts/ages.
 
 ## Dashboards
 

@@ -1015,6 +1015,36 @@ class SignatureRequestsForceRlsActivationTest extends TestCase
         // plus its own focused regression tests).
         'app/Services/RetentionGovernanceRegistryService.php',
         'tests/Feature/Governance/Retention/RetentionGovernanceRegistryServiceTest.php',
+        // feature/ses-consumer-ecs-wiring (a later, distinct,
+        // wholly isolated ECS/IAM wiring mission) legitimately
+        // added docker/entrypoint.sh's ses-consumer role dispatch,
+        // a new docker/commands/ses-consumer.sh, Terraform IAM/
+        // ECS-service/CloudWatch-alarm wiring for that role, its
+        // own docs/ecs/ updates, and its own new test files.
+        'docker/commands/ses-consumer.sh',
+        'docker/entrypoint.sh',
+        'docs/ecs/alarm-inventory.md',
+        'docs/ecs/container-architecture.md',
+        'docs/ecs/database-migrations.md',
+        'docs/ecs/env.ecs.example',
+        'docs/ecs/graceful-shutdown.md',
+        'docs/ecs/iam-matrix.md',
+        'docs/ecs/infrastructure-architecture.md',
+        'docs/ecs/observability.md',
+        'docs/ecs/runbooks/deployment-runbook.md',
+        'docs/ecs/runbooks/rollback-runbook.md',
+        'infrastructure/ecs/environments/staging/main.tf',
+        'infrastructure/ecs/environments/staging/outputs.tf',
+        'infrastructure/ecs/environments/staging/terraform.tfvars.example',
+        'infrastructure/ecs/environments/staging/variables.tf',
+        'infrastructure/ecs/modules/cloudwatch_alarms/main.tf',
+        'infrastructure/ecs/modules/cloudwatch_alarms/variables.tf',
+        'infrastructure/ecs/modules/iam/main.tf',
+        'infrastructure/ecs/modules/iam/variables.tf',
+        'tests/Feature/Ecs/SesConsumerEntrypointTest.php',
+        'tests/Feature/Ecs/SesConsumerTerraformIamTest.php',
+        // feature/ses-consumer-ecs-wiring also bounded the SqsClient's HTTP connect/overall timeouts here, confirmed necessary by a real container-level graceful-shutdown smoke test.
+        'app/Providers/AppServiceProvider.php',
     ];
 
     private function changedOrUntrackedPaths(string $scope): array

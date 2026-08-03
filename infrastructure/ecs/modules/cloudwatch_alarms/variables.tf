@@ -31,6 +31,30 @@ variable "critical_worker_service_name" {
   type = string
 }
 
+variable "ses_consumer_service_name" {
+  description = "ECS service name for the ses-consumer role. Null omits ses-consumer from the running-count/CPU alarms below (mirrors this module's existing 'no ARN yet, no alarm' pattern for RDS/Redis)."
+  type        = string
+  default     = null
+}
+
+variable "ses_events_queue_name" {
+  description = "SQS queue NAME (not URL/ARN — AWS/SQS CloudWatch metrics dimension on QueueName) of the SES bounce/complaint queue. Null omits the backlog/oldest-message-age alarms below."
+  type        = string
+  default     = null
+}
+
+variable "ses_events_dlq_name" {
+  description = "SQS queue NAME of the SES bounce/complaint dead-letter queue. Used ONLY to alarm on messages arriving there — never to grant any IAM permission (the consumer has none on the DLQ, and this module grants no permissions at all). Null omits the DLQ alarm below."
+  type        = string
+  default     = null
+}
+
+variable "ses_consumer_log_group_name" {
+  description = "CloudWatch log group the ses-consumer service writes to. Null omits the log-based 'consumer errors' metric filter/alarm below."
+  type        = string
+  default     = null
+}
+
 variable "rds_instance_id" {
   description = "Existing RDS instance identifier (see docs/ecs/infrastructure-architecture.md — this mission does not create the RDS instance itself)."
   type        = string

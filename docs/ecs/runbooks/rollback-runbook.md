@@ -24,6 +24,15 @@ Same mechanism as web (step 1 above) — register the previous digest's task def
 
 The `migrate` role is a one-off task (`RunTask`), not a service — there is no "previous deployment" of it to roll back to in the ECS sense. See [database-migrations.md](../database-migrations.md) for schema-level rollback reasoning (forward-fix is almost always preferred over `migrate:rollback`).
 
+## Case 5: rolling back or stopping ses-consumer specifically
+
+Same mechanism as Case 3 for a code-level rollback (register the previous digest's `ses-consumer` task definition revision, `update-service --force-new-deployment`). Additionally, to simply **stop** the consumer without rolling back its image (e.g. a suspected upstream SES/SNS issue, or to pause processing during an investigation):
+
+- Set `ses_consumer_desired_count = 0` and `terraform apply` (or `aws ecs update-service --desired-count 0` directly for a faster, out-of-band stop), then restore the count to resume.
+- **Do not** delete or truncate `notification_provider_correlations`, `ses_event_receipts`, `platform_notification_correlations`, or `platform_notification_suppressions` — these are durable records, not caches, and their loss defeats the idempotency/correlation guarantees the whole consumer depends on.
+- **Do not** purge the SQS queue. Unprocessed events remain safely queued (subject to their own retention/visibility settings) for the consumer to pick up once resumed — purging discards bounce/complaint events permanently, with no way to recover them from AWS afterward.
+- **Do not** remove the `PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY` secret while stopping/rolling back `ses-consumer` — the **web** service also requires it (see [iam-matrix.md](../iam-matrix.md)) and removing it would break synchronous password-reset/owner-invitation sends, an unrelated and more severe regression than the one being rolled back.
+
 ## Verification after any rollback
 
 1. `/up` and `/readyz` both return 2xx against the staging ALB.

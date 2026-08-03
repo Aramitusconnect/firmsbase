@@ -35,9 +35,33 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(SqsClient::class, function () {
             $config = config('services.ses_events');
 
+            // Bounds the worst-case time ConsumeSesEventsCommand's
+            // graceful-shutdown handling can be blocked inside a single
+            // receiveMessage() call — confirmed necessary by a real
+            // container-level smoke test (feature/ses-consumer-ecs-
+            // wiring): pcntl's async signal dispatch cannot interrupt a
+            // C-library network call already in flight (e.g. a hung
+            // TCP connect during a network partition), so without an
+            // explicit ceiling here, SIGTERM could be delayed well past
+            // ECS's stopTimeout, forcing a SIGKILL instead of a clean
+            // exit. 'connect_timeout' bounds the TCP handshake phase
+            // alone (5s is generous for a reachable AWS endpoint, fast-
+            // fails on an unreachable one); 'timeout' bounds the whole
+            // request including the long-poll wait itself, so it MUST
+            // always exceed the configured WaitTimeSeconds — it is
+            // deliberately derived from the SAME normalized wait-time
+            // value the receiveMessage() call itself uses (+10s margin
+            // for TLS/transfer), never a flat constant, so a legitimate
+            // near-20s long poll is never cut short.
+            $waitTimeSeconds = $this->normalizeSesEventsWaitTimeSeconds($config['wait_time_seconds'] ?? null);
+
             $clientConfig = [
                 'version' => 'latest',
                 'region' => $config['region'],
+                'http' => [
+                    'connect_timeout' => 5,
+                    'timeout' => $waitTimeSeconds + 10,
+                ],
             ];
 
             // Matches Illuminate\Mail\MailManager::addSesCredentials()'s
@@ -56,6 +80,37 @@ class AppServiceProvider extends ServiceProvider
 
             return new SqsClient($clientConfig);
         });
+    }
+
+    /**
+     * Validates the raw `services.ses_events.wait_time_seconds` config
+     * value (itself only ever a blind `(int)` cast of an env var — see
+     * config/services.php) before it drives the SqsClient's derived
+     * HTTP 'timeout'. SQS's own ReceiveMessage API only accepts
+     * WaitTimeSeconds in [0, 20] — a value outside that range would
+     * either be rejected by SQS itself at call time, or (if somehow
+     * negative after a bad cast) could derive a nonsensical/too-short
+     * HTTP timeout. Rather than let a misconfigured env var (e.g. a
+     * manual ECS console edit bypassing Terraform's own 0-20
+     * validation — see infrastructure/ecs/environments/staging/
+     * variables.tf) silently produce a degenerate timeout, any
+     * out-of-range or non-numeric value falls back to the documented
+     * safe default of 20 — never a fabricated smaller number, and
+     * never left unbounded.
+     */
+    private function normalizeSesEventsWaitTimeSeconds(mixed $rawValue): int
+    {
+        $default = 20;
+
+        if (is_int($rawValue) && $rawValue >= 0 && $rawValue <= 20) {
+            return $rawValue;
+        }
+
+        if (is_string($rawValue) && preg_match('/\A(0|[1-9][0-9]?)\z/', $rawValue) === 1 && (int) $rawValue <= 20) {
+            return (int) $rawValue;
+        }
+
+        return $default;
     }
 
     /**

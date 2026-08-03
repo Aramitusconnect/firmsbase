@@ -32,7 +32,35 @@ use Throwable;
  * Exit behavior: returns self::FAILURE only when the SQS client itself
  * throws (queue misconfigured, no permission, network failure) —
  * distinct from an individual message failing to process, which is
- * normal, expected, non-fatal operation and never stops the loop.
+ * normal, expected, non-fatal operation and never stops the loop. A
+ * clean SIGTERM/SIGINT shutdown (see installShutdownSignalHandlers())
+ * returns self::SUCCESS — it is a normal, expected way for this
+ * long-running ECS process to stop, not a failure.
+ *
+ * Graceful shutdown (ECS SIGTERM, see docs/ecs/graceful-shutdown.md):
+ * pcntl_async_signals() + pcntl_signal() install a handler that only
+ * ever sets a flag ($shouldStop), never anything that could interrupt
+ * a database write mid-transaction. That flag is checked in exactly
+ * two places — the top of the outer while loop (never starts another
+ * receiveMessage() cycle) and right after each processOne() call
+ * inside the inner foreach (stops advancing to the next message in an
+ * already-received batch as soon as possible) — so a message already
+ * being processed always runs to completion first. Because SQS long
+ * polling has a hard ceiling (WaitTimeSeconds, capped at 20s by SQS
+ * itself — see config('services.ses_events.wait_time_seconds')), the
+ * process notices a pending shutdown and exits within, at worst, one
+ * such wait even in the (henceforth theoretical, since pcntl async
+ * signals are expected to interrupt the blocking call directly) case
+ * where the signal is not delivered until the current receiveMessage()
+ * call itself returns — well within ECS's stopTimeout budget, so
+ * SIGKILL should not be the normal path. This is a single, per-process
+ * signal handler for this command's own one-shot execution (the
+ * process exits right after, never reused for a second invocation), so
+ * unlike a shared long-lived process' event listeners, there is no
+ * cross-invocation listener-leak risk — the handler is still reset to
+ * the OS default in a `finally` block below purely as defensive
+ * hygiene (relevant if this command is ever invoked more than once
+ * within the same PHP process, e.g. under a test runner).
  */
 class ConsumeSesEventsCommand extends Command
 {
@@ -40,6 +68,8 @@ class ConsumeSesEventsCommand extends Command
         {--max-iterations= : Stop after this many receive-message cycles (omit to run indefinitely)}';
 
     protected $description = 'Long-poll the SES bounce/complaint SQS queue and process events (never via queue:work).';
+
+    private bool $shouldStop = false;
 
     public function __construct(
         private readonly SqsClient $sqs,
@@ -58,36 +88,114 @@ class ConsumeSesEventsCommand extends Command
             return self::FAILURE;
         }
 
-        $maxIterations = $this->option('max-iterations') !== null
-            ? (int) $this->option('max-iterations')
-            : null;
+        $this->shouldStop = false;
+        $this->installShutdownSignalHandlers();
 
-        $iteration = 0;
+        try {
+            $maxIterations = $this->option('max-iterations') !== null
+                ? (int) $this->option('max-iterations')
+                : null;
 
-        while ($maxIterations === null || $iteration < $maxIterations) {
-            $iteration++;
+            $iteration = 0;
 
-            try {
-                $result = $this->sqs->receiveMessage([
-                    'QueueUrl' => $queueUrl,
-                    'MaxNumberOfMessages' => config('services.ses_events.max_messages'),
-                    'WaitTimeSeconds' => config('services.ses_events.wait_time_seconds'),
-                    'VisibilityTimeout' => config('services.ses_events.visibility_timeout_seconds'),
-                ]);
-            } catch (AwsException|Throwable $e) {
-                $this->components->error('SQS receiveMessage failed: '.$e->getMessage());
+            while (! $this->shouldStop && ($maxIterations === null || $iteration < $maxIterations)) {
+                $iteration++;
 
-                return self::FAILURE;
+                try {
+                    $result = $this->sqs->receiveMessage([
+                        'QueueUrl' => $queueUrl,
+                        'MaxNumberOfMessages' => config('services.ses_events.max_messages'),
+                        'WaitTimeSeconds' => config('services.ses_events.wait_time_seconds'),
+                        'VisibilityTimeout' => config('services.ses_events.visibility_timeout_seconds'),
+                    ]);
+                } catch (AwsException|Throwable $e) {
+                    // A signal can arrive while receiveMessage() is
+                    // blocked mid-network-call — depending on timing,
+                    // that surfaces here as a thrown exception (a
+                    // curl/AWS timeout or connection-abort), which
+                    // looks identical to a genuine SQS outage. The
+                    // $shouldStop flag (set only by our own signal
+                    // handler, never by this exception itself)
+                    // disambiguates: if a shutdown was actually
+                    // requested, this is expected, intentional
+                    // shutdown — not a fatal consumer error — and must
+                    // exit successfully so ECS never mistakes a clean
+                    // stop for a crash-looping task. A genuine failure
+                    // with no signal requested keeps the exact original
+                    // behavior: logged as an error and self::FAILURE,
+                    // preserving whatever retry/redrive expectations
+                    // depend on that exit code.
+                    if ($this->shouldStop) {
+                        Log::info('ses_consumer_shutdown_during_receive');
+
+                        break;
+                    }
+
+                    $this->components->error('SQS receiveMessage failed: '.$e->getMessage());
+
+                    return self::FAILURE;
+                }
+
+                $messages = $result['Messages'] ?? [];
+
+                foreach ($messages as $message) {
+                    $this->processOne($queueUrl, $message);
+
+                    // Let the message just processed finish and be
+                    // deleted (already happened, above) before honoring
+                    // a pending shutdown — never abandons mid-message,
+                    // but also never starts a fresh one after the
+                    // signal arrived.
+                    if ($this->shouldStop) {
+                        break;
+                    }
+                }
             }
 
-            $messages = $result['Messages'] ?? [];
-
-            foreach ($messages as $message) {
-                $this->processOne($queueUrl, $message);
+            if ($this->shouldStop) {
+                Log::info('ses_consumer_shutdown_complete');
             }
+
+            return self::SUCCESS;
+        } finally {
+            $this->restoreDefaultSignalHandlers();
+        }
+    }
+
+    /**
+     * Registers SIGTERM/SIGINT handlers that do nothing but flip
+     * $shouldStop — never touches the database, SQS, or logs anything
+     * beyond a generic "signal received" line (no message content, no
+     * recipient, no secret). Requires pcntl (confirmed present in this
+     * image — see docs/ecs/ec2-dependency-audit.md); silently a no-op
+     * if it is ever absent, matching this consumer's existing "never
+     * crash the long-running loop over an environment quirk" posture.
+     */
+    private function installShutdownSignalHandlers(): void
+    {
+        if (! extension_loaded('pcntl')) {
+            return;
         }
 
-        return self::SUCCESS;
+        pcntl_async_signals(true);
+
+        $onShutdownSignal = function (int $signal): void {
+            $this->shouldStop = true;
+            Log::info('ses_consumer_shutdown_signal_received', ['signal' => $signal]);
+        };
+
+        pcntl_signal(SIGTERM, $onShutdownSignal);
+        pcntl_signal(SIGINT, $onShutdownSignal);
+    }
+
+    private function restoreDefaultSignalHandlers(): void
+    {
+        if (! extension_loaded('pcntl')) {
+            return;
+        }
+
+        pcntl_signal(SIGTERM, SIG_DFL);
+        pcntl_signal(SIGINT, SIG_DFL);
     }
 
     /**
