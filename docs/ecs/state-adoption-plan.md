@@ -532,7 +532,8 @@ terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.elasticache.aws_elasticache_subnet_group.this' 'firmsbase-staging-cache-subnets'
 
 # Requires: var.elasticache_engine = "valkey", var.elasticache_parameter_group_name = "default.valkey7",
-# engine_version aligned to the live 7.2 line, and the module's ignore_changes=[auth_token] (already added)
+# var.elasticache_engine_version = "7.2" (live's exact reported version is 7.2.6, but AWS requires
+# major.minor-only for Redis v6+/Valkey), and the module's ignore_changes=[auth_token] (already added)
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.elasticache.aws_elasticache_replication_group.this' 'firmsbase-staging-redis'
 
@@ -657,8 +658,19 @@ services). `var.ecr_repository_name` closes this the same way.
   changed in place; applying with the old hardcoded `engine = "redis"`
   against the live Valkey replication group would plan a full,
   data-losing replacement. Fixed via `var.elasticache_engine`
-  (`"redis"` default / must be `"valkey"` for this environment) and
-  `var.elasticache_parameter_group_name`.
+  (`"redis"` default / must be `"valkey"` for this environment),
+  `var.elasticache_parameter_group_name`, and `var.elasticache_engine_version`
+  (`"7.1"` default / must be `"7.2"` for this environment). The live
+  replication group's exact reported version is `7.2.6`
+  (`aws elasticache describe-cache-clusters .EngineVersion`), but AWS's
+  `aws_elasticache_replication_group` requires major.minor-only format for
+  Redis v6+/Valkey and rejects a major.minor.patch value like `"7.2.6"`
+  outright (confirmed via a real provider validation error while adding
+  this test coverage) — `"7.2"` is the value to actually supply. A `"7.1"`
+  Redis-line version string is meaningless once the engine is Valkey.
+  Previously this variable did not exist at all at the staging-environment
+  level (only the module itself had an `engine_version` input with no
+  environment-level pass-through) — corrected in this pass.
 - **Subnet group name mismatch** — fixed via `var.elasticache_subnet_group_name`.
 - **`auth_token`** (pre-existing, unrelated to the above): write-only,
   never returned by any read API — `lifecycle { ignore_changes =
@@ -769,9 +781,13 @@ Terraform (`.tf`), a Terraform test (`.tftest.hcl`), documentation
    remains BLOCKED (`import_then_migrate`) until the live-compatible
    values are actually supplied.
 5. ElastiCache engine/version (§9.4, new this revision): confirm
-   `elasticache_engine = "valkey"` and an appropriate `engine_version` for
-   the live 7.2 line before any replication-group import is attempted —
-   this is now a required variable override, not optional.
+   `elasticache_engine = "valkey"` and `elasticache_engine_version = "7.2"`
+   (now an actual staging-environment variable, wired into
+   `module.elasticache`, not just the module's own internal default; the
+   live replication group's exact reported version is `7.2.6`, but AWS's
+   own provider validation requires major.minor-only for Redis v6+/Valkey)
+   before any replication-group import is attempted — this is now a
+   required variable override, not optional.
 6. Security-group rule reconciliation timing (§9.6): apply the narrower
    declared rules alongside the existing broad ones now, or defer until
    the broad rules are revoked in the same change.

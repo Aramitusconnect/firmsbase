@@ -59,17 +59,28 @@ variable "app_image_digest" {
 
 # --- Secrets — ARNs only; values live in Secrets Manager, never in
 # Terraform state or var files. See docs/ecs/iam-matrix.md and
-# docs/ecs/env.ecs.example. ------------------------------------------------
+# docs/ecs/env.ecs.example. Each of the three variables below must be the
+# BARE Secrets Manager ARN — no ":<json-key>::" selector suffix. Each live
+# secret is a JSON blob with multiple keys, so main.tf's local.shared_secrets
+# derives the exact ECS `valueFrom` selector Terraform needs
+# (":APP_KEY::", ":password::", ":REDIS_PASSWORD::" respectively) by string
+# interpolation, while module.iam's secret_arns list receives these bare
+# variables unchanged — IAM's secretsmanager:GetSecretValue grant is scoped
+# to the whole secret, so its Resource entries must never carry a JSON-key
+# suffix (see docs/ecs/staging-variable-inventory.md). --------------------
 variable "app_key_secret_arn" {
-  type = string
+  description = "Bare ARN of the APP_KEY secret (a JSON blob with an \"APP_KEY\" key — see docs/ecs/staging-variable-inventory.md). Do not append a \":APP_KEY::\" selector here; main.tf derives it automatically."
+  type        = string
 }
 
 variable "db_password_secret_arn" {
-  type = string
+  description = "Bare ARN of the database secret (a JSON blob with a \"password\" key, among others — see docs/ecs/staging-variable-inventory.md). Do not append a \":password::\" selector here; main.tf derives it automatically."
+  type        = string
 }
 
 variable "redis_auth_token_secret_arn" {
-  type = string
+  description = "Bare ARN of the Redis auth-token secret (a JSON blob with a \"REDIS_PASSWORD\" key — see docs/ecs/staging-variable-inventory.md). Do not append a \":REDIS_PASSWORD::\" selector here; main.tf derives it automatically."
+  type        = string
 }
 
 variable "redis_auth_token" {
@@ -274,6 +285,12 @@ variable "elasticache_parameter_group_name" {
   description = "ElastiCache parameter group. Defaults to \"default.redis7\" (this module's original design). This staging environment's live replication group uses \"default.valkey7\" (a Valkey-family parameter group — must match var.elasticache_engine, they cannot disagree). See docs/ecs/state-adoption-plan.md §3B."
   type        = string
   default     = "default.redis7"
+}
+
+variable "elasticache_engine_version" {
+  description = "ElastiCache engine version. Defaults to \"7.1\" (this module's original Redis-line design), preserving existing behavior for a brand-new environment. This staging environment's live replication group actually runs Valkey, exact reported version 7.2.6 (confirmed via aws elasticache describe-cache-clusters .EngineVersion) — but must be set to \"7.2\" (major.minor only) for this environment before import: AWS's aws_elasticache_replication_group requires major.minor format for Redis v6+/Valkey engine_version, and rejects a major.minor.patch value like \"7.2.6\" outright (confirmed via a real provider validation error during this correction). A \"7.1\" Redis-line version string is meaningless once var.elasticache_engine is \"valkey\". See docs/ecs/state-adoption-plan.md §9.4 and docs/ecs/staging-variable-inventory.md."
+  type        = string
+  default     = "7.1"
 }
 
 variable "iam_task_execution_role_name" {

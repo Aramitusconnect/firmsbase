@@ -224,3 +224,57 @@ run "alb_health_check_overrides_plan_cleanly" {
     alb_health_check_matcher          = "200-399"
   }
 }
+
+# --- ElastiCache engine_version --------------------------------------------
+
+run "elasticache_engine_version_defaults_to_original_module_value" {
+  command = plan
+
+  assert {
+    condition     = module.elasticache.engine_version == "7.1"
+    error_message = "Without elasticache_engine_version set, must default to \"7.1\" — the module's original Redis-line design, unaffected for a brand-new environment."
+  }
+}
+
+run "elasticache_engine_version_resolves_to_live_valkey_value_when_overridden" {
+  command = plan
+
+  variables {
+    elasticache_engine               = "valkey"
+    elasticache_parameter_group_name = "default.valkey7"
+    elasticache_engine_version       = "7.2"
+  }
+
+  assert {
+    condition     = module.elasticache.engine_version == "7.2"
+    error_message = "Must resolve to \"7.2\" (major.minor only) — the live replication group's exact reported version is 7.2.6 (aws elasticache describe-cache-clusters), but AWS's aws_elasticache_replication_group rejects a major.minor.patch value like \"7.2.6\" outright for Redis v6+/Valkey. See docs/ecs/state-adoption-plan.md §9.4."
+  }
+}
+
+# --- Secret valueFrom JSON-key derivation (bare ARN in, selector derived) --
+#
+# local.shared_secrets is a plain string-interpolation local computed
+# directly from input variables (not a resource/module attribute), so
+# unlike module.alb's/module.elasticache's computed outputs, it is fully
+# knowable at plan time without any provider involvement at all — this
+# directly proves main.tf's real derivation logic, not just that a plan
+# succeeds. See docs/ecs/staging-variable-inventory.md.
+
+run "shared_secrets_derives_the_exact_live_json_key_selector_for_each_secret" {
+  command = plan
+
+  assert {
+    condition     = local.shared_secrets.APP_KEY == "${var.app_key_secret_arn}:APP_KEY::"
+    error_message = "APP_KEY's valueFrom must be the bare app_key_secret_arn with the exact \":APP_KEY::\" selector appended — this is the live secret's actual JSON key."
+  }
+
+  assert {
+    condition     = local.shared_secrets.DB_PASSWORD == "${var.db_password_secret_arn}:password::"
+    error_message = "DB_PASSWORD's valueFrom must be the bare db_password_secret_arn with the exact \":password::\" selector appended — this is the live secret's actual JSON key."
+  }
+
+  assert {
+    condition     = local.shared_secrets.REDIS_PASSWORD == "${var.redis_auth_token_secret_arn}:REDIS_PASSWORD::"
+    error_message = "REDIS_PASSWORD's valueFrom must be the bare redis_auth_token_secret_arn with the exact \":REDIS_PASSWORD::\" selector appended — this is the live secret's actual JSON key."
+  }
+}
