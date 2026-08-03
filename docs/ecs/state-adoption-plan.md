@@ -413,6 +413,25 @@ the wrong thing, verified now while the stakes are zero.
 
 Restructured into four phases per the review's requested structure.
 
+**Standing rule for every checkpoint in Phase A** (A2 and A3 below,
+and any future addition to this section): a checkpoint plan review must
+reject unexpected **create** actions, not only destroy/replace actions,
+before any `apply` runs. "Zero destroy/replace" alone is not a sufficient
+pass condition — a plan can show zero destroys and zero replacements and
+still be unsafe to apply if it proposes creating a resource nobody
+reviewed. Every proposed action in a Phase A plan must be checked against
+`import-manifest.json`: a CREATE is only expected for a `new`-classified
+address; a CREATE against any `import_unchanged`, `import_then_migrate`,
+or — especially — any of the 6 `do_not_import` historical task-definition
+addresses (`module.{web,worker,critical_worker,scheduler,migrate,maintenance}.aws_ecs_task_definition.this`,
+§6) is a hard stop. These 6 are unconditional resource blocks in the
+module source, not `count`-gated, so `do_not_import` alone (i.e. simply
+never running `terraform import` for them) does not stop a broad `apply`
+from creating them — the plan-review requirement in this rule is the
+actual control, not the classification by itself. Never run `apply`
+against an unreviewed plan in Phase A, and never treat "no import command
+was written for it" as equivalent to "Terraform cannot touch it."
+
 ### Phase A1 — backend and state safety
 
 1. §5's backend decided and provisioned by a human (not this plan);
@@ -435,7 +454,7 @@ Restructured into four phases per the review's requested structure.
 
 Security groups (`alb`, `ecs_tasks`, `redis`) and their field-matching
 rules, the ALB + target group + both listeners. Import commands are fully
-prepared in the manifest; 5 of the 11 are marked `import_id: "BLOCKED"`
+prepared in the manifest; 4 of the 11 are marked `import_id: "BLOCKED"`
 pending `ec2:DescribeSecurityGroupRules` access (`AccessDenied` for this
 operator — the SG/rule *content* is already confirmed matching, only the
 AWS-internal rule ID needed for the literal import command is unresolved).
@@ -455,9 +474,13 @@ terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.alb.aws_lb_listener.https' 'arn:aws:elasticloadbalancing:us-east-1:603013471426:listener/app/firmsbase-staging-alb/79a16ccaf391d71b/f8dc4575154478ca'
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.alb.aws_lb_listener.http_redirect' 'arn:aws:elasticloadbalancing:us-east-1:603013471426:listener/app/firmsbase-staging-alb/79a16ccaf391d71b/371edb36d1b49e2c'
-# --- plan checkpoint: MUST show zero destroy/replace. The 5 BLOCKED SG-rule
-# imports (see import-manifest.json) run here too, once their rule IDs are
-# resolved with elevated read access — not guessed. ---
+# --- plan checkpoint: MUST show zero destroy/replace, and MUST show zero
+# unexpected create actions (every resource this checkpoint's plan proposes
+# to create must be one this document already classified `new` — anything
+# else is a sign an earlier step was skipped or misordered; stop and
+# re-diagnose rather than apply). The 4 BLOCKED SG-rule imports (see
+# import-manifest.json) run here too, once their rule IDs are resolved with
+# elevated read access — not guessed. ---
 ```
 
 ### Phase A3 — resources requiring a temporary live-state-compatible configuration first (`import_then_migrate`, 11 addresses)
@@ -505,14 +528,40 @@ terraform -chdir=infrastructure/ecs/environments/staging import \
 # --- final plan checkpoint: MUST show zero destroy/replace anywhere, and
 # the diff for assign_public_ip specifically must be empty (already true,
 # already matching live) — if it shows a change to assign_public_ip, STOP,
-# do not apply, re-diagnose before touching anything further. ---
+# do not apply, re-diagnose before touching anything further.
+#
+# MANDATORY CREATE review, not just destroy/replace: run this plan and read
+# every single proposed action line by line against import-manifest.json
+# BEFORE running apply. "Zero destroy/replace" is necessary but not
+# sufficient — a plan can be entirely free of destroys/replacements and
+# still be unsafe to apply if it proposes an unreviewed CREATE. Pay
+# specific attention to the 6 do_not_import task-definition addresses
+# (module.{web,worker,critical_worker,scheduler,migrate,maintenance}.aws_ecs_task_definition.this):
+# each is declared, unconditional, in the module source, but deliberately
+# never imported (§6) — if any of them shows up as a planned CREATE, that
+# means Terraform has no state entry for it yet and is about to register a
+# brand-new task-definition revision with the (still-nonexistent,
+# Phase-B-only) role-specific IAM role baked in. STOP. Do not apply. This
+# is exactly the failure mode Option B (§6) exists to prevent, and only
+# happens if this checkpoint is skipped or an apply is run out of order.
+# Every proposed CREATE in this plan must correspond to a `new`-classified
+# address in the manifest and nothing else — a CREATE against any
+# `do_not_import`, `import_unchanged`, or `import_then_migrate` address is
+# a hard stop requiring re-diagnosis, never a "looks fine, proceed." ---
 ```
 
 Explicitly **not** imported, ever, without a separate future decision: the
 6 pinned task definitions (§6, `do_not_import`), the two generic IAM
 roles / shared log group / 3 ad-hoc task-def families (no address exists —
 §3), and `module.cloudwatch_alarms.*` (existence unconfirmed —
-`cloudwatch:DescribeAlarms` denied, §11 item 6).
+`cloudwatch:DescribeAlarms` denied, §11 item 6). **Because these 6
+task-definition resources are unconditional blocks in the module source
+(not `count`-gated), simply never running `terraform import` for them does
+not by itself stop a broad `terraform apply` from creating them — the
+CREATE-review requirement in the checkpoint immediately above this
+paragraph is the actual control that catches this, not the `do_not_import`
+classification alone. Do not run a broad `apply` at any point in Phase A
+without first inspecting its full plan output against the manifest.**
 
 ### Phase B — intentional migrations (deliberately out of scope for this plan; listed for sequencing only)
 
@@ -641,7 +690,7 @@ Terraform (`.tf`), a Terraform test (`.tftest.hcl`), documentation
    declared rules alongside the existing broad ones now, or defer until
    the broad rules are revoked in the same change.
 7. Elevated (or one-time delegated) read access for
-   `ec2:DescribeSecurityGroupRules` (blocks 5 of the 11 `import_unchanged`
+   `ec2:DescribeSecurityGroupRules` (blocks 4 of the 11 `import_unchanged`
    commands — the SG *content* is already confirmed matching, only the
    literal rule ID is missing), `cloudwatch:DescribeAlarms`, and
    `sns:ListTopics` — not requested automatically, per the mission's

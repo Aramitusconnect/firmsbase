@@ -262,11 +262,88 @@ class SesConsumerTerraformIamTest extends TestCase
         $this->assertDoesNotMatchRegularExpression('/target_group_arn\s*=/', $matches[0]);
     }
 
-    public function test_ecs_service_module_never_assigns_a_public_ip_to_any_role(): void
+    // ------------------------------------------------------------
+    // Public-IP / NAT-egress safety design (see
+    // docs/ecs/state-adoption-plan.md §9.1 and §7). Live staging has
+    // no confirmed NAT gateway and the running services use
+    // assignPublicIp=ENABLED — a hardcoded `assign_public_ip = false`
+    // in the shared module would create an outage risk on any future
+    // apply. These tests replace the obsolete
+    // test_ecs_service_module_never_assigns_a_public_ip_to_any_role,
+    // which asserted exactly that hardcoded, now-removed literal.
+    // ------------------------------------------------------------
+
+    public function test_ecs_service_module_derives_public_ip_from_a_caller_supplied_variable(): void
     {
-        $this->assertStringContainsString(
-            'assign_public_ip = false',
-            $this->readFile('infrastructure/ecs/modules/ecs_service/main.tf')
+        $this->assertMatchesRegularExpression(
+            '/assign_public_ip\s*=\s*var\.assign_public_ip/',
+            $this->readFile('infrastructure/ecs/modules/ecs_service/main.tf'),
+            'The shared module must never hardcode assign_public_ip — it must come from var.assign_public_ip so every caller decides explicitly.'
+        );
+    }
+
+    public function test_ecs_service_assign_public_ip_variable_has_no_permissive_hidden_default(): void
+    {
+        $block = $this->extractVariableBlock('assign_public_ip');
+
+        $this->assertStringContainsString('type        = bool', $block);
+        $this->assertDoesNotMatchRegularExpression(
+            '/\bdefault\s*=/',
+            $block,
+            'assign_public_ip must have no default at all — every caller (including any future environment) must choose explicitly, so a forgotten call site fails terraform validate/plan instead of silently defaulting to something unsafe.'
+        );
+    }
+
+    public function test_every_staging_ecs_service_module_call_passes_assign_public_ip_from_the_shared_local(): void
+    {
+        $main = $this->stagingMain();
+
+        foreach (['web', 'worker', 'critical_worker', 'scheduler', 'migrate', 'maintenance', 'ses_consumer'] as $role) {
+            preg_match('/module "'.$role.'" \{.*?\n}/s', $main, $block);
+            $this->assertNotEmpty($block, "Could not locate module \"{$role}\" block.");
+            $this->assertMatchesRegularExpression(
+                '/assign_public_ip\s*=\s*local\.assign_public_ip/',
+                $block[0],
+                "module \"{$role}\" must pass assign_public_ip = local.assign_public_ip — no role may be omitted from this wiring."
+            );
+        }
+    }
+
+    public function test_staging_computes_public_ip_from_the_private_egress_readiness_local(): void
+    {
+        preg_match('/locals\s*\{.*?\n}/s', $this->stagingMain(), $matches);
+        $this->assertNotEmpty($matches, 'Could not locate the first locals block in staging main.tf.');
+
+        $this->assertMatchesRegularExpression(
+            '/assign_public_ip\s*=\s*!\s*var\.private_egress_ready/',
+            $matches[0],
+            'local.assign_public_ip must be derived from private_egress_ready (negated), not a separate independent toggle.'
+        );
+    }
+
+    public function test_private_egress_ready_defaults_false_so_public_ip_stays_enabled_by_default(): void
+    {
+        $block = $this->extractStagingVariableBlock('private_egress_ready');
+
+        $this->assertStringContainsString('type        = bool', $block);
+        $this->assertMatchesRegularExpression(
+            '/default\s*=\s*false/',
+            $block,
+            'private_egress_ready must default to false — combined with local.assign_public_ip = !var.private_egress_ready, this is what keeps every ECS service publicly IP-addressed by default, matching the live VPC (no confirmed NAT gateway) and avoiding an outage on first apply.'
+        );
+    }
+
+    public function test_private_egress_ready_cannot_be_declared_true_without_nat_gateway_ids(): void
+    {
+        $block = $this->extractStagingVariableBlock('nat_gateway_ids');
+
+        $this->assertStringContainsString('type        = list(string)', $block);
+        $this->assertMatchesRegularExpression('/default\s*=\s*\[\]/', $block);
+        $this->assertStringContainsString('validation {', $block);
+        $this->assertMatchesRegularExpression(
+            '/condition\s*=\s*!\s*var\.private_egress_ready\s*\|\|\s*length\(var\.nat_gateway_ids\)\s*>\s*0/',
+            $block,
+            'nat_gateway_ids must cross-validate against private_egress_ready: private_egress_ready may only be true when at least one real NAT gateway ID is supplied — this is what makes the safety invariant enforceable by terraform plan/validate, not just documentation.'
         );
     }
 
@@ -414,6 +491,15 @@ class SesConsumerTerraformIamTest extends TestCase
         $content = $this->readFile('infrastructure/ecs/modules/ecs_service/variables.tf');
         preg_match('/variable "'.preg_quote($name, '/').'" \{.*?\n}/s', $content, $matches);
         $this->assertNotEmpty($matches, "Could not locate variable \"{$name}\".");
+
+        return $matches[0];
+    }
+
+    private function extractStagingVariableBlock(string $name): string
+    {
+        $content = $this->readFile('infrastructure/ecs/environments/staging/variables.tf');
+        preg_match('/variable "'.preg_quote($name, '/').'" \{.*?\n}/s', $content, $matches);
+        $this->assertNotEmpty($matches, "Could not locate variable \"{$name}\" in staging variables.tf.");
 
         return $matches[0];
     }
