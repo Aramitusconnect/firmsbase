@@ -12,7 +12,8 @@ before any import can begin.
 `infrastructure/ecs/environments/staging` was written to describe the
 staging ECS environment, but the environment it describes already exists —
 it was stood up manually/out-of-band before this Terraform config existed.
-No backend has ever been configured; see §5.
+An approved S3 backend was configured on 2026-08-03 (code-only — the state
+prefix remains empty); see §5.
 
 **This is a corrected revision.** An independent review of the first
 version of this plan (commit `0734429`) found material inconsistencies —
@@ -60,9 +61,11 @@ own prior mistakes isn't trustworthy:
 
 - Worktree: `/home/ubuntu/firmsbase-ses-staging-deployment-prep`, branch
   `feature/ses-staging-deployment-prep`.
-- No Terraform state, local or remote, exists anywhere in this repository.
-- `infrastructure/ecs/environments/staging/versions.tf` has no `backend`
-  block — a deliberate, not-yet-made decision (see §5).
+- No Terraform state, local or remote, exists anywhere in this repository —
+  `infrastructure/ecs/environments/staging/versions.tf` now has an
+  approved `backend "s3" {}` block (configured 2026-08-03, see §5), but no
+  `terraform init` has been run against it, so no state object exists yet
+  either locally or in that backend.
 - The live AWS environment (account `603013471426`, region `us-east-1`) is
   real, running, and serving traffic.
 
@@ -259,48 +262,69 @@ No VPC/subnet/route resource is imported by this plan (there are none to
 import — the module has no such resources), and none is classified
 `import_unchanged` without the field-level comparison above.
 
-## 5. Backend — a candidate, not an approved decision
+## 5. Backend — approved and configured (2026-08-03)
 
-**No existing backend was found, approved, or referenced anywhere.**
-`versions.tf` has no `backend` block, and no prior mission or document
-records a backend decision having been made for this environment.
+**Updated 2026-08-03.** The S3+DynamoDB vs. Terraform Cloud choice this
+section previously left open has been decided: **S3, with native
+Terraform lockfile locking, no DynamoDB table.** The backend is now
+committed in `versions.tf`:
 
-This plan does **not** present any option as already chosen. Two
-candidates exist, both requiring an owner decision before either is
-implemented — this plan implements neither:
+- **Bucket**: `firmsbase-terraform-state-603013471426-us-east-1` (account
+  `603013471426`, region `us-east-1`).
+- **State key**: `environments/staging/ecs/terraform.tfstate`.
+- **Lock object**: `environments/staging/ecs/terraform.tfstate.tflock`
+  (native S3 lockfile locking — `use_lockfile = true` — a Terraform
+  1.11+ feature; **no DynamoDB table exists or is used** for this
+  backend, superseding the S3+DynamoDB candidate this section originally
+  described).
+- **Encryption**: SSE-S3 (`encrypt = true`).
+- **Versioning**: enabled on the bucket (recovery path for a bad state
+  write, independent of Terraform itself).
+- **Public access**: Block Public Access fully enabled on the bucket.
+- **Object ownership**: bucket owner enforced — ACLs disabled.
+- **Object Lock**: disabled (durability/rollback comes from bucket
+  versioning, not S3 Object Lock retention — a deliberate choice, not an
+  oversight).
+- **Access**: the operator role (`firmsbase-staging-operator-login`)
+  holds a narrowly scoped customer-managed IAM policy,
+  `FirmsBaseStagingTerraformStateAccess`, granting access to exactly the
+  state key and its `.tflock` object — not a shared bucket with broad
+  access, and no policy grants apply beyond this one state key/lock pair.
+- **Required Terraform CLI**: `>= 1.15.0` (see `versions.tf`'s
+  `required_version` and `scripts/tf-guard.sh`'s version check) — the
+  approved binary in this environment is the pinned
+  `/home/ubuntu/bin/terraform-1.15.8` install, never the sandbox's
+  default `terraform` on PATH (1.9.8).
 
-1. **S3 + DynamoDB** (native Terraform, most common for this kind of
-   setup): a new versioned + encrypted S3 bucket for state, a DynamoDB
-   table for locking (`LockID` hash key), and an IAM policy scoped to
-   exactly `s3:GetObject`/`PutObject` on the state key and
-   `dynamodb:GetItem`/`PutItem`/`DeleteItem` on the lock table.
-2. **Terraform Cloud / HCP Terraform workspace**: no AWS resources to
-   create, but requires an organization/workspace decision and a way to
-   supply AWS credentials to the run (dynamic provider credentials or a
-   service-account key) — itself a decision this plan does not make.
-3. **Any other repository-supported alternative** the owner prefers is
-   equally in scope — this list is not exhaustive, only the two candidates
-   evaluated so far.
+**This was a code-only change.** No `terraform init` has been run against
+this backend, no state or `.tflock` object has been written, and no live
+AWS resource has been imported — confirmed via a read-only
+`aws s3api list-objects-v2` against the `environments/staging/ecs/`
+prefix returning `KeyCount: 0`. Configuring the backend answers *where*
+state will live; it is a separate, earlier step from state *adoption*
+(§8) and does not by itself change anything about the live environment,
+does not adopt any resource, and does not lift the `plan`/`apply`
+prohibition below.
 
-**Required properties, regardless of which candidate is chosen** (a
-checklist for whoever makes this decision, not an instruction to this
-plan):
+**Required properties — all satisfied by the configuration above**:
 
-- Encrypted remote state (at rest, and in transit for any state-access
-  API).
-- Versioning (so a bad apply's prior state is recoverable).
-- Locking (concurrent `apply`/`plan` protection).
-- Least-privilege access — scoped to exactly the state object(s)/lock
-  table this environment needs, not a shared bucket with broad access.
-- Backup/recovery process independent of Terraform itself (e.g. S3
-  versioning + a documented restore procedure, or the backend's
-  equivalent).
-- State is never committed to Git, under any circumstance.
+- Encrypted remote state (at rest via SSE-S3; in transit via HTTPS,
+  the AWS SDK's default).
+- Versioning (bucket versioning enabled).
+- Locking (native S3 lockfile locking via `use_lockfile`).
+- Least-privilege access (`FirmsBaseStagingTerraformStateAccess`, scoped
+  to exactly this state key and lock object).
+- Backup/recovery independent of Terraform itself (S3 versioning).
+- State is never committed to Git (enforced structurally — see §4's
+  `.gitignore` rules for `*.tfstate`/`*.tflock`/`.terraform/`, none of
+  which this backend's configuration bypasses).
 
-**This plan does not create the bucket, table, workspace, or IAM policy**
-for either candidate. `tf-guard.sh` (§6) refuses `plan`/`apply` outright
-until a `backend` block actually exists in `versions.tf` — this is a
-structural precondition, not a suggestion.
+`tf-guard.sh` (§6) still refuses `plan`/`apply` — now because local state
+is confirmed empty (check 5) and the import checkpoints in §8 have not
+been reached, not because no backend exists (check 1 now passes). A
+backend being configured is necessary but not sufficient for adoption;
+the import procedure in §8 remains the only path to a
+`plan`/`apply`-safe state.
 
 ## 6. Corrected: ECS task-definition strategy (Option B, chosen and documented)
 
@@ -654,7 +678,7 @@ provider's documented behavior for this attribute pair.
 | `terraform -chdir=infrastructure/ecs/environments/staging test` | 9/9 pass — naming-override fallback/override for cluster, ECR, ElastiCache subnet group + engine; `assign_public_ip` default-true, override-to-false-with-NAT-IDs, and validation-failure-without-NAT-IDs |
 | `terraform -chdir=infrastructure/ecs/modules/iam test` | 2/2 pass — `task_execution_role_name` fallback/override (isolated from the root module's other data-source complications via `override_data` on the assume-role/execution/metrics policy documents, since those need real JSON a blanket `mock_provider` can't produce) |
 | `python3 infrastructure/ecs/environments/staging/scripts/validate-import-manifest.py` | Pass — 94 addresses, all uniquely classified, summary counts match a fresh recount; verified to correctly FAIL on each of the 5 violation types the review required (missing classification, duplicate address, wrong totals, import-classified entry missing an import_id, new/unmanaged/do_not_import entry incorrectly carrying an import_id) |
-| `tf-guard.sh` manual tests | `validate`/`fmt` passthrough confirmed; `plan`/`apply` correctly refused with no backend configured (today's real state); with a temporary mock backend block, correctly refused on wrong region, then correctly refused on empty state with correct account+region — all 4 checks independently verified to fire |
+| `tf-guard.sh` manual tests (historical — at the time this row was written, no backend existed yet; see the 2026-08-03 backend-configuration update in §5 for the current state) | `validate`/`fmt` passthrough confirmed; `plan`/`apply` correctly refused with no backend configured (the real state at that time); with a temporary mock backend block, correctly refused on wrong region, then correctly refused on empty state with correct account+region — all 4 checks independently verified to fire. Re-verified after the real backend was configured: `plan`/`apply` now correctly refused on Terraform binary version (new check) instead, then on empty state once an approved-version binary and correct account/region are used — see docs/ecs/staging-readiness-report.md for the current guard check list. |
 | AWS-backed `terraform plan` against empty state | **Not run** — explicitly prohibited |
 | `terraform apply` / `terraform import` / `terraform refresh` / any `terraform state` subcommand | **Not run** — explicitly prohibited |
 
