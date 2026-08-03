@@ -51,6 +51,16 @@ ses_events_queue_url = "https://sqs.us-east-1.amazonaws.com/ACCOUNT_ID/firmsvaul
 ses_events_queue_arn = "arn:aws:sqs:us-east-1:ACCOUNT_ID:firmsvault-staging-ses-events"
 ses_events_dlq_arn   = "arn:aws:sqs:us-east-1:ACCOUNT_ID:firmsvault-staging-ses-events-dlq"
 
+# --- SES outbound mail sending (web role only) — verified staging sender.
+# Both values below are resource identifiers, not secrets: the identity ARN
+# names a verified SES domain identity (no secret material), and the From
+# address is the same one already configured as MAIL_FROM_ADDRESS in
+# main.tf's shared_environment. Never grant this to ses_consumer or any
+# other role — see infrastructure/ecs/modules/iam/main.tf and
+# docs/ecs/iam-matrix.md.
+ses_sending_identity_arn    = "arn:aws:ses:us-east-1:ACCOUNT_ID:identity/staging-mail.firmsvault.com"
+ses_authorized_from_address = "no-reply@staging-mail.firmsvault.com"
+
 # Generate this secret OUTSIDE Terraform (e.g. `aws secretsmanager
 # create-secret` from a value produced by
 # `php artisan tinker --execute="echo bin2hex(random_bytes(32));"`) and
@@ -65,4 +75,4 @@ ses_events_max_messages                = 10
 ses_consumer_desired_count             = 1
 ses_consumer_cpu                       = 256
 ses_consumer_memory                    = 512
-ses_consumer_stop_timeout              = 30
+ses_consumer_stop_timeout              = 45

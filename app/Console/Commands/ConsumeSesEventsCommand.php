@@ -109,6 +109,28 @@ class ConsumeSesEventsCommand extends Command
                         'VisibilityTimeout' => config('services.ses_events.visibility_timeout_seconds'),
                     ]);
                 } catch (AwsException|Throwable $e) {
+                    // A signal can arrive while receiveMessage() is
+                    // blocked mid-network-call — depending on timing,
+                    // that surfaces here as a thrown exception (a
+                    // curl/AWS timeout or connection-abort), which
+                    // looks identical to a genuine SQS outage. The
+                    // $shouldStop flag (set only by our own signal
+                    // handler, never by this exception itself)
+                    // disambiguates: if a shutdown was actually
+                    // requested, this is expected, intentional
+                    // shutdown — not a fatal consumer error — and must
+                    // exit successfully so ECS never mistakes a clean
+                    // stop for a crash-looping task. A genuine failure
+                    // with no signal requested keeps the exact original
+                    // behavior: logged as an error and self::FAILURE,
+                    // preserving whatever retry/redrive expectations
+                    // depend on that exit code.
+                    if ($this->shouldStop) {
+                        Log::info('ses_consumer_shutdown_during_receive');
+
+                        break;
+                    }
+
                     $this->components->error('SQS receiveMessage failed: '.$e->getMessage());
 
                     return self::FAILURE;

@@ -15,6 +15,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Mockery;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -175,6 +176,76 @@ class ConsumeSesEventsCommandTest extends TestCase
     {
         config(['services.ses_events.wait_time_seconds' => 20]);
 
+        $http = $this->resolveSqsClientHttpConfig();
+
+        $this->assertLessThanOrEqual(10, $http['connect_timeout'], 'connect_timeout must stay well under any reasonable ECS stopTimeout.');
+        $this->assertGreaterThan(20, $http['timeout'], 'timeout must comfortably exceed the configured long-poll wait_time_seconds so a legitimate long poll is never cut short.');
+    }
+
+    public function test_default_wait_time_seconds_produces_a_total_timeout_greater_than_20(): void
+    {
+        // Deliberately does not override config — exercises the real
+        // config/services.php default (20) end to end.
+        $http = $this->resolveSqsClientHttpConfig();
+
+        $this->assertSame(30, $http['timeout'], 'Default WaitTimeSeconds (20) + the documented 10s margin.');
+        $this->assertGreaterThan(20, $http['timeout']);
+    }
+
+    public function test_a_custom_wait_time_seconds_produces_a_correspondingly_larger_safe_timeout(): void
+    {
+        config(['services.ses_events.wait_time_seconds' => 5]);
+
+        $http = $this->resolveSqsClientHttpConfig();
+
+        $this->assertSame(15, $http['timeout']);
+        $this->assertGreaterThan(5, $http['timeout']);
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    public static function invalidWaitTimeSecondsProvider(): array
+    {
+        return [
+            'negative int' => [-1],
+            'over SQS ceiling' => [21],
+            'non-numeric string' => ['abc'],
+            'decimal string' => ['12.5'],
+            'boolean' => [true],
+            'null' => [null],
+            'array' => [[20]],
+        ];
+    }
+
+    #[DataProvider('invalidWaitTimeSecondsProvider')]
+    public function test_invalid_wait_time_seconds_normalizes_to_the_safe_20_second_default(mixed $invalidValue): void
+    {
+        config(['services.ses_events.wait_time_seconds' => $invalidValue]);
+
+        $http = $this->resolveSqsClientHttpConfig();
+
+        // Never a fabricated smaller number, never unbounded — falls
+        // back to the same documented safe default a missing value
+        // would use.
+        $this->assertSame(30, $http['timeout'], 'An invalid wait_time_seconds must normalize to the safe 20s default (+10s margin), never a degenerate value.');
+    }
+
+    public function test_a_valid_numeric_string_wait_time_seconds_is_still_honored(): void
+    {
+        // Simulates a config path that bypassed config/services.php's
+        // own (int) cast (e.g. a direct config() override, or a future
+        // refactor) — proves the normalizer accepts a real digit-only
+        // positive value in string form too, not just a native int.
+        config(['services.ses_events.wait_time_seconds' => '8']);
+
+        $http = $this->resolveSqsClientHttpConfig();
+
+        $this->assertSame(18, $http['timeout']);
+    }
+
+    private function resolveSqsClientHttpConfig(): array
+    {
         $client = app(SqsClient::class);
 
         // Aws\AwsClient stores the constructor's 'http' option in a
@@ -190,8 +261,8 @@ class ConsumeSesEventsCommandTest extends TestCase
         $this->assertIsArray($http);
         $this->assertArrayHasKey('connect_timeout', $http);
         $this->assertArrayHasKey('timeout', $http);
-        $this->assertLessThanOrEqual(10, $http['connect_timeout'], 'connect_timeout must stay well under any reasonable ECS stopTimeout.');
-        $this->assertGreaterThan(20, $http['timeout'], 'timeout must comfortably exceed the configured long-poll wait_time_seconds so a legitimate long poll is never cut short.');
+
+        return $http;
     }
 
     // ------------------------------------------------------------
@@ -317,5 +388,92 @@ class ConsumeSesEventsCommandTest extends TestCase
                 return true;
             }))
             ->atLeast()->once();
+    }
+
+    // ------------------------------------------------------------
+    // Blocker fix: a signal arriving while receiveMessage() is blocked
+    // surfaces as a thrown exception that looks identical to a genuine
+    // SQS outage. These prove the command actually distinguishes them
+    // — intentional shutdown exits 0, a genuine unsolicited failure
+    // still exits 1 — using real signal delivery exactly like the
+    // existing shutdown tests above.
+    // ------------------------------------------------------------
+
+    public function test_sigterm_while_receive_message_is_blocked_exits_successfully(): void
+    {
+        if (! extension_loaded('pcntl') || ! extension_loaded('posix')) {
+            $this->markTestSkipped('pcntl/posix not loaded in this environment.');
+        }
+
+        $sqs = Mockery::mock(SqsClient::class);
+        $sqs->shouldReceive('receiveMessage')
+            ->once()
+            ->andReturnUsing(function () {
+                posix_kill(posix_getpid(), SIGTERM);
+
+                throw new \RuntimeException('simulated connection abort during shutdown');
+            });
+        // No second receiveMessage() call — the shutdown flag must
+        // prevent another cycle, not just report success once.
+        $this->app->instance(SqsClient::class, $sqs);
+
+        $this->artisan('ses:consume-events')->assertExitCode(0);
+    }
+
+    public function test_sigint_while_receive_message_is_blocked_exits_successfully(): void
+    {
+        if (! extension_loaded('pcntl') || ! extension_loaded('posix')) {
+            $this->markTestSkipped('pcntl/posix not loaded in this environment.');
+        }
+
+        $sqs = Mockery::mock(SqsClient::class);
+        $sqs->shouldReceive('receiveMessage')
+            ->once()
+            ->andReturnUsing(function () {
+                posix_kill(posix_getpid(), SIGINT);
+
+                throw new \RuntimeException('simulated connection abort during shutdown');
+            });
+        $this->app->instance(SqsClient::class, $sqs);
+
+        $this->artisan('ses:consume-events')->assertExitCode(0);
+    }
+
+    public function test_a_receive_message_failure_with_no_signal_still_exits_with_failure(): void
+    {
+        // The exact same kind of exception as the two tests above, but
+        // with no signal ever sent — must NOT be mislabeled as a
+        // graceful shutdown. Preserves the pre-existing "genuine SQS
+        // outage" contract this command has always had.
+        $sqs = Mockery::mock(SqsClient::class);
+        $sqs->shouldReceive('receiveMessage')
+            ->once()
+            ->andThrow(new \RuntimeException('genuine SQS outage, no shutdown requested'));
+        $this->app->instance(SqsClient::class, $sqs);
+
+        $this->artisan('ses:consume-events')->assertExitCode(1);
+    }
+
+    public function test_shutdown_during_receive_prevents_the_next_receive_call(): void
+    {
+        if (! extension_loaded('pcntl') || ! extension_loaded('posix')) {
+            $this->markTestSkipped('pcntl/posix not loaded in this environment.');
+        }
+
+        $sqs = Mockery::mock(SqsClient::class);
+        // Mockery's ->once() on its own already fails the test if a
+        // second call is attempted — the explicit exit-code assertion
+        // below additionally proves the loop actually stopped, not just
+        // that a second call never happened to fire.
+        $sqs->shouldReceive('receiveMessage')
+            ->once()
+            ->andReturnUsing(function () {
+                posix_kill(posix_getpid(), SIGTERM);
+
+                throw new \RuntimeException('simulated connection abort during shutdown');
+            });
+        $this->app->instance(SqsClient::class, $sqs);
+
+        $this->artisan('ses:consume-events')->assertExitCode(0);
     }
 }

@@ -305,6 +305,110 @@ class SesConsumerTerraformIamTest extends TestCase
         $this->assertStringContainsString('enable_autoscaling = false', $matches[0]);
     }
 
+    // ------------------------------------------------------------
+    // Blocker fix: SES sending permission reconciliation. Proves the
+    // grant is real Terraform-managed infrastructure (a resource
+    // block, not just a doc claim), scoped to exactly the web role,
+    // exactly one identity, with an exact From-address condition — and
+    // that no other role (including ses_consumer) can send mail.
+    // ------------------------------------------------------------
+
+    private function sesSendPolicyDocumentBlock(): string
+    {
+        preg_match('/data "aws_iam_policy_document" "task_web_ses_send".*?\n}\n/s', $this->iamMain(), $matches);
+        $this->assertNotEmpty($matches, 'Could not locate the task_web_ses_send policy document — the SES-sending grant must be Terraform-managed, not merely documented.');
+
+        return $matches[0];
+    }
+
+    public function test_ses_send_permission_is_terraform_managed_not_merely_documented(): void
+    {
+        $iam = $this->iamMain();
+
+        $this->assertStringContainsString('data "aws_iam_policy_document" "task_web_ses_send"', $iam);
+        $this->assertStringContainsString('resource "aws_iam_role_policy" "task_web_ses_send"', $iam);
+
+        preg_match('/resource "aws_iam_role_policy" "task_web_ses_send".*?\n}\n/s', $iam, $resourceMatch);
+        $this->assertNotEmpty($resourceMatch);
+        $this->assertStringContainsString('aws_iam_role.task["web"]', $resourceMatch[0], 'The SES-send policy resource must attach to the web task role.');
+    }
+
+    public function test_web_role_receives_exactly_ses_send_raw_email_on_the_exact_identity_variable(): void
+    {
+        $block = $this->sesSendPolicyDocumentBlock();
+
+        $this->assertStringContainsString('"ses:SendRawEmail"', $block);
+        $this->assertStringNotContainsString('ses:SendEmail', $block, 'ses:SendEmail is never called by SesTransport — must not be granted without direct code evidence.');
+        $this->assertMatchesRegularExpression('/resources\s*=\s*\[var\.ses_sending_identity_arn\]/', $block);
+        // Never a hardcoded ARN literal in the reusable module.
+        $this->assertDoesNotMatchRegularExpression('/arn:aws:ses:[a-z0-9-]+:\d{12}:/', $block);
+    }
+
+    public function test_ses_send_permission_has_an_exact_from_address_condition(): void
+    {
+        $block = $this->sesSendPolicyDocumentBlock();
+
+        $this->assertStringContainsString('condition {', $block);
+        $this->assertStringContainsString('"StringEquals"', $block);
+        $this->assertStringContainsString('"ses:FromAddress"', $block);
+        $this->assertMatchesRegularExpression('/values\s*=\s*\[var\.ses_authorized_from_address\]/', $block);
+    }
+
+    public function test_no_ses_wildcard_or_all_identities_grant_exists(): void
+    {
+        $iam = $this->iamMain();
+
+        $this->assertStringNotContainsString('"ses:*"', $iam);
+        $this->assertStringNotContainsString("'ses:*'", $iam);
+        // The only resources block inside the SES policy document must
+        // be the single-element identity-ARN list already asserted
+        // above — assert there is no "resources = [\"*\"]" anywhere
+        // near an ses: action.
+        $block = $this->sesSendPolicyDocumentBlock();
+        $this->assertDoesNotMatchRegularExpression('/resources\s*=\s*\["\*"\]/', $block);
+    }
+
+    public function test_ses_consumer_and_unrelated_roles_receive_no_ses_permission(): void
+    {
+        $iam = $this->iamMain();
+
+        // Exactly one ses: policy document exists in the entire
+        // module, and it is the web-scoped one asserted above — proves
+        // no *other* policy document anywhere (ses_consumer's own SQS
+        // policy, task_s3_documents, task_metrics, task_execution)
+        // references any ses: action.
+        $this->assertSame(
+            1,
+            substr_count($iam, 'actions   = ["ses:SendRawEmail"]'),
+            'Exactly one policy statement should grant ses:SendRawEmail, scoped to web only.'
+        );
+
+        foreach (['task_ses_consumer_sqs', 'task_s3_documents', 'task_metrics', 'task_execution'] as $name) {
+            preg_match('/data "aws_iam_policy_document" "'.$name.'".*?\n}\n/s', $iam, $blockMatch);
+            $this->assertNotEmpty($blockMatch, "Could not locate data \"aws_iam_policy_document\" \"{$name}\" block.");
+            $this->assertStringNotContainsString('ses:', $blockMatch[0], "{$name} must not reference any ses: action.");
+        }
+    }
+
+    public function test_execution_role_hmac_secret_access_is_exact_not_wildcarded(): void
+    {
+        $iam = $this->iamMain();
+
+        preg_match('/sid\s*=\s*"ReadTaskSecrets".*?\n    }\n/s', $iam, $blockMatch);
+        $this->assertNotEmpty($blockMatch, 'Could not locate the execution role\'s ReadTaskSecrets statement.');
+        $block = $blockMatch[0];
+
+        $this->assertMatchesRegularExpression('/resources\s*=\s*var\.secret_arns/', $block, 'The execution role\'s secret access must be the exact var.secret_arns list, never a wildcard.');
+        $this->assertStringNotContainsString('"*"', $block);
+
+        // And the HMAC secret ARN variable is actually included in
+        // that list at the call site (main.tf), not just theoretically
+        // supported by the module.
+        preg_match('/secret_arns\s*=\s*\[(.*?)\]/s', $this->stagingMain(), $callSite);
+        $this->assertNotEmpty($callSite, 'Could not locate the secret_arns list passed to module.iam.');
+        $this->assertStringContainsString('var.platform_notifications_recipient_fingerprint_hmac_key_secret_arn', $callSite[1]);
+    }
+
     private function extractVariableBlock(string $name): string
     {
         $content = $this->readFile('infrastructure/ecs/modules/ecs_service/variables.tf');

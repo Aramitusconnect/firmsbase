@@ -206,3 +206,45 @@ resource "aws_iam_role_policy" "task_ses_consumer_sqs" {
   role   = aws_iam_role.task["ses_consumer"].id
   policy = data.aws_iam_policy_document.task_ses_consumer_sqs[0].json
 }
+
+# ---------------------------------------------------------------------------
+# web task role — SES outbound mail sending. Confirmed by direct code
+# inspection: Illuminate\Mail\Transport\SesTransport calls only
+# ses:SendRawEmail (never ses:SendEmail — see
+# vendor/laravel/framework/src/Illuminate/Mail/Transport/SesTransport.php),
+# synchronously from the request path (no ShouldQueue notification/mailable
+# exists anywhere in app/Notifications or app/Mail, so no worker/
+# critical-worker role ever sends mail today). Scoped to exactly the one
+# verified sending identity (never all identities, never ses:*), with a
+# ses:FromAddress condition so the grant cannot be used to send as any
+# address other than the one this environment's MAIL_FROM_ADDRESS actually
+# uses. Deliberately NOT granted to ses_consumer (inbound bounce/complaint
+# handling never sends mail — see docs/ecs/iam-matrix.md) or any other
+# role. This was previously manual/out-of-band AWS configuration —
+# representing it here in Terraform means a rebuilt web task role no
+# longer silently loses the ability to send mail; see docs/ecs/
+# iam-matrix.md for the full history of this gap and its resolution.
+# ---------------------------------------------------------------------------
+data "aws_iam_policy_document" "task_web_ses_send" {
+  count = (var.ses_sending_identity_arn == null || var.ses_authorized_from_address == null) ? 0 : 1
+
+  statement {
+    sid       = "SendVerifiedIdentityMailAsAuthorizedFromAddressOnly"
+    actions   = ["ses:SendRawEmail"]
+    resources = [var.ses_sending_identity_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ses:FromAddress"
+      values   = [var.ses_authorized_from_address]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "task_web_ses_send" {
+  count = (var.ses_sending_identity_arn == null || var.ses_authorized_from_address == null) ? 0 : 1
+
+  name   = "${var.name_prefix}-task-web-ses-send"
+  role   = aws_iam_role.task["web"].id
+  policy = data.aws_iam_policy_document.task_web_ses_send[0].json
+}

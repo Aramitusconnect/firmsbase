@@ -77,9 +77,11 @@ module "iam" {
     var.platform_notifications_recipient_fingerprint_hmac_key_secret_arn,
   ]
 
-  kms_key_arn             = module.kms.key_arn
-  s3_documents_bucket_arn = module.s3_documents.bucket_arn
-  ses_events_queue_arn    = var.ses_events_queue_arn
+  kms_key_arn                 = module.kms.key_arn
+  s3_documents_bucket_arn     = module.s3_documents.bucket_arn
+  ses_events_queue_arn        = var.ses_events_queue_arn
+  ses_sending_identity_arn    = var.ses_sending_identity_arn
+  ses_authorized_from_address = var.ses_authorized_from_address
 }
 
 module "alb" {

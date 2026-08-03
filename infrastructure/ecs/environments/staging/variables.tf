@@ -122,6 +122,26 @@ variable "ses_events_dlq_arn" {
   }
 }
 
+variable "ses_sending_identity_arn" {
+  description = "ARN of the verified SES identity (domain or email address) web sends outbound mail from — arn:aws:ses:<region>:<account-id>:identity/<domain>. Passed to the iam module so ONLY the web task role's policy references var.ses_sending_identity_arn rather than a hardcoded ARN. Confirmed by direct code inspection (Illuminate\\Mail\\Transport\\SesTransport, synchronous from the request path — no ShouldQueue mailable/notification exists) that web is the only role that sends mail; see infrastructure/ecs/modules/iam/main.tf and docs/ecs/iam-matrix.md."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws:ses:[a-z0-9-]+:[0-9]{12}:identity/.+$", var.ses_sending_identity_arn))
+    error_message = "ses_sending_identity_arn must be a valid SES identity ARN: arn:aws:ses:<region>:<12-digit-account-id>:identity/<domain-or-email>."
+  }
+}
+
+variable "ses_authorized_from_address" {
+  description = "The exact From address web's SES send is authorized for — must match MAIL_FROM_ADDRESS in local.shared_environment (main.tf) exactly. Enforced as a ses:FromAddress IAM condition, not just documentation, so the grant cannot be used to send as a different address even though it can reach ses:SendRawEmail."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.ses_authorized_from_address))
+    error_message = "ses_authorized_from_address must look like a real email address (local-part@domain)."
+  }
+}
+
 variable "platform_notifications_recipient_fingerprint_hmac_key_secret_arn" {
   description = "Secrets Manager ARN of the dedicated PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY secret — a new, dedicated secret, never APP_KEY. Delivered as an ECS `secrets` entry (resolved by the task execution role at task start) to exactly the web and ses-consumer services; never worker/critical-worker/scheduler/migrate/maintenance. Marked sensitive here because Terraform has no narrower way to flag \"handle this value carefully\" — the ARN itself is an identifier, not the secret value, which never enters Terraform state, a tfvars file, or any output."
   type        = string
@@ -190,12 +210,23 @@ variable "ses_consumer_memory" {
 }
 
 variable "ses_consumer_stop_timeout" {
-  description = "ses-consumer ECS stopTimeout. The consumer checks its shutdown flag between messages (never mid-message — see docs/ecs/graceful-shutdown.md), so the realistic drain time is bounded by a single message's processing time, not a full batch; 30s (matching the scheduler role) leaves ample headroom without approaching ECS's 120s ceiling."
+  description = "ses-consumer ECS stopTimeout. Must always exceed the SqsClient's own derived HTTP request timeout (var.ses_events_wait_time_seconds + 10s margin — see app/Providers/AppServiceProvider.php) plus real headroom for the consumer's own shutdown-flag check and any in-flight message's processing/delete — otherwise ECS could SIGKILL the task before its own AwsException-driven clean exit ever fires. 45s default: 20s (default wait_time_seconds) + 10s (client margin) + 15s (processing/shutdown headroom), comfortably under ECS's 120s ceiling."
   type        = number
-  default     = 30
+  default     = 45
 
   validation {
     condition     = var.ses_consumer_stop_timeout > 0 && var.ses_consumer_stop_timeout <= 120
     error_message = "ses_consumer_stop_timeout must be positive and at most 120 (ECS's own stopTimeout ceiling)."
+  }
+
+  validation {
+    # Terraform 1.9+ allows a validation condition to reference other
+    # input variables. Mirrors the exact relationship
+    # AppServiceProvider's SqsClient binding establishes at runtime
+    # (derived HTTP timeout = wait_time_seconds + 10) plus a minimum
+    # 5s of real headroom, so this fails plan/apply rather than
+    # silently shipping a stopTimeout that could force a SIGKILL.
+    condition     = var.ses_consumer_stop_timeout > (var.ses_events_wait_time_seconds + 10 + 5)
+    error_message = "ses_consumer_stop_timeout must exceed ses_events_wait_time_seconds + 10 (the SqsClient's derived HTTP request timeout) by at least 5 seconds of headroom, so ECS never needs to SIGKILL the task before its own clean exit."
   }
 }

@@ -41,6 +41,23 @@ variable "ses_events_queue_arn" {
   default     = null
 }
 
+variable "ses_sending_identity_arn" {
+  description = "ARN of the verified SES identity (domain or email) outbound mail is sent from — e.g. arn:aws:ses:<region>:<account-id>:identity/<domain>. Grants ONLY the web task role ses:SendRawEmail on exactly this identity, condition-scoped to ses_authorized_from_address below. Confirmed by direct code inspection that web is the only role sending mail today (Illuminate\\Mail\\Transport\\SesTransport, synchronous from the request path — no ShouldQueue notification/mailable exists, so no worker/critical-worker role sends mail). Null (the default) omits the statement entirely, matching this module's existing 'no grant until the identity exists' convention (see s3_documents_bucket_arn/ses_events_queue_arn above)."
+  type        = string
+  default     = null
+}
+
+variable "ses_authorized_from_address" {
+  description = "The exact From address web's SES send is authorized for (matches MAIL_FROM_ADDRESS in the environment's shared_environment — see infrastructure/ecs/environments/staging/main.tf). Enforced as a ses:FromAddress StringEquals condition on the grant above, so the web task role cannot send SES mail as any other address even though it can reach the ses:SendRawEmail action. Required (no default) whenever ses_sending_identity_arn is set — see the module's own validation."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.ses_authorized_from_address == null || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.ses_authorized_from_address))
+    error_message = "ses_authorized_from_address must look like a real email address (local-part@domain)."
+  }
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
