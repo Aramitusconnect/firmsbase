@@ -92,6 +92,19 @@ elasticache_parameter_group_name = "default.valkey7"
 # default: engine_version = "7.2"
 iam_task_execution_role_name  = "firmsbase-staging-ecs-execution-role"
 
+# ALB target-group health check — these three values match the currently
+# running target group exactly (confirmed via aws elbv2
+# describe-target-groups/describe-target-group-attributes) and must be used
+# during state adoption so the import doesn't leave a permanent drift that
+# would silently change live health-check behavior on the next apply. See
+# docs/ecs/state-adoption-plan.md §9.5/§11. Any later migration to the
+# module's original readiness-check design (path "/readyz", interval 15,
+# matcher "200") must be a separate, deliberately reviewed deployment, not a
+# byproduct of this import.
+alb_health_check_path             = "/up"
+alb_health_check_interval_seconds = 30
+alb_health_check_matcher          = "200-399"
+
 # Do NOT set private_egress_ready = true for this environment — it has no
 # NAT gateway anywhere (see docs/ecs/state-adoption-plan.md §9.1). Left at
 # its default (false) here deliberately, not omitted by accident.
