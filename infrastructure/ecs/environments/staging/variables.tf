@@ -230,3 +230,85 @@ variable "ses_consumer_stop_timeout" {
     error_message = "ses_consumer_stop_timeout must exceed ses_events_wait_time_seconds + 10 (the SqsClient's derived HTTP request timeout) by at least 5 seconds of headroom, so ECS never needs to SIGKILL the task before its own clean exit."
   }
 }
+
+# ---------------------------------------------------------------------------
+# Live-infrastructure-adoption overrides — see docs/ecs/state-adoption-plan.md.
+# This environment's AWS resources predate this Terraform config; the
+# variables below let the computed identifiers/config match what's already
+# running instead of forcing a rename/replacement. All default to null
+# (falling back to this file's existing name_prefix-derived computation) so
+# a brand-new environment that has never had manual infrastructure is
+# completely unaffected.
+# ---------------------------------------------------------------------------
+
+variable "ecs_cluster_name" {
+  description = "Override for the ECS cluster name. Null (default) falls back to var.name_prefix, matching a brand-new environment. This staging environment's live cluster is \"firmsbase-staging-cluster\", not \"firmsbase-staging\" (what name_prefix alone computes) — ECS cluster names cannot be changed post-creation, so this must be set correctly before any import, never used to rename the live cluster. See docs/ecs/state-adoption-plan.md §3B."
+  type        = string
+  default     = null
+}
+
+variable "ecr_repository_name" {
+  description = "Override for the ECR repository name. Null (default) falls back to \"firmsbase-app\" (this file's prior hardcoded value). This staging environment's live repository is \"firmsbase-staging\" — ECR repository renames are destructive (all existing image tags/digests are lost), so this must be set correctly before any import, never used to rename the live repository. See docs/ecs/state-adoption-plan.md §3B."
+  type        = string
+  default     = null
+}
+
+variable "elasticache_subnet_group_name" {
+  description = "Override for the ElastiCache subnet group name. Null (default) falls back to \"<name_prefix>-redis\". This staging environment's live subnet group (referenced by the live replication group) is \"firmsbase-staging-cache-subnets\". See docs/ecs/state-adoption-plan.md §3B."
+  type        = string
+  default     = null
+}
+
+variable "elasticache_engine" {
+  description = "ElastiCache engine. Defaults to \"redis\" (this module's original design), but this staging environment's live replication group actually runs Valkey (confirmed via aws elasticache describe-replication-groups .Engine = \"valkey\"), not Redis — the engine attribute cannot be changed in place; setting it wrong here plans a full, data-losing replacement of the live cache. Must be set to \"valkey\" for this environment before import. See docs/ecs/state-adoption-plan.md §3B/§9."
+  type        = string
+  default     = "redis"
+
+  validation {
+    condition     = contains(["redis", "valkey"], var.elasticache_engine)
+    error_message = "elasticache_engine must be \"redis\" or \"valkey\" — those are the only engines aws_elasticache_replication_group supports."
+  }
+}
+
+variable "elasticache_parameter_group_name" {
+  description = "ElastiCache parameter group. Defaults to \"default.redis7\" (this module's original design). This staging environment's live replication group uses \"default.valkey7\" (a Valkey-family parameter group — must match var.elasticache_engine, they cannot disagree). See docs/ecs/state-adoption-plan.md §3B."
+  type        = string
+  default     = "default.redis7"
+}
+
+variable "iam_task_execution_role_name" {
+  description = "Override for the shared ECS task-execution IAM role name. Null (default) falls back to \"<name_prefix>-task-execution\". This staging environment's live execution role is \"firmsbase-staging-ecs-execution-role\" — a naming fix alone is NOT sufficient to make this role import-clean; the live role's permissions come from the AWS-managed AmazonECSTaskExecutionRolePolicy plus one narrow inline policy, while this module builds one broader custom inline policy with no managed-policy attachment. That permission-shape reconciliation is a separate, explicit human decision — see docs/ecs/state-adoption-plan.md §3B/§8 — this variable only fixes the name, not the policy shape."
+  type        = string
+  default     = null
+}
+
+# ---------------------------------------------------------------------------
+# Public-IP / NAT-egress safety invariant — see docs/ecs/state-adoption-plan.md
+# §9.1. This staging VPC is the AWS account's DEFAULT VPC: every subnet is
+# public (MapPublicIpOnLaunch = true) and there is no NAT gateway anywhere in
+# it (confirmed via the sole route table having only a direct Internet
+# Gateway route). assignPublicIp = ENABLED is therefore the ONLY way any ECS
+# task in this environment reaches the internet at all today — for ECR
+# pulls, Secrets Manager, CloudWatch Logs, SES, and SQS alike. Disabling it
+# without real private-subnet + NAT egress in place would cut off all
+# outbound connectivity for every service simultaneously.
+# ---------------------------------------------------------------------------
+
+variable "private_egress_ready" {
+  description = "Set to true ONLY after this VPC has real private subnets with verified NAT gateway (or equivalent) egress provisioned — see nat_gateway_ids below, which this variable's validation requires be non-empty before private_egress_ready can be true. While false (the default — matching today's live reality), every ECS service is forced to assign_public_ip = true. Do not flip this to true as a config toggle alone; it must follow, never precede, real NAT infrastructure existing and being verified reachable."
+  type        = bool
+  default     = false
+}
+
+variable "nat_gateway_ids" {
+  description = "The real NAT gateway ID(s) this environment's private subnets route egress through. Not consumed directly by any resource in this repository today (the networking module remains data-source-only by design — see infrastructure/ecs/modules/networking), so this variable's only job is to make \"NAT egress genuinely exists\" a checkable fact tied to private_egress_ready, rather than a bare boolean assertion that could be flipped by mistake."
+  type        = list(string)
+  default     = []
+
+  validation {
+    # Terraform 1.9+ cross-variable validation — same pattern already used
+    # by ses_consumer_stop_timeout above.
+    condition     = !var.private_egress_ready || length(var.nat_gateway_ids) > 0
+    error_message = "private_egress_ready = true requires at least one nat_gateway_ids entry. Do not set private_egress_ready = true without real, verified NAT egress in place — see docs/ecs/state-adoption-plan.md §9.1 (this VPC currently has no NAT gateway at all; disabling assign_public_ip without one cuts off all outbound connectivity for every ECS service)."
+  }
+}

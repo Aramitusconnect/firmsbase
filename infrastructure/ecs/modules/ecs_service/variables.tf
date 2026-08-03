@@ -98,6 +98,11 @@ variable "security_group_ids" {
   type = list(string)
 }
 
+variable "assign_public_ip" {
+  description = "Whether ECS tasks in this service get a public IP. No default, deliberately — every caller must decide explicitly. In a VPC with no NAT gateway (true of this repo's default staging VPC — see docs/ecs/state-adoption-plan.md §9.1), this is the ONLY way tasks reach the internet at all (ECR pulls, Secrets Manager, CloudWatch Logs, SES, SQS); setting it false there cuts off all outbound connectivity. The staging root module derives this from var.private_egress_ready, which itself cannot be set true without real, verified NAT egress (nat_gateway_ids) — see environments/staging/variables.tf."
+  type        = bool
+}
+
 variable "target_group_arn" {
   description = "Web role only — the ALB target group to register tasks in."
   type        = string

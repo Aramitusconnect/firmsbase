@@ -81,7 +81,7 @@ resource "aws_ecs_service" "this" {
   network_configuration {
     subnets          = var.subnet_ids
     security_groups  = var.security_group_ids
-    assign_public_ip = false # tasks run in private subnets only — see infrastructure/ecs/modules/networking
+    assign_public_ip = var.assign_public_ip # see docs/ecs/state-adoption-plan.md §9.1 — no default; every caller must decide explicitly
   }
 
   dynamic "load_balancer" {

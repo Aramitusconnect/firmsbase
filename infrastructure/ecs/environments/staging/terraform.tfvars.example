@@ -76,3 +76,24 @@ ses_consumer_desired_count             = 1
 ses_consumer_cpu                       = 256
 ses_consumer_memory                    = 512
 ses_consumer_stop_timeout              = 45
+
+# --- Live-infrastructure-adoption overrides — see
+# docs/ecs/state-adoption-plan.md. All null/false by default (safe for a
+# brand-new environment); THIS staging environment's live resources need
+# every one of the non-comment values below set exactly as shown before any
+# import is attempted — see the plan doc for why each one exists.
+ecs_cluster_name              = "firmsbase-staging-cluster"
+ecr_repository_name           = "firmsbase-staging"
+elasticache_subnet_group_name = "firmsbase-staging-cache-subnets"
+elasticache_engine            = "valkey"
+elasticache_parameter_group_name = "default.valkey7"
+# engine_version (already existed) must also be overridden to match the
+# live Valkey 7.2 line — do not leave it at the module's "7.1" (Redis)
+# default: engine_version = "7.2"
+iam_task_execution_role_name  = "firmsbase-staging-ecs-execution-role"
+
+# Do NOT set private_egress_ready = true for this environment — it has no
+# NAT gateway anywhere (see docs/ecs/state-adoption-plan.md §9.1). Left at
+# its default (false) here deliberately, not omitted by accident.
+# private_egress_ready = false
+# nat_gateway_ids       = []

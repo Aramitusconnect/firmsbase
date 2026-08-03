@@ -24,7 +24,7 @@ data "aws_iam_policy_document" "ecs_tasks_assume_role" {
 # definitions reference.
 # ---------------------------------------------------------------------------
 resource "aws_iam_role" "task_execution" {
-  name               = "${var.name_prefix}-task-execution"
+  name               = coalesce(var.task_execution_role_name, "${var.name_prefix}-task-execution")
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
   tags               = var.tags
 }

@@ -1,5 +1,17 @@
 locals {
   roles = ["web", "worker", "critical-worker", "scheduler", "migrate", "maintenance", "ses-consumer"]
+
+  # See variables.tf "Live-infrastructure-adoption overrides" and
+  # docs/ecs/state-adoption-plan.md — null overrides fall back to this
+  # config's original name_prefix-derived computation, so a brand-new
+  # environment is unaffected.
+  ecs_cluster_name    = coalesce(var.ecs_cluster_name, var.name_prefix)
+  ecr_repository_name = coalesce(var.ecr_repository_name, "firmsbase-app")
+
+  # See docs/ecs/state-adoption-plan.md §9.1 — the only safe default until
+  # real private-subnet + NAT egress exists and private_egress_ready is
+  # deliberately flipped on.
+  assign_public_ip = !var.private_egress_ready
 }
 
 module "networking" {
@@ -17,7 +29,7 @@ module "kms" {
 
 module "ecr" {
   source          = "../../modules/ecr"
-  repository_name = "firmsbase-app"
+  repository_name = local.ecr_repository_name
 }
 
 module "security_groups" {
@@ -43,11 +55,15 @@ module "elasticache" {
   private_subnet_ids          = var.private_subnet_ids
   ecs_tasks_security_group_id = module.security_groups.ecs_tasks_security_group_id
   auth_token                  = var.redis_auth_token
+
+  subnet_group_name    = coalesce(var.elasticache_subnet_group_name, "${var.name_prefix}-redis")
+  engine               = var.elasticache_engine
+  parameter_group_name = var.elasticache_parameter_group_name
 }
 
 module "ecs_cluster" {
   source       = "../../modules/ecs_cluster"
-  cluster_name = var.name_prefix
+  cluster_name = local.ecs_cluster_name
 }
 
 resource "aws_cloudwatch_log_group" "app" {
@@ -61,8 +77,9 @@ resource "aws_cloudwatch_log_group" "app" {
 module "iam" {
   source = "../../modules/iam"
 
-  name_prefix        = var.name_prefix
-  ecr_repository_arn = module.ecr.repository_arn
+  name_prefix              = var.name_prefix
+  task_execution_role_name = var.iam_task_execution_role_name
+  ecr_repository_arn       = module.ecr.repository_arn
   # trimsuffix guards against the aws_cloudwatch_log_group.arn attribute's
   # trailing ":*" varying by provider version — normalize then re-append so
   # the IAM policy always ends up with exactly one ":*" (needed for
@@ -191,6 +208,7 @@ module "web" {
   cluster_id         = module.ecs_cluster.cluster_id
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
+  assign_public_ip   = local.assign_public_ip
   target_group_arn   = module.alb.target_group_arn
 
   enable_autoscaling             = true
@@ -233,6 +251,7 @@ module "worker" {
   cluster_id         = module.ecs_cluster.cluster_id
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
+  assign_public_ip   = local.assign_public_ip
 
   enable_autoscaling             = true
   autoscaling_min_capacity       = 1
@@ -274,6 +293,7 @@ module "critical_worker" {
   cluster_id         = module.ecs_cluster.cluster_id
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
+  assign_public_ip   = local.assign_public_ip
 
   enable_autoscaling = false
 }
@@ -304,6 +324,7 @@ module "scheduler" {
   cluster_id         = module.ecs_cluster.cluster_id
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
+  assign_public_ip   = local.assign_public_ip
 
   # See docs/ecs/graceful-shutdown.md — avoids a transient two-instance
   # overlap during deploys for this single-instance service.
@@ -338,6 +359,7 @@ module "migrate" {
   cluster_id         = module.ecs_cluster.cluster_id
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
+  assign_public_ip   = local.assign_public_ip
 }
 
 module "maintenance" {
@@ -369,6 +391,7 @@ module "maintenance" {
   cluster_id         = module.ecs_cluster.cluster_id
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
+  assign_public_ip   = local.assign_public_ip
 }
 
 module "ses_consumer" {
@@ -401,6 +424,7 @@ module "ses_consumer" {
   cluster_id         = module.ecs_cluster.cluster_id
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
+  assign_public_ip   = local.assign_public_ip
   # No target_group_arn — never behind the ALB (not an HTTP service).
 
   enable_autoscaling = false # single long-polling consumer; SQS's own visibility timeout already prevents duplicate concurrent processing of one message.

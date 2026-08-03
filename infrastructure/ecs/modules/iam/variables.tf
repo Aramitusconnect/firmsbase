@@ -2,6 +2,12 @@ variable "name_prefix" {
   type = string
 }
 
+variable "task_execution_role_name" {
+  description = "Null (default) falls back to \"<name_prefix>-task-execution\". See docs/ecs/state-adoption-plan.md §3B — this is a naming fix only; it does not reconcile the live role's AWS-managed-policy-based permission shape with this module's custom-inline-policy shape, which remains a separate human decision."
+  type        = string
+  default     = null
+}
+
 variable "ecr_repository_arn" {
   type = string
 }
