@@ -29,9 +29,11 @@ use App\Models\User;
 use App\Notifications\FirmOwnerInvitationNotification;
 use App\Services\FirmProvisioningService;
 use App\ValueObjects\FirmProvisioningInput;
+use Illuminate\Auth\Passwords\PasswordBroker;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Schema;
@@ -344,6 +346,72 @@ final class FirmProvisioningServiceTest extends TestCase
             PlatformNotificationCorrelation::query()->count(),
             'A firm-owned invitation must never fall back to the platform-scope correlation path.'
         );
+    }
+
+    /**
+     * FIRMSVAULT — REAL STAGING STABILIZATION, Objective A / Phase 3:
+     * dispatchOwnerInvitation() previously caught every Throwable
+     * silently, with no trace anywhere of WHY a send failed. Proves the
+     * fix: a real send failure now produces exactly one structured,
+     * sanitized Log::error() entry — safe category, exception class,
+     * a scrubbed message — and never the token, a signed URL, or the
+     * raw (unredacted) recipient address.
+     */
+    public function test_invitation_failure_is_logged_with_a_safe_category_and_no_pii(): void
+    {
+        Password::shouldReceive('broker')->with('users')->andThrow(
+            new \RuntimeException('AccessDenied: not authorized to perform ses:SendRawEmail on resource arn:aws:ses:us-east-1:603013471426:identity/staging-mail.firmsvault.com')
+        );
+
+        Log::spy();
+
+        $result = $this->service()->provision($this->input(), $this->actor());
+
+        Log::shouldHaveReceived('error')
+            ->once()
+            ->withArgs(function (string $message, array $context) use ($result) {
+                return $message === 'firm_owner_invitation_failed'
+                    && $context['failure_category'] === 'mail_transport_access_denied'
+                    && $context['exception_class'] === \RuntimeException::class
+                    && str_contains($context['owner_email_redacted'], '*')
+                    && ! str_contains($context['owner_email_redacted'], $result->owner->email)
+                    && ! str_contains(json_encode($context), $result->owner->email)
+                    && str_contains($context['exception_message'], 'AccessDenied')
+                    && ! str_contains($context['exception_message'], '@');
+            });
+    }
+
+    /**
+     * FIRMSVAULT REAL STAGING STABILIZATION correction: the request's
+     * own `failure_category` column must carry a safe category on an
+     * invitation failure — an operator reviewing a stuck
+     * FirmProvisioningRequest row should not have to go find the
+     * corresponding log line first. A subsequent successful resend must
+     * clear it back to null.
+     */
+    public function test_invitation_failure_and_recovery_are_reflected_on_the_provisioning_record(): void
+    {
+        // First dispatchOwnerInvitation() call (inside provision()) fails;
+        // the second (inside the resendInvitation() call below) succeeds —
+        // two ordered, single-use expectations on the same facade method.
+        Password::shouldReceive('broker')->with('users')->once()->andThrow(
+            new \RuntimeException('AccessDenied: not authorized to perform ses:SendRawEmail')
+        );
+        Password::shouldReceive('broker')->with('users')->once()->andReturn(
+            tap(\Mockery::mock(PasswordBroker::class), function ($broker) {
+                $broker->shouldReceive('sendResetLink')->once()->andReturn(Password::RESET_LINK_SENT);
+            })
+        );
+
+        $result = $this->service()->provision($this->input(), $this->actor());
+
+        $this->assertSame(FirmProvisioningStatus::InvitationFailed, $result->status);
+        $this->assertSame('mail_transport_access_denied', $result->request->fresh()->failure_category);
+
+        $recovered = $this->service()->resendInvitation($result->firm, $this->actor());
+
+        $this->assertTrue($recovered);
+        $this->assertNull($result->request->fresh()->failure_category);
     }
 
     public function test_resend_invitation_works_without_duplicating_tenant_records(): void
