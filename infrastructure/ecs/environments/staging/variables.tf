@@ -32,6 +32,19 @@ variable "acm_certificate_arn" {
   type        = string
 }
 
+variable "app_url" {
+  description = "Public HTTPS URL used by the staging application for generated links and redirects."
+  type        = string
+
+  validation {
+    condition = (
+      can(regex("^https://[^[:space:]]+$", var.app_url)) &&
+      !endswith(var.app_url, "/")
+    )
+    error_message = "app_url must be an HTTPS URL without whitespace or a trailing slash."
+  }
+}
+
 # --- RDS — existing instance, not created by this mission ------------------
 variable "rds_instance_id" {
   type = string

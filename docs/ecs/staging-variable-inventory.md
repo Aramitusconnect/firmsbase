@@ -49,6 +49,28 @@ variable is named that — see §4 "Material finding 2" of
 | `acm_certificate_arn` | `arn:aws:acm:us-east-1:603013471426:certificate/d56ea11d-4173-4a2d-a6c4-3006f9d86057` | `describe-listeners` (443 cert) | Confirmed |
 | `alb_health_check_path` / `alb_health_check_interval_seconds` / `alb_health_check_matcher` | `/up`, `30`, `200-399` | `describe-target-groups`/`describe-target-group-attributes` (already adopted — see commit `0c81994`) | Confirmed |
 
+### APP_URL — RESOLVED, now modeled
+
+**Previously a real gap, not just an unresolved value**: `APP_URL` appears as
+a plain (non-secret) environment variable on the live web task definition
+(`describe-task-definition` on `firmsbase-staging-web:9`), but had **no
+Terraform representation at all** — no declared variable, no entry in
+`local.shared_environment`. This was first surfaced during the variable
+inventory pass and is now corrected.
+
+| Variable | Resolved value | Source | Status |
+|---|---|---|---|
+| `app_url` | `https://staging.firmsvault.com` | Live web task definition's plain `environment` list (`describe-task-definition`) | Confirmed — **now modeled**: `variable "app_url"` added (required, HTTPS-validated, no default) and wired as `APP_URL = var.app_url` in `local.shared_environment` (`infrastructure/ecs/environments/staging/main.tf`), reaching every role that consumes `local.shared_environment` — web, worker, critical-worker, scheduler, migrate, maintenance, and ses-consumer (all 7). |
+
+**Why this matters**: `APP_URL` is used by the application to generate
+absolute links — password-reset URLs, owner-invitation URLs, redirects, and
+OAuth/webhook callback URLs. Omitting it from a Terraform-managed task
+definition would not fail loudly; it would silently produce incorrect
+generated links pointing at the wrong host (or no host) once any ECS
+task-definition migration adopts Terraform's version instead of the current
+live one. **This correction must merge before any ECS task-definition
+migration or `terraform plan`/`apply` against this environment.**
+
 ### RDS
 
 | Variable | Resolved value | Source | Status |

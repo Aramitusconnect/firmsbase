@@ -18,6 +18,13 @@ alb_ingress_cidr_blocks = ["203.0.113.0/24"] # replace with actual allowed stagi
 
 acm_certificate_arn = "arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/REPLACE_ME"
 
+# Confirmed live staging value (present as a plain APP_URL environment
+# variable on the running web task, previously unmodeled by this config —
+# see docs/ecs/staging-variable-inventory.md). Used for generated links,
+# password-reset/invitation URLs, redirects, and callback URLs — must stay
+# present through any ECS task-definition migration.
+app_url = "https://staging.firmsvault.com"
+
 rds_instance_id       = "REPLACE_ME"
 rds_security_group_id = "sg-REPLACE_ME"
 db_host                = "REPLACE_ME.rds.amazonaws.com"

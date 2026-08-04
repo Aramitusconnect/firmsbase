@@ -127,6 +127,7 @@ locals {
   shared_environment = {
     APP_NAME                = "FirmsBase"
     APP_ENV                 = "staging"
+    APP_URL                 = var.app_url
     APP_DEBUG               = "false"
     APP_MAINTENANCE_DRIVER  = "cache"
     APP_MAINTENANCE_STORE   = "redis"
