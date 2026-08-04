@@ -99,7 +99,7 @@ string interpolation (`"${var.X}:JSON_KEY::"`), while `module.iam`'s
 | `db_password_secret_arn` | `arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/database-app-8NUj2a` | `...database-app-8NUj2a:password::` | `password` |
 | `redis_auth_token_secret_arn` | `arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/redis-auth-token-p6rVKN` | `...redis-auth-token-p6rVKN:REDIS_PASSWORD::` | `REDIS_PASSWORD` |
 | `redis_auth_token` | **[SECRET VALUE — DO NOT DISPLAY]** — see "Secure handling of `redis_auth_token`" below | n/a (consumed directly by `aws_elasticache_replication_group.auth_token`, never by ECS) | n/a |
-| `platform_notifications_recipient_fingerprint_hmac_key_secret_arn` | **Existence unconfirmed** — see "HMAC secret" below | n/a (secret does not yet appear in any live task definition) | n/a |
+| `platform_notifications_recipient_fingerprint_hmac_key_secret_arn` | `arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/platform-notifications-hmac-key-PFBzd3` — **resolved, bare ARN, confirmed via `describe-secret`** | `local.hmac_secret` passes this bare ARN straight through with no derived suffix (unlike the three above) — this secret's internal structure was never inspected (value never retrieved), so no JSON-key selector is assumed | n/a — see "HMAC secret" below |
 
 **Additional live-only finding, out of this mission's scope to fix**: the
 live execution role's inline policy (`FirmsBaseStagingSecretsAccess`) grants
@@ -109,26 +109,75 @@ credential, different from `database-app-8NUj2a`. No Terraform variable,
 module, or other doc currently models this. Not fixed here since it is
 outside this mission's required-work list.
 
-### HMAC secret
+### HMAC secret — RESOLVED 2026-08-03
 
-**Existence is unconfirmed — not confirmed absent.** Two live signals are
-consistent with non-existence (the live web task definition's `secrets` list
-has no `PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY` entry, and the
-live execution role's IAM policy lists only 4 secret ARNs, none HMAC-related),
-but `secretsmanager:ListSecrets` and a direct `describe-secret` sweep were
-never available to this operator, and the secret's exact name (if it exists)
-would carry an unguessable random suffix like the other three secrets do. The
-correct classification is **unconfirmed**, not "does not exist" — a stronger
-claim than the evidence supports. Until confirmed one way or the other by
-someone with `secretsmanager:ListSecrets` (or equivalent) access, treat this
-as a **blocker**: do not assume it needs creating, and do not assume it
-already exists.
+**Created and independently confirmed.** An operator with the necessary
+Secrets Manager access created the secret outside this session (this
+operator's own attempt was blocked — see history below) and supplied its
+bare ARN back to this thread. That ARN was then independently verified via
+a targeted, read-only `aws secretsmanager describe-secret` call — **the
+value was never retrieved or displayed**:
 
-### Alarms / SNS
+- **Bare ARN**: `arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/platform-notifications-hmac-key-PFBzd3`
+- **Name**: `firmsbase/staging/platform-notifications-hmac-key` — matches the
+  naming convention already documented in
+  [env.ecs.example](env.ecs.example).
+- **KMS key**: the default AWS-managed Secrets Manager key (`KmsKeyId` was
+  `null` in the `describe-secret` response, meaning no customer-managed key
+  is in use).
+- **Deletion status**: not scheduled for deletion (`DeletedDate` was `null`).
+
+This resolves the previously open question — earlier in this same
+investigation thread, two live signals were consistent with non-existence
+(the live web task definition's `secrets` list had no
+`PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY` entry, and the live
+execution role's IAM policy listed only 4 unrelated secret ARNs), but
+`secretsmanager:ListSecrets` was never available to this operator, so the
+secret's actual existence could only be classified as **unconfirmed**, never
+"does not exist." That gap is now closed by the direct `describe-secret`
+confirmation above, not by inference.
+
+**No longer a blocker.**
+
+### Alarms / SNS — RESOLVED 2026-08-03
+
+The paging decision [alarm-inventory.md](alarm-inventory.md) and
+[staging-readiness-report.md](staging-readiness-report.md) §5 flagged as
+required has been made: alerts page `firmsvault@gmail.com`.
 
 | Variable | Resolved value | Status |
 |---|---|---|
-| `alarm_sns_topic_arn` | Does not exist yet — [alarm-inventory.md](alarm-inventory.md) and [staging-readiness-report.md](staging-readiness-report.md) §5 both explicitly state this branch never creates the SNS topic; who gets paged is a separate operational decision. | Confirmed absent (a documented decision, not a permission artifact) — **blocker** pending that decision + topic creation |
+| `alarm_sns_topic_arn` | `arn:aws:sns:us-east-1:603013471426:firmsbase-staging-alarms` | Resolved — **no longer a blocker** |
+
+**Important — topic ARN vs. subscription ARN**: the ARN above is the
+**topic** ARN. A separate, UUID-suffixed ARN
+(`arn:aws:sns:us-east-1:603013471426:firmsbase-staging-alarms:cc3e0e25-390b-44fa-b0db-ef2d96dda4e4`)
+identifies the *subscription* to that topic, not the topic itself — SNS
+topic ARNs never carry a trailing UUID; subscription ARNs always do once
+confirmed. `alarm_sns_topic_arn` must always resolve to the topic ARN above,
+never the subscription ARN.
+
+**Subscription**:
+
+| Field | Value |
+|---|---|
+| Endpoint | `firmsvault@gmail.com` |
+| Protocol | `email` |
+| Status | **Confirmed** |
+
+**Verification provenance** — stated accurately, not overclaimed: the topic
+ARN, subscription endpoint, and confirmed status above were supplied by an
+operator with SNS access (via the administrator console), not independently
+verified by this operator. This operator's own `sns:GetTopicAttributes`,
+`sns:GetSubscriptionAttributes`, and `sns:ListSubscriptionsByTopic` calls are
+all denied (`AuthorizationError` — this operator has no SNS read permission
+at all, the same gap that blocked topic creation in the first place). The
+reported values are structurally consistent with real SNS ARN formats and
+with SNS's documented subscription-confirmation behavior (a subscription ARN
+only resolves to a real UUID-suffixed value, rather than the literal string
+`"PendingConfirmation"`, once the recipient has clicked the confirmation
+link) — but this document is not claiming independent AWS-side confirmation
+of the SNS side the way the HMAC secret section above can.
 
 ### SES / SQS
 
@@ -185,12 +234,12 @@ in the shell for each `import`/`plan`/`apply` invocation. See
 None of these block **Phase A2** itself (security groups, ALB, listeners) —
 every A2-relevant variable is fully confirmed. They block later phases:
 
-1. HMAC secret existence must be confirmed (by someone with
-   `secretsmanager:ListSecrets` access) or created via a separate approved
-   AWS step.
-2. `alarm_sns_topic_arn` needs a human paging decision, then topic creation.
-3. `elasticache_engine_version` must actually be set to `"7.2"` (major.minor
+1. `elasticache_engine_version` must actually be set to `"7.2"` (major.minor
    only — not `"7.2.6"`, which AWS's own provider validation rejects for
    Redis v6+/Valkey) in whatever `terraform.tfvars` is eventually created
    (the variable now exists and is wired — see above — but still defaults
    to `"7.1"`).
+
+Resolved as of 2026-08-03 (previously listed here): the HMAC secret's
+existence and `alarm_sns_topic_arn` — see "HMAC secret" and "Alarms / SNS"
+above.

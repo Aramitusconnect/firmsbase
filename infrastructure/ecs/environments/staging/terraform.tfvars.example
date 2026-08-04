@@ -41,7 +41,11 @@ redis_auth_token_secret_arn   = "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:sec
 # `-var="redis_auth_token=$(aws secretsmanager get-secret-value ...)"` at
 # plan/apply time instead.
 
-alarm_sns_topic_arn = "arn:aws:sns:us-east-1:ACCOUNT_ID:REPLACE_ME"
+# Resolved 2026-08-03: topic created and an email subscription to
+# firmsvault@gmail.com confirmed. This is the TOPIC ARN — never the
+# subscription ARN (which carries a trailing UUID after the topic name;
+# SNS topic ARNs never do). See docs/ecs/staging-variable-inventory.md.
+alarm_sns_topic_arn = "arn:aws:sns:us-east-1:603013471426:firmsbase-staging-alarms"
 
 enable_custom_metric_alarms = false
 
@@ -67,11 +71,13 @@ ses_events_dlq_arn   = "arn:aws:sqs:us-east-1:ACCOUNT_ID:firmsvault-staging-ses-
 ses_sending_identity_arn    = "arn:aws:ses:us-east-1:ACCOUNT_ID:identity/staging-mail.firmsvault.com"
 ses_authorized_from_address = "no-reply@staging-mail.firmsvault.com"
 
-# Generate this secret OUTSIDE Terraform (e.g. `aws secretsmanager
-# create-secret` from a value produced by
-# `php artisan tinker --execute="echo bin2hex(random_bytes(32));"`) and
-# supply only its ARN here — never the value itself.
-platform_notifications_recipient_fingerprint_hmac_key_secret_arn = "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:firmsbase/staging/platform-notifications-hmac-key-REPLACE_ME"
+# Resolved 2026-08-03: created OUTSIDE Terraform via a server-side-generated
+# value (never handled locally or by Terraform). Bare ARN only — never the
+# value itself. Confirmed independently via `aws secretsmanager
+# describe-secret` (ARN/Name only, value never retrieved): uses the default
+# AWS-managed Secrets Manager KMS key, not scheduled for deletion. See
+# docs/ecs/staging-variable-inventory.md.
+platform_notifications_recipient_fingerprint_hmac_key_secret_arn = "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/platform-notifications-hmac-key-PFBzd3"
 
 # Consumer tuning — safe defaults already match config/services.php's own
 # env() fallbacks; only listed here for visibility/override.
