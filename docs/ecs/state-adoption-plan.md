@@ -474,28 +474,21 @@ was written for it" as equivalent to "Terraform cannot touch it."
    the review — see the script's own header for its exact checks and
    documented bypass limitation), never the bare `terraform` binary.
 
-### Phase A2 — resources proven configuration-equivalent (`import_unchanged`, 10 addresses)
+### Phase A2 — resources proven configuration-equivalent (`import_unchanged`, 6 addresses)
 
-Security groups (`alb`, `ecs_tasks`, `redis`) and their field-matching
-rules, the ALB itself + both listeners. **All 10 addresses now have a
-resolved import ID in the manifest — none remain `"BLOCKED"`.** Execution
-status as of 2026-08-04 (see §9.10 for full detail):
+Security groups (`alb`, `ecs_tasks`, `redis`), the ALB itself, and both
+listeners — no field drift of any kind against live. **All six have
+already been imported** into the live backend
+(`environments/staging/ecs/terraform.tfstate`) as of 2026-08-04.
 
-- **Six already imported** into the live backend
-  (`environments/staging/ecs/terraform.tfstate`): the 3 security groups,
-  the ALB, and both listeners.
-- **Four rule imports resolved but not yet run** — pending repository
-  review and merge of the manifest correction that resolved their
-  Terraform composite import IDs:
+The four SG *rule* addresses that were originally scoped alongside these
+six (see history below) are **not** part of this phase's `import_unchanged`
+count — they carry a real field drift (description) and are classified
+`import_then_migrate`; see Phase A3 below.
 
-  - `module.security_groups.aws_security_group_rule.alb_ingress_https`
-  - `module.security_groups.aws_security_group_rule.ecs_tasks_ingress_from_alb`
-  - `module.security_groups.aws_security_group_rule.rds_ingress_from_ecs_tasks[0]`
-  - `module.elasticache.aws_security_group_rule.redis_ingress_from_ecs_tasks`
-
-The target group (`module.alb.aws_lb_target_group.web`) is **not** in this
-phase — it has three real health-check-field mismatches against live
-(§9.5) and has been moved to Phase A3 (`import_then_migrate`) below.
+The target group (`module.alb.aws_lb_target_group.web`) is also **not**
+in this phase — it has three real health-check-field mismatches against
+live (§9.5) and was moved to Phase A3 in an earlier revision.
 
 ```bash
 # --- already imported (2026-08-04) ---
@@ -511,17 +504,63 @@ terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.alb.aws_lb_listener.https' 'arn:aws:elasticloadbalancing:us-east-1:603013471426:listener/app/firmsbase-staging-alb/79a16ccaf391d71b/f8dc4575154478ca'
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.alb.aws_lb_listener.http_redirect' 'arn:aws:elasticloadbalancing:us-east-1:603013471426:listener/app/firmsbase-staging-alb/79a16ccaf391d71b/371edb36d1b49e2c'
+```
 
-# --- resolved, NOT yet imported — pending repository review and merge ---
-# aws_security_group_rule (the legacy per-rule resource) does not accept its
-# AWS-internal SecurityGroupRuleId (sgr-*) as a Terraform import ID. It
-# requires a composite identifier the provider constructs itself:
+**History**: these six addresses, plus the four SG-rule addresses now in
+Phase A3, were originally grouped together as "Phase A2" — a single
+execution batch of low-risk, security-group-related resources. A
+2026-08-04 correction found the four rules do **not** field-match live
+exactly (description drift — see Phase A3) and reclassified them
+`import_then_migrate`, moving their manifest entries and import commands
+into Phase A3's listing. They are still referred to informally as
+"the Phase A2 rules" in this document for historical continuity, but the
+manifest's `import_unchanged` count for Phase A2 itself is now 6, not 10.
+
+### Phase A3 — resources requiring a temporary live-state-compatible configuration first (`import_then_migrate`, 16 addresses)
+
+**Every command below is BLOCKED until its named code fix/decision lands,
+EXCEPT the four SG-rule imports immediately following this paragraph** —
+those four are importable now (their identity-defining fields already
+match live exactly and their composite import IDs are resolved); they are
+`import_then_migrate` only because of a description-only field drift, not
+because anything blocks the import itself. Every other command in this
+phase remains genuinely blocked; none of these are guesses, each is
+marked in the manifest with an explicit `prerequisite` field.
+
+```bash
+# --- importable now (2026-08-04) — description-drift only, NOT blocked ---
+# These four were originally scoped as "Phase A2" (see that section's
+# History note) and moved here because they do not field-match live
+# exactly: every identity-defining field (ingress direction, protocol,
+# ports, destination security group, and CIDR/referenced source security
+# group) matches live uniquely and exactly, but the live rule's
+# Description is null while this configuration sets an explicit
+# description string on each. Importing records the live rule's current
+# fields (including its null description) into state; it does NOT
+# authorize changing the description or any other subsequent apply. The
+# exact provider action Terraform would take to reconcile that
+# description drift (in-place update vs. replacement vs. something else)
+# has NOT been verified by a real `terraform plan` in this pass — no
+# plan/apply is authorized during state adoption. Reconciling the drift
+# is a separate decision, to be made only after these imports and a
+# complete drift analysis across all four rules; if a future plan
+# proposes REPLACING rather than updating any of these four, that is a
+# stop condition requiring explicit human review before either import or
+# apply proceeds — nothing here authorizes that.
+#
+# aws_security_group_rule (the legacy per-rule resource) does not accept
+# its AWS-internal SecurityGroupRuleId (sgr-*) as a Terraform import ID.
+# It requires a composite identifier the provider constructs itself:
 #   <security_group_id>_<type>_<protocol>_<from_port>_<to_port>_<source>
 # where <source> is either a CIDR block or a referenced security-group ID.
 # The AWS sgr-* ID is recorded separately in import-manifest.json
 # (`live_reference`) purely for audit traceability — it is not usable as
 # the import ID itself. Any argument containing a CIDR (a "/") must be
 # shell-quoted.
+#
+# This mission does not migrate these four resources to
+# aws_vpc_security_group_ingress_rule — that would change their Terraform
+# addresses and expand scope beyond this correction.
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.security_groups.aws_security_group_rule.alb_ingress_https' \
   'sg-02a26ff122a9a1d29_ingress_tcp_443_443_0.0.0.0/0'
@@ -538,24 +577,14 @@ terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.elasticache.aws_security_group_rule.redis_ingress_from_ecs_tasks' \
   'sg-0da3ea50262a9d20d_ingress_tcp_6379_6379_sg-0db14e50ea5c5466c'
   # AWS SecurityGroupRuleId: sgr-0d4fcba591950afde
-# --- plan checkpoint: MUST show zero destroy/replace, and MUST show zero
-# unexpected create actions (every resource this checkpoint's plan proposes
-# to create must be one this document already classified `new` — anything
-# else is a sign an earlier step was skipped or misordered; stop and
-# re-diagnose rather than apply). All four rule imports above have a
-# description-only diff expected on the following plan (live Description is
-# null; config sets an explicit description) — description is not a
-# ForceNew attribute on aws_security_group_rule, so this is a benign
-# update-in-place, not a replacement. ---
-```
+# --- plan checkpoint (for the four rule imports above only): MUST show
+# zero unexpected destroy/replace. A description-only diff on next plan is
+# EXPECTED (live Description is null; config sets an explicit string) —
+# but whether Terraform proposes that as an update or a replace has not
+# been verified live in this pass; if it proposes replace, STOP and get
+# human review before applying anything. ---
 
-### Phase A3 — resources requiring a temporary live-state-compatible configuration first (`import_then_migrate`, 12 addresses)
-
-**Every command below is BLOCKED until its named code fix/decision lands**
-— none of these are guesses; each is marked in the manifest with an
-explicit `prerequisite` field.
-
-```bash
+# --- everything below remains genuinely BLOCKED ---
 # Requires: main.tf's ecr_repository_name resolves to "firmsbase-staging" (now wired via var.ecr_repository_name — see §6/§9.5 of variables.tf)
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.ecr.aws_ecr_repository.app' 'firmsbase-staging'
@@ -881,24 +910,26 @@ have been run against the live S3 backend
   entries** (the data-source entries — `aws_vpc`, 4× `aws_subnet`, 4×
   `aws_iam_policy_document` — are read-only cache artifacts of Terraform
   evaluating the whole configuration graph during `import`, per point 3
-  above; they are not separately-managed resources and are not counted
-  against Phase A2's 10 addresses).
-- The 6 already-imported managed resources: `module.security_groups.aws_security_group.alb`,
+  above; they are not separately-managed resources).
+- The 6 already-imported managed resources — now Phase A2's full
+  `import_unchanged` set (§8) — are: `module.security_groups.aws_security_group.alb`,
   `module.security_groups.aws_security_group.ecs_tasks`,
   `module.elasticache.aws_security_group.redis`, `module.alb.aws_lb.this`,
   `module.alb.aws_lb_listener.https`,
   `module.alb.aws_lb_listener.http_redirect`.
-- The remaining 4 Phase A2 addresses (all `aws_security_group_rule`) now
-  have a resolved Terraform composite import ID in
-  `import-manifest.json` (no longer `"BLOCKED"`), confirmed against a
-  live, read-only `aws ec2 describe-security-group-rules` query with
-  exactly one matching rule per address — see §8's Phase A2 listing above
+- The remaining 4 originally-"Phase A2" addresses (all
+  `aws_security_group_rule`) now have a resolved Terraform composite
+  import ID in `import-manifest.json` (no longer `"BLOCKED"`), confirmed
+  against a live, read-only `aws ec2 describe-security-group-rules` query
+  with exactly one matching rule per address — see §8's Phase A3 listing
   and each address's manifest entry for the full field comparison. **They
   have not been imported.** That import run is pending repository review
-  and merge of the manifest correction that resolved these IDs.
+  and merge of the manifest correction that resolved these IDs. See §9.11
+  for why they are classified `import_then_migrate`, not
+  `import_unchanged`.
 - `aws_security_group_rule` uses a provider-constructed composite import
   identifier, not the AWS-internal `SecurityGroupRuleId` (`sgr-*`) — see
-  the explanatory comment in §8's Phase A2 command block. Each of the 4
+  the explanatory comment in §8's Phase A3 command block. Each of the 4
   manifest entries records both: `live_reference` holds the `sgr-*` ID
   (audit traceability only, not usable as an import ID) and `import_id`
   holds the actual composite string to pass to `terraform import`.
@@ -908,6 +939,61 @@ have been run against the live S3 backend
   correction only adds Terraform config/manifest/documentation content,
   it runs no `state rm`/`mv`/`push`/`pull` and no lifecycle operation
   against the backend's object versions.
+
+### 9.11 Phase A2 rule classification correction — description drift, not field-equivalence (2026-08-04)
+
+§9.10 (and the manifest, as originally written by the pass that resolved
+the four rules' import IDs) claimed the four `aws_security_group_rule`
+imports were `import_unchanged` and that their live-vs-config description
+mismatch was "a non-disruptive update-in-place diff only, not a
+replacement," citing that `description` is "not a ForceNew attribute on
+`aws_security_group_rule`." **That claim was unsupported and has been
+removed.** No real `terraform plan`/`providers schema` was ever run
+against this resource in this pass to confirm how the AWS provider
+actually handles a description-only diff on `aws_security_group_rule` —
+asserting a specific reconciliation behavior (update-in-place vs.
+replacement) without having verified it live is exactly the kind of
+unverified claim this plan's own validation table (§10) explicitly labels
+"not run" for provider-schema checks elsewhere. The claim is corrected as
+follows:
+
+1. **What is actually proven, read-only, for all four rules:** every
+   identity-defining field — ingress direction, protocol, from/to port,
+   destination security group, and CIDR/referenced source security group —
+   matches live uniquely and exactly. That is a real, verified basis for
+   importing: `terraform import` only requires identity to match to
+   succeed; it does not require every attribute to match.
+2. **What is real drift, not proven safe:** the live rule's `Description`
+   is `null` on all four; this configuration sets an explicit description
+   string on each. This is a genuine field mismatch.
+3. **What is NOT claimed:** whether the AWS provider would reconcile that
+   description mismatch via an in-place update, a resource replacement,
+   or something else. That has not been verified by a real `terraform
+   plan` and is not asserted here.
+4. **Classification, corrected:** all four addresses are `import_then_migrate`,
+   not `import_unchanged` — manifest totals corrected to
+   `new: 66, import_unchanged: 6, import_then_migrate: 16, do_not_import: 6,
+   total: 94`.
+5. **What importing does and does not authorize:** running these four
+   imports (once approved) records the live rules' current fields —
+   including their `null` description — into Terraform state. It does
+   **not** authorize any subsequent `apply` that would change the
+   description or anything else; no apply is authorized during state
+   adoption at all (§9.9 point 1, §10). Reconciling the description drift
+   is a separate, later decision requiring a complete drift analysis
+   across all four rules and explicit review — not assumed or pre-approved
+   here.
+6. **Stop condition:** if a future, properly-authorized `plan` against any
+   of these four proposes a **replacement** rather than an in-place
+   update, that is a stop condition requiring explicit human review before
+   either import or apply proceeds. Nothing in this document authorizes
+   proceeding past that point automatically.
+7. **Not in scope for this correction:** migrating these four resources to
+   `aws_vpc_security_group_ingress_rule` (the newer per-rule resource
+   type) is a real alternative that would let description drift reconcile
+   differently, but it changes Terraform addresses and is out of scope
+   here — it would need its own explicit, reviewed migration, not a
+   byproduct of a classification fix.
 
 ## 10. Validation performed (local/static only)
 

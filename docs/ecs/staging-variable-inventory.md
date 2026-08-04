@@ -305,23 +305,40 @@ granted**. Current status:
    (the variable now exists and is wired — see above — but still defaults
    to `"7.1"`). This one only blocks Phase A3 (ElastiCache), not A2.
 
-**Six of Phase A2's ten `import_unchanged` resources are already imported**
+**Phase A2's six `import_unchanged` resources are already imported**
 into the live backend (`environments/staging/ecs/terraform.tfstate`): the
 3 security groups, the ALB, and both listeners. State currently contains
 6 managed resources plus 9 read-only data-source cache entries (not
 separately-managed resources — see state-adoption-plan.md §9.10).
 
-**The remaining four Phase A2 addresses (all `aws_security_group_rule`)
-now have a resolved Terraform composite import ID** — recorded in
-`import-manifest.json`, no longer `"BLOCKED"` — confirmed against a live,
-read-only rule query with exactly one matching rule per address.
-`aws_security_group_rule` requires a provider-constructed composite
-identifier (`<sg-id>_<type>_<protocol>_<from-port>_<to-port>_<source>`),
-not the AWS-internal `SecurityGroupRuleId` (`sgr-*`), which is recorded
-separately in each manifest entry's `live_reference` field for audit
-traceability only. **These four have not been imported yet** — that
-import run is pending repository review and merge of the manifest
-correction that resolved their IDs.
+**The remaining four originally-"Phase A2" addresses (all
+`aws_security_group_rule`) now have a resolved Terraform composite import
+ID** — recorded in `import-manifest.json`, no longer `"BLOCKED"` —
+confirmed against a live, read-only rule query with exactly one matching
+rule per address. `aws_security_group_rule` requires a
+provider-constructed composite identifier
+(`<sg-id>_<type>_<protocol>_<from-port>_<to-port>_<source>`), not the
+AWS-internal `SecurityGroupRuleId` (`sgr-*`), which is recorded separately
+in each manifest entry's `live_reference` field for audit traceability
+only. **These four have not been imported yet** — that import run is
+pending repository review and merge of the manifest correction that
+resolved their IDs.
+
+**Classification correction (2026-08-04, see
+[state-adoption-plan.md §9.11](state-adoption-plan.md)):** these four are
+classified `import_then_migrate`, not `import_unchanged` — every
+identity-defining field (direction, protocol, ports, destination group,
+CIDR/referenced source) matches live uniquely, but each rule's live
+`Description` is `null` against an explicit description string in
+config. Importing them, once approved, records the live rule's fields —
+including the `null` description — into state; it does not authorize
+changing the description or any other apply. Whether the provider would
+reconcile that description drift via an in-place update or a replacement
+has not been verified by a real `terraform plan` in this pass and is not
+claimed either way; a proposed replacement is a stop condition requiring
+human review. Manifest totals are now
+`new: 66, import_unchanged: 6, import_then_migrate: 16, do_not_import: 6,
+total: 94`.
 
 Resolved as of 2026-08-03 (previously listed here): the HMAC secret's
 existence and `alarm_sns_topic_arn` — see "HMAC secret" and "Alarms / SNS"

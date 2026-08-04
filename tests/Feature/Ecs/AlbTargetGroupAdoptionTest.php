@@ -170,14 +170,20 @@ class AlbTargetGroupAdoptionTest extends TestCase
         }
     }
 
-    public function test_manifest_summary_totals_are_exactly_66_10_12_6_94(): void
+    public function test_manifest_summary_totals_are_exactly_66_6_16_6_94(): void
     {
         $manifest = $this->importManifest();
         $summary = $manifest['summary'];
 
+        // import_unchanged/import_then_migrate shifted from 10/12 to 6/16
+        // on 2026-08-04 when four aws_security_group_rule addresses were
+        // reclassified for description drift — see
+        // docs/ecs/state-adoption-plan.md §9.11. This target group's own
+        // classification (import_then_migrate) and totals-sum invariant are
+        // unaffected by that correction.
         $this->assertSame(66, $summary['new']);
-        $this->assertSame(10, $summary['import_unchanged']);
-        $this->assertSame(12, $summary['import_then_migrate']);
+        $this->assertSame(6, $summary['import_unchanged']);
+        $this->assertSame(16, $summary['import_then_migrate']);
         $this->assertSame(6, $summary['do_not_import']);
         $this->assertSame(94, $summary['total']);
     }
@@ -203,7 +209,10 @@ class AlbTargetGroupAdoptionTest extends TestCase
         $this->assertNotEmpty($matches, 'Could not locate the Phase A2 section.');
         $phaseA2 = $matches[0];
 
-        $this->assertStringContainsString('10 addresses', $phaseA2, 'Phase A2 heading must declare 10 addresses, not 11.');
+        // Phase A2 shrank from 10 to 6 addresses on 2026-08-04 when four
+        // aws_security_group_rule addresses were reclassified for
+        // description drift — see docs/ecs/state-adoption-plan.md §9.11.
+        $this->assertStringContainsString('6 addresses', $phaseA2, 'Phase A2 heading must declare 6 addresses.');
 
         preg_match('/```bash(.*?)```/s', $phaseA2, $codeBlock);
         $this->assertNotEmpty($codeBlock, 'Could not locate the Phase A2 import command block.');
@@ -222,7 +231,9 @@ class AlbTargetGroupAdoptionTest extends TestCase
         $this->assertNotEmpty($matches, 'Could not locate the Phase A3 section.');
         $phaseA3 = $matches[0];
 
-        $this->assertStringContainsString('12 addresses', $phaseA3, 'Phase A3 heading must declare 12 addresses, not 11.');
+        // Phase A3 grew from 12 to 16 addresses on 2026-08-04 for the same
+        // reclassification — see docs/ecs/state-adoption-plan.md §9.11.
+        $this->assertStringContainsString('16 addresses', $phaseA3, 'Phase A3 heading must declare 16 addresses.');
         $this->assertStringContainsString('module.alb.aws_lb_target_group.web', $phaseA3);
         $this->assertStringContainsString('alb_health_check_path', $phaseA3);
         $this->assertStringContainsString('alb_health_check_interval_seconds', $phaseA3);
