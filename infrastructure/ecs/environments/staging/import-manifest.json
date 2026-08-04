@@ -1,5 +1,5 @@
 {
-  "_comment": "Identifiers only - no credentials or secret values. See docs/ecs/state-adoption-plan.md for full context, ordering, and preconditions. Nothing in this file has been imported; it is a reference manifest for Phase A execution, not a record of work done. Every resource address parsed from infrastructure/ecs/environments/staging and its child modules appears exactly once below. CORRECTION (see state-adoption-plan.md section 9.9): a real canary import attempt (module.security_groups.aws_security_group.alb) confirmed that terraform import evaluates enough of the whole configuration graph that ec2:DescribeVpcAttribute on vpc-0fd81b688155ded2b is required for every import, not merely the four SG-rule addresses already marked BLOCKED for ec2:DescribeSecurityGroupRules - none of the classifications below change as a result (all six executable Phase A2 addresses genuinely are import_unchanged), but none of them can actually be imported until this additional permission is granted. The backend prefix remains completely empty and no import has yet succeeded.",
+  "_comment": "Identifiers only - no credentials or secret values. See docs/ecs/state-adoption-plan.md for full context, ordering, and preconditions. Every resource address parsed from infrastructure/ecs/environments/staging and its child modules appears exactly once below. STATUS (see state-adoption-plan.md section 9.9, 9.10, 9.11): ec2:DescribeVpcAttribute and ec2:DescribeSecurityGroupRules are both now granted. Six of Phase A2's ten resources (the import_unchanged security groups, the ALB, and both listeners) have actually been imported into the live backend (environments/staging/ecs/terraform.tfstate) as of 2026-08-04: module.security_groups.aws_security_group.alb, module.security_groups.aws_security_group.ecs_tasks, module.elasticache.aws_security_group.redis, module.alb.aws_lb.this, module.alb.aws_lb_listener.https, module.alb.aws_lb_listener.http_redirect. The remaining four Phase A2 addresses (the aws_security_group_rule resources) are classified import_then_migrate, not import_unchanged: every identity-defining field (protocol, ports, source, destination group, direction) matches live uniquely and exactly, and their Terraform composite import IDs are resolved (see each entry's notes field) \u2014 but each has a live Description of null against an explicit description string in config, and the exact provider action for reconciling that drift has not been verified by a real plan. None of these four has been imported yet \u2014 that import run is pending repository review and merge of this correction. Importing them, if/when it happens, records the live rules into state; it does not authorize any description change or other apply. No other resource in this manifest (new/do_not_import) has been imported or modified.",
   "generated_from_account": "603013471426",
   "generated_from_region": "us-east-1",
   "counting_methodology": {
@@ -18,8 +18,8 @@
   },
   "summary": {
     "new": 66,
-    "import_then_migrate": 12,
-    "import_unchanged": 10,
+    "import_then_migrate": 16,
+    "import_unchanged": 6,
     "do_not_import": 6,
     "total": 94
   },
@@ -89,11 +89,11 @@
     },
     {
       "address": "module.security_groups.aws_security_group_rule.alb_ingress_https",
-      "classification": "import_unchanged",
-      "import_id": "BLOCKED",
-      "prerequisite": "Exact SecurityGroupRuleId unresolved: ec2:DescribeSecurityGroupRules was AccessDenied for this operator. Live rule (443 ingress from configured CIDRs) exists and field-matches; resolve the rule ID with elevated read access before running the import.",
-      "live_reference": null,
-      "notes": "Field content confirmed matching live (443/tcp ingress from 0.0.0.0/0, matching var.alb_ingress_cidr_blocks intent) via aws_security_group ingress listing; only the AWS-internal rule ID is unresolved.",
+      "classification": "import_then_migrate",
+      "import_id": "sg-02a26ff122a9a1d29_ingress_tcp_443_443_0.0.0.0/0",
+      "prerequisite": "Importable now \u2014 protocol/ports/source/destination-group/direction match uniquely and exactly, and the composite import ID is resolved (see notes). Not import_unchanged because of description drift (live Description is null; config sets an explicit string). Import records the live rule's current fields into state; it does NOT approve any subsequent description change. Any reconciliation of this drift (including confirming via a real plan whether it is update-in-place or would force replacement) must be reviewed separately, after the import itself and a complete drift analysis across all four rules \u2014 not assumed here. If a future plan proposes replacing rather than updating any of these four rules, that is a stop condition requiring explicit human review before either import or apply proceeds; nothing in this manifest authorizes that.",
+      "live_reference": "sgr-0c01cb5ed9c2ade63",
+      "notes": "Live rule confirmed via read-only aws ec2 describe-security-group-rules on 2026-08-04 (AWS SecurityGroupRuleId sgr-0c01cb5ed9c2ade63): ingress, tcp, 443-443, CidrIpv4 0.0.0.0/0. Every identity-defining field matches uniquely and exactly: ingress direction, protocol, from/to port, destination security group (sg-02a26ff122a9a1d29 (ALB)), and source (CIDR or referenced security group). Exactly one live rule matches this Terraform address; no ambiguity. DRIFT: live Description is null; config specifies \"HTTPS from allowed staging access ranges\". This description drift is why this entry is import_then_migrate, not import_unchanged \u2014 the exact provider action AWS/Terraform would take to reconcile a description-only diff on this resource has not been verified by a real `terraform plan` in this pass (no plan/apply is authorized during state adoption), so no claim is made here about whether reconciliation is update-in-place, requires replacement, or something else. Terraform composite import ID (distinct from the AWS-internal sgr-* ID, which cannot be passed to `terraform import` for the legacy aws_security_group_rule resource) is sg-02a26ff122a9a1d29_ingress_tcp_443_443_0.0.0.0/0 \u2014 must be shell-quoted when used as a literal argument because it contains a CIDR slash.",
       "live_existence_confirmed": true
     },
     {
@@ -107,11 +107,11 @@
     },
     {
       "address": "module.security_groups.aws_security_group_rule.ecs_tasks_ingress_from_alb",
-      "classification": "import_unchanged",
-      "import_id": "BLOCKED",
-      "prerequisite": "Same ec2:DescribeSecurityGroupRules AccessDenied as above.",
-      "live_reference": null,
-      "notes": "Field content confirmed matching live (8080/tcp ingress from ALB SG) via aws_security_group ingress listing.",
+      "classification": "import_then_migrate",
+      "import_id": "sg-0db14e50ea5c5466c_ingress_tcp_8080_8080_sg-02a26ff122a9a1d29",
+      "prerequisite": "Importable now \u2014 protocol/ports/source/destination-group/direction match uniquely and exactly, and the composite import ID is resolved (see notes). Not import_unchanged because of description drift (live Description is null; config sets an explicit string). Import records the live rule's current fields into state; it does NOT approve any subsequent description change. Any reconciliation of this drift (including confirming via a real plan whether it is update-in-place or would force replacement) must be reviewed separately, after the import itself and a complete drift analysis across all four rules \u2014 not assumed here. If a future plan proposes replacing rather than updating any of these four rules, that is a stop condition requiring explicit human review before either import or apply proceeds; nothing in this manifest authorizes that.",
+      "live_reference": "sgr-0d10f5fbc9e17c912",
+      "notes": "Live rule confirmed via read-only aws ec2 describe-security-group-rules on 2026-08-04 (AWS SecurityGroupRuleId sgr-0d10f5fbc9e17c912): ingress, tcp, 8080-8080, ReferencedGroupId sg-02a26ff122a9a1d29 (ALB). Every identity-defining field matches uniquely and exactly: ingress direction, protocol, from/to port, destination security group (sg-0db14e50ea5c5466c (ECS tasks)), and source (CIDR or referenced security group). Exactly one live rule matches this Terraform address; no ambiguity. DRIFT: live Description is null; config specifies \"ALB to web task container port\". This description drift is why this entry is import_then_migrate, not import_unchanged \u2014 the exact provider action AWS/Terraform would take to reconcile a description-only diff on this resource has not been verified by a real `terraform plan` in this pass (no plan/apply is authorized during state adoption), so no claim is made here about whether reconciliation is update-in-place, requires replacement, or something else. Terraform composite import ID (distinct from the AWS-internal sgr-* ID, which cannot be passed to `terraform import` for the legacy aws_security_group_rule resource) is sg-0db14e50ea5c5466c_ingress_tcp_8080_8080_sg-02a26ff122a9a1d29.",
       "live_existence_confirmed": true
     },
     {
@@ -134,11 +134,11 @@
     },
     {
       "address": "module.security_groups.aws_security_group_rule.rds_ingress_from_ecs_tasks[0]",
-      "classification": "import_unchanged",
-      "import_id": "BLOCKED",
-      "prerequisite": "Same ec2:DescribeSecurityGroupRules AccessDenied as above.",
-      "live_reference": null,
-      "notes": "Field content confirmed matching live: RDS SG sg-0d4c5eedb2ee21743 already has exactly this rule (5432/tcp ingress from ECS-tasks SG).",
+      "classification": "import_then_migrate",
+      "import_id": "sg-0d4c5eedb2ee21743_ingress_tcp_5432_5432_sg-0db14e50ea5c5466c",
+      "prerequisite": "Importable now \u2014 protocol/ports/source/destination-group/direction match uniquely and exactly, and the composite import ID is resolved (see notes). Not import_unchanged because of description drift (live Description is null; config sets an explicit string). Import records the live rule's current fields into state; it does NOT approve any subsequent description change. Any reconciliation of this drift (including confirming via a real plan whether it is update-in-place or would force replacement) must be reviewed separately, after the import itself and a complete drift analysis across all four rules \u2014 not assumed here. If a future plan proposes replacing rather than updating any of these four rules, that is a stop condition requiring explicit human review before either import or apply proceeds; nothing in this manifest authorizes that.",
+      "live_reference": "sgr-00039246ff540e217",
+      "notes": "Live rule confirmed via read-only aws ec2 describe-security-group-rules on 2026-08-04 (AWS SecurityGroupRuleId sgr-00039246ff540e217): ingress, tcp, 5432-5432, ReferencedGroupId sg-0db14e50ea5c5466c (ECS tasks). Every identity-defining field matches uniquely and exactly: ingress direction, protocol, from/to port, destination security group (sg-0d4c5eedb2ee21743 (RDS)), and source (CIDR or referenced security group). Exactly one live rule matches this Terraform address; no ambiguity. DRIFT: live Description is null; config specifies \"ECS tasks to RDS PostgreSQL\". This description drift is why this entry is import_then_migrate, not import_unchanged \u2014 the exact provider action AWS/Terraform would take to reconcile a description-only diff on this resource has not been verified by a real `terraform plan` in this pass (no plan/apply is authorized during state adoption), so no claim is made here about whether reconciliation is update-in-place, requires replacement, or something else. Terraform composite import ID (distinct from the AWS-internal sgr-* ID, which cannot be passed to `terraform import` for the legacy aws_security_group_rule resource) is sg-0d4c5eedb2ee21743_ingress_tcp_5432_5432_sg-0db14e50ea5c5466c.",
       "live_existence_confirmed": true
     },
     {
@@ -197,11 +197,11 @@
     },
     {
       "address": "module.elasticache.aws_security_group_rule.redis_ingress_from_ecs_tasks",
-      "classification": "import_unchanged",
-      "import_id": "BLOCKED",
-      "prerequisite": "Same ec2:DescribeSecurityGroupRules AccessDenied.",
-      "live_reference": null,
-      "notes": "Field content confirmed matching live (6379/tcp ingress from ECS-tasks SG) via aws_security_group ingress listing on sg-0da3ea50262a9d20d.",
+      "classification": "import_then_migrate",
+      "import_id": "sg-0da3ea50262a9d20d_ingress_tcp_6379_6379_sg-0db14e50ea5c5466c",
+      "prerequisite": "Importable now \u2014 protocol/ports/source/destination-group/direction match uniquely and exactly, and the composite import ID is resolved (see notes). Not import_unchanged because of description drift (live Description is null; config sets an explicit string). Import records the live rule's current fields into state; it does NOT approve any subsequent description change. Any reconciliation of this drift (including confirming via a real plan whether it is update-in-place or would force replacement) must be reviewed separately, after the import itself and a complete drift analysis across all four rules \u2014 not assumed here. If a future plan proposes replacing rather than updating any of these four rules, that is a stop condition requiring explicit human review before either import or apply proceeds; nothing in this manifest authorizes that.",
+      "live_reference": "sgr-0d4fcba591950afde",
+      "notes": "Live rule confirmed via read-only aws ec2 describe-security-group-rules on 2026-08-04 (AWS SecurityGroupRuleId sgr-0d4fcba591950afde): ingress, tcp, 6379-6379, ReferencedGroupId sg-0db14e50ea5c5466c (ECS tasks). Every identity-defining field matches uniquely and exactly: ingress direction, protocol, from/to port, destination security group (sg-0da3ea50262a9d20d (Redis/Valkey)), and source (CIDR or referenced security group). Exactly one live rule matches this Terraform address; no ambiguity. DRIFT: live Description is null; config specifies \"ECS tasks to Redis\". This description drift is why this entry is import_then_migrate, not import_unchanged \u2014 the exact provider action AWS/Terraform would take to reconcile a description-only diff on this resource has not been verified by a real `terraform plan` in this pass (no plan/apply is authorized during state adoption), so no claim is made here about whether reconciliation is update-in-place, requires replacement, or something else. Terraform composite import ID (distinct from the AWS-internal sgr-* ID, which cannot be passed to `terraform import` for the legacy aws_security_group_rule resource) is sg-0da3ea50262a9d20d_ingress_tcp_6379_6379_sg-0db14e50ea5c5466c.",
       "live_existence_confirmed": true
     },
     {
@@ -453,7 +453,7 @@
       "import_id": "arn:aws:elasticloadbalancing:us-east-1:603013471426:targetgroup/firmsbase-staging-tg/1830c01b9aaac37d",
       "prerequisite": "Code fix required (now landed): var.alb_health_check_path, var.alb_health_check_interval_seconds, and var.alb_health_check_matcher must all be set to their live-matching values (\"/up\", 30, \"200-399\" - see terraform.tfvars.example) before import. BLOCKED until those three values are actually supplied at apply time; the variables/wiring existing in source is not by itself sufficient.",
       "live_reference": null,
-      "notes": "CORRECTED in this pass - previously misclassified import_unchanged based on only one of three real mismatches. All three are in-place-updatable (health_check.* and matcher are never ForceNew on aws_lb_target_group per the AWS provider's documented resource schema - this was not re-verified live via `terraform providers schema` in this pass, which is out of scope for a read-only worktree with a real backend configured), so the target group itself is not at replacement risk - but importing with any of the three still at their Terraform default would silently diverge from the live target group's actual health-check behavior on the very next apply. Mismatches: (1) health-check path: live /up (liveness) vs. Terraform default /readyz (readiness); (2) health-check interval: live 30s vs. Terraform default 15s; (3) matcher: live \"200-399\" vs. Terraform default \"200\". See docs/ecs/state-adoption-plan.md §9.5.",
+      "notes": "CORRECTED in this pass - previously misclassified import_unchanged based on only one of three real mismatches. All three are in-place-updatable (health_check.* and matcher are never ForceNew on aws_lb_target_group per the AWS provider's documented resource schema - this was not re-verified live via `terraform providers schema` in this pass, which is out of scope for a read-only worktree with a real backend configured), so the target group itself is not at replacement risk - but importing with any of the three still at their Terraform default would silently diverge from the live target group's actual health-check behavior on the very next apply. Mismatches: (1) health-check path: live /up (liveness) vs. Terraform default /readyz (readiness); (2) health-check interval: live 30s vs. Terraform default 15s; (3) matcher: live \"200-399\" vs. Terraform default \"200\". See docs/ecs/state-adoption-plan.md \u00a79.5.",
       "live_existence_confirmed": true
     },
     {

@@ -283,31 +283,62 @@ excluded entirely and supplied only via `TF_VAR_redis_auth_token` set fresh
 in the shell for each `import`/`plan`/`apply` invocation. See
 `terraform.tfvars.example` for the exact non-secret and ARN values.
 
-## Remaining blockers before the first Phase A2 import
+## Phase A2 import status (updated 2026-08-04)
 
-**Correction**: this section previously claimed nothing blocks Phase A2
-itself. A real canary import attempt (see
-[state-adoption-plan.md §9.9](state-adoption-plan.md)) proved that claim
-too optimistic — `terraform import` evaluates enough of the whole
-configuration graph that `data "aws_vpc" "this"` (networking module) gets
-read on **every** import regardless of which specific resource is
-targeted, and `ec2:DescribeVpcAttribute` on `vpc-0fd81b688155ded2b` is
-denied for this operator. That is now the actual, confirmed blocker on the
-first Phase A2 import, not merely a later-phase concern:
+**Correction**: this section previously claimed nothing blocks Phase A2,
+then was corrected to describe a real, confirmed blocker
+(`ec2:DescribeVpcAttribute`) discovered by a canary import attempt (see
+[state-adoption-plan.md §9.9](state-adoption-plan.md)). That blocker, and
+the separate `ec2:DescribeSecurityGroupRules` gap, are **both now
+granted**. Current status:
 
-1. **`ec2:DescribeVpcAttribute` on `vpc-0fd81b688155ded2b`** must be
-   granted to `firmsbase-staging-operator` before any import — including
-   the Phase A2 canary — can succeed. Not requested automatically, per
-   mission constraint.
-2. `elasticache_engine_version` must actually be set to `"7.2"` (major.minor
+1. `ec2:DescribeVpcAttribute` on `vpc-0fd81b688155ded2b` — **granted**.
+   `data "aws_vpc" "this"` (networking module) is read on every import
+   regardless of target resource; this no longer blocks anything.
+2. `ec2:DescribeSecurityGroupRules` — **granted**. Used to resolve the
+   Terraform composite import IDs for the four remaining
+   `aws_security_group_rule` addresses (see below and
+   [state-adoption-plan.md §9.10](state-adoption-plan.md)).
+3. `elasticache_engine_version` must actually be set to `"7.2"` (major.minor
    only — not `"7.2.6"`, which AWS's own provider validation rejects for
    Redis v6+/Valkey) in whatever `terraform.tfvars` is eventually created
    (the variable now exists and is wired — see above — but still defaults
    to `"7.1"`). This one only blocks Phase A3 (ElastiCache), not A2.
 
-**As of this correction, the backend prefix
-(`environments/staging/ecs/`) remains completely empty — `KeyCount: 0` —
-and all six Phase A2 imports remain pending. No import has yet succeeded.**
+**Phase A2's six `import_unchanged` resources are already imported**
+into the live backend (`environments/staging/ecs/terraform.tfstate`): the
+3 security groups, the ALB, and both listeners. State currently contains
+6 managed resources plus 9 read-only data-source cache entries (not
+separately-managed resources — see state-adoption-plan.md §9.10).
+
+**The remaining four originally-"Phase A2" addresses (all
+`aws_security_group_rule`) now have a resolved Terraform composite import
+ID** — recorded in `import-manifest.json`, no longer `"BLOCKED"` —
+confirmed against a live, read-only rule query with exactly one matching
+rule per address. `aws_security_group_rule` requires a
+provider-constructed composite identifier
+(`<sg-id>_<type>_<protocol>_<from-port>_<to-port>_<source>`), not the
+AWS-internal `SecurityGroupRuleId` (`sgr-*`), which is recorded separately
+in each manifest entry's `live_reference` field for audit traceability
+only. **These four have not been imported yet** — that import run is
+pending repository review and merge of the manifest correction that
+resolved their IDs.
+
+**Classification correction (2026-08-04, see
+[state-adoption-plan.md §9.11](state-adoption-plan.md)):** these four are
+classified `import_then_migrate`, not `import_unchanged` — every
+identity-defining field (direction, protocol, ports, destination group,
+CIDR/referenced source) matches live uniquely, but each rule's live
+`Description` is `null` against an explicit description string in
+config. Importing them, once approved, records the live rule's fields —
+including the `null` description — into state; it does not authorize
+changing the description or any other apply. Whether the provider would
+reconcile that description drift via an in-place update or a replacement
+has not been verified by a real `terraform plan` in this pass and is not
+claimed either way; a proposed replacement is a stop condition requiring
+human review. Manifest totals are now
+`new: 66, import_unchanged: 6, import_then_migrate: 16, do_not_import: 6,
+total: 94`.
 
 Resolved as of 2026-08-03 (previously listed here): the HMAC secret's
 existence and `alarm_sns_topic_arn` — see "HMAC secret" and "Alarms / SNS"
