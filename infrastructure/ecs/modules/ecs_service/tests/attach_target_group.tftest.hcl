@@ -34,14 +34,19 @@ variables {
   subnet_ids           = ["subnet-020540b8377bb4d0e", "subnet-07efcb5d4bcf5aa59"]
   security_group_ids   = ["sg-0db14e50ea5c5466c"]
   assign_public_ip     = true
+  # attach_target_group has no default (see variables.tf — every caller
+  # must set it explicitly, so an omitted boolean can never silently
+  # disable an existing load_balancer registration). This shared block
+  # sets the "no load balancer" case; the run below overrides it to true.
+  attach_target_group = false
 }
 
-run "attach_target_group_defaults_to_false_no_grace_period" {
+run "attach_target_group_explicit_false_no_grace_period" {
   command = plan
 
   assert {
     condition     = aws_ecs_service.this[0].health_check_grace_period_seconds == null
-    error_message = "Without attach_target_group set, health_check_grace_period_seconds must remain null — original 'no load balancer' behavior must be unchanged."
+    error_message = "With attach_target_group=false, health_check_grace_period_seconds must remain null — original 'no load balancer' behavior must be unchanged."
   }
 }
 

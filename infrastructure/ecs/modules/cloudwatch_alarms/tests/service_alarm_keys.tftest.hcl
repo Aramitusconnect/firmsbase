@@ -38,6 +38,11 @@ variables {
   critical_worker_service_name = "firmsbase-staging-critical-worker"
   rds_instance_id              = "firmsbase-staging-db"
   redis_cluster_id             = "firmsbase-staging-redis"
+  # ses_consumer_enabled has no default (see variables.tf — every caller
+  # must set it explicitly, so an omitted boolean can never silently
+  # disable existing ses-consumer alarms). This shared block sets the
+  # "disabled" case; the run below overrides it to true.
+  ses_consumer_enabled = false
 }
 
 run "ses_consumer_enabled_includes_all_four_service_alarm_keys" {
@@ -78,9 +83,10 @@ run "ses_consumer_enabled_includes_all_four_service_alarm_keys" {
 run "ses_consumer_disabled_omits_exactly_the_ses_consumer_key" {
   command = plan
 
-  # ses_consumer_enabled defaults to false; ses_consumer_service_name/
-  # ses_consumer_log_group_name are deliberately left at their own default
-  # (null) too, matching a caller that has no ses-consumer at all.
+  # Inherits ses_consumer_enabled = false from the shared block above.
+  # ses_consumer_service_name/ses_consumer_log_group_name are deliberately
+  # left at their own default (null) too, matching a caller that has no
+  # ses-consumer at all.
 
   assert {
     condition     = length(aws_cloudwatch_metric_alarm.ecs_service_running_count) == 3

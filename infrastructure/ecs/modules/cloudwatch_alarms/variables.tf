@@ -38,9 +38,8 @@ variable "ses_consumer_service_name" {
 }
 
 variable "ses_consumer_enabled" {
-  description = "Whether to include ses-consumer in the per-service alarms (running-count, CPU) and the log-based consumer-errors alarm. Must be a literal true/false set explicitly by the caller — never derived from whether ses_consumer_service_name/ses_consumer_log_group_name is null, since those values can be unknown during import/plan for a not-yet-created service. Defaults to false, matching the original 'no ses-consumer alarms' behavior."
+  description = "Whether to include ses-consumer in the per-service alarms (running-count, CPU) and the log-based consumer-errors alarm. Must be a literal true/false set explicitly by every caller — never derived from whether ses_consumer_service_name/ses_consumer_log_group_name is null, since those values can be unknown during import/plan for a not-yet-created service. No default, deliberately: a default of false would let an existing caller that already passes ses_consumer_service_name/ses_consumer_log_group_name silently lose those alarms by simply omitting this variable during an upgrade, rather than failing loudly at plan/validate time."
   type        = bool
-  default     = false
 }
 
 variable "ses_events_queue_name" {

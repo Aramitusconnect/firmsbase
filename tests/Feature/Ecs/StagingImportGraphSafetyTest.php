@@ -130,11 +130,16 @@ class StagingImportGraphSafetyTest extends TestCase
     // ecs_service: attach_target_group
     // ------------------------------------------------------------
 
-    public function test_attach_target_group_variable_is_a_bool_defaulting_false(): void
+    public function test_attach_target_group_variable_is_a_required_bool_with_no_default(): void
     {
         $block = $this->extractVariableBlock($this->ecsServiceVariables(), 'attach_target_group');
         $this->assertStringContainsString('type        = bool', $block);
-        $this->assertMatchesRegularExpression('/default\s*=\s*false/', $block);
+        // No default, deliberately: a default of false would let an
+        // existing caller that already passes target_group_arn silently
+        // lose its load_balancer registration by simply omitting this
+        // variable, rather than failing loudly at plan/validate time. See
+        // docs/ecs/state-adoption-plan.md §9.9.
+        $this->assertDoesNotMatchRegularExpression('/\bdefault\s*=/', $block);
     }
 
     public function test_load_balancer_dynamic_block_gated_by_attach_target_group(): void
@@ -156,12 +161,12 @@ class StagingImportGraphSafetyTest extends TestCase
     // iam: kms_encryption_enabled, s3_documents_enabled, task_role_names
     // ------------------------------------------------------------
 
-    public function test_kms_and_s3_enabled_flags_are_bools_defaulting_false(): void
+    public function test_kms_and_s3_enabled_flags_are_required_bools_with_no_default(): void
     {
         foreach (['kms_encryption_enabled', 's3_documents_enabled'] as $name) {
             $block = $this->extractVariableBlock($this->iamVariables(), $name);
             $this->assertStringContainsString('type        = bool', $block);
-            $this->assertMatchesRegularExpression('/default\s*=\s*false/', $block);
+            $this->assertDoesNotMatchRegularExpression('/\bdefault\s*=/', $block, "{$name} must have no default — every caller must set it explicitly.");
         }
     }
 
@@ -192,11 +197,11 @@ class StagingImportGraphSafetyTest extends TestCase
     // cloudwatch_alarms: ses_consumer_enabled, service_alarm_names
     // ------------------------------------------------------------
 
-    public function test_ses_consumer_enabled_is_a_bool_defaulting_false(): void
+    public function test_ses_consumer_enabled_is_a_required_bool_with_no_default(): void
     {
         $block = $this->extractVariableBlock($this->cloudwatchAlarmsVariables(), 'ses_consumer_enabled');
         $this->assertStringContainsString('type        = bool', $block);
-        $this->assertMatchesRegularExpression('/default\s*=\s*false/', $block);
+        $this->assertDoesNotMatchRegularExpression('/\bdefault\s*=/', $block);
     }
 
     public function test_service_alarm_names_local_gated_by_the_boolean_not_a_null_check(): void
@@ -248,13 +253,64 @@ class StagingImportGraphSafetyTest extends TestCase
         $this->assertMatchesRegularExpression('/kms_encryption_enabled\s*=\s*true/', $iamBlock[0]);
         $this->assertMatchesRegularExpression('/s3_documents_enabled\s*=\s*true/', $iamBlock[0]);
 
-        preg_match('/module "web" \{.*?\n}/s', $main, $webBlock);
-        $this->assertNotEmpty($webBlock);
-        $this->assertMatchesRegularExpression('/attach_target_group\s*=\s*true/', $webBlock[0]);
-
         preg_match('/module "cloudwatch_alarms" \{.*?\n}/s', $main, $alarmsBlock);
         $this->assertNotEmpty($alarmsBlock);
         $this->assertMatchesRegularExpression('/ses_consumer_enabled\s*=\s*true/', $alarmsBlock[0]);
+
+        // Every one of the 7 ecs_service callers must supply
+        // attach_target_group explicitly (now a required variable, no
+        // default) — web is the only one intended to be true.
+        $expectedAttachTargetGroup = [
+            'web' => 'true',
+            'worker' => 'false',
+            'critical_worker' => 'false',
+            'scheduler' => 'false',
+            'migrate' => 'false',
+            'maintenance' => 'false',
+            'ses_consumer' => 'false',
+        ];
+
+        foreach ($expectedAttachTargetGroup as $role => $expected) {
+            preg_match('/module "'.$role.'" \{.*?\n}/s', $main, $block);
+            $this->assertNotEmpty($block, "Could not locate module \"{$role}\" block.");
+            $this->assertMatchesRegularExpression(
+                '/attach_target_group\s*=\s*'.$expected.'/',
+                $block[0],
+                "module \"{$role}\" must explicitly pass attach_target_group = {$expected} — an omitted boolean must never silently disable or enable the load_balancer registration."
+            );
+        }
+    }
+
+    public function test_every_repository_caller_of_the_three_changed_modules_supplies_every_required_boolean(): void
+    {
+        // Confirms there is exactly one caller of each changed module in
+        // the whole repository (environments/staging/main.tf) — if a
+        // second environment/caller is ever added, this test must be
+        // updated to audit it too, not silently skip it. Pure PHP
+        // directory scan, no shell exec — consistent with every other
+        // test in this file.
+        $ecsRoot = base_path('infrastructure/ecs');
+        $callers = [];
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($ecsRoot, \FilesystemIterator::SKIP_DOTS)
+        );
+
+        foreach ($iterator as $file) {
+            if ($file->getExtension() !== 'tf') {
+                continue;
+            }
+            $contents = file_get_contents($file->getPathname());
+            if (preg_match('#source\s*=\s*"\.\./\.\./modules/(ecs_service|iam|cloudwatch_alarms)"#', $contents)) {
+                $callers[] = $file->getPathname();
+            }
+        }
+
+        $this->assertSame(
+            [base_path('infrastructure/ecs/environments/staging/main.tf')],
+            $callers,
+            'Exactly one file in the repository must call modules/{ecs_service,iam,cloudwatch_alarms} — if this fails, a new caller was added and must be audited for the same required-boolean coverage as staging.'
+        );
     }
 
     // ------------------------------------------------------------

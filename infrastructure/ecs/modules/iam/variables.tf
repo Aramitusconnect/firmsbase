@@ -36,9 +36,8 @@ variable "kms_key_arn" {
 }
 
 variable "kms_encryption_enabled" {
-  description = "Whether to include the KMS decrypt grant for kms_key_arn. Must be a literal true/false set explicitly by the caller — never derived from whether kms_key_arn is null, since that value can be unknown during import/plan for a not-yet-created key. Defaults to false, matching the original 'no KMS' behavior."
+  description = "Whether to include the KMS decrypt grant for kms_key_arn. Must be a literal true/false set explicitly by every caller — never derived from whether kms_key_arn is null, since that value can be unknown during import/plan for a not-yet-created key. No default, deliberately: a default of false would let an existing caller that already passes kms_key_arn silently lose the decrypt grant by simply omitting this variable during an upgrade, rather than failing loudly at plan/validate time."
   type        = bool
-  default     = false
 }
 
 variable "s3_documents_bucket_arn" {
@@ -48,9 +47,8 @@ variable "s3_documents_bucket_arn" {
 }
 
 variable "s3_documents_enabled" {
-  description = "Whether to grant the S3 document-bucket permissions for s3_documents_bucket_arn. Must be a literal true/false set explicitly by the caller — never derived from whether s3_documents_bucket_arn is null, since that value can be unknown during import/plan for a not-yet-created bucket. Defaults to false, matching the original 'no S3 grant' behavior."
+  description = "Whether to grant the S3 document-bucket permissions for s3_documents_bucket_arn. Must be a literal true/false set explicitly by every caller — never derived from whether s3_documents_bucket_arn is null, since that value can be unknown during import/plan for a not-yet-created bucket. No default, deliberately: a default of false would let an existing caller that already passes s3_documents_bucket_arn silently lose the S3 grant by simply omitting this variable during an upgrade, rather than failing loudly at plan/validate time."
   type        = bool
-  default     = false
 }
 
 variable "ses_events_queue_arn" {

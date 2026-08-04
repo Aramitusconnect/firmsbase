@@ -32,12 +32,18 @@ override_data {
 }
 
 variables {
-  name_prefix                 = "firmsbase-staging"
-  ecr_repository_arn          = "arn:aws:ecr:us-east-1:603013471426:repository/firmsbase-staging"
-  log_group_arns              = ["arn:aws:logs:us-east-1:603013471426:log-group:/ecs/firmsbase-staging/web:*"]
-  secret_arns                 = []
-  kms_key_arn                 = null
+  name_prefix        = "firmsbase-staging"
+  ecr_repository_arn = "arn:aws:ecr:us-east-1:603013471426:repository/firmsbase-staging"
+  log_group_arns     = ["arn:aws:logs:us-east-1:603013471426:log-group:/ecs/firmsbase-staging/web:*"]
+  secret_arns        = []
+  kms_key_arn        = null
+  # kms_encryption_enabled/s3_documents_enabled have no default (see
+  # variables.tf) — every caller must set them explicitly. This file isn't
+  # exercising either grant, so both are explicitly false, matching
+  # kms_key_arn/s3_documents_bucket_arn both being null here.
+  kms_encryption_enabled      = false
   s3_documents_bucket_arn     = null
+  s3_documents_enabled        = false
   ses_events_queue_arn        = null
   ses_sending_identity_arn    = null
   ses_authorized_from_address = null

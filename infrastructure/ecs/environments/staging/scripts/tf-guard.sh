@@ -207,6 +207,56 @@ case "$subcommand" in
     ;;
 esac
 
+# --- state: only `list`/`show` are permitted; every destructive or raw- ---
+# --- state-extraction subcommand is refused before Terraform ever runs. ---
+# This check runs BEFORE credential bridging (no point bridging credentials
+# for a command that's about to be refused outright), and deliberately has
+# no override flag — state mutation or raw-state extraction is a real,
+# separate risk class (this environment's live infrastructure, or its only
+# copy of not-yet-imported state, can be corrupted in ways `list`/`show`
+# never can) that this mission does not approve a bypass for.
+if [ "$subcommand" = "state" ]; then
+  state_subcommand=""
+  seen_state_token=false
+  for arg in "$@"; do
+    case "$arg" in
+      -*) continue ;;
+    esac
+    if [ "$seen_state_token" = true ]; then
+      state_subcommand="$arg"
+      break
+    fi
+    if [ "$arg" = "state" ]; then
+      seen_state_token=true
+    fi
+  done
+
+  case "$state_subcommand" in
+    list|show)
+      : # permitted — continues to credential bridging + verification below
+      ;;
+    "")
+      fail "'terraform state' requires an explicit subcommand (list or show)." \
+        "State mutation or raw-state extraction requires a separate," \
+        "explicitly approved recovery procedure — it is never inferred from" \
+        "an empty or missing state subcommand."
+      ;;
+    rm|mv|push|pull|replace-provider)
+      fail "'terraform state ${state_subcommand}' is refused by this guard." \
+        "State mutation or raw-state extraction (state rm/mv/push/pull/" \
+        "replace-provider) requires a separate, explicitly approved recovery" \
+        "procedure — it is never performed through this wrapper, and there" \
+        "is deliberately no override flag for this check."
+      ;;
+    *)
+      fail "'terraform state ${state_subcommand}' is not a recognized subcommand this guard permits." \
+        "Only 'state list' and 'state show' are allowed here. State mutation" \
+        "or raw-state extraction requires a separate, explicitly approved" \
+        "recovery procedure."
+      ;;
+  esac
+fi
+
 # --- Check 1: backend configured in source ---------------------------------
 if ! grep -qE '^\s*backend\s+"[a-z0-9_]+"\s*\{' "${ENV_DIR}/versions.tf" 2>/dev/null; then
   fail "no backend block is configured in versions.tf." \

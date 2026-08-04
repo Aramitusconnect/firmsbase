@@ -285,6 +285,8 @@ module "worker" {
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # Literal false — worker is never behind the ALB.
+  attach_target_group = false
 
   enable_autoscaling             = true
   autoscaling_min_capacity       = 1
@@ -327,6 +329,8 @@ module "critical_worker" {
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # Literal false — critical-worker is never behind the ALB.
+  attach_target_group = false
 
   enable_autoscaling = false
 }
@@ -358,6 +362,8 @@ module "scheduler" {
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # Literal false — scheduler is never behind the ALB.
+  attach_target_group = false
 
   # See docs/ecs/graceful-shutdown.md — avoids a transient two-instance
   # overlap during deploys for this single-instance service.
@@ -393,6 +399,8 @@ module "migrate" {
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # Literal false — migrate is never behind the ALB.
+  attach_target_group = false
 }
 
 module "maintenance" {
@@ -425,6 +433,8 @@ module "maintenance" {
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # Literal false — maintenance is never behind the ALB.
+  attach_target_group = false
 }
 
 module "ses_consumer" {
@@ -459,6 +469,7 @@ module "ses_consumer" {
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
   # No target_group_arn — never behind the ALB (not an HTTP service).
+  attach_target_group = false
 
   enable_autoscaling = false # single long-polling consumer; SQS's own visibility timeout already prevents duplicate concurrent processing of one message.
 }

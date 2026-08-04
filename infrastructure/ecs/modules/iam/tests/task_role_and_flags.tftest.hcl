@@ -47,6 +47,13 @@ variables {
   ecr_repository_arn = "arn:aws:ecr:us-east-1:603013471426:repository/firmsbase-staging"
   log_group_arns     = ["arn:aws:logs:us-east-1:603013471426:log-group:/ecs/firmsbase-staging/web:*"]
   secret_arns        = []
+  # kms_encryption_enabled/s3_documents_enabled have no default (see
+  # variables.tf — every caller must set them explicitly, so an omitted
+  # boolean can never silently disable an existing grant). This shared
+  # block sets the "both disabled" case; the run below overrides both to
+  # true.
+  kms_encryption_enabled = false
+  s3_documents_enabled   = false
 }
 
 run "all_seven_task_roles_and_metrics_policies_exist" {
@@ -92,17 +99,17 @@ run "task_metrics_web_attaches_to_the_web_role_specifically" {
   }
 }
 
-run "kms_and_s3_grants_are_omitted_by_default" {
+run "kms_and_s3_grants_are_omitted_when_explicitly_disabled" {
   command = plan
 
   assert {
     condition     = length(data.aws_iam_policy_document.task_s3_documents) == 0
-    error_message = "Without s3_documents_enabled=true, no S3 documents policy document should exist — original 'no S3 grant' behavior must be unchanged."
+    error_message = "With s3_documents_enabled=false, no S3 documents policy document should exist — original 'no S3 grant' behavior must be unchanged."
   }
 
   assert {
     condition     = length(aws_iam_role_policy.task_s3_documents) == 0
-    error_message = "Without s3_documents_enabled=true, no per-role S3 documents policy should exist."
+    error_message = "With s3_documents_enabled=false, no per-role S3 documents policy should exist."
   }
 }
 

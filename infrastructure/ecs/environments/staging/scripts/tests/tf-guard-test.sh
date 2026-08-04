@@ -226,6 +226,49 @@ assert_output_contains "requires >= 1.15.0" "refusal message names the minimum r
 assert_capture_absent "the real terraform (mocked) was never actually invoked for 'import' itself when the version check fails"
 
 echo
+echo "=== 10. 'terraform state' is restricted to list/show; every destructive or raw-state subcommand is refused ==="
+
+reset_mock_env
+run_guard state list
+assert_exit_zero "'state list' is allowed after credential and identity verification"
+assert_capture_field_equals "SUBCOMMAND" "state" "'state list' actually reached the real terraform"
+assert_capture_field_equals "AWS_ACCESS_KEY_ID" "$MOCK_ACCESS_KEY_ID" "'state list' received the bridged credentials, same as any other live command"
+
+reset_mock_env
+run_guard state show 'module.security_groups.aws_security_group.alb'
+assert_exit_zero "'state show <address>' is allowed after credential and identity verification"
+assert_capture_field_equals "SUBCOMMAND" "state" "'state show' actually reached the real terraform"
+
+for destructive in "rm module.security_groups.aws_security_group.alb" \
+                   "mv module.old module.new" \
+                   "push terraform.tfstate" \
+                   "pull" \
+                   "replace-provider registry.terraform.io/hashicorp/aws registry.terraform.io/hashicorp/aws"; do
+  reset_mock_env
+  # shellcheck disable=SC2086
+  run_guard state $destructive
+  sub="$(printf '%s' "$destructive" | cut -d' ' -f1)"
+  assert_exit_nonzero "'state ${sub}' is refused"
+  assert_output_contains "requires a separate, explicitly approved recovery" "'state ${sub}' refusal names the required recovery procedure, not a bypass"
+  assert_capture_absent "'state ${sub}' never reached the real terraform (mocked)"
+done
+
+reset_mock_env
+run_guard state
+assert_exit_nonzero "'state' with no subcommand at all is refused, not silently treated as a no-op"
+assert_capture_absent "'state' with no subcommand never reached the real terraform (mocked)"
+
+reset_mock_env
+run_guard state totally-made-up-subcommand
+assert_exit_nonzero "an unrecognized 'state' subcommand is refused"
+assert_capture_absent "the unrecognized 'state' subcommand never reached the real terraform (mocked)"
+
+reset_mock_env
+run_guard state rm module.security_groups.aws_security_group.alb
+assert_output_does_not_contain "$MOCK_SECRET_ACCESS_KEY" "no credential value appears in the output of a refused 'state rm' (bridging is never even attempted for a subcommand refused up front)"
+assert_output_does_not_contain "$MOCK_SESSION_TOKEN" "no session token appears in the output of a refused 'state rm' either"
+
+echo
 if [ "$FAIL_COUNT" -eq 0 ]; then
   echo "ALL TF-GUARD MOCKED REGRESSION CHECKS PASSED"
   exit 0

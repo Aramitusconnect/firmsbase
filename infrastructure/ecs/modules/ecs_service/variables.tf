@@ -110,9 +110,8 @@ variable "target_group_arn" {
 }
 
 variable "attach_target_group" {
-  description = "Whether to register this service with target_group_arn. Must be a literal true/false set explicitly by the caller — never derived from whether target_group_arn is null, since that value can be unknown during import/plan for a not-yet-created target group, and an unknown value can't determine a for_each key set. Defaults to false, matching the original 'no load balancer' behavior for any role that doesn't pass target_group_arn."
+  description = "Whether to register this service with target_group_arn. Must be a literal true/false set explicitly by every caller — never derived from whether target_group_arn is null, since that value can be unknown during import/plan for a not-yet-created target group, and an unknown value can't determine a for_each key set. No default, deliberately: a default of false would let an existing caller that already passes target_group_arn silently lose its load_balancer registration by simply omitting this variable during an upgrade, rather than failing loudly at plan/validate time."
   type        = bool
-  default     = false
 }
 
 variable "deployment_minimum_healthy_percent" {
