@@ -482,6 +482,13 @@ prepared in the manifest; 4 of the 10 are marked `import_id: "BLOCKED"`
 pending `ec2:DescribeSecurityGroupRules` access (`AccessDenied` for this
 operator — the SG/rule *content* is already confirmed matching, only the
 AWS-internal rule ID needed for the literal import command is unresolved).
+The exact four blocked addresses:
+
+- `module.security_groups.aws_security_group_rule.alb_ingress_https`
+- `module.security_groups.aws_security_group_rule.ecs_tasks_ingress_from_alb`
+- `module.security_groups.aws_security_group_rule.rds_ingress_from_ecs_tasks[0]`
+- `module.elasticache.aws_security_group_rule.redis_ingress_from_ecs_tasks`
+
 The executable A2 set is therefore **six** resources, not seven: the 3
 security groups, the ALB, and both listeners. The target group
 (`module.alb.aws_lb_target_group.web`) is **not** in this phase — it has
@@ -756,6 +763,79 @@ Terraform-managed task definition created without it would silently
 generate incorrect links rather than failing loudly. This correction must
 be merged before Phase B's task-definition migration work begins.
 
+### 9.9 Import execution safety — corrected after a real, failed attempt
+
+A real canary import (`module.security_groups.aws_security_group.alb`,
+`sg-02a26ff122a9a1d29`) was attempted against the real S3 backend and
+failed twice, in ways no static check (`validate`/`fmt`/`terraform test`)
+could have caught. Both failures are now fixed; the backend prefix
+remained empty throughout and remains empty today — **no Phase A2 import
+has yet succeeded.**
+
+1. **Wrong identity, silently.** The approved AWS CLI profile
+   (`firmsbase-staging-operator-login`) resolves credentials through a
+   custom `login_session = <arn>` broker the AWS CLI itself understands
+   but which is not a real AWS SDK credential mechanism. Terraform's AWS
+   provider (Go SDK) fell through the entire credential chain and picked
+   up the sandbox's own ambient `AmazonLightsailInstanceRole` — a
+   different AWS account — with no error. `scripts/tf-guard.sh` now
+   bridges `AWS_PROFILE` into standard, SDK-universal credentials
+   (`aws configure export-credentials --format process`, exported as
+   `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`),
+   disables EC2/instance-metadata fallback
+   (`AWS_EC2_METADATA_DISABLED=true`), and verifies the resulting identity
+   against the **exact** expected caller ARN — not just the account —
+   before allowing any live command (`init` against the real backend,
+   `import`, `state`, `output`, `plan`, `apply`) to proceed:
+
+   ```
+   arn:aws:iam::603013471426:user/firmsbase-staging-operator
+   ```
+
+   `import` is no longer an unguarded passthrough in `scripts/tf-guard.sh`
+   — it goes through the same bridging and verification as `plan`/`apply`
+   now. See the script's own header for the full explanation and every
+   check it enforces.
+
+2. **Remaining IAM prerequisite, once identity was corrected:**
+   `ec2:DescribeVpcAttribute` on `vpc-0fd81b688155ded2b` is denied for
+   `firmsbase-staging-operator` (needed by `data "aws_vpc" "this"` in the
+   networking module). This is a genuine, previously-undocumented
+   permission gap — distinct from the already-known
+   `ec2:DescribeSecurityGroupRules` gap (§8's 4 BLOCKED SG-rule imports) —
+   and blocks any import, not only the four SG rules. Not requested
+   automatically, per this mission's constraint (see §11 item 7).
+
+3. **`terraform import` evaluates enough of the configuration graph that
+   every `count`/`for_each` instance set must be knowable up front** — not
+   just for the resource being imported. Modern Terraform (1.15.8)
+   internally plans the whole graph as part of any `import`, and several
+   `count`/`for_each` expressions in this configuration derived their
+   instance keys from module outputs of resources that don't exist yet
+   (`module.kms.key_arn`, `module.s3_documents.bucket_arn`,
+   `module.alb.target_group_arn`, every ECS service's `.service_name`) by
+   comparing them to `null` — comparing an unknown value to `null`
+   produces an unknown boolean, which collapses a `for_each`'s key set to
+   unknown and hard-errors the entire `import` command, not just the
+   affected resource. **Corrected**: every such gate now uses a literal
+   `true`/`false` flag the caller sets explicitly
+   (`kms_encryption_enabled`, `s3_documents_enabled`, `attach_target_group`,
+   `ses_consumer_enabled` — all default `false`, matching original
+   behavior, all set `true` at this environment's actual call sites), and
+   `aws_iam_role_policy.task_metrics` no longer derives its `for_each` from
+   `aws_iam_role.task`'s own (potentially-unknown) instance map, using a
+   static `local.task_role_names` list instead. No resource address
+   changed; no functionality was disabled. See
+   `infrastructure/ecs/modules/{iam,cloudwatch_alarms,ecs_service}` and
+   their `tests/*.tftest.hcl` files.
+
+4. **No targeted (`-target`) apply is approved for state adoption.**
+   Terraform's own error output for the graph-evaluation failure above
+   suggested `-target` as a workaround; this plan does not adopt it. The
+   configuration fix in point 3 is the only approved remedy — targeted
+   applies are exactly the kind of narrow, easy-to-forget, order-dependent
+   operation this whole state-adoption plan exists to avoid.
+
 ## 10. Validation performed (local/static only)
 
 | Check | Result |
@@ -812,11 +892,13 @@ Terraform (`.tf`), a Terraform test (`.tftest.hcl`), documentation
    declared rules alongside the existing broad ones now, or defer until
    the broad rules are revoked in the same change.
 7. Elevated (or one-time delegated) read access for
-   `ec2:DescribeSecurityGroupRules` (blocks 4 of the 11 `import_unchanged`
+   `ec2:DescribeSecurityGroupRules` (blocks 4 of the 10 `import_unchanged`
    commands — the SG *content* is already confirmed matching, only the
-   literal rule ID is missing), `cloudwatch:DescribeAlarms`, and
-   `sns:ListTopics` — not requested automatically, per the mission's
-   constraint.
+   literal rule ID is missing), `ec2:DescribeVpcAttribute` on
+   `vpc-0fd81b688155ded2b` (§9.9 — blocks any import at all, discovered
+   during the real canary import attempt, not only the four SG rules),
+   `cloudwatch:DescribeAlarms`, and `sns:ListTopics` — not requested
+   automatically, per the mission's constraint.
 8. Confirmation of `module.migrate`/`module.maintenance` task-definition
    content — both are covered by the uniform `do_not_import` decision in
    §6 regardless, so this is informational for Phase B planning, not a

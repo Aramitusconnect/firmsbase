@@ -30,15 +30,27 @@ variable "ssm_parameter_arns" {
 }
 
 variable "kms_key_arn" {
-  description = "KMS key used to encrypt the secrets above and/or the S3 document bucket. Null if none is set up yet."
+  description = "KMS key used to encrypt the secrets above and/or the S3 document bucket. Value only — see kms_encryption_enabled for whether the decrypt grant is included; an unknown-until-apply ARN (e.g. before the key is created/imported) cannot be compared to null to decide a for_each instance set."
   type        = string
   default     = null
 }
 
+variable "kms_encryption_enabled" {
+  description = "Whether to include the KMS decrypt grant for kms_key_arn. Must be a literal true/false set explicitly by the caller — never derived from whether kms_key_arn is null, since that value can be unknown during import/plan for a not-yet-created key. Defaults to false, matching the original 'no KMS' behavior."
+  type        = bool
+  default     = false
+}
+
 variable "s3_documents_bucket_arn" {
-  description = "ARN of the (prepared, see docs/ecs/storage-readiness.md) S3 document bucket. Null until it exists — application/worker/maintenance task roles get no S3 grant at all when null, rather than a wildcard placeholder."
+  description = "ARN of the (prepared, see docs/ecs/storage-readiness.md) S3 document bucket. Value only — see s3_documents_enabled for whether the grant is included; an unknown-until-apply ARN (e.g. before the bucket is created/imported) cannot be compared to null to decide a for_each/count instance set."
   type        = string
   default     = null
+}
+
+variable "s3_documents_enabled" {
+  description = "Whether to grant the S3 document-bucket permissions for s3_documents_bucket_arn. Must be a literal true/false set explicitly by the caller — never derived from whether s3_documents_bucket_arn is null, since that value can be unknown during import/plan for a not-yet-created bucket. Defaults to false, matching the original 'no S3 grant' behavior."
+  type        = bool
+  default     = false
 }
 
 variable "ses_events_queue_arn" {

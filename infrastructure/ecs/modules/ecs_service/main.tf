@@ -85,7 +85,7 @@ resource "aws_ecs_service" "this" {
   }
 
   dynamic "load_balancer" {
-    for_each = var.target_group_arn == null ? [] : [1]
+    for_each = var.attach_target_group ? [1] : []
     content {
       target_group_arn = var.target_group_arn
       container_name   = local.container_name
@@ -105,7 +105,7 @@ resource "aws_ecs_service" "this" {
 
   # Web tasks need time to pass the ALB health check before the deployment
   # considers them steady; other roles have no load balancer to wait on.
-  health_check_grace_period_seconds = var.target_group_arn == null ? null : 60
+  health_check_grace_period_seconds = var.attach_target_group ? 60 : null
 
   tags = var.tags
 

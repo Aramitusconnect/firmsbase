@@ -74,7 +74,7 @@ data "aws_iam_policy_document" "task_execution" {
   }
 
   dynamic "statement" {
-    for_each = var.kms_key_arn == null ? [] : [1]
+    for_each = var.kms_encryption_enabled ? [1] : []
     content {
       sid       = "DecryptSecretsAndParameters"
       actions   = ["kms:Decrypt"]
@@ -98,6 +98,15 @@ resource "aws_iam_role_policy" "task_execution" {
 # ---------------------------------------------------------------------------
 
 locals {
+  # Static, configuration-known role-key set — every for_each in this file
+  # that needs "one instance per task role" must derive its keys from this
+  # local (or a subset of it), never from aws_iam_role.task itself. Deriving
+  # for_each keys from a resource's own for_each map (e.g. `for_each =
+  # aws_iam_role.task`) requires that resource's full instance set to be
+  # known, which is not guaranteed during `terraform import` of an unrelated
+  # resource in the same configuration — see docs/ecs/state-adoption-plan.md.
+  task_role_names = ["web", "worker", "critical_worker", "scheduler", "migrate", "maintenance", "ses_consumer"]
+
   # Roles that read/write the (future) S3 document bucket. Scheduler and
   # migrate get no S3 grant at all — neither has any documented need for it
   # today (see docs/ecs/iam-matrix.md).
@@ -105,7 +114,7 @@ locals {
 }
 
 resource "aws_iam_role" "task" {
-  for_each = toset(["web", "worker", "critical_worker", "scheduler", "migrate", "maintenance", "ses_consumer"])
+  for_each = toset(local.task_role_names)
 
   name               = "${var.name_prefix}-task-${replace(each.value, "_", "-")}"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
@@ -113,7 +122,7 @@ resource "aws_iam_role" "task" {
 }
 
 data "aws_iam_policy_document" "task_s3_documents" {
-  count = var.s3_documents_bucket_arn == null ? 0 : 1
+  count = var.s3_documents_enabled ? 1 : 0
 
   statement {
     sid = "DocumentBucketObjectAccess"
@@ -132,7 +141,7 @@ data "aws_iam_policy_document" "task_s3_documents" {
   }
 
   dynamic "statement" {
-    for_each = var.kms_key_arn == null ? [] : [1]
+    for_each = var.kms_encryption_enabled ? [1] : []
     content {
       sid       = "DocumentBucketEncryption"
       actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
@@ -142,7 +151,7 @@ data "aws_iam_policy_document" "task_s3_documents" {
 }
 
 resource "aws_iam_role_policy" "task_s3_documents" {
-  for_each = var.s3_documents_bucket_arn == null ? toset([]) : toset(local.s3_document_role_names)
+  for_each = var.s3_documents_enabled ? toset(local.s3_document_role_names) : toset([])
 
   name   = "${var.name_prefix}-task-${replace(each.value, "_", "-")}-s3-documents"
   role   = aws_iam_role.task[each.value].id
@@ -168,10 +177,14 @@ data "aws_iam_policy_document" "task_metrics" {
 }
 
 resource "aws_iam_role_policy" "task_metrics" {
-  for_each = aws_iam_role.task
+  # Deliberately NOT `for_each = aws_iam_role.task` — see local.task_role_names
+  # above for why a resource's own for_each map is not a safe for_each source
+  # here. aws_iam_role.task[each.key] below is a VALUE reference (its id),
+  # which is fine to be unknown-until-apply; only the KEY SET must be static.
+  for_each = toset(local.task_role_names)
 
   name   = "${var.name_prefix}-task-${each.key}-metrics"
-  role   = each.value.id
+  role   = aws_iam_role.task[each.key].id
   policy = data.aws_iam_policy_document.task_metrics.json
 }
 
