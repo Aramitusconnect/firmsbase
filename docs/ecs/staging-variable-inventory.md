@@ -330,6 +330,10 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
    **wrong** and is corrected. `modules/ecs_cluster` now exposes
    `capacity_providers`/`default_capacity_provider` (default preserves
    original design; this environment sets `ecs_capacity_providers = []`).
+   With that live-matching empty value now supplied, this address moved
+   from Group C to **Group A** in the corrected readiness matrix (see
+   item 7 below) — importing records the empty association exactly; it
+   does not authorize associating `FARGATE`/`FARGATE_SPOT` later.
 4. **IAM inline-policy name**: live policy is
    `FirmsBaseStagingSecretsAccess`, not the module's previous hardcoded
    `"<name_prefix>-task-execution"` — a real replacement risk, since
@@ -349,6 +353,27 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
    pending this grant and a fresh read-only re-verification.
 6. **ECR is the recommended first Phase A3 canary** — smallest, most
    isolated Group A resource, no dependents among the 12.
+7. **Corrected Group A/B/C matrix (second pass, 2026-08-04)** — full
+   reasoning in [state-adoption-plan.md §9.12](state-adoption-plan.md):
+   - **Group A**: `module.ecr.aws_ecr_repository.app`,
+     `module.alb.aws_lb_target_group.web`,
+     `module.ecs_cluster.aws_ecs_cluster.this`,
+     `module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`.
+   - **Group B**: `module.iam.aws_iam_role.task_execution`,
+     `module.elasticache.aws_elasticache_subnet_group.this`,
+     `module.elasticache.aws_elasticache_replication_group.this`.
+   - **Group C**: `module.iam.aws_iam_role_policy.task_execution`,
+     `module.web.aws_ecs_service.this[0]`,
+     `module.worker.aws_ecs_service.this[0]`,
+     `module.critical_worker.aws_ecs_service.this[0]`,
+     `module.scheduler.aws_ecs_service.this[0]`. Launch mode and desired
+     count are **no longer** blockers for the four services — both are
+     resolved. They remain Group C because each service's
+     `task_definition` points at a Terraform-managed task definition this
+     module would create fresh (not merely the running historical
+     revision), and live services run under a single generic shared task
+     role while Terraform declares 7 distinct per-role roles that don't
+     exist live.
 
 **No import, apply, ECS deployment, scaling change, capacity-provider
 association, IAM permission migration, or description-drift

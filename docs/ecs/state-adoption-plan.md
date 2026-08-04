@@ -1050,38 +1050,67 @@ import, apply, ECS deployment, scaling change, capacity-provider
 association, IAM permission migration, or description-drift
 reconciliation.
 
-**Corrected Group A/B/C readiness matrix** (each address's manifest entry
-carries the same grouping and the specific reasoning):
+**Corrected Group A/B/C readiness matrix (2026-08-04, second pass)** (each
+address's manifest entry carries the same grouping and the specific
+reasoning):
 
-- **Group A — safe canary now that this correction has merged:**
-  `module.ecr.aws_ecr_repository.app`. Smallest, most isolated resource;
-  no dependents among the 12; import only records the existing repository
-  under its own correct live name.
-- **Group B — potentially importable after exact live-compatible inputs
-  and documentation are verified:**
+- **Group A — live-aligned and suitable for individual canary imports:**
+  `module.ecr.aws_ecr_repository.app`,
   `module.alb.aws_lb_target_group.web`,
   `module.ecs_cluster.aws_ecs_cluster.this`,
+  `module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`. The
+  capacity-providers resource **moved here from Group C** in this pass:
+  live association is confirmed empty
+  (`capacityProviders: []`, `defaultCapacityProviderStrategy: []`) and
+  this environment's adoption bundle now supplies the matching empty
+  values (`capacity_providers = []`, so
+  `default_capacity_provider_strategy` renders zero blocks) — see
+  correction 3 below. Importing records that empty association exactly;
+  it does **not** authorize any later association of `FARGATE` or
+  `FARGATE_SPOT` with the live cluster, which remains a separate,
+  explicitly reviewed decision. The resource address
+  (`module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`) is
+  unchanged. No exact, source-backed blocker remains for any of these
+  four — each is still an individual canary, not a batch.
+- **Group B — a small prerequisite or additional read verification away:**
   `module.iam.aws_iam_role.task_execution`,
   `module.elasticache.aws_elasticache_subnet_group.this`,
   `module.elasticache.aws_elasticache_replication_group.this`. The two
-  ElastiCache addresses are additionally blocked on a narrow read
-  permission (§9.13); the IAM role is blocked on the still-pending
-  permission-shape decision (§11 item 3); the cluster and target group
-  have no known remaining drift but are grouped with the rest for a
-  combined sequencing/documentation review rather than treated as bare
-  canaries.
-- **Group C — not currently adoption-aligned:**
-  `module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`,
+  ElastiCache addresses are blocked on a narrow read permission
+  (`elasticache:ListTagsForResource`, §9.13); the IAM execution role's
+  *name* is aligned, but its permission-shape decision (managed-policy +
+  narrow-inline vs. this module's broader custom-inline-policy, §11 item
+  3) is still pending — that decision, not a technical blocker, is what
+  keeps it out of Group A.
+- **Group C — architecture/content migration remains unresolved:**
   `module.iam.aws_iam_role_policy.task_execution`,
   `module.web.aws_ecs_service.this[0]`,
   `module.worker.aws_ecs_service.this[0]`,
   `module.critical_worker.aws_ecs_service.this[0]`,
-  `module.scheduler.aws_ecs_service.this[0]`. An ECS service is **not**
-  classified safe merely because importing itself does not change AWS —
-  the configuration must first preserve the live launch mode and desired
-  count (now true, see below) so a later reviewed plan does not
-  accidentally contain unrelated service migrations; these four remain
-  Group C pending the cluster/capacity-provider and IAM sequencing above.
+  `module.scheduler.aws_ecs_service.this[0]`.
+  - The inline policy's *name* is now aligned (`FirmsBaseStagingSecretsAccess`),
+    but its *content*/permission shape still differs materially from live
+    (§9.12 correction 4) — the same unresolved decision as the role above,
+    applied to the policy's actual grants, not merely its identity.
+  - The four ECS services are **no longer blocked by launch mode or
+    desired count** — both are now resolved (see corrections 1-2 below)
+    and must not be cited as a reason to withhold these imports. They
+    remain Group C for two different, still-open reasons: (a) each
+    service's `task_definition` argument points at
+    `aws_ecs_task_definition.this.arn` — a task definition this module
+    itself declares and would create fresh — rather than merely recording
+    the currently-running historical revision; `lifecycle.ignore_changes
+    = [task_definition]` prevents an import-time service update from
+    switching to it, but the surrounding configuration's intent (Terraform
+    owns future task-definition revisions) is a real architecture change,
+    not yet reviewed; and (b) live services run under a single, generic
+    shared task role, while this module's `iam` component declares 7
+    distinct per-role task roles (`module.iam.task_role_arns["web"]`,
+    etc.) that do not exist live at all. Importing a service does not, by
+    itself, create a task definition or role — but it must not be treated
+    as approval to deploy any new Terraform-managed task definition or
+    role-specific task role; that migration is a separate, explicitly
+    reviewed decision.
 
 **Corrections landed in this pass:**
 

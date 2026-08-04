@@ -146,6 +146,14 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
         return $matches[0];
     }
 
+    private function extractSection(string $doc, string $startPattern, string $endPattern): string
+    {
+        preg_match('/'.$startPattern.'.*?(?='.$endPattern.')/s', $doc, $matches);
+        $this->assertNotEmpty($matches, "Could not locate section matching /{$startPattern}/.");
+
+        return $matches[0];
+    }
+
     // ------------------------------------------------------------
     // ECS launch mode: use_capacity_provider_strategy
     // ------------------------------------------------------------
@@ -384,21 +392,71 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
         $this->assertStringContainsString('canary', strtolower($combined));
     }
 
-    public function test_ecs_services_are_documented_as_group_c_not_safe_merely_because_import_is_safe(): void
+    public function test_ecs_services_are_documented_as_group_c_blocked_by_task_definition_and_task_role_not_launch_mode(): void
     {
         foreach (['module.web.aws_ecs_service.this[0]', 'module.worker.aws_ecs_service.this[0]', 'module.critical_worker.aws_ecs_service.this[0]', 'module.scheduler.aws_ecs_service.this[0]'] as $address) {
             $entry = $this->manifestEntry($address);
+            $notes = $entry['notes'];
 
-            $this->assertStringContainsString('Group C', $entry['notes']);
+            $this->assertStringContainsString('Group C', $notes);
+
+            // Must explicitly confirm launch mode / desired count are
+            // resolved, not silently omitted as if still open.
+            $this->assertMatchesRegularExpression(
+                '/NO LONGER.{0,20}block|no longer.{0,20}block/is',
+                $notes,
+                "{$address} must explicitly state launch mode/desired count are no longer blockers."
+            );
+            $this->assertStringContainsString('desiredCount=1', $notes);
+
+            // Must cite the two real remaining reasons.
+            $this->assertStringContainsString('aws_ecs_task_definition.this.arn', $notes);
+            $this->assertStringContainsString('historical revision', $notes);
+            $this->assertMatchesRegularExpression('/shared task role/i', $notes);
+            $this->assertMatchesRegularExpression('/per-role task roles/i', $notes);
+
+            // Must not silently re-cite launch mode/desired count as an
+            // open blocker (a stale future edit would re-introduce this).
+            $this->assertDoesNotMatchRegularExpression(
+                '/launch mode is (not|still) (yet )?resolved|desired count is (not|still) (yet )?resolved/i',
+                $notes
+            );
         }
     }
 
-    public function test_capacity_providers_resource_documents_the_corrected_stale_claim(): void
+    public function test_capacity_providers_resource_moved_to_group_a_with_live_empty_association_recorded(): void
     {
         $entry = $this->manifestEntry('module.ecs_cluster.aws_ecs_cluster_capacity_providers.this');
+        $combined = $entry['notes'].' '.$entry['prerequisite'];
 
         $this->assertStringContainsString('WRONG', $entry['prerequisite']);
-        $this->assertStringContainsString('Group C', $entry['notes']);
+        $this->assertStringContainsString('Group A', $entry['notes']);
+        // "moved out of Group C into Group A" is legitimate historical
+        // narrative — the notes field (the actual current classification)
+        // must not itself label this address Group C.
+        $this->assertStringNotContainsString('Group C', $entry['notes']);
+
+        // Live empty association recorded accurately.
+        $this->assertMatchesRegularExpression('/capacityProviders:\s*\[\]/', $combined);
+        $this->assertStringContainsString('capacity_providers = []', $combined);
+
+        // No later association is authorized by the import.
+        $this->assertMatchesRegularExpression('/does NOT authorize|not authorize/i', $combined);
+        $this->assertStringContainsString('FARGATE', $combined);
+
+        // Resource address unchanged.
+        $this->assertStringContainsString('module.ecs_cluster.aws_ecs_cluster_capacity_providers.this', $combined);
+        $this->assertMatchesRegularExpression('/address.{0,20}unchanged|unchanged/i', $combined);
+    }
+
+    public function test_iam_inline_policy_remains_group_c_for_content_not_name(): void
+    {
+        $entry = $this->manifestEntry('module.iam.aws_iam_role_policy.task_execution');
+        $notes = $entry['notes'];
+
+        $this->assertStringContainsString('Group C', $notes);
+        $this->assertMatchesRegularExpression('/name.{0,20}(mismatch|fixed|aligned)/is', $notes);
+        $this->assertMatchesRegularExpression('/content.{0,40}(mismatch|not|differ)/is', $notes);
     }
 
     public function test_manifest_totals_unchanged_since_no_classification_genuinely_changed(): void
@@ -531,5 +589,85 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
             '/authorizes\s+no\s+import,\s+apply,\s+ECS\s+deployment,\s+scaling\s+change,\s+capacity-provider\s+association,\s+IAM\s+permission\s+migration,\s+or\s+description-drift\s+reconciliation/',
             $matches[0]
         );
+    }
+
+    // ------------------------------------------------------------
+    // Cross-document consistency: the corrected Group A/B/C matrix must
+    // agree across state-adoption-plan.md, staging-variable-inventory.md,
+    // and the manifest.
+    // ------------------------------------------------------------
+
+    public function test_group_a_addresses_are_consistent_across_both_docs_and_the_manifest(): void
+    {
+        $expectedA = [
+            'module.ecr.aws_ecr_repository.app',
+            'module.alb.aws_lb_target_group.web',
+            'module.ecs_cluster.aws_ecs_cluster.this',
+            'module.ecs_cluster.aws_ecs_cluster_capacity_providers.this',
+        ];
+
+        $plan = $this->extractSection($this->stateAdoptionPlan(), '### 9\.12', '### 9\.13');
+        $inventory = $this->variableInventory();
+
+        foreach ($expectedA as $address) {
+            $this->assertStringContainsString($address, $plan, "{$address} must appear in state-adoption-plan.md §9.12's Group A list.");
+            $this->assertStringContainsString($address, $inventory, "{$address} must appear in staging-variable-inventory.md's Group A list.");
+            $this->assertStringContainsString('Group A', $this->manifestEntry($address)['notes']);
+        }
+    }
+
+    public function test_group_b_addresses_are_consistent_across_both_docs_and_the_manifest(): void
+    {
+        $expectedB = [
+            'module.iam.aws_iam_role.task_execution',
+            'module.elasticache.aws_elasticache_subnet_group.this',
+            'module.elasticache.aws_elasticache_replication_group.this',
+        ];
+
+        $plan = $this->extractSection($this->stateAdoptionPlan(), '### 9\.12', '### 9\.13');
+        $inventory = $this->variableInventory();
+
+        foreach ($expectedB as $address) {
+            $this->assertStringContainsString($address, $plan, "{$address} must appear in state-adoption-plan.md §9.12's Group B list.");
+            $this->assertStringContainsString($address, $inventory, "{$address} must appear in staging-variable-inventory.md's Group B list.");
+            $this->assertStringContainsString('Group B', $this->manifestEntry($address)['notes']);
+        }
+    }
+
+    public function test_group_c_addresses_are_consistent_across_both_docs_and_the_manifest(): void
+    {
+        $expectedC = [
+            'module.iam.aws_iam_role_policy.task_execution',
+            'module.web.aws_ecs_service.this[0]',
+            'module.worker.aws_ecs_service.this[0]',
+            'module.critical_worker.aws_ecs_service.this[0]',
+            'module.scheduler.aws_ecs_service.this[0]',
+        ];
+
+        $plan = $this->extractSection($this->stateAdoptionPlan(), '### 9\.12', '### 9\.13');
+        $inventory = $this->variableInventory();
+
+        foreach ($expectedC as $address) {
+            $this->assertStringContainsString($address, $plan, "{$address} must appear in state-adoption-plan.md §9.12's Group C list.");
+            $this->assertStringContainsString($address, $inventory, "{$address} must appear in staging-variable-inventory.md's Group C list.");
+            $this->assertStringContainsString('Group C', $this->manifestEntry($address)['notes']);
+        }
+    }
+
+    public function test_group_counts_are_exactly_four_three_five(): void
+    {
+        $groupOf = [];
+        foreach (self::PHASE_A3_ADDRESSES as $address) {
+            $notes = $this->manifestEntry($address)['notes'];
+            preg_match('/Group ([ABC])/', $notes, $m);
+            $this->assertNotEmpty($m, "{$address} must record a single unambiguous Group letter.");
+            $groupOf[$address] = $m[1];
+        }
+
+        $counts = array_count_values($groupOf);
+
+        $this->assertSame(4, $counts['A'] ?? 0, 'Group A must contain exactly 4 addresses.');
+        $this->assertSame(3, $counts['B'] ?? 0, 'Group B must contain exactly 3 addresses.');
+        $this->assertSame(5, $counts['C'] ?? 0, 'Group C must contain exactly 5 addresses.');
     }
 }
