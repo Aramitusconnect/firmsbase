@@ -477,25 +477,28 @@ was written for it" as equivalent to "Terraform cannot touch it."
 ### Phase A2 — resources proven configuration-equivalent (`import_unchanged`, 10 addresses)
 
 Security groups (`alb`, `ecs_tasks`, `redis`) and their field-matching
-rules, the ALB itself + both listeners. Import commands are fully
-prepared in the manifest; 4 of the 10 are marked `import_id: "BLOCKED"`
-pending `ec2:DescribeSecurityGroupRules` access (`AccessDenied` for this
-operator — the SG/rule *content* is already confirmed matching, only the
-AWS-internal rule ID needed for the literal import command is unresolved).
-The exact four blocked addresses:
+rules, the ALB itself + both listeners. **All 10 addresses now have a
+resolved import ID in the manifest — none remain `"BLOCKED"`.** Execution
+status as of 2026-08-04 (see §9.10 for full detail):
 
-- `module.security_groups.aws_security_group_rule.alb_ingress_https`
-- `module.security_groups.aws_security_group_rule.ecs_tasks_ingress_from_alb`
-- `module.security_groups.aws_security_group_rule.rds_ingress_from_ecs_tasks[0]`
-- `module.elasticache.aws_security_group_rule.redis_ingress_from_ecs_tasks`
+- **Six already imported** into the live backend
+  (`environments/staging/ecs/terraform.tfstate`): the 3 security groups,
+  the ALB, and both listeners.
+- **Four rule imports resolved but not yet run** — pending repository
+  review and merge of the manifest correction that resolved their
+  Terraform composite import IDs:
 
-The executable A2 set is therefore **six** resources, not seven: the 3
-security groups, the ALB, and both listeners. The target group
-(`module.alb.aws_lb_target_group.web`) is **not** in this phase — it has
-three real health-check-field mismatches against live (§9.5) and has been
-moved to Phase A3 (`import_then_migrate`) below.
+  - `module.security_groups.aws_security_group_rule.alb_ingress_https`
+  - `module.security_groups.aws_security_group_rule.ecs_tasks_ingress_from_alb`
+  - `module.security_groups.aws_security_group_rule.rds_ingress_from_ecs_tasks[0]`
+  - `module.elasticache.aws_security_group_rule.redis_ingress_from_ecs_tasks`
+
+The target group (`module.alb.aws_lb_target_group.web`) is **not** in this
+phase — it has three real health-check-field mismatches against live
+(§9.5) and has been moved to Phase A3 (`import_then_migrate`) below.
 
 ```bash
+# --- already imported (2026-08-04) ---
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.security_groups.aws_security_group.alb' 'sg-02a26ff122a9a1d29'
 terraform -chdir=infrastructure/ecs/environments/staging import \
@@ -508,13 +511,42 @@ terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.alb.aws_lb_listener.https' 'arn:aws:elasticloadbalancing:us-east-1:603013471426:listener/app/firmsbase-staging-alb/79a16ccaf391d71b/f8dc4575154478ca'
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.alb.aws_lb_listener.http_redirect' 'arn:aws:elasticloadbalancing:us-east-1:603013471426:listener/app/firmsbase-staging-alb/79a16ccaf391d71b/371edb36d1b49e2c'
+
+# --- resolved, NOT yet imported — pending repository review and merge ---
+# aws_security_group_rule (the legacy per-rule resource) does not accept its
+# AWS-internal SecurityGroupRuleId (sgr-*) as a Terraform import ID. It
+# requires a composite identifier the provider constructs itself:
+#   <security_group_id>_<type>_<protocol>_<from_port>_<to_port>_<source>
+# where <source> is either a CIDR block or a referenced security-group ID.
+# The AWS sgr-* ID is recorded separately in import-manifest.json
+# (`live_reference`) purely for audit traceability — it is not usable as
+# the import ID itself. Any argument containing a CIDR (a "/") must be
+# shell-quoted.
+terraform -chdir=infrastructure/ecs/environments/staging import \
+  'module.security_groups.aws_security_group_rule.alb_ingress_https' \
+  'sg-02a26ff122a9a1d29_ingress_tcp_443_443_0.0.0.0/0'
+  # AWS SecurityGroupRuleId: sgr-0c01cb5ed9c2ade63
+terraform -chdir=infrastructure/ecs/environments/staging import \
+  'module.security_groups.aws_security_group_rule.ecs_tasks_ingress_from_alb' \
+  'sg-0db14e50ea5c5466c_ingress_tcp_8080_8080_sg-02a26ff122a9a1d29'
+  # AWS SecurityGroupRuleId: sgr-0d10f5fbc9e17c912
+terraform -chdir=infrastructure/ecs/environments/staging import \
+  'module.security_groups.aws_security_group_rule.rds_ingress_from_ecs_tasks[0]' \
+  'sg-0d4c5eedb2ee21743_ingress_tcp_5432_5432_sg-0db14e50ea5c5466c'
+  # AWS SecurityGroupRuleId: sgr-00039246ff540e217
+terraform -chdir=infrastructure/ecs/environments/staging import \
+  'module.elasticache.aws_security_group_rule.redis_ingress_from_ecs_tasks' \
+  'sg-0da3ea50262a9d20d_ingress_tcp_6379_6379_sg-0db14e50ea5c5466c'
+  # AWS SecurityGroupRuleId: sgr-0d4fcba591950afde
 # --- plan checkpoint: MUST show zero destroy/replace, and MUST show zero
 # unexpected create actions (every resource this checkpoint's plan proposes
 # to create must be one this document already classified `new` — anything
 # else is a sign an earlier step was skipped or misordered; stop and
-# re-diagnose rather than apply). The 4 BLOCKED SG-rule imports (see
-# import-manifest.json) run here too, once their rule IDs are resolved with
-# elevated read access — not guessed. ---
+# re-diagnose rather than apply). All four rule imports above have a
+# description-only diff expected on the following plan (live Description is
+# null; config sets an explicit description) — description is not a
+# ForceNew attribute on aws_security_group_rule, so this is a benign
+# update-in-place, not a replacement. ---
 ```
 
 ### Phase A3 — resources requiring a temporary live-state-compatible configuration first (`import_then_migrate`, 12 addresses)
@@ -768,9 +800,11 @@ be merged before Phase B's task-definition migration work begins.
 A real canary import (`module.security_groups.aws_security_group.alb`,
 `sg-02a26ff122a9a1d29`) was attempted against the real S3 backend and
 failed twice, in ways no static check (`validate`/`fmt`/`terraform test`)
-could have caught. Both failures are now fixed; the backend prefix
-remained empty throughout and remains empty today — **no Phase A2 import
-has yet succeeded.**
+could have caught. Both failures are now fixed. The canary import (and
+five further Phase A2 imports after it) has since succeeded — see §9.10
+for the current, corrected execution status; the historical narrative
+below describes the state at the time these two bugs were diagnosed and
+fixed, not the state today.
 
 1. **Wrong identity, silently.** The approved AWS CLI profile
    (`firmsbase-staging-operator-login`) resolves credentials through a
@@ -836,6 +870,45 @@ has yet succeeded.**
    applies are exactly the kind of narrow, easy-to-forget, order-dependent
    operation this whole state-adoption plan exists to avoid.
 
+### 9.10 Phase A2 execution status (current, as of 2026-08-04)
+
+Both remaining blockers from §9.9 (`ec2:DescribeVpcAttribute` and
+`ec2:DescribeSecurityGroupRules`) are now granted. Real, guarded imports
+have been run against the live S3 backend
+(`environments/staging/ecs/terraform.tfstate`):
+
+- **State currently contains 6 managed resources plus 9 data-source
+  entries** (the data-source entries — `aws_vpc`, 4× `aws_subnet`, 4×
+  `aws_iam_policy_document` — are read-only cache artifacts of Terraform
+  evaluating the whole configuration graph during `import`, per point 3
+  above; they are not separately-managed resources and are not counted
+  against Phase A2's 10 addresses).
+- The 6 already-imported managed resources: `module.security_groups.aws_security_group.alb`,
+  `module.security_groups.aws_security_group.ecs_tasks`,
+  `module.elasticache.aws_security_group.redis`, `module.alb.aws_lb.this`,
+  `module.alb.aws_lb_listener.https`,
+  `module.alb.aws_lb_listener.http_redirect`.
+- The remaining 4 Phase A2 addresses (all `aws_security_group_rule`) now
+  have a resolved Terraform composite import ID in
+  `import-manifest.json` (no longer `"BLOCKED"`), confirmed against a
+  live, read-only `aws ec2 describe-security-group-rules` query with
+  exactly one matching rule per address — see §8's Phase A2 listing above
+  and each address's manifest entry for the full field comparison. **They
+  have not been imported.** That import run is pending repository review
+  and merge of the manifest correction that resolved these IDs.
+- `aws_security_group_rule` uses a provider-constructed composite import
+  identifier, not the AWS-internal `SecurityGroupRuleId` (`sgr-*`) — see
+  the explanatory comment in §8's Phase A2 command block. Each of the 4
+  manifest entries records both: `live_reference` holds the `sgr-*` ID
+  (audit traceability only, not usable as an import ID) and `import_id`
+  holds the actual composite string to pass to `terraform import`.
+- The backend's S3 object history (state versions plus the native
+  `use_lockfile` lock-object versions/delete-markers from each completed
+  operation) has not been altered or deleted by this correction — this
+  correction only adds Terraform config/manifest/documentation content,
+  it runs no `state rm`/`mv`/`push`/`pull` and no lifecycle operation
+  against the backend's object versions.
+
 ## 10. Validation performed (local/static only)
 
 | Check | Result |
@@ -891,14 +964,11 @@ Terraform (`.tf`), a Terraform test (`.tftest.hcl`), documentation
 6. Security-group rule reconciliation timing (§9.6): apply the narrower
    declared rules alongside the existing broad ones now, or defer until
    the broad rules are revoked in the same change.
-7. Elevated (or one-time delegated) read access for
-   `ec2:DescribeSecurityGroupRules` (blocks 4 of the 10 `import_unchanged`
-   commands — the SG *content* is already confirmed matching, only the
-   literal rule ID is missing), `ec2:DescribeVpcAttribute` on
-   `vpc-0fd81b688155ded2b` (§9.9 — blocks any import at all, discovered
-   during the real canary import attempt, not only the four SG rules),
-   `cloudwatch:DescribeAlarms`, and `sns:ListTopics` — not requested
-   automatically, per the mission's constraint.
+7. ~~Elevated read access for `ec2:DescribeSecurityGroupRules` and
+   `ec2:DescribeVpcAttribute`~~ — **both now granted** (§9.10). Elevated
+   (or one-time delegated) read access for `cloudwatch:DescribeAlarms` and
+   `sns:ListTopics` remains an open item — not requested automatically,
+   per the mission's constraint.
 8. Confirmation of `module.migrate`/`module.maintenance` task-definition
    content — both are covered by the uniform `do_not_import` decision in
    §6 regardless, so this is informational for Phase B planning, not a
