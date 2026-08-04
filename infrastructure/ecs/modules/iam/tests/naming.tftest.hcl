@@ -37,6 +37,11 @@ variables {
   log_group_arns     = ["arn:aws:logs:us-east-1:603013471426:log-group:/ecs/firmsbase-staging/web:*"]
   secret_arns        = []
   kms_key_arn        = null
+  # task_execution_policy_name has no default (see variables.tf) — every
+  # caller must set it explicitly. This file isn't exercising this
+  # variable's own behavior (see task_execution_policy_name.tftest.hcl),
+  # so it's set to the module's previous hardcoded value here.
+  task_execution_policy_name = "firmsbase-staging-task-execution"
   # kms_encryption_enabled/s3_documents_enabled have no default (see
   # variables.tf) — every caller must set them explicitly. This file isn't
   # exercising either grant, so both are explicitly false, matching

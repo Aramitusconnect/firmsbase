@@ -589,32 +589,45 @@ terraform -chdir=infrastructure/ecs/environments/staging import \
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.ecr.aws_ecr_repository.app' 'firmsbase-staging'
 
-# Requires: var.ecs_cluster_name = "firmsbase-staging-cluster"
+# Requires: var.ecs_cluster_name = "firmsbase-staging-cluster" (Group B)
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.ecs_cluster.aws_ecs_cluster.this' 'firmsbase-staging-cluster'
+# Group C — see §9.12/§9.13: live cluster has NO capacity providers
+# associated (capacityProviders: []); var.ecs_capacity_providers=[] now
+# lets this address represent that, but associating capacity providers
+# with the live cluster remains a separate, explicitly reviewed decision.
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.ecs_cluster.aws_ecs_cluster_capacity_providers.this' 'firmsbase-staging-cluster'
 
-# Requires: var.elasticache_subnet_group_name = "firmsbase-staging-cache-subnets"
+# Requires: var.elasticache_subnet_group_name = "firmsbase-staging-cache-subnets" (Group B)
+# ALSO blocked on elasticache:ListTagsForResource — AccessDenied for this
+# operator on this ARN's tag-read call — see §9.13. Not granted in this mission.
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.elasticache.aws_elasticache_subnet_group.this' 'firmsbase-staging-cache-subnets'
 
 # Requires: var.elasticache_engine = "valkey", var.elasticache_parameter_group_name = "default.valkey7",
 # var.elasticache_engine_version = "7.2" (live's exact reported version is 7.2.6, but AWS requires
-# major.minor-only for Redis v6+/Valkey), and the module's ignore_changes=[auth_token] (already added)
+# major.minor-only for Redis v6+/Valkey), and the module's ignore_changes=[auth_token] (already added).
+# Group B — ALSO blocked on elasticache:ListTagsForResource, same as the subnet group above — see §9.13.
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.elasticache.aws_elasticache_replication_group.this' 'firmsbase-staging-redis'
 
-# Requires: var.iam_task_execution_role_name = "firmsbase-staging-ecs-execution-role"
+# Requires: var.iam_task_execution_role_name = "firmsbase-staging-ecs-execution-role" (Group B)
 # PLUS a separate, explicit decision on permission-shape reconciliation (managed-policy vs custom-inline) — see §11 item 3. Do not import until that decision is made; a name-only fix imports a role whose Terraform-declared permissions don't match what's actually attached live.
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.iam.aws_iam_role.task_execution' 'firmsbase-staging-ecs-execution-role'
+# Group C — var.iam_task_execution_policy_name="FirmsBaseStagingSecretsAccess"
+# (landed 2026-08-04) aligns this resource's identity with live, fixing a
+# real replacement risk from the module's previous hardcoded name — but
+# the policy's CONTENT still differs materially from live (see §9.12 item
+# 4), paired with the same permission-shape decision as the role above.
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.iam.aws_iam_role_policy.task_execution' 'firmsbase-staging-ecs-execution-role:FirmsBaseStagingSecretsAccess'
 
-# BLOCKED — Requires: var.alb_health_check_path = "/up", var.alb_health_check_interval_seconds = 30,
-# and var.alb_health_check_matcher = "200-399" (see terraform.tfvars.example) all actually supplied
-# at apply time, matching the live target group exactly (§9.5). None of the three mismatches force
+# Requires: var.alb_health_check_path = "/up", var.alb_health_check_interval_seconds = 30,
+# and var.alb_health_check_matcher = "200-399" (see terraform.tfvars.example) — Group B, confirmed
+# supplied exactly via an isolated local-backend terraform console boolean check on 2026-08-04
+# (never by printing terraform.tfvars). None of the three mismatches force
 # replacement (health_check.* and matcher are in-place-updatable per the AWS provider's documented
 # resource schema for aws_lb_target_group — not re-verified live via `terraform providers schema`
 # in this pass, which this mission does not authorize against the real initialized backend), but
@@ -626,7 +639,19 @@ terraform -chdir=infrastructure/ecs/environments/staging import \
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.alb.aws_lb_target_group.web' 'arn:aws:elasticloadbalancing:us-east-1:603013471426:targetgroup/firmsbase-staging-tg/1830c01b9aaac37d'
 
-# Requires: assign_public_ip=true is in effect (default, §7) for all four — DO NOT apply with private_egress_ready=true until real NAT egress exists
+# Group C for all four (§9.12) — not because import itself is unsafe, but
+# because the cluster/capacity-provider and IAM sequencing above must
+# resolve first, per this correction's explicit instruction not to treat
+# an ECS service as safe merely because its own import doesn't change AWS.
+# assign_public_ip=true is already the default (!var.private_egress_ready,
+# §9.1/§7) and matches live — the prior "hard stop" framing here was
+# stale and has been corrected (§9.12 item under each service's manifest
+# entry). use_capacity_provider_strategy=false (landed 2026-08-04, §9.7)
+# matches live's launchType=FARGATE. desired_count now flows through
+# web_desired_count/worker_desired_count/critical_worker_desired_count/
+# scheduler_desired_count (landed 2026-08-04, §9.12 item 2) — this
+# environment's terraform.tfvars sets all four to 1, matching live exactly
+# (web/worker previously diverged: config declared 2, live is 1).
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.web.aws_ecs_service.this[0]' 'firmsbase-staging-cluster/web'
 terraform -chdir=infrastructure/ecs/environments/staging import \
@@ -799,10 +824,26 @@ environment remains more permissive than Terraform's declared rules after
 Phase A unless a human explicitly revokes the extra broad rules in a
 follow-up — out of scope here.
 
-### 9.7 `launch_type` vs. `capacity_provider_strategy`
+### 9.7 `launch_type` vs. `capacity_provider_strategy` — now explicitly modeled (corrected 2026-08-04)
 
-Unchanged, confirmed non-destructive: an in-place field swap per the AWS
-provider's documented behavior for this attribute pair.
+Previously accepted as "unchanged, confirmed non-destructive: an in-place
+field swap," but the module gave callers no way to actually choose
+`launch_type` — it hardcoded a `capacity_provider_strategy` block
+unconditionally. Live re-verification (`aws ecs describe-services`)
+confirms every one of this environment's four long-running services
+(`web`/`worker`/`critical_worker`/`scheduler`) actually runs
+`launchType=FARGATE` with `capacityProviderStrategy=null` today —
+consistent with the live cluster itself having no capacity providers
+associated at all (§9.10/§9.11/§9.12). **Corrected**: `modules/ecs_service`
+now takes a required `use_capacity_provider_strategy` boolean (no default —
+every caller must decide explicitly); `false` sets `launch_type = "FARGATE"`
+and omits the `capacity_provider_strategy` block entirely via a `dynamic`
+block, `true` does the reverse. AWS rejects setting both on the same
+`aws_ecs_service`, so exactly one is ever rendered. Every current staging
+caller (`web`, `worker`, `critical_worker`, `scheduler`, `migrate`,
+`maintenance`, `ses_consumer`) sets this `false`, matching live exactly.
+The `aws_ecs_cluster_capacity_providers` resource has its own, separate
+drift — see §9.12.
 
 ### 9.8 `APP_URL` — previously unmodeled, corrected in this pass
 
@@ -995,6 +1036,142 @@ follows:
    here — it would need its own explicit, reviewed migration, not a
    byproduct of a classification fix.
 
+### 9.12 Phase A3 adoption alignment and readiness matrix (2026-08-04)
+
+Phase A2 is complete — all 10 `import_unchanged` addresses (3 security
+groups, ALB, 2 listeners, 4 security-group rules) are imported. State
+currently contains 10 managed resources plus 9 read-only data-source
+cache entries. **No Phase A3 (`import_then_migrate`, 16 addresses)
+resource has been imported.** This correction read-only re-verified all
+12 addresses not already covered by the four now-imported security-group
+rules against live AWS, landed several code fixes, corrected stale prior
+claims, and recorded a still-open permission gap — but authorizes no
+import, apply, ECS deployment, scaling change, capacity-provider
+association, IAM permission migration, or description-drift
+reconciliation.
+
+**Corrected Group A/B/C readiness matrix (2026-08-04, second pass)** (each
+address's manifest entry carries the same grouping and the specific
+reasoning):
+
+- **Group A — live-aligned and suitable for individual canary imports:**
+  `module.ecr.aws_ecr_repository.app`,
+  `module.alb.aws_lb_target_group.web`,
+  `module.ecs_cluster.aws_ecs_cluster.this`,
+  `module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`. The
+  capacity-providers resource **moved here from Group C** in this pass:
+  live association is confirmed empty
+  (`capacityProviders: []`, `defaultCapacityProviderStrategy: []`) and
+  this environment's adoption bundle now supplies the matching empty
+  values (`capacity_providers = []`, so
+  `default_capacity_provider_strategy` renders zero blocks) — see
+  correction 3 below. Importing records that empty association exactly;
+  it does **not** authorize any later association of `FARGATE` or
+  `FARGATE_SPOT` with the live cluster, which remains a separate,
+  explicitly reviewed decision. The resource address
+  (`module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`) is
+  unchanged. No exact, source-backed blocker remains for any of these
+  four — each is still an individual canary, not a batch.
+- **Group B — a small prerequisite or additional read verification away:**
+  `module.iam.aws_iam_role.task_execution`,
+  `module.elasticache.aws_elasticache_subnet_group.this`,
+  `module.elasticache.aws_elasticache_replication_group.this`. The two
+  ElastiCache addresses are blocked on a narrow read permission
+  (`elasticache:ListTagsForResource`, §9.13); the IAM execution role's
+  *name* is aligned, but its permission-shape decision (managed-policy +
+  narrow-inline vs. this module's broader custom-inline-policy, §11 item
+  3) is still pending — that decision, not a technical blocker, is what
+  keeps it out of Group A.
+- **Group C — architecture/content migration remains unresolved:**
+  `module.iam.aws_iam_role_policy.task_execution`,
+  `module.web.aws_ecs_service.this[0]`,
+  `module.worker.aws_ecs_service.this[0]`,
+  `module.critical_worker.aws_ecs_service.this[0]`,
+  `module.scheduler.aws_ecs_service.this[0]`.
+  - The inline policy's *name* is now aligned (`FirmsBaseStagingSecretsAccess`),
+    but its *content*/permission shape still differs materially from live
+    (§9.12 correction 4) — the same unresolved decision as the role above,
+    applied to the policy's actual grants, not merely its identity.
+  - The four ECS services are **no longer blocked by launch mode or
+    desired count** — both are now resolved (see corrections 1-2 below)
+    and must not be cited as a reason to withhold these imports. They
+    remain Group C for two different, still-open reasons: (a) each
+    service's `task_definition` argument points at
+    `aws_ecs_task_definition.this.arn` — a task definition this module
+    itself declares and would create fresh — rather than merely recording
+    the currently-running historical revision; `lifecycle.ignore_changes
+    = [task_definition]` prevents an import-time service update from
+    switching to it, but the surrounding configuration's intent (Terraform
+    owns future task-definition revisions) is a real architecture change,
+    not yet reviewed; and (b) live services run under a single, generic
+    shared task role, while this module's `iam` component declares 7
+    distinct per-role task roles (`module.iam.task_role_arns["web"]`,
+    etc.) that do not exist live at all. Importing a service does not, by
+    itself, create a task definition or role — but it must not be treated
+    as approval to deploy any new Terraform-managed task definition or
+    role-specific task role; that migration is a separate, explicitly
+    reviewed decision.
+
+**Corrections landed in this pass:**
+
+1. **ECS launch mode** (§9.7): `use_capacity_provider_strategy` (no
+   default) added to `modules/ecs_service`; every staging caller sets it
+   `false`, matching live's `launchType=FARGATE`.
+2. **ECS desired counts**: live desired counts are all confirmed `1`
+   (`aws ecs describe-services`, 2026-08-04) — Terraform previously
+   declared `web`/`worker` at `2`. New explicit variables
+   `web_desired_count`/`worker_desired_count`/
+   `critical_worker_desired_count`/`scheduler_desired_count` preserve
+   their original new-environment defaults (`2`/`2`/`1`/`1`); this
+   environment's `terraform.tfvars` sets all four to `1`.
+3. **Cluster capacity-provider association**: live is confirmed empty
+   (`capacityProviders: []`, `defaultCapacityProviderStrategy: []`) — the
+   prior audit's claim that the configured `["FARGATE","FARGATE_SPOT"]`
+   default "already matches the live default" was **wrong** and has been
+   removed. `modules/ecs_cluster` now exposes
+   `capacity_providers`/`default_capacity_provider` (config-known,
+   default preserves original design); an offline mocked test
+   (`modules/ecs_cluster/tests/capacity_providers.tftest.hcl`) confirms an
+   empty list plus zero `default_capacity_provider_strategy` blocks is
+   schema-valid — not confirmed via a real plan or `terraform providers
+   schema` (neither authorized in this pass). This environment's
+   `terraform.tfvars` sets `ecs_capacity_providers = []`. The resource
+   address is unchanged; associating capacity providers with the live
+   cluster remains a separate, explicitly reviewed decision.
+4. **IAM inline-policy name**: live policy is named
+   `FirmsBaseStagingSecretsAccess`, not the module's previously hardcoded
+   `"<name_prefix>-task-execution"`. Since `aws_iam_role_policy.name` is
+   effectively immutable, the old hardcoded value would have set up a
+   guaranteed replacement on the first plan after import. `modules/iam`
+   now takes a required `task_execution_policy_name` (no default); this
+   environment's `terraform.tfvars` sets it to
+   `"FirmsBaseStagingSecretsAccess"`. This aligns identity only — the
+   policy's *content*/permission-shape (§11 item 3) remains the same
+   separate, undecided migration.
+
+### 9.13 ElastiCache read-permission blocker (recorded, not resolved)
+
+`elasticache:ListTagsForResource` is `AccessDenied` for
+`firmsbase-staging-operator` on both:
+
+- `arn:aws:elasticache:us-east-1:603013471426:replicationgroup:firmsbase-staging-redis`
+- `arn:aws:elasticache:us-east-1:603013471426:subnetgroup:firmsbase-staging-cache-subnets`
+
+confirmed via a direct read-only `aws elasticache list-tags-for-resource`
+call against each ARN on 2026-08-04. ElastiCache's `Describe*` APIs do not
+embed tags inline (unlike IAM's `GetRole`), so the AWS provider's
+`aws_elasticache_replication_group`/`aws_elasticache_subnet_group` reads
+plausibly need this permission during import — this is a **plausible**
+real blocker, not one confirmed by an actual import attempt in this pass
+(unlike `ec2:DescribeVpcAttribute`/`ec2:DescribeSecurityGroupRules`, which
+were confirmed by real failures). **Not granted in this mission.** By
+contrast, `iam:ListRoleTags` is also `AccessDenied` for this operator, but
+is *not* claimed as a required import-time permission here — IAM's
+`GetRole` (which does work) embeds `Role.Tags` inline per its own API
+shape, so the provider's `aws_iam_role` read typically does not need a
+separate tags call; this distinction is not re-verified against the
+provider's source directly.
+
 ## 10. Validation performed (local/static only)
 
 | Check | Result |
@@ -1052,9 +1229,12 @@ Terraform (`.tf`), a Terraform test (`.tftest.hcl`), documentation
    the broad rules are revoked in the same change.
 7. ~~Elevated read access for `ec2:DescribeSecurityGroupRules` and
    `ec2:DescribeVpcAttribute`~~ — **both now granted** (§9.10). Elevated
-   (or one-time delegated) read access for `cloudwatch:DescribeAlarms` and
-   `sns:ListTopics` remains an open item — not requested automatically,
-   per the mission's constraint.
+   (or one-time delegated) read access for `cloudwatch:DescribeAlarms`,
+   `sns:ListTopics`, and (newly recorded, §9.13)
+   `elasticache:ListTagsForResource` remains an open item — not requested
+   automatically, per the mission's constraint. The `elasticache` grant
+   specifically blocks both remaining ElastiCache Phase A3 imports
+   (`aws_elasticache_subnet_group.this`, `aws_elasticache_replication_group.this`).
 8. Confirmation of `module.migrate`/`module.maintenance` task-definition
    content — both are covered by the uniform `do_not_import` decision in
    §6 regardless, so this is informational for Phase B planning, not a

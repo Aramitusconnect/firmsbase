@@ -167,6 +167,11 @@ variable "capacity_provider" {
   }
 }
 
+variable "use_capacity_provider_strategy" {
+  description = "Whether the service places tasks via a capacity_provider_strategy block (true) or a fixed launch_type=\"FARGATE\" (false). No default, deliberately — every caller must decide explicitly, matching this module's original design intent of always using a capacity-provider strategy versus this staging environment's live reality, where every service currently runs with launch_type=FARGATE and the cluster has no capacity-provider association at all (see docs/ecs/state-adoption-plan.md §9.10/§9.11). The two are mutually exclusive on aws_ecs_service; AWS rejects setting both."
+  type        = bool
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

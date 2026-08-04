@@ -84,7 +84,7 @@ data "aws_iam_policy_document" "task_execution" {
 }
 
 resource "aws_iam_role_policy" "task_execution" {
-  name   = "${var.name_prefix}-task-execution"
+  name   = var.task_execution_policy_name
   role   = aws_iam_role.task_execution.id
   policy = data.aws_iam_policy_document.task_execution.json
 }

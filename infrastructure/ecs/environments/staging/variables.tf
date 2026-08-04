@@ -221,6 +221,50 @@ variable "ses_consumer_desired_count" {
   }
 }
 
+variable "web_desired_count" {
+  description = "web ECS service desired task count. Defaults to 2 (this module's original design intent — a load-balanced HTTP service with more than one task for availability). This staging environment's live service currently runs 1 (confirmed via aws ecs describe-services) — see docs/ecs/state-adoption-plan.md §9.10/§9.11. Left at its 2 default, applying after import would scale the live service up; set to 1 in terraform.tfvars to match live exactly before any apply."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.web_desired_count >= 0
+    error_message = "web_desired_count must be non-negative."
+  }
+}
+
+variable "worker_desired_count" {
+  description = "worker ECS service desired task count. Defaults to 2 (this module's original design intent). This staging environment's live service currently runs 1 (confirmed via aws ecs describe-services) — see docs/ecs/state-adoption-plan.md §9.10/§9.11. Left at its 2 default, applying after import would scale the live service up; set to 1 in terraform.tfvars to match live exactly before any apply."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.worker_desired_count >= 0
+    error_message = "worker_desired_count must be non-negative."
+  }
+}
+
+variable "critical_worker_desired_count" {
+  description = "critical_worker ECS service desired task count. Defaults to 1 (this module's original design intent — a fixed-capacity, never-scaled-to-zero worker; see docs/ecs/queue-and-redis-architecture.md). This staging environment's live service also currently runs 1 (confirmed via aws ecs describe-services) — no live-adoption override is required, but the variable exists for consistency with web/worker/scheduler and to make this explicit rather than a hardcoded literal."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.critical_worker_desired_count >= 0
+    error_message = "critical_worker_desired_count must be non-negative."
+  }
+}
+
+variable "scheduler_desired_count" {
+  description = "scheduler ECS service desired task count. Defaults to 1 (this module's original design intent — a single instance; see docs/ecs/graceful-shutdown.md). This staging environment's live service also currently runs 1 (confirmed via aws ecs describe-services) — no live-adoption override is required, but the variable exists for consistency with web/worker/critical_worker and to make this explicit rather than a hardcoded literal."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.scheduler_desired_count >= 0
+    error_message = "scheduler_desired_count must be non-negative."
+  }
+}
+
 variable "ses_consumer_cpu" {
   description = "ses-consumer task CPU units (Fargate). 256 (the smallest Fargate size) — an SQS long-poll loop plus a handful of DB writes per event is not CPU-intensive, matching the scheduler role's own sizing."
   type        = number
@@ -271,6 +315,18 @@ variable "ecs_cluster_name" {
   default     = null
 }
 
+variable "ecs_capacity_providers" {
+  description = "Capacity providers associated with the ECS cluster. Defaults to [\"FARGATE\", \"FARGATE_SPOT\"] — original module design, unaffected for a brand-new environment. This staging environment's live cluster currently has NO capacity providers associated at all (confirmed via aws ecs describe-clusters — capacityProviders: []) — see docs/ecs/state-adoption-plan.md §9.10/§9.11. Set to [] for live-compatible adoption. Associating capacity providers with the live cluster is a separate, explicitly reviewed decision — this variable only lets the resource address represent the live (empty) association; it does not itself authorize changing it."
+  type        = list(string)
+  default     = ["FARGATE", "FARGATE_SPOT"]
+}
+
+variable "ecs_default_capacity_provider" {
+  description = "The capacity_provider used in the cluster's default_capacity_provider_strategy, when var.ecs_capacity_providers is non-empty. Ignored when var.ecs_capacity_providers is empty (the live-adoption case) — see docs/ecs/state-adoption-plan.md §9.10/§9.11."
+  type        = string
+  default     = "FARGATE"
+}
+
 variable "ecr_repository_name" {
   description = "Override for the ECR repository name. Null (default) falls back to \"firmsbase-app\" (this file's prior hardcoded value). This staging environment's live repository is \"firmsbase-staging\" — ECR repository renames are destructive (all existing image tags/digests are lost), so this must be set correctly before any import, never used to rename the live repository. See docs/ecs/state-adoption-plan.md §3B."
   type        = string
@@ -310,6 +366,11 @@ variable "iam_task_execution_role_name" {
   description = "Override for the shared ECS task-execution IAM role name. Null (default) falls back to \"<name_prefix>-task-execution\". This staging environment's live execution role is \"firmsbase-staging-ecs-execution-role\" — a naming fix alone is NOT sufficient to make this role import-clean; the live role's permissions come from the AWS-managed AmazonECSTaskExecutionRolePolicy plus one narrow inline policy, while this module builds one broader custom inline policy with no managed-policy attachment. That permission-shape reconciliation is a separate, explicit human decision — see docs/ecs/state-adoption-plan.md §3B/§8 — this variable only fixes the name, not the policy shape."
   type        = string
   default     = null
+}
+
+variable "iam_task_execution_policy_name" {
+  description = "The name of the task-execution role's inline policy. No default, deliberately — mirrors modules/iam's own task_execution_policy_name (no default, since aws_iam_role_policy's name is effectively immutable and a wrong default would silently set up a replacement rather than fail loudly). This staging environment's live inline policy is named \"FirmsBaseStagingSecretsAccess\" (confirmed via aws iam get-role-policy), not the module's previous hardcoded \"<name_prefix>-task-execution\" — see docs/ecs/state-adoption-plan.md §9.10/§9.11. Aligns identity only; the policy-content/permission-shape migration referenced above for iam_task_execution_role_name remains a separate decision."
+  type        = string
 }
 
 # ---------------------------------------------------------------------------

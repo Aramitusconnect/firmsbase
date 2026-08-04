@@ -102,6 +102,15 @@ ses_consumer_stop_timeout              = 45
 # every one of the non-comment values below set exactly as shown before any
 # import is attempted — see the plan doc for why each one exists.
 ecs_cluster_name              = "firmsbase-staging-cluster"
+# Live cluster currently has NO capacity providers associated at all
+# (confirmed via aws ecs describe-clusters — capacityProviders: [],
+# defaultCapacityProviderStrategy: []); every live service instead uses a
+# fixed launch_type=FARGATE (see use_capacity_provider_strategy=false on
+# every service below). This value only lets the aws_ecs_cluster_capacity_providers
+# resource address represent that live (empty) state — it does not itself
+# authorize associating capacity providers with the live cluster, which
+# remains a separate, explicitly reviewed decision.
+ecs_capacity_providers        = []
 ecr_repository_name           = "firmsbase-staging"
 elasticache_subnet_group_name = "firmsbase-staging-cache-subnets"
 elasticache_engine            = "valkey"
@@ -112,6 +121,29 @@ elasticache_parameter_group_name = "default.valkey7"
 # Redis v6+/Valkey and rejects "7.2.6" outright; supply "7.2" here.
 elasticache_engine_version        = "7.2"
 iam_task_execution_role_name  = "firmsbase-staging-ecs-execution-role"
+
+# Live inline policy name (confirmed via aws iam get-role-policy) differs
+# from what this module previously hardcoded
+# ("${name_prefix}-task-execution") — aws_iam_role_policy's name is
+# effectively immutable, so this must be set correctly before import, never
+# used to rename the live policy. This aligns identity only — the live
+# policy's actual permission content (managed-policy + narrow-inline) still
+# differs from this module's declared content (one broader custom inline
+# policy); that is a separate, still-pending, explicitly reviewed decision —
+# see docs/ecs/state-adoption-plan.md §11 item 3 and §9.10/§9.11.
+iam_task_execution_policy_name = "FirmsBaseStagingSecretsAccess"
+
+# ECS service desired counts — these four default to this module's
+# original design intent (web/worker=2, critical_worker/scheduler=1). This
+# staging environment's live services currently all run 1 (confirmed via
+# aws ecs describe-services) — web and worker specifically diverge from
+# their 2-task default. Set all four to 1 here so import doesn't leave a
+# permanent drift that would silently scale live services up on the next
+# apply. See docs/ecs/state-adoption-plan.md §9.10/§9.11.
+web_desired_count             = 1
+worker_desired_count          = 1
+critical_worker_desired_count = 1
+scheduler_desired_count       = 1
 
 # ALB target-group health check — these three values match the currently
 # running target group exactly (confirmed via aws elbv2
