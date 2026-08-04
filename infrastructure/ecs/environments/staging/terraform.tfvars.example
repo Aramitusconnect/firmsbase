@@ -111,6 +111,13 @@ ecs_cluster_name              = "firmsbase-staging-cluster"
 # authorize associating capacity providers with the live cluster, which
 # remains a separate, explicitly reviewed decision.
 ecs_capacity_providers        = []
+# Live cluster's containerInsights setting is confirmed disabled (aws ecs
+# describe-clusters — Settings: [{name: containerInsights, value:
+# disabled}]); this module previously hardcoded "enabled" unconditionally.
+# Set to false for live-compatible adoption; enabling Container Insights on
+# the live cluster later is a separate decision requiring its own cost and
+# observability review, not a byproduct of import.
+ecs_container_insights_enabled = false
 ecr_repository_name           = "firmsbase-staging"
 elasticache_subnet_group_name = "firmsbase-staging-cache-subnets"
 elasticache_engine            = "valkey"

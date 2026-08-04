@@ -16,6 +16,11 @@ mock_provider "aws" {}
 
 variables {
   cluster_name = "firmsbase-staging-cluster"
+  # container_insights_enabled has no default (see variables.tf) — every
+  # caller must set it explicitly. This file isn't exercising this
+  # variable's own behavior (see container_insights.tftest.hcl), so it's
+  # set to the module's previous hardcoded behavior here.
+  container_insights_enabled = true
 }
 
 run "default_capacity_providers_match_original_module_design" {

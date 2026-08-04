@@ -63,10 +63,11 @@ module "elasticache" {
 }
 
 module "ecs_cluster" {
-  source                    = "../../modules/ecs_cluster"
-  cluster_name              = local.ecs_cluster_name
-  capacity_providers        = var.ecs_capacity_providers
-  default_capacity_provider = var.ecs_default_capacity_provider
+  source                     = "../../modules/ecs_cluster"
+  cluster_name               = local.ecs_cluster_name
+  capacity_providers         = var.ecs_capacity_providers
+  default_capacity_provider  = var.ecs_default_capacity_provider
+  container_insights_enabled = var.ecs_container_insights_enabled
 }
 
 resource "aws_cloudwatch_log_group" "app" {

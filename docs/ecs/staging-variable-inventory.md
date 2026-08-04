@@ -374,6 +374,22 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
      revision), and live services run under a single generic shared task
      role while Terraform declares 7 distinct per-role roles that don't
      exist live.
+8. **ECS cluster Container Insights (third pass, 2026-08-04, see
+   [state-adoption-plan.md §9.14](state-adoption-plan.md))**: a canary
+   import attempt against `module.ecs_cluster.aws_ecs_cluster.this` was
+   halted (no state mutated) when live `containerInsights` was found
+   `disabled`, while `modules/ecs_cluster` previously hardcoded `"enabled"`
+   unconditionally — item 7's "no known drift" framing for this address
+   was **wrong**. Fixed: `modules/ecs_cluster` now takes a required
+   `container_insights_enabled` boolean (no default); this environment's
+   `terraform.tfvars` sets `ecs_container_insights_enabled = false`,
+   matching live. The normal new-environment default remains `true`
+   (`enabled`). Importing the cluster records the current disabled
+   setting; it does not authorize enabling Container Insights later — that
+   is a separate decision requiring its own cost and observability review.
+   The resource address is unchanged. The separate, already-empty
+   capacity-provider association (`module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`)
+   remains a different resource and a later, independent import.
 
 **No import, apply, ECS deployment, scaling change, capacity-provider
 association, IAM permission migration, or description-drift
