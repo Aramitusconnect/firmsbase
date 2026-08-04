@@ -44,6 +44,7 @@ variables {
   private_subnet_ids                                               = ["subnet-bbbb1111", "subnet-bbbb2222"]
   alb_ingress_cidr_blocks                                          = ["0.0.0.0/0"]
   acm_certificate_arn                                              = "arn:aws:acm:us-east-1:603013471426:certificate/test-cert"
+  app_url                                                          = "https://staging.firmsvault.com"
   rds_instance_id                                                  = "firmsbase-staging-db"
   rds_security_group_id                                            = "sg-0d4c5eedb2ee21743"
   db_host                                                          = "firmsbase-staging-db.example.rds.amazonaws.com"
@@ -277,4 +278,52 @@ run "shared_secrets_derives_the_exact_live_json_key_selector_for_each_secret" {
     condition     = local.shared_secrets.REDIS_PASSWORD == "${var.redis_auth_token_secret_arn}:REDIS_PASSWORD::"
     error_message = "REDIS_PASSWORD's valueFrom must be the bare redis_auth_token_secret_arn with the exact \":REDIS_PASSWORD::\" selector appended — this is the live secret's actual JSON key."
   }
+}
+
+# --- APP_URL (previously unmodeled, see docs/ecs/state-adoption-plan.md §9.8) ---
+
+run "shared_environment_includes_app_url_from_the_variable" {
+  command = plan
+
+  assert {
+    condition     = local.shared_environment.APP_URL == var.app_url
+    error_message = "local.shared_environment.APP_URL must equal var.app_url exactly — every role consuming shared_environment (web, worker, critical-worker, scheduler, migrate, maintenance, ses-consumer) must receive it."
+  }
+}
+
+run "app_url_resolves_to_the_confirmed_live_value_when_set_to_it" {
+  command = plan
+
+  variables {
+    app_url = "https://staging.firmsvault.com"
+  }
+
+  assert {
+    condition     = local.shared_environment.APP_URL == "https://staging.firmsvault.com"
+    error_message = "With app_url set to the confirmed live value, shared_environment.APP_URL must resolve to it exactly."
+  }
+}
+
+run "app_url_rejects_a_non_https_value" {
+  command = plan
+
+  variables {
+    app_url = "http://staging.firmsvault.com"
+  }
+
+  expect_failures = [
+    var.app_url,
+  ]
+}
+
+run "app_url_rejects_a_trailing_slash" {
+  command = plan
+
+  variables {
+    app_url = "https://staging.firmsvault.com/"
+  }
+
+  expect_failures = [
+    var.app_url,
+  ]
 }

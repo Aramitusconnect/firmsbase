@@ -736,6 +736,26 @@ follow-up — out of scope here.
 Unchanged, confirmed non-destructive: an in-place field swap per the AWS
 provider's documented behavior for this attribute pair.
 
+### 9.8 `APP_URL` — previously unmodeled, corrected in this pass
+
+The live web task definition carries a plain `APP_URL` environment variable
+(`https://staging.firmsvault.com`, confirmed via `describe-task-definition`)
+that this Terraform configuration never declared or wired at all — not a
+wrong default, a complete absence. Fixed via a new required `var.app_url`
+(HTTPS-validated, no default — see `variables.tf`) wired into
+`local.shared_environment` in `main.tf`, reaching every role that consumes
+it: web, worker, critical-worker, scheduler, migrate, maintenance, and
+ses-consumer.
+
+This is not one of the 6 executable Phase A2 imports (security groups, ALB,
+listeners) and does not block them. It **does** block any ECS
+task-definition migration or `terraform plan`/`apply` against this
+environment: `APP_URL` drives generated links (password-reset URLs,
+owner-invitation URLs, redirects, OAuth/webhook callbacks) — a
+Terraform-managed task definition created without it would silently
+generate incorrect links rather than failing loudly. This correction must
+be merged before Phase B's task-definition migration work begins.
+
 ## 10. Validation performed (local/static only)
 
 | Check | Result |
@@ -803,3 +823,9 @@ Terraform (`.tf`), a Terraform test (`.tftest.hcl`), documentation
    Phase A blocker.
 9. Human sign-off to actually begin executing §8's import commands — this
    plan prepares them, it does not run them.
+10. `APP_URL` (§9.8, new this revision): now modeled via `var.app_url` —
+    not an open approval decision, a required input. Must be set to the
+    confirmed live value (`https://staging.firmsvault.com`) in
+    `terraform.tfvars` before any Terraform `plan`/`apply` or ECS
+    task-definition migration; omission would silently generate incorrect
+    application links rather than failing loudly.
