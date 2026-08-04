@@ -99,8 +99,16 @@ module "iam" {
     var.platform_notifications_recipient_fingerprint_hmac_key_secret_arn,
   ]
 
-  kms_key_arn                 = module.kms.key_arn
-  s3_documents_bucket_arn     = module.s3_documents.bucket_arn
+  # Literal true — this environment always provisions module.kms/
+  # module.s3_documents; never derived from whether their outputs are null
+  # (both are unknown-until-apply for these not-yet-created resources,
+  # which would otherwise collapse dependent for_each/count instance sets
+  # to unknown during import — see docs/ecs/state-adoption-plan.md).
+  kms_encryption_enabled  = true
+  s3_documents_enabled    = true
+  kms_key_arn             = module.kms.key_arn
+  s3_documents_bucket_arn = module.s3_documents.bucket_arn
+
   ses_events_queue_arn        = var.ses_events_queue_arn
   ses_sending_identity_arn    = var.ses_sending_identity_arn
   ses_authorized_from_address = var.ses_authorized_from_address
@@ -229,7 +237,12 @@ module "web" {
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
-  target_group_arn   = module.alb.target_group_arn
+  # Literal true — web is always registered with the ALB target group;
+  # never derived from whether target_group_arn is null (unknown-until-apply
+  # for the not-yet-imported target group, which would otherwise collapse
+  # the load_balancer dynamic block's for_each to unknown during import).
+  attach_target_group = true
+  target_group_arn    = module.alb.target_group_arn
 
   enable_autoscaling             = true
   autoscaling_min_capacity       = 2
@@ -272,6 +285,8 @@ module "worker" {
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # Literal false — worker is never behind the ALB.
+  attach_target_group = false
 
   enable_autoscaling             = true
   autoscaling_min_capacity       = 1
@@ -314,6 +329,8 @@ module "critical_worker" {
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # Literal false — critical-worker is never behind the ALB.
+  attach_target_group = false
 
   enable_autoscaling = false
 }
@@ -345,6 +362,8 @@ module "scheduler" {
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # Literal false — scheduler is never behind the ALB.
+  attach_target_group = false
 
   # See docs/ecs/graceful-shutdown.md — avoids a transient two-instance
   # overlap during deploys for this single-instance service.
@@ -380,6 +399,8 @@ module "migrate" {
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # Literal false — migrate is never behind the ALB.
+  attach_target_group = false
 }
 
 module "maintenance" {
@@ -412,6 +433,8 @@ module "maintenance" {
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # Literal false — maintenance is never behind the ALB.
+  attach_target_group = false
 }
 
 module "ses_consumer" {
@@ -446,6 +469,7 @@ module "ses_consumer" {
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
   # No target_group_arn — never behind the ALB (not an HTTP service).
+  attach_target_group = false
 
   enable_autoscaling = false # single long-polling consumer; SQS's own visibility timeout already prevents duplicate concurrent processing of one message.
 }
@@ -465,6 +489,12 @@ module "cloudwatch_alarms" {
   rds_instance_id              = var.rds_instance_id
   redis_cluster_id             = "${var.name_prefix}-redis"
 
+  # Literal true — ses-consumer is always provisioned in this environment;
+  # never derived from whether ses_consumer_service_name/
+  # ses_consumer_log_group_name is null (both unknown-until-apply for the
+  # not-yet-created ses-consumer service, which would otherwise collapse
+  # the per-service alarm for_each's key set to unknown during import).
+  ses_consumer_enabled        = true
   ses_consumer_service_name   = module.ses_consumer.service_name
   ses_events_queue_name       = element(split("/", var.ses_events_queue_url), length(split("/", var.ses_events_queue_url)) - 1)
   ses_events_dlq_name         = element(split(":", var.ses_events_dlq_arn), 5)

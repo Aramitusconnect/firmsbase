@@ -104,9 +104,14 @@ variable "assign_public_ip" {
 }
 
 variable "target_group_arn" {
-  description = "Web role only — the ALB target group to register tasks in."
+  description = "Web role only — the ALB target group to register tasks in. Value only — see attach_target_group for whether the load_balancer block is included; an unknown-until-apply ARN (e.g. before the target group is imported/created) cannot be compared to null to decide a for_each/count instance set."
   type        = string
   default     = null
+}
+
+variable "attach_target_group" {
+  description = "Whether to register this service with target_group_arn. Must be a literal true/false set explicitly by every caller — never derived from whether target_group_arn is null, since that value can be unknown during import/plan for a not-yet-created target group, and an unknown value can't determine a for_each key set. No default, deliberately: a default of false would let an existing caller that already passes target_group_arn silently lose its load_balancer registration by simply omitting this variable during an upgrade, rather than failing loudly at plan/validate time."
+  type        = bool
 }
 
 variable "deployment_minimum_healthy_percent" {

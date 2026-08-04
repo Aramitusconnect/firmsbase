@@ -48,10 +48,28 @@ class SesConsumerTerraformIamTest extends TestCase
 
     public function test_ses_consumer_exists_in_the_task_role_inventory(): void
     {
+        $iam = $this->iamMain();
+
+        // aws_iam_role.task's for_each now keys off local.task_role_names
+        // (a static list, shared with aws_iam_role_policy.task_metrics —
+        // see docs/ecs/state-adoption-plan.md §9.9 for why deriving a
+        // for_each from another resource's own for_each map is unsafe
+        // during `terraform import`) rather than an inline literal list.
+        // The invariant this test actually cares about — ses_consumer has
+        // its own dedicated task role — still holds via that local.
+        preg_match('/resource "aws_iam_role" "task" \{.*?\n}/s', $iam, $roleBlock);
+        $this->assertNotEmpty($roleBlock, 'Could not locate resource "aws_iam_role" "task".');
         $this->assertMatchesRegularExpression(
-            '/for_each\s*=\s*toset\(\["web",\s*"worker",\s*"critical_worker",\s*"scheduler",\s*"migrate",\s*"maintenance",\s*"ses_consumer"\]\)/',
-            $this->iamMain(),
-            'ses_consumer must be added to the aws_iam_role.task for_each set, giving it its own dedicated task role.'
+            '/for_each\s*=\s*toset\(local\.task_role_names\)/',
+            $roleBlock[0]
+        );
+
+        preg_match('/task_role_names\s*=\s*\[(.*?)\]/s', $iam, $localMatch);
+        $this->assertNotEmpty($localMatch, 'Could not locate local.task_role_names.');
+        $this->assertStringContainsString(
+            '"ses_consumer"',
+            $localMatch[1],
+            'ses_consumer must be in local.task_role_names, giving it its own dedicated task role.'
         );
     }
 

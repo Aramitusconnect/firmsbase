@@ -2,6 +2,22 @@
 # reasoning behind every alarm in this file — kept in sync deliberately;
 # update both together.
 
+locals {
+  # Static, configuration-known key set for the per-service alarms below —
+  # gated by the literal var.ses_consumer_enabled boolean, never by
+  # comparing var.ses_consumer_service_name (a value that can be
+  # unknown-until-apply for a not-yet-created ses-consumer ECS service) to
+  # null. See docs/ecs/state-adoption-plan.md.
+  service_alarm_names = merge(
+    {
+      web             = var.web_service_name
+      general_worker  = var.general_worker_service_name
+      critical_worker = var.critical_worker_service_name
+    },
+    var.ses_consumer_enabled ? { ses_consumer = var.ses_consumer_service_name } : {}
+  )
+}
+
 resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   alarm_name          = "${var.name_prefix}-alb-5xx"
   comparison_operator = "GreaterThanThreshold"
@@ -67,14 +83,7 @@ resource "aws_cloudwatch_metric_alarm" "target_unhealthy" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "ecs_service_running_count" {
-  for_each = merge(
-    {
-      web             = var.web_service_name
-      general_worker  = var.general_worker_service_name
-      critical_worker = var.critical_worker_service_name
-    },
-    var.ses_consumer_service_name == null ? {} : { ses_consumer = var.ses_consumer_service_name }
-  )
+  for_each = local.service_alarm_names
 
   alarm_name          = "${var.name_prefix}-${each.key}-running-count-low"
   comparison_operator = "LessThanThreshold"
@@ -98,14 +107,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_service_running_count" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "ecs_service_cpu_high" {
-  for_each = merge(
-    {
-      web             = var.web_service_name
-      general_worker  = var.general_worker_service_name
-      critical_worker = var.critical_worker_service_name
-    },
-    var.ses_consumer_service_name == null ? {} : { ses_consumer = var.ses_consumer_service_name }
-  )
+  for_each = local.service_alarm_names
 
   alarm_name          = "${var.name_prefix}-${each.key}-cpu-high"
   comparison_operator = "GreaterThanThreshold"
@@ -404,7 +406,7 @@ resource "aws_cloudwatch_metric_alarm" "ses_events_dlq_messages_present" {
 # is unset in this environment, so log lines are plain Monolog text, and a
 # literal event-name match works identically either way.
 resource "aws_cloudwatch_log_metric_filter" "ses_consumer_errors" {
-  count = var.ses_consumer_log_group_name == null ? 0 : 1
+  count = var.ses_consumer_enabled ? 1 : 0
 
   name           = "${var.name_prefix}-ses-consumer-errors"
   log_group_name = var.ses_consumer_log_group_name
@@ -419,7 +421,7 @@ resource "aws_cloudwatch_log_metric_filter" "ses_consumer_errors" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "ses_consumer_errors_high" {
-  count = var.ses_consumer_log_group_name == null ? 0 : 1
+  count = var.ses_consumer_enabled ? 1 : 0
 
   alarm_name          = "${var.name_prefix}-ses-consumer-errors-high"
   comparison_operator = "GreaterThanThreshold"

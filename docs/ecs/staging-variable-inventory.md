@@ -226,6 +226,38 @@ the account ID confirmed via STS; this document now records them as
 confirmed identifiers rather than re-litigating a live existence check this
 operator's permissions can't perform anyway.
 
+## AWS credential handling for live Terraform commands — corrected
+
+**AWS login profiles are not safe to hand directly to this Terraform
+environment.** `AWS_PROFILE=firmsbase-staging-operator-login` resolves
+correctly for the AWS CLI (via a custom `login_session` broker mechanism
+this sandbox's `aws` command understands), but Terraform's AWS provider
+(Go SDK) does not understand that mechanism at all — it silently falls
+through the entire credential chain to EC2/instance-metadata, picking up
+this sandbox's own ambient `AmazonLightsailInstanceRole` (a different AWS
+account) with no error or warning. This was discovered empirically during
+a real canary import attempt — see
+[state-adoption-plan.md §9.9](state-adoption-plan.md) for the full account
+of both failures and the fix.
+
+`infrastructure/ecs/environments/staging/scripts/tf-guard.sh` now bridges
+`AWS_PROFILE` into standard, SDK-universal credentials before any live
+command (a real-backend `init`, `import`, `state`, `output`, `plan`,
+`apply`) and disables instance-metadata fallback entirely
+(`AWS_EC2_METADATA_DISABLED=true`). It then verifies the resulting
+identity against the **exact** expected caller ARN, not merely the right
+account:
+
+```
+arn:aws:iam::603013471426:user/firmsbase-staging-operator
+```
+
+Every check fails closed — any of export-credentials failing, an empty
+field, the wrong account, the wrong ARN, or the wrong region refuses the
+command outright. Offline commands (`fmt`, `validate`, `test`,
+`init -backend=false`) are unaffected and still require zero AWS
+credentials of any kind.
+
 ## Secure handling of `redis_auth_token`
 
 - **Exact source**: `arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/redis-auth-token-p6rVKN`, JSON key `REDIS_PASSWORD`.
@@ -253,14 +285,29 @@ in the shell for each `import`/`plan`/`apply` invocation. See
 
 ## Remaining blockers before the first Phase A2 import
 
-None of these block **Phase A2** itself (security groups, ALB, listeners) —
-every A2-relevant variable is fully confirmed. They block later phases:
+**Correction**: this section previously claimed nothing blocks Phase A2
+itself. A real canary import attempt (see
+[state-adoption-plan.md §9.9](state-adoption-plan.md)) proved that claim
+too optimistic — `terraform import` evaluates enough of the whole
+configuration graph that `data "aws_vpc" "this"` (networking module) gets
+read on **every** import regardless of which specific resource is
+targeted, and `ec2:DescribeVpcAttribute` on `vpc-0fd81b688155ded2b` is
+denied for this operator. That is now the actual, confirmed blocker on the
+first Phase A2 import, not merely a later-phase concern:
 
-1. `elasticache_engine_version` must actually be set to `"7.2"` (major.minor
+1. **`ec2:DescribeVpcAttribute` on `vpc-0fd81b688155ded2b`** must be
+   granted to `firmsbase-staging-operator` before any import — including
+   the Phase A2 canary — can succeed. Not requested automatically, per
+   mission constraint.
+2. `elasticache_engine_version` must actually be set to `"7.2"` (major.minor
    only — not `"7.2.6"`, which AWS's own provider validation rejects for
    Redis v6+/Valkey) in whatever `terraform.tfvars` is eventually created
    (the variable now exists and is wired — see above — but still defaults
-   to `"7.1"`).
+   to `"7.1"`). This one only blocks Phase A3 (ElastiCache), not A2.
+
+**As of this correction, the backend prefix
+(`environments/staging/ecs/`) remains completely empty — `KeyCount: 0` —
+and all six Phase A2 imports remain pending. No import has yet succeeded.**
 
 Resolved as of 2026-08-03 (previously listed here): the HMAC secret's
 existence and `alarm_sns_topic_arn` — see "HMAC secret" and "Alarms / SNS"
