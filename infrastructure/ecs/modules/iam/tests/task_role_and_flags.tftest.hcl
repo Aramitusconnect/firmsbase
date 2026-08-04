@@ -47,6 +47,9 @@ variables {
   ecr_repository_arn = "arn:aws:ecr:us-east-1:603013471426:repository/firmsbase-staging"
   log_group_arns     = ["arn:aws:logs:us-east-1:603013471426:log-group:/ecs/firmsbase-staging/web:*"]
   secret_arns        = []
+  # task_execution_policy_name has no default (see variables.tf) — every
+  # caller must set it explicitly.
+  task_execution_policy_name = "firmsbase-staging-task-execution"
   # kms_encryption_enabled/s3_documents_enabled have no default (see
   # variables.tf — every caller must set them explicitly, so an omitted
   # boolean can never silently disable an existing grant). This shared

@@ -401,8 +401,13 @@ class StagingPhaseA2RuleImportIdsTest extends TestCase
     {
         $doc = $this->variableInventory();
 
+        // As of the Phase A3 adoption-alignment correction, Phase A2 is
+        // complete — the four rules this test originally covered are now
+        // imported, not pending. This test now proves the doc records that
+        // completion accurately (not the stale "not yet imported" claim)
+        // while still preserving the classification/totals proof.
         $this->assertStringContainsString('import_then_migrate', $doc);
-        $this->assertStringContainsString('have not been imported yet', $doc);
+        $this->assertMatchesRegularExpression('/Phase A2 is complete/i', $doc);
         $this->assertMatchesRegularExpression('/new: 66, import_unchanged: 6, import_then_migrate: 16, do_not_import: 6/', $doc);
 
         foreach (self::UNSUPPORTED_CLAIM_PATTERNS as $pattern) {

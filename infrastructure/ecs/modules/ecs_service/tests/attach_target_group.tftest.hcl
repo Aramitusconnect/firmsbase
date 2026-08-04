@@ -34,6 +34,11 @@ variables {
   subnet_ids           = ["subnet-020540b8377bb4d0e", "subnet-07efcb5d4bcf5aa59"]
   security_group_ids   = ["sg-0db14e50ea5c5466c"]
   assign_public_ip     = true
+  # use_capacity_provider_strategy has no default (see variables.tf — every
+  # caller must set it explicitly). This shared block matches live staging
+  # reality (fixed launch_type=FARGATE); see use_capacity_provider_strategy.tftest.hcl
+  # for the dedicated test of this variable's own behavior.
+  use_capacity_provider_strategy = false
   # attach_target_group has no default (see variables.tf — every caller
   # must set it explicitly, so an omitted boolean can never silently
   # disable an existing load_balancer registration). This shared block

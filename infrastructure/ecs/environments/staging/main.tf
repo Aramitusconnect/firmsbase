@@ -63,8 +63,10 @@ module "elasticache" {
 }
 
 module "ecs_cluster" {
-  source       = "../../modules/ecs_cluster"
-  cluster_name = local.ecs_cluster_name
+  source                    = "../../modules/ecs_cluster"
+  cluster_name              = local.ecs_cluster_name
+  capacity_providers        = var.ecs_capacity_providers
+  default_capacity_provider = var.ecs_default_capacity_provider
 }
 
 resource "aws_cloudwatch_log_group" "app" {
@@ -78,9 +80,10 @@ resource "aws_cloudwatch_log_group" "app" {
 module "iam" {
   source = "../../modules/iam"
 
-  name_prefix              = var.name_prefix
-  task_execution_role_name = var.iam_task_execution_role_name
-  ecr_repository_arn       = module.ecr.repository_arn
+  name_prefix                = var.name_prefix
+  task_execution_role_name   = var.iam_task_execution_role_name
+  task_execution_policy_name = var.iam_task_execution_policy_name
+  ecr_repository_arn         = module.ecr.repository_arn
   # trimsuffix guards against the aws_cloudwatch_log_group.arn attribute's
   # trailing ":*" varying by provider version — normalize then re-append so
   # the IAM policy always ends up with exactly one ":*" (needed for
@@ -232,11 +235,15 @@ module "web" {
   container_health_check_command = ["CMD-SHELL", "curl -f http://localhost:8080/up || exit 1"]
 
   create_service     = true
-  desired_count      = 2
+  desired_count      = var.web_desired_count
   cluster_id         = module.ecs_cluster.cluster_id
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # Literal false — live staging services currently run with launch_type=FARGATE,
+  # no capacity-provider association at the cluster level. See
+  # docs/ecs/state-adoption-plan.md §9.10/§9.11.
+  use_capacity_provider_strategy = false
   # Literal true — web is always registered with the ALB target group;
   # never derived from whether target_group_arn is null (unknown-until-apply
   # for the not-yet-imported target group, which would otherwise collapse
@@ -280,11 +287,15 @@ module "worker" {
   stop_timeout_seconds = 120
 
   create_service     = true
-  desired_count      = 2
+  desired_count      = var.worker_desired_count
   cluster_id         = module.ecs_cluster.cluster_id
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # Literal false — live staging services currently run with launch_type=FARGATE,
+  # no capacity-provider association at the cluster level. See
+  # docs/ecs/state-adoption-plan.md §9.10/§9.11.
+  use_capacity_provider_strategy = false
   # Literal false — worker is never behind the ALB.
   attach_target_group = false
 
@@ -324,11 +335,15 @@ module "critical_worker" {
   stop_timeout_seconds = 120
 
   create_service     = true
-  desired_count      = 1 # fixed — never scaled to zero, see docs/ecs/queue-and-redis-architecture.md
+  desired_count      = var.critical_worker_desired_count
   cluster_id         = module.ecs_cluster.cluster_id
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # Literal false — live staging services currently run with launch_type=FARGATE,
+  # no capacity-provider association at the cluster level. See
+  # docs/ecs/state-adoption-plan.md §9.10/§9.11.
+  use_capacity_provider_strategy = false
   # Literal false — critical-worker is never behind the ALB.
   attach_target_group = false
 
@@ -357,11 +372,15 @@ module "scheduler" {
   stop_timeout_seconds = 30
 
   create_service     = true
-  desired_count      = 1 # single instance — see docs/ecs/graceful-shutdown.md
+  desired_count      = var.scheduler_desired_count
   cluster_id         = module.ecs_cluster.cluster_id
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # Literal false — live staging services currently run with launch_type=FARGATE,
+  # no capacity-provider association at the cluster level. See
+  # docs/ecs/state-adoption-plan.md §9.10/§9.11.
+  use_capacity_provider_strategy = false
   # Literal false — scheduler is never behind the ALB.
   attach_target_group = false
 
@@ -399,6 +418,10 @@ module "migrate" {
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # No service is ever created here (create_service=false), but the
+  # variable is still required by the module regardless of count — literal
+  # false for consistency with every other caller.
+  use_capacity_provider_strategy = false
   # Literal false — migrate is never behind the ALB.
   attach_target_group = false
 }
@@ -433,6 +456,10 @@ module "maintenance" {
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # No service is ever created here (create_service=false), but the
+  # variable is still required by the module regardless of count — literal
+  # false for consistency with every other caller.
+  use_capacity_provider_strategy = false
   # Literal false — maintenance is never behind the ALB.
   attach_target_group = false
 }
@@ -468,6 +495,10 @@ module "ses_consumer" {
   subnet_ids         = var.private_subnet_ids
   security_group_ids = [module.security_groups.ecs_tasks_security_group_id]
   assign_public_ip   = local.assign_public_ip
+  # Literal false — live staging services currently run with launch_type=FARGATE,
+  # no capacity-provider association at the cluster level. See
+  # docs/ecs/state-adoption-plan.md §9.10/§9.11.
+  use_capacity_provider_strategy = false
   # No target_group_arn — never behind the ALB (not an HTTP service).
   attach_target_group = false
 

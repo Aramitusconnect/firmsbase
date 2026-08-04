@@ -69,13 +69,23 @@ resource "aws_ecs_service" "this" {
   task_definition = aws_ecs_task_definition.this.arn
   desired_count   = var.desired_count
 
-  # No `launch_type` set — capacity_provider_strategy below governs
-  # placement instead of a fixed launch_type (the two are mutually
-  # exclusive on this resource).
-  capacity_provider_strategy {
-    capacity_provider = var.capacity_provider
-    weight            = 100
-    base              = 0
+  # launch_type and capacity_provider_strategy are mutually exclusive on
+  # this resource — AWS rejects both being set. var.use_capacity_provider_strategy
+  # (no default; every caller must decide explicitly) selects between them:
+  # this staging environment's live services currently run with a fixed
+  # launch_type=FARGATE and no capacity-provider association at the cluster
+  # level at all (see docs/ecs/state-adoption-plan.md §9.10/§9.11), so every
+  # current caller sets this false. Setting launch_type to null when true is
+  # equivalent to omitting the argument entirely.
+  launch_type = var.use_capacity_provider_strategy ? null : "FARGATE"
+
+  dynamic "capacity_provider_strategy" {
+    for_each = var.use_capacity_provider_strategy ? [1] : []
+    content {
+      capacity_provider = var.capacity_provider
+      weight            = 100
+      base              = 0
+    }
   }
 
   network_configuration {

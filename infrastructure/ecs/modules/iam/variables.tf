@@ -8,6 +8,11 @@ variable "task_execution_role_name" {
   default     = null
 }
 
+variable "task_execution_policy_name" {
+  description = "The name of the task-execution role's inline policy. No default, deliberately — this module previously hardcoded \"<name_prefix>-task-execution\", but aws_iam_role_policy's name is effectively immutable (renaming requires delete+recreate), so a default here that didn't match a given caller's live policy would silently set up a replacement on the next plan rather than failing loudly. This staging environment's live inline policy is actually named \"FirmsBaseStagingSecretsAccess\" (confirmed via aws iam get-role-policy) — see docs/ecs/state-adoption-plan.md §9.10/§9.11. Setting this correctly aligns the policy's identity only; it does not reconcile the policy's content/permission shape, which remains the same separate human decision referenced above for task_execution_role_name."
+  type        = string
+}
+
 variable "ecr_repository_arn" {
   type = string
 }

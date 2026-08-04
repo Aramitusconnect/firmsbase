@@ -13,3 +13,11 @@ output "service_name" {
 output "assign_public_ip" {
   value = var.assign_public_ip
 }
+
+output "desired_count" {
+  value = var.desired_count
+}
+
+output "use_capacity_provider_strategy" {
+  value = var.use_capacity_provider_strategy
+}

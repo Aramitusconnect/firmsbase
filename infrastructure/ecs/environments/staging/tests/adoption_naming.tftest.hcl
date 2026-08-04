@@ -60,6 +60,9 @@ variables {
   ses_sending_identity_arn                                         = "arn:aws:ses:us-east-1:603013471426:identity/staging-mail.firmsvault.com"
   ses_authorized_from_address                                      = "no-reply@staging-mail.firmsvault.com"
   platform_notifications_recipient_fingerprint_hmac_key_secret_arn = "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/hmac-key-AbCdEf"
+  # iam_task_execution_policy_name has no default (see variables.tf) — every
+  # caller must set it explicitly.
+  iam_task_execution_policy_name = "firmsbase-staging-task-execution"
 }
 
 # --- ECS cluster name ---------------------------------------------------

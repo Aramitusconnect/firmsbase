@@ -283,62 +283,76 @@ excluded entirely and supplied only via `TF_VAR_redis_auth_token` set fresh
 in the shell for each `import`/`plan`/`apply` invocation. See
 `terraform.tfvars.example` for the exact non-secret and ARN values.
 
-## Phase A2 import status (updated 2026-08-04)
+## Phase A2 import status (Phase A2 complete)
 
-**Correction**: this section previously claimed nothing blocks Phase A2,
-then was corrected to describe a real, confirmed blocker
-(`ec2:DescribeVpcAttribute`) discovered by a canary import attempt (see
-[state-adoption-plan.md §9.9](state-adoption-plan.md)). That blocker, and
-the separate `ec2:DescribeSecurityGroupRules` gap, are **both now
-granted**. Current status:
-
-1. `ec2:DescribeVpcAttribute` on `vpc-0fd81b688155ded2b` — **granted**.
-   `data "aws_vpc" "this"` (networking module) is read on every import
-   regardless of target resource; this no longer blocks anything.
-2. `ec2:DescribeSecurityGroupRules` — **granted**. Used to resolve the
-   Terraform composite import IDs for the four remaining
-   `aws_security_group_rule` addresses (see below and
-   [state-adoption-plan.md §9.10](state-adoption-plan.md)).
-3. `elasticache_engine_version` must actually be set to `"7.2"` (major.minor
-   only — not `"7.2.6"`, which AWS's own provider validation rejects for
-   Redis v6+/Valkey) in whatever `terraform.tfvars` is eventually created
-   (the variable now exists and is wired — see above — but still defaults
-   to `"7.1"`). This one only blocks Phase A3 (ElastiCache), not A2.
-
-**Phase A2's six `import_unchanged` resources are already imported**
-into the live backend (`environments/staging/ecs/terraform.tfstate`): the
-3 security groups, the ALB, and both listeners. State currently contains
-6 managed resources plus 9 read-only data-source cache entries (not
-separately-managed resources — see state-adoption-plan.md §9.10).
-
-**The remaining four originally-"Phase A2" addresses (all
-`aws_security_group_rule`) now have a resolved Terraform composite import
-ID** — recorded in `import-manifest.json`, no longer `"BLOCKED"` —
-confirmed against a live, read-only rule query with exactly one matching
-rule per address. `aws_security_group_rule` requires a
-provider-constructed composite identifier
-(`<sg-id>_<type>_<protocol>_<from-port>_<to-port>_<source>`), not the
-AWS-internal `SecurityGroupRuleId` (`sgr-*`), which is recorded separately
-in each manifest entry's `live_reference` field for audit traceability
-only. **These four have not been imported yet** — that import run is
-pending repository review and merge of the manifest correction that
-resolved their IDs.
-
-**Classification correction (2026-08-04, see
-[state-adoption-plan.md §9.11](state-adoption-plan.md)):** these four are
-classified `import_then_migrate`, not `import_unchanged` — every
-identity-defining field (direction, protocol, ports, destination group,
-CIDR/referenced source) matches live uniquely, but each rule's live
-`Description` is `null` against an explicit description string in
-config. Importing them, once approved, records the live rule's fields —
-including the `null` description — into state; it does not authorize
-changing the description or any other apply. Whether the provider would
-reconcile that description drift via an in-place update or a replacement
-has not been verified by a real `terraform plan` in this pass and is not
-claimed either way; a proposed replacement is a stop condition requiring
-human review. Manifest totals are now
+`ec2:DescribeVpcAttribute` — granted. `ec2:DescribeSecurityGroupRules` —
+granted. **Phase A2 is complete: all 10 `import_unchanged` addresses are
+imported** into the live backend
+(`environments/staging/ecs/terraform.tfstate`) — the 3 security groups,
+the ALB, both listeners, and all 4 `aws_security_group_rule` addresses
+(classified `import_then_migrate` due to description drift — live
+`Description` is `null` against an explicit string in config; see
+[state-adoption-plan.md §9.11](state-adoption-plan.md) — importing
+recorded the live rules' fields, including the `null` description; it did
+not authorize any description change). State currently contains 10
+managed resources plus 9 read-only data-source cache entries (not
+separately-managed resources). Manifest totals:
 `new: 66, import_unchanged: 6, import_then_migrate: 16, do_not_import: 6,
 total: 94`.
+
+`elasticache_engine_version` is set to `"7.2"` (major.minor only — not
+`"7.2.6"`, which AWS's own provider validation rejects for Redis
+v6+/Valkey) in this environment's `terraform.tfvars` — see below for the
+exact-value verification method.
+
+## Phase A3 adoption alignment (2026-08-04)
+
+**No Phase A3 (`import_then_migrate`, 16 addresses total, 12 remaining
+after Phase A2's 4 rules) resource has been imported.** This correction
+read-only re-verified all 12 remaining addresses against live AWS, landed
+code fixes, and corrected stale prior-audit claims — see
+[state-adoption-plan.md §9.12/§9.13](state-adoption-plan.md) for the full
+Group A/B/C readiness matrix and reasoning per address. Summary:
+
+1. **ECS launch mode**: live services run `launchType=FARGATE`,
+   `capacityProviderStrategy=null` — `modules/ecs_service` now takes a
+   required `use_capacity_provider_strategy` boolean (no default); every
+   staging caller sets it `false`, matching live.
+2. **ECS desired counts**: live desired counts are all `1`; Terraform
+   previously declared `web`/`worker` at `2`. New
+   `web_desired_count`/`worker_desired_count`/
+   `critical_worker_desired_count`/`scheduler_desired_count` variables
+   preserve their original `2`/`2`/`1`/`1` defaults; this environment's
+   `terraform.tfvars` sets all four to `1`.
+3. **Cluster capacity-provider association**: live is empty
+   (`capacityProviders: []`) — the prior audit's claim that the
+   configured `["FARGATE","FARGATE_SPOT"]` already matched live was
+   **wrong** and is corrected. `modules/ecs_cluster` now exposes
+   `capacity_providers`/`default_capacity_provider` (default preserves
+   original design; this environment sets `ecs_capacity_providers = []`).
+4. **IAM inline-policy name**: live policy is
+   `FirmsBaseStagingSecretsAccess`, not the module's previous hardcoded
+   `"<name_prefix>-task-execution"` — a real replacement risk, since
+   `aws_iam_role_policy.name` is effectively immutable. `modules/iam` now
+   takes a required `task_execution_policy_name`; this environment sets
+   it to `"FirmsBaseStagingSecretsAccess"`. Identity only — policy content
+   remains a separate, undecided migration (see item 3 in
+   state-adoption-plan.md §11).
+5. **ElastiCache permission blocker (recorded, not resolved)**:
+   `elasticache:ListTagsForResource` is `AccessDenied` for
+   `firmsbase-staging-operator` on both
+   `arn:aws:elasticache:us-east-1:603013471426:replicationgroup:firmsbase-staging-redis`
+   and
+   `arn:aws:elasticache:us-east-1:603013471426:subnetgroup:firmsbase-staging-cache-subnets`
+   — confirmed via a direct read-only call on 2026-08-04. Not granted in
+   this mission; the subnet-group and replication-group imports remain
+   pending this grant and a fresh read-only re-verification.
+6. **ECR is the recommended first Phase A3 canary** — smallest, most
+   isolated Group A resource, no dependents among the 12.
+
+**No import, apply, ECS deployment, scaling change, capacity-provider
+association, IAM permission migration, or description-drift
+reconciliation is approved by any of the above.**
 
 Resolved as of 2026-08-03 (previously listed here): the HMAC secret's
 existence and `alarm_sns_topic_arn` — see "HMAC secret" and "Alarms / SNS"
