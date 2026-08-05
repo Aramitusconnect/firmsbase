@@ -275,6 +275,181 @@ variable "scheduler_desired_count" {
   }
 }
 
+# ---------------------------------------------------------------------------
+# Deployment min/max healthy percent — the ecs_service module's own
+# deployment_minimum_healthy_percent/deployment_maximum_percent variables
+# already default to 100/200 (this module's original rolling-deployment
+# design intent, preserved unchanged for a brand-new environment). This
+# staging environment's four live services ALL currently run 0/100
+# (confirmed via aws ecs describe-services, 2026-08-05) — previously only
+# the scheduler module call overrode these; web/worker/critical_worker fell
+# through to the module's 100/200 defaults with no override at all. Left
+# unset, applying against these services after import would silently
+# propose raising minimum-healthy from 0% to 100%, a materially different
+# rolling-deployment mechanic for desired_count=1 services than what is
+# live today. Explicit per-role variables (rather than one shared pair)
+# match this file's existing per-role pattern (desired_count above) and
+# let each role's adoption value diverge from the others later without a
+# cross-cutting edit. These values preserve current LIVE BEHAVIOR ONLY for
+# state-only adoption; they do not constitute review or approval of 0/100
+# as the intended steady-state for a future production-style, no-downtime
+# cutover — that deployment strategy remains a separate, later, explicitly
+# reviewed decision. See docs/ecs/state-adoption-plan.md §9.20.
+# ---------------------------------------------------------------------------
+
+variable "web_deployment_minimum_healthy_percent" {
+  description = "web ECS service deployment_minimum_healthy_percent. Defaults to 100 (this module's original design intent). This staging environment's live service currently runs 0 (confirmed via aws ecs describe-services, 2026-08-05) — set to 0 in terraform.tfvars to match live exactly before any apply. See docs/ecs/state-adoption-plan.md §9.20."
+  type        = number
+  default     = 100
+
+  validation {
+    condition     = var.web_deployment_minimum_healthy_percent >= 0 && var.web_deployment_minimum_healthy_percent <= 100
+    error_message = "web_deployment_minimum_healthy_percent must be between 0 and 100."
+  }
+}
+
+variable "web_deployment_maximum_percent" {
+  description = "web ECS service deployment_maximum_percent. Defaults to 200 (this module's original design intent). This staging environment's live service currently runs 100 (confirmed via aws ecs describe-services, 2026-08-05) — set to 100 in terraform.tfvars to match live exactly before any apply. See docs/ecs/state-adoption-plan.md §9.20."
+  type        = number
+  default     = 200
+
+  validation {
+    condition     = var.web_deployment_maximum_percent >= 100 && var.web_deployment_maximum_percent <= 200
+    error_message = "web_deployment_maximum_percent must be between 100 and 200."
+  }
+  validation {
+    condition     = var.web_deployment_maximum_percent >= var.web_deployment_minimum_healthy_percent
+    error_message = "web_deployment_maximum_percent must not be lower than web_deployment_minimum_healthy_percent."
+  }
+}
+
+variable "worker_deployment_minimum_healthy_percent" {
+  description = "worker ECS service deployment_minimum_healthy_percent. Defaults to 100 (this module's original design intent). This staging environment's live service currently runs 0 (confirmed via aws ecs describe-services, 2026-08-05) — set to 0 in terraform.tfvars to match live exactly before any apply. See docs/ecs/state-adoption-plan.md §9.20."
+  type        = number
+  default     = 100
+
+  validation {
+    condition     = var.worker_deployment_minimum_healthy_percent >= 0 && var.worker_deployment_minimum_healthy_percent <= 100
+    error_message = "worker_deployment_minimum_healthy_percent must be between 0 and 100."
+  }
+}
+
+variable "worker_deployment_maximum_percent" {
+  description = "worker ECS service deployment_maximum_percent. Defaults to 200 (this module's original design intent). This staging environment's live service currently runs 100 (confirmed via aws ecs describe-services, 2026-08-05) — set to 100 in terraform.tfvars to match live exactly before any apply. See docs/ecs/state-adoption-plan.md §9.20."
+  type        = number
+  default     = 200
+
+  validation {
+    condition     = var.worker_deployment_maximum_percent >= 100 && var.worker_deployment_maximum_percent <= 200
+    error_message = "worker_deployment_maximum_percent must be between 100 and 200."
+  }
+  validation {
+    condition     = var.worker_deployment_maximum_percent >= var.worker_deployment_minimum_healthy_percent
+    error_message = "worker_deployment_maximum_percent must not be lower than worker_deployment_minimum_healthy_percent."
+  }
+}
+
+variable "critical_worker_deployment_minimum_healthy_percent" {
+  description = "critical_worker ECS service deployment_minimum_healthy_percent. Defaults to 100 (this module's original design intent). This staging environment's live service currently runs 0 (confirmed via aws ecs describe-services, 2026-08-05) — set to 0 in terraform.tfvars to match live exactly before any apply. See docs/ecs/state-adoption-plan.md §9.20."
+  type        = number
+  default     = 100
+
+  validation {
+    condition     = var.critical_worker_deployment_minimum_healthy_percent >= 0 && var.critical_worker_deployment_minimum_healthy_percent <= 100
+    error_message = "critical_worker_deployment_minimum_healthy_percent must be between 0 and 100."
+  }
+}
+
+variable "critical_worker_deployment_maximum_percent" {
+  description = "critical_worker ECS service deployment_maximum_percent. Defaults to 200 (this module's original design intent). This staging environment's live service currently runs 100 (confirmed via aws ecs describe-services, 2026-08-05) — set to 100 in terraform.tfvars to match live exactly before any apply. See docs/ecs/state-adoption-plan.md §9.20."
+  type        = number
+  default     = 200
+
+  validation {
+    condition     = var.critical_worker_deployment_maximum_percent >= 100 && var.critical_worker_deployment_maximum_percent <= 200
+    error_message = "critical_worker_deployment_maximum_percent must be between 100 and 200."
+  }
+  validation {
+    condition     = var.critical_worker_deployment_maximum_percent >= var.critical_worker_deployment_minimum_healthy_percent
+    error_message = "critical_worker_deployment_maximum_percent must not be lower than critical_worker_deployment_minimum_healthy_percent."
+  }
+}
+
+variable "scheduler_deployment_minimum_healthy_percent" {
+  description = "scheduler ECS service deployment_minimum_healthy_percent. Defaults to 100 (this module's original design intent). This staging environment's live service currently runs 0 (confirmed via aws ecs describe-services, 2026-08-05) — set to 0 in terraform.tfvars to match live exactly before any apply. Note: the staging root main.tf previously hardcoded this role's override as a literal 0 directly in the module call; it is now sourced from this variable instead so all four roles are modeled the same explicit way. See docs/ecs/state-adoption-plan.md §9.20."
+  type        = number
+  default     = 100
+
+  validation {
+    condition     = var.scheduler_deployment_minimum_healthy_percent >= 0 && var.scheduler_deployment_minimum_healthy_percent <= 100
+    error_message = "scheduler_deployment_minimum_healthy_percent must be between 0 and 100."
+  }
+}
+
+variable "scheduler_deployment_maximum_percent" {
+  description = "scheduler ECS service deployment_maximum_percent. Defaults to 200 (this module's original design intent). This staging environment's live service currently runs 100 (confirmed via aws ecs describe-services, 2026-08-05) — set to 100 in terraform.tfvars to match live exactly before any apply. Note: the staging root main.tf previously hardcoded this role's override as a literal 100 directly in the module call; it is now sourced from this variable instead so all four roles are modeled the same explicit way. See docs/ecs/state-adoption-plan.md §9.20."
+  type        = number
+  default     = 200
+
+  validation {
+    condition     = var.scheduler_deployment_maximum_percent >= 100 && var.scheduler_deployment_maximum_percent <= 200
+    error_message = "scheduler_deployment_maximum_percent must be between 100 and 200."
+  }
+  validation {
+    condition     = var.scheduler_deployment_maximum_percent >= var.scheduler_deployment_minimum_healthy_percent
+    error_message = "scheduler_deployment_maximum_percent must not be lower than scheduler_deployment_minimum_healthy_percent."
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Service-level tags — the ecs_service module's own `tags` input already
+# exists (default {}, this module's original new-environment design
+# intent, preserved unchanged here); these four root variables wire it per
+# role rather than adding a second, parallel tagging mechanism. This
+# staging environment's live `web` service carries five explicit tags
+# (confirmed via aws ecs describe-services --include TAGS, 2026-08-05):
+# SourceCommit, Environment=staging, ManagedBy=manual-reviewed-deployment,
+# ImageDigest, Application=FirmsBase. `worker`/`critical-worker`/
+# `scheduler` carry no service-level tags at all live (confirmed the same
+# way). NOTE: this environment's AWS provider (see versions.tf) has its
+# own `default_tags` block (Project, Environment, ManagedBy, Mission) that
+# applies to every resource this provider manages, including all four ECS
+# services — that is a provider-wide, cross-cutting configuration, not
+# specific to these four services, and is unchanged and out of scope here.
+# Because of it, even an exact live-tag `var.tags` value cannot make the
+# *effective* apply-time tag set match live exactly: Project/Mission would
+# still be added on top for every service (including worker/critical-
+# worker/scheduler, which have zero live tags), though Environment/
+# ManagedBy correctly resolve to each service's resource-level value where
+# one is supplied (resource-level tags win per-key over default_tags). See
+# docs/ecs/state-adoption-plan.md §9.20 for the full accounting; reconciling
+# default_tags itself is a separate, later, explicitly reviewed decision.
+# ---------------------------------------------------------------------------
+
+variable "web_tags" {
+  description = "web ECS service tags, wired into the ecs_service module's existing `tags` input. Defaults to {} (this module's original design intent). This staging environment's live service carries five tags (confirmed via aws ecs describe-services --include TAGS, 2026-08-05) — set in terraform.tfvars to match live exactly, including the live ImageDigest tag's value, which is deliberately preserved as-is (it does not match the currently running task definition's actual image digest — a pre-existing, stale metadata inconsistency on the live resource itself, not something this adoption pass corrects; see docs/ecs/state-adoption-plan.md §9.20)."
+  type        = map(string)
+  default     = {}
+}
+
+variable "worker_tags" {
+  description = "worker ECS service tags, wired into the ecs_service module's existing `tags` input. Defaults to {} (this module's original design intent). This staging environment's live service currently carries no service-level tags (confirmed via aws ecs describe-services --include TAGS, 2026-08-05) — the {} default already matches live; no override is required in terraform.tfvars."
+  type        = map(string)
+  default     = {}
+}
+
+variable "critical_worker_tags" {
+  description = "critical_worker ECS service tags, wired into the ecs_service module's existing `tags` input. Defaults to {} (this module's original design intent). This staging environment's live service currently carries no service-level tags (confirmed via aws ecs describe-services --include TAGS, 2026-08-05) — the {} default already matches live; no override is required in terraform.tfvars."
+  type        = map(string)
+  default     = {}
+}
+
+variable "scheduler_tags" {
+  description = "scheduler ECS service tags, wired into the ecs_service module's existing `tags` input. Defaults to {} (this module's original design intent). This staging environment's live service currently carries no service-level tags (confirmed via aws ecs describe-services --include TAGS, 2026-08-05) — the {} default already matches live; no override is required in terraform.tfvars."
+  type        = map(string)
+  default     = {}
+}
+
 variable "ses_consumer_cpu" {
   description = "ses-consumer task CPU units (Fargate). 256 (the smallest Fargate size) — an SQS long-poll loop plus a handful of DB writes per event is not CPU-intensive, matching the scheduler role's own sizing."
   type        = number

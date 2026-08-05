@@ -370,9 +370,24 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
     // import-manifest.json: 12 addresses documented, totals unchanged
     // ------------------------------------------------------------
 
+    private const ECS_SERVICE_ADDRESSES = [
+        'module.web.aws_ecs_service.this[0]',
+        'module.worker.aws_ecs_service.this[0]',
+        'module.critical_worker.aws_ecs_service.this[0]',
+        'module.scheduler.aws_ecs_service.this[0]',
+    ];
+
     public function test_all_twelve_phase_a3_addresses_are_documented_with_a_readiness_group(): void
     {
+        // The four ECS services are excluded here: as of 2026-08-05
+        // (§9.21) they no longer carry a current Group A/B/C letter —
+        // see test_ecs_services_are_documented_as_state_import_ready_and_deployment_migration_pending
+        // for their (different) two-axis model instead.
         foreach (self::PHASE_A3_ADDRESSES as $address) {
+            if (in_array($address, self::ECS_SERVICE_ADDRESSES, true)) {
+                continue;
+            }
+
             $entry = $this->manifestEntry($address);
             $combined = $entry['notes'].' '.$entry['prerequisite'];
 
@@ -393,13 +408,20 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
         $this->assertStringContainsString('canary', strtolower($combined));
     }
 
-    public function test_ecs_services_are_documented_as_group_c_blocked_by_task_definition_and_task_role_not_launch_mode(): void
+    public function test_ecs_services_are_documented_as_state_import_ready_and_deployment_migration_pending(): void
     {
-        foreach (['module.web.aws_ecs_service.this[0]', 'module.worker.aws_ecs_service.this[0]', 'module.critical_worker.aws_ecs_service.this[0]', 'module.scheduler.aws_ecs_service.this[0]'] as $address) {
+        // Superseded 2026-08-05 (§9.21): these four no longer carry a
+        // current "Group C" classification — a single letter conflated
+        // "safe to import" with "fully migrated." Any "Group C" text
+        // that survives here is a deliberate historical quotation (see
+        // the SUPERSEDED sentence), not a current classification claim.
+        foreach (self::ECS_SERVICE_ADDRESSES as $address) {
             $entry = $this->manifestEntry($address);
             $notes = $entry['notes'];
 
-            $this->assertStringContainsString('Group C', $notes);
+            $this->assertMatchesRegularExpression('/state.import readiness.{0,20}READY|READY/i', $notes);
+            $this->assertMatchesRegularExpression('/deployment.migration status.{0,20}PENDING|PENDING/i', $notes);
+            $this->assertMatchesRegularExpression('/SUPERSEDED 2026-08-05/', $notes);
 
             // Must explicitly confirm launch mode / desired count are
             // resolved, not silently omitted as if still open.
@@ -410,7 +432,7 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
             );
             $this->assertStringContainsString('desiredCount=1', $notes);
 
-            // Must cite the two real remaining reasons.
+            // Must cite the two real remaining deployment-migration reasons.
             $this->assertStringContainsString('aws_ecs_task_definition.this.arn', $notes);
             $this->assertStringContainsString('historical revision', $notes);
             $this->assertMatchesRegularExpression('/shared task role/i', $notes);
@@ -422,6 +444,10 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
                 '/launch mode is (not|still) (yet )?resolved|desired count is (not|still) (yet )?resolved/i',
                 $notes
             );
+
+            // classification must remain import_then_migrate — only the
+            // prose model changed, not the manifest's structural field.
+            $this->assertSame('import_then_migrate', $entry['classification']);
         }
     }
 
@@ -661,36 +687,52 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
         }
     }
 
-    public function test_group_c_addresses_are_consistent_across_both_docs_and_the_manifest(): void
+    public function test_ecs_service_two_axis_model_is_consistent_across_both_docs_and_the_manifest(): void
     {
-        $expectedC = [
-            'module.web.aws_ecs_service.this[0]',
-            'module.worker.aws_ecs_service.this[0]',
-            'module.critical_worker.aws_ecs_service.this[0]',
-            'module.scheduler.aws_ecs_service.this[0]',
-        ];
-
+        // Superseded 2026-08-05 (§9.21): these four no longer use a
+        // Group A/B/C letter as their current classification — they use
+        // two independent labels (state-import readiness,
+        // deployment-migration status) instead. This test replaces the
+        // former test_group_c_addresses_are_consistent_across_both_docs_and_the_manifest.
         $plan = $this->extractSection($this->stateAdoptionPlan(), '### 9\.12', '### 9\.13');
         $inventory = $this->variableInventory();
 
-        foreach ($expectedC as $address) {
-            $this->assertStringContainsString($address, $plan, "{$address} must appear in state-adoption-plan.md §9.12's Group C list.");
-            $this->assertStringContainsString($address, $inventory, "{$address} must appear in staging-variable-inventory.md's Group C list.");
-            $this->assertStringContainsString('Group C', $this->manifestEntry($address)['notes']);
+        foreach (self::ECS_SERVICE_ADDRESSES as $address) {
+            $this->assertStringContainsString($address, $plan, "{$address} must appear in state-adoption-plan.md §9.12.");
+            $this->assertStringContainsString($address, $inventory, "{$address} must appear in staging-variable-inventory.md.");
+
+            $notes = $this->manifestEntry($address)['notes'];
+            $this->assertMatchesRegularExpression('/READY/', $notes);
+            $this->assertMatchesRegularExpression('/PENDING/', $notes);
         }
+
+        $this->assertMatchesRegularExpression('/state-import readiness/i', $plan);
+        $this->assertMatchesRegularExpression('/deployment-migration status/i', $plan);
     }
 
-    public function test_group_counts_are_exactly_seven_two_four(): void
+    public function test_group_counts_are_exactly_seven_two_and_four_are_two_axis(): void
     {
         // Was 4/3/5, then 5/2/5 after module.iam.aws_iam_role.task_execution
-        // moved from Group B to Group A (2026-08-05, §9.17). Now 7/2/4:
+        // moved from Group B to Group A (2026-08-05, §9.17). Then 7/2/4:
         // module.iam.aws_iam_role_policy.task_execution moved from Group C
         // to Group A, and the new
         // module.iam.aws_iam_role_policy_attachment.task_execution_managed
         // address was added directly to Group A (2026-08-05, §9.18) —
-        // genuine, intentional reclassifications, not drift.
+        // genuine, intentional reclassifications, not drift. Superseded
+        // 2026-08-05 (§9.21): the four ECS services are excluded from
+        // this Group-letter count entirely — they no longer carry a
+        // current Group A/B/C classification (only historical
+        // quotations of "Group C" survive in their notes, inside an
+        // explicit SUPERSEDED sentence), so counting them by first
+        // regex match would be counting a quotation, not a
+        // classification. They are verified separately via
+        // test_ecs_service_two_axis_model_is_consistent_across_both_docs_and_the_manifest.
         $groupOf = [];
         foreach (self::PHASE_A3_ADDRESSES as $address) {
+            if (in_array($address, self::ECS_SERVICE_ADDRESSES, true)) {
+                continue;
+            }
+
             $notes = $this->manifestEntry($address)['notes'];
             preg_match('/Group ([ABC])/', $notes, $m);
             $this->assertNotEmpty($m, "{$address} must record a single unambiguous Group letter.");
@@ -701,6 +743,7 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
 
         $this->assertSame(7, $counts['A'] ?? 0, 'Group A must contain exactly 7 addresses.');
         $this->assertSame(2, $counts['B'] ?? 0, 'Group B must contain exactly 2 addresses.');
-        $this->assertSame(4, $counts['C'] ?? 0, 'Group C must contain exactly 4 addresses.');
+        $this->assertArrayNotHasKey('C', $counts, 'No address outside the four ECS services should be Group C.');
+        $this->assertCount(9, $groupOf, 'Exactly 9 of the 13 Phase A3 addresses use the Group A/B/C model; the other 4 (ECS services) use the two-axis model instead.');
     }
 }

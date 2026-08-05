@@ -119,9 +119,23 @@ resource "aws_ecs_service" "this" {
 
   tags = var.tags
 
+  # tags/tags_all: this environment's AWS provider default_tags (Project,
+  # Mission — see versions.tf) has no per-service override for those two
+  # keys on any of the seven roles here, so a live-vs-config tag diff would
+  # otherwise appear on the very next plan/apply after importing any of the
+  # four existing services (import records live's actual tags verbatim;
+  # config's computed tags_all always includes the provider defaults on
+  # top). Ignoring both here freezes whatever tags exist in state at
+  # import/creation time — this is deliberate adoption-metadata
+  # preservation, not a blanket exemption from tagging: it has NO effect on
+  # a brand-new resource's first creation (there is no prior state to
+  # diff against yet), only on every apply AFTER a resource already exists
+  # in state. See docs/ecs/state-adoption-plan.md §9.21.
   lifecycle {
     ignore_changes = [
       task_definition, # deploys update this via the CI/CD pipeline (see docs/ecs/env.ecs.example and .github/workflows/ecs-pipeline.yml), not via `terraform apply` re-running with a stale local image reference
+      tags,
+      tags_all,
     ]
   }
 }

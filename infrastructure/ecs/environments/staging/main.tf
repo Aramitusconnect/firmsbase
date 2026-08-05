@@ -273,6 +273,10 @@ module "web" {
   attach_target_group = true
   target_group_arn    = module.alb.target_group_arn
 
+  deployment_minimum_healthy_percent = var.web_deployment_minimum_healthy_percent
+  deployment_maximum_percent         = var.web_deployment_maximum_percent
+  tags                               = var.web_tags
+
   enable_autoscaling             = true
   autoscaling_min_capacity       = 2
   autoscaling_max_capacity       = 6
@@ -320,6 +324,10 @@ module "worker" {
   use_capacity_provider_strategy = false
   # Literal false — worker is never behind the ALB.
   attach_target_group = false
+
+  deployment_minimum_healthy_percent = var.worker_deployment_minimum_healthy_percent
+  deployment_maximum_percent         = var.worker_deployment_maximum_percent
+  tags                               = var.worker_tags
 
   enable_autoscaling             = true
   autoscaling_min_capacity       = 1
@@ -369,6 +377,10 @@ module "critical_worker" {
   # Literal false — critical-worker is never behind the ALB.
   attach_target_group = false
 
+  deployment_minimum_healthy_percent = var.critical_worker_deployment_minimum_healthy_percent
+  deployment_maximum_percent         = var.critical_worker_deployment_maximum_percent
+  tags                               = var.critical_worker_tags
+
   enable_autoscaling = false
 }
 
@@ -407,9 +419,12 @@ module "scheduler" {
   attach_target_group = false
 
   # See docs/ecs/graceful-shutdown.md — avoids a transient two-instance
-  # overlap during deploys for this single-instance service.
-  deployment_minimum_healthy_percent = 0
-  deployment_maximum_percent         = 100
+  # overlap during deploys for this single-instance service. Sourced from
+  # variables (matching web/worker/critical_worker) rather than hardcoded
+  # literals, per docs/ecs/state-adoption-plan.md §9.20.
+  deployment_minimum_healthy_percent = var.scheduler_deployment_minimum_healthy_percent
+  deployment_maximum_percent         = var.scheduler_deployment_maximum_percent
+  tags                               = var.scheduler_tags
 
   enable_autoscaling = false
 }
