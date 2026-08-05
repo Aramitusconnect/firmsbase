@@ -76,7 +76,7 @@ resource "aws_iam_role_policy_attachment" "task_execution_managed" {
 # docs/ecs/state-adoption-plan.md §9.18 for the live-verified correction.
 data "aws_iam_policy_document" "task_execution" {
   statement {
-    sid       = "ReadTaskSecrets"
+    sid       = var.task_execution_secrets_policy_sid
     actions   = ["secretsmanager:GetSecretValue"]
     resources = var.task_execution_secret_arns
   }

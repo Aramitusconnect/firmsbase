@@ -501,8 +501,11 @@ class SesConsumerTerraformIamTest extends TestCase
         // actually deployed).
         $iam = $this->iamMain();
 
-        preg_match('/sid\s*=\s*"ReadTaskSecrets".*?\n    }\n/s', $iam, $blockMatch);
-        $this->assertNotEmpty($blockMatch, 'Could not locate the execution role\'s ReadTaskSecrets statement.');
+        // §9.19: the statement's sid is no longer the hardcoded
+        // "ReadTaskSecrets" literal (which never matched live) — it's now
+        // the required task_execution_secrets_policy_sid variable.
+        preg_match('/sid\s*=\s*var\.task_execution_secrets_policy_sid.*?\n    }\n/s', $iam, $blockMatch);
+        $this->assertNotEmpty($blockMatch, 'Could not locate the execution role\'s secrets-read statement.');
         $block = $blockMatch[0];
 
         $this->assertMatchesRegularExpression('/resources\s*=\s*var\.task_execution_secret_arns/', $block, 'The execution role\'s secret access must be the exact var.task_execution_secret_arns list, never a wildcard.');

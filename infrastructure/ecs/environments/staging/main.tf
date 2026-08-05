@@ -96,6 +96,7 @@ module "iam" {
   task_execution_role_description   = var.iam_task_execution_role_description
   task_execution_policy_name        = var.iam_task_execution_policy_name
   task_execution_managed_policy_arn = var.iam_task_execution_managed_policy_arn
+  task_execution_secrets_policy_sid = var.iam_task_execution_secrets_policy_sid
 
   # Bare ARNs only — never a ":<json-key>::" selector. IAM's
   # secretsmanager:GetSecretValue grant applies to the whole secret; the

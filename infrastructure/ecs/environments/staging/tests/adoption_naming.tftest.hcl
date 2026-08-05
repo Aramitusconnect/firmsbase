@@ -67,6 +67,7 @@ variables {
   aws_account_id                        = "603013471426"
   iam_task_execution_role_description   = "Execution role for FirmsBase staging ECS tasks"
   iam_task_execution_managed_policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+  iam_task_execution_secrets_policy_sid = "ReadFirmsBaseStagingSecrets"
 }
 
 # --- ECS cluster name ---------------------------------------------------

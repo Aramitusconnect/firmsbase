@@ -498,6 +498,24 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
     and `module.iam.aws_iam_role_policy.task_execution` moved to Group A;
     neither was imported, and neither import authorizes detaching the
     managed policy or expanding/reducing the inline policy's permissions.
+13. **All three IAM execution-role resources imported; inline-policy Sid
+    corrected (2026-08-05, see
+    [state-adoption-plan.md §9.19](state-adoption-plan.md))**:
+    `module.iam.aws_iam_role.task_execution`,
+    `module.iam.aws_iam_role_policy_attachment.task_execution_managed`,
+    and `module.iam.aws_iam_role_policy.task_execution` are all now
+    imported. The inline-policy import's own mission instructions required
+    stopping on any Sid difference between live and Terraform; a
+    difference existed (live `ReadFirmsBaseStagingSecrets` vs. Terraform's
+    hardcoded `ReadTaskSecrets`) and should have stopped the import but did
+    not — the import itself only ever writes Terraform state, never AWS,
+    so no IAM permission or policy content was changed by it. Fixed: a new
+    required `task_execution_secrets_policy_sid` input (no default, mirrors
+    `task_execution_policy_name`'s pattern) now renders the exact live Sid.
+    No action, effect, resource, attachment, or permission changed — only
+    the Sid label in Terraform's own configuration. A fresh
+    `aws iam get-role-policy` re-verification confirmed the live policy was
+    unchanged throughout.
 
 **No import, apply, ECS deployment, scaling change, capacity-provider
 association, IAM permission migration, or description-drift

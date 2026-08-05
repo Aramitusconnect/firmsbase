@@ -202,6 +202,94 @@ class StagingIamExecutionPolicyArchitectureTest extends TestCase
         }
     }
 
+    // ------------------------------------------------------------
+    // Sid alignment (§9.19) — a prior import discovered live's Sid
+    // (ReadFirmsBaseStagingSecrets) never matched the module's hardcoded
+    // ReadTaskSecrets. The import mission's own instructions required
+    // stopping on this difference but did not; the import changed only
+    // Terraform state, never AWS/IAM. This section proves the correction:
+    // only the Sid label changed, nothing else.
+    // ------------------------------------------------------------
+
+    public function test_secrets_statement_sid_is_the_exact_live_value(): void
+    {
+        $doc = $this->extractDataBlock($this->iamModuleMain(), 'aws_iam_policy_document', 'task_execution');
+
+        $this->assertStringContainsString('sid       = var.task_execution_secrets_policy_sid', $doc);
+        $this->assertStringNotContainsString('ReadTaskSecrets', $doc, 'The old, never-matched-live Sid must not remain anywhere in the module.');
+
+        $module = $this->extractModuleBlock($this->stagingMain(), 'iam');
+        $this->assertMatchesRegularExpression('/task_execution_secrets_policy_sid\s*= var\.iam_task_execution_secrets_policy_sid/', $module);
+
+        $tfvars = $this->stagingTfvarsExample();
+        $this->assertStringContainsString('iam_task_execution_secrets_policy_sid = "ReadFirmsBaseStagingSecrets"', $tfvars);
+    }
+
+    public function test_secrets_policy_sid_is_a_required_module_input_with_no_default(): void
+    {
+        $var = $this->extractVariableBlock($this->iamModuleVariables(), 'task_execution_secrets_policy_sid');
+        $this->assertDoesNotMatchRegularExpression('/^\s*default\s*=/m', $var, 'task_execution_secrets_policy_sid must have no default.');
+        $this->assertStringContainsString('type        = string', $var);
+
+        $rootVar = $this->extractVariableBlock($this->stagingVariables(), 'iam_task_execution_secrets_policy_sid');
+        $this->assertDoesNotMatchRegularExpression('/^\s*default\s*=/m', $rootVar);
+    }
+
+    public function test_old_sid_is_absent_as_an_actual_value_anywhere(): void
+    {
+        // main.tf (module and staging root) must never mention the old
+        // Sid at all — not even in a comment, since these are the live
+        // source of truth for what gets rendered. variables.tf and
+        // terraform.tfvars.example are exempt from that blanket check:
+        // both legitimately explain the old, now-replaced value as
+        // historical context for why the new variable/setting exists
+        // (the same pattern already established elsewhere in this file)
+        // — so for those two, this only checks the old value is never
+        // assigned as an actual sid.
+        $this->assertStringNotContainsString('ReadTaskSecrets', $this->iamModuleMain());
+        $this->assertStringNotContainsString('ReadTaskSecrets', $this->stagingMain());
+
+        foreach ([$this->iamModuleVariables(), $this->stagingVariables(), $this->stagingTfvarsExample()] as $content) {
+            $this->assertDoesNotMatchRegularExpression(
+                '/[a-z_]*sid\s*=\s*"ReadTaskSecrets"/i',
+                $content,
+                'ReadTaskSecrets must never be assigned as an actual sid value.'
+            );
+        }
+    }
+
+    public function test_sid_correction_changed_nothing_else_in_the_secrets_statement(): void
+    {
+        // The statement's action and resources arguments are untouched by
+        // this correction — only the sid argument changed.
+        $doc = $this->extractDataBlock($this->iamModuleMain(), 'aws_iam_policy_document', 'task_execution');
+        $this->assertStringContainsString('actions   = ["secretsmanager:GetSecretValue"]', $doc);
+        $this->assertStringContainsString('resources = var.task_execution_secret_arns', $doc);
+    }
+
+    public function test_secrets_statement_has_no_explicit_effect_argument_defaulting_to_allow(): void
+    {
+        // aws_iam_policy_document statements default to Effect "Allow"
+        // when the effect argument is omitted — matching live's explicit
+        // "Effect": "Allow". This statement never declared an explicit
+        // effect, before or after the Sid correction, and certainly never
+        // "Deny".
+        $doc = $this->extractDataBlock($this->iamModuleMain(), 'aws_iam_policy_document', 'task_execution');
+        $this->assertStringNotContainsString('effect', $doc);
+        $this->assertStringNotContainsString('"Deny"', $doc);
+    }
+
+    public function test_manifest_records_the_sid_only_mismatch_discovery_and_correction(): void
+    {
+        $entry = $this->manifestEntry('module.iam.aws_iam_role_policy.task_execution');
+
+        $this->assertStringContainsString('ReadFirmsBaseStagingSecrets', $entry['notes']);
+        $this->assertStringContainsString('ReadTaskSecrets', $entry['notes']);
+        $this->assertMatchesRegularExpression('/Sid/i', $entry['notes']);
+        $this->assertStringContainsString('IMPORTED 2026-08-05', $entry['notes']);
+        $this->assertStringContainsString('§9.19', $entry['notes']);
+    }
+
     public function test_no_ecr_or_logs_action_reaches_the_staging_inline_policy_via_wiring(): void
     {
         // Removed entirely — these variables previously fed the ECR/logs
@@ -329,11 +417,14 @@ class StagingIamExecutionPolicyArchitectureTest extends TestCase
     // Both imports stay separate; no permission decision authorized
     // ------------------------------------------------------------
 
-    public function test_neither_policy_resource_is_marked_as_imported(): void
+    public function test_both_policy_resources_are_now_marked_as_imported(): void
     {
+        // Superseded 2026-08-05 (§9.19): both addresses were imported as
+        // their own individual canary missions after this test was
+        // originally written — the manifest notes now say so.
         foreach (['module.iam.aws_iam_role_policy_attachment.task_execution_managed', 'module.iam.aws_iam_role_policy.task_execution'] as $address) {
             $entry = $this->manifestEntry($address);
-            $this->assertMatchesRegularExpression('/remains unimported|Remains unimported/', $entry['notes']);
+            $this->assertMatchesRegularExpression('/IMPORTED 2026-08-05/', $entry['notes']);
         }
     }
 
