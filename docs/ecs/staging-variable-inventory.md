@@ -357,9 +357,10 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
    - **Group A**: `module.ecr.aws_ecr_repository.app`,
      `module.alb.aws_lb_target_group.web`,
      `module.ecs_cluster.aws_ecs_cluster.this`,
-     `module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`.
-   - **Group B**: `module.iam.aws_iam_role.task_execution`,
-     `module.elasticache.aws_elasticache_subnet_group.this`,
+     `module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`,
+     `module.iam.aws_iam_role.task_execution` (moved here from Group B,
+     2026-08-05, see item 11 below).
+   - **Group B**: `module.elasticache.aws_elasticache_subnet_group.this`,
      `module.elasticache.aws_elasticache_replication_group.this`.
    - **Group C**: `module.iam.aws_iam_role_policy.task_execution`,
      `module.web.aws_ecs_service.this[0]`,
@@ -438,6 +439,32 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
     decided; a future plan proposing either change is a stop condition
     requiring its own review. Both resources remain classified
     `import_then_migrate` in `import-manifest.json`.
+11. **IAM execution-role trust policy and description aligned (2026-08-05,
+    see [state-adoption-plan.md §9.17](state-adoption-plan.md))**: a
+    read-only preflight for `module.iam.aws_iam_role.task_execution`
+    found two previously-undiscovered role-level gaps. Live
+    `firmsbase-staging-ecs-execution-role` and
+    `firmsbase-staging-ecs-task-role` both carry an identical assume-role
+    trust policy with `StringEquals aws:SourceAccount=603013471426` and
+    `ArnLike aws:SourceArn=arn:aws:ecs:us-east-1:603013471426:*`
+    conditions (confirmed via `aws iam get-role` on both, 2026-08-05);
+    `modules/iam`'s shared trust-policy document had no conditions at
+    all. Live's execution-role description
+    (`"Execution role for FirmsBase staging ECS tasks"`) was also
+    undeclared in the module. Fixed: the shared trust-policy document now
+    takes required `aws_account_id`/`aws_region` inputs (no default —
+    never derived from ambient AWS identity) and renders both conditions
+    for every role that uses it (execution role and all 7 task roles,
+    since both examined live roles are identical); a new required
+    `task_execution_role_description` input is wired only to
+    `aws_iam_role.task_execution.description`. Neither fix adds, removes,
+    or touches any IAM permission, policy attachment, or the separate
+    `module.iam.aws_iam_role_policy.task_execution` address, which
+    remains Group C/unsafe pending its own permission-shape decision.
+    `module.iam.aws_iam_role.task_execution` moved from Group B to Group A
+    — its role-level configuration now matches live exactly, and it is
+    suitable for an isolated canary import after this correction merges.
+    Neither IAM resource was imported in this pass.
 
 **No import, apply, ECS deployment, scaling change, capacity-provider
 association, IAM permission migration, or description-drift

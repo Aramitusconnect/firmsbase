@@ -154,6 +154,17 @@ iam_task_execution_role_name  = "firmsbase-staging-ecs-execution-role"
 # see docs/ecs/state-adoption-plan.md §11 item 3 and §9.10/§9.11.
 iam_task_execution_policy_name = "FirmsBaseStagingSecretsAccess"
 
+# Both live ECS roles (firmsbase-staging-ecs-execution-role AND
+# firmsbase-staging-ecs-task-role) carry identical aws:SourceAccount /
+# aws:SourceArn confused-deputy conditions on their assume-role trust
+# policy (confirmed via aws iam get-role on both, 2026-08-05) — this one
+# account ID is shared, not role-specific. See docs/ecs/state-adoption-plan.md §9.17.
+aws_account_id = "603013471426"
+
+# Live execution-role description (confirmed via aws iam get-role,
+# 2026-08-05). No default — see variables.tf for why.
+iam_task_execution_role_description = "Execution role for FirmsBase staging ECS tasks"
+
 # ECS service desired counts — these four default to this module's
 # original design intent (web/worker=2, critical_worker/scheduler=1). This
 # staging environment's live services currently all run 1 (confirmed via

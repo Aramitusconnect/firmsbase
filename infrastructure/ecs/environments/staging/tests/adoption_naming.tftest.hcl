@@ -62,7 +62,9 @@ variables {
   platform_notifications_recipient_fingerprint_hmac_key_secret_arn = "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/hmac-key-AbCdEf"
   # iam_task_execution_policy_name has no default (see variables.tf) — every
   # caller must set it explicitly.
-  iam_task_execution_policy_name = "firmsbase-staging-task-execution"
+  iam_task_execution_policy_name      = "firmsbase-staging-task-execution"
+  aws_account_id                      = "603013471426"
+  iam_task_execution_role_description = "Execution role for FirmsBase staging ECS tasks"
 }
 
 # --- ECS cluster name ---------------------------------------------------

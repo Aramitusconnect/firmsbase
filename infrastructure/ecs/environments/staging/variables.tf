@@ -390,6 +390,21 @@ variable "iam_task_execution_policy_name" {
   type        = string
 }
 
+variable "aws_account_id" {
+  description = "AWS account ID this staging environment runs in. Wired only into module.iam's shared assume-role trust-policy scoping (aws:SourceAccount/aws:SourceArn confused-deputy conditions) — this staging environment's live execution role AND its live generic task role (firmsbase-staging-ecs-execution-role, firmsbase-staging-ecs-task-role) both carry the identical StringEquals aws:SourceAccount=603013471426 / ArnLike aws:SourceArn=arn:aws:ecs:us-east-1:603013471426:* conditions (confirmed via aws iam get-role on both, 2026-08-05), so this one value is shared, not role-specific. See docs/ecs/state-adoption-plan.md §9.17."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.aws_account_id))
+    error_message = "aws_account_id must be exactly 12 digits."
+  }
+}
+
+variable "iam_task_execution_role_description" {
+  description = "The task-execution role's description. No default, deliberately — mirrors iam_task_execution_policy_name's own no-default pattern above: this module previously declared no description at all, so a default here risks silently applying a description that doesn't match live rather than failing loudly. This staging environment's live execution role description is \"Execution role for FirmsBase staging ECS tasks\" (confirmed via aws iam get-role, 2026-08-05). See docs/ecs/state-adoption-plan.md §9.17."
+  type        = string
+}
+
 # ---------------------------------------------------------------------------
 # Public-IP / NAT-egress safety invariant — see docs/ecs/state-adoption-plan.md
 # §9.1. This staging VPC is the AWS account's DEFAULT VPC: every subnet is

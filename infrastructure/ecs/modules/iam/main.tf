@@ -5,12 +5,34 @@
 # modifying permission — every grant below is scoped to a specific ARN list
 # supplied by the caller.
 
+# Shared by both the execution role and every task role below — this
+# staging environment's live firmsbase-staging-ecs-execution-role AND
+# firmsbase-staging-ecs-task-role both carry the identical
+# aws:SourceAccount/aws:SourceArn confused-deputy conditions (confirmed via
+# aws iam get-role on both roles), so they are modeled here as one shared
+# document rather than a role-specific one. var.aws_account_id/var.aws_region
+# are explicit, required module inputs — deliberately not derived from the
+# caller's ambient AWS identity inside this reusable module, so the trust
+# policy this module renders never silently depends on which credentials
+# happen to run `terraform apply`. See docs/ecs/state-adoption-plan.md §9.17.
 data "aws_iam_policy_document" "ecs_tasks_assume_role" {
   statement {
     actions = ["sts:AssumeRole"]
     principals {
       type        = "Service"
       identifiers = ["ecs-tasks.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [var.aws_account_id]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:aws:ecs:${var.aws_region}:${var.aws_account_id}:*"]
     }
   }
 }
@@ -26,6 +48,7 @@ data "aws_iam_policy_document" "ecs_tasks_assume_role" {
 resource "aws_iam_role" "task_execution" {
   name               = coalesce(var.task_execution_role_name, "${var.name_prefix}-task-execution")
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
+  description        = var.task_execution_role_description
   tags               = var.tags
 }
 

@@ -35,17 +35,20 @@ override_data {
 }
 
 variables {
-  name_prefix                 = "firmsbase-staging"
-  ecr_repository_arn          = "arn:aws:ecr:us-east-1:603013471426:repository/firmsbase-staging"
-  log_group_arns              = ["arn:aws:logs:us-east-1:603013471426:log-group:/ecs/firmsbase-staging/web:*"]
-  secret_arns                 = []
-  kms_key_arn                 = null
-  kms_encryption_enabled      = false
-  s3_documents_bucket_arn     = null
-  s3_documents_enabled        = false
-  ses_events_queue_arn        = null
-  ses_sending_identity_arn    = null
-  ses_authorized_from_address = null
+  name_prefix                     = "firmsbase-staging"
+  aws_account_id                  = "603013471426"
+  aws_region                      = "us-east-1"
+  task_execution_role_description = "Execution role for FirmsBase staging ECS tasks"
+  ecr_repository_arn              = "arn:aws:ecr:us-east-1:603013471426:repository/firmsbase-staging"
+  log_group_arns                  = ["arn:aws:logs:us-east-1:603013471426:log-group:/ecs/firmsbase-staging/web:*"]
+  secret_arns                     = []
+  kms_key_arn                     = null
+  kms_encryption_enabled          = false
+  s3_documents_bucket_arn         = null
+  s3_documents_enabled            = false
+  ses_events_queue_arn            = null
+  ses_sending_identity_arn        = null
+  ses_authorized_from_address     = null
   # task_execution_policy_name is the variable under test — no shared
   # default here (it has no default in variables.tf); each run below sets
   # it explicitly.
