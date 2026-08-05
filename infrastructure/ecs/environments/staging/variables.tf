@@ -327,6 +327,12 @@ variable "ecs_default_capacity_provider" {
   default     = "FARGATE"
 }
 
+variable "ecs_container_insights_enabled" {
+  description = "Whether the ECS cluster's containerInsights setting is enabled. Defaults to true — this module's original design intent, unaffected for a brand-new environment. This staging environment's live cluster actually has it disabled (confirmed via aws ecs describe-clusters) — see docs/ecs/state-adoption-plan.md §9.10/§9.11. Set to false for live-compatible adoption; enabling Container Insights on the live cluster later is a separate decision requiring its own cost and observability review, not a byproduct of import."
+  type        = bool
+  default     = true
+}
+
 variable "ecr_repository_name" {
   description = "Override for the ECR repository name. Null (default) falls back to \"firmsbase-app\" (this file's prior hardcoded value). This staging environment's live repository is \"firmsbase-staging\" — ECR repository renames are destructive (all existing image tags/digests are lost), so this must be set correctly before any import, never used to rename the live repository. See docs/ecs/state-adoption-plan.md §3B."
   type        = string

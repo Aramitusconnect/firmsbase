@@ -9,3 +9,7 @@ output "cluster_name" {
 output "cluster_arn" {
   value = aws_ecs_cluster.this.arn
 }
+
+output "container_insights_enabled" {
+  value = var.container_insights_enabled
+}

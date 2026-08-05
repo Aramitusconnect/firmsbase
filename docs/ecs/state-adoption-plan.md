@@ -1172,6 +1172,54 @@ shape, so the provider's `aws_iam_role` read typically does not need a
 separate tags call; this distinction is not re-verified against the
 provider's source directly.
 
+### 9.14 ECS cluster Container Insights correction (2026-08-04, third pass)
+
+A canary import attempt against `module.ecs_cluster.aws_ecs_cluster.this`
+was halted before running (no state was mutated) when a fresh, read-only
+`aws ecs describe-clusters` re-verification found **live `containerInsights`
+is `disabled`**, while `modules/ecs_cluster` previously hardcoded
+`"enabled"` unconditionally, with no override variable. §9.12's claim that
+"the cluster resource itself (name, containerInsights setting) has no
+known drift" was **WRONG** — it was never actually verified against this
+specific field. This is a real, previously-unreviewed Terraform-managed
+setting mismatch: importing under the old hardcoded config would have left
+the next (unauthorized) `plan` proposing to enable Container Insights on a
+live, in-use cluster — a genuine cost and observability behavior change,
+not a no-op.
+
+**Fixed:**
+
+1. Live `containerInsights` is confirmed `disabled` (`aws ecs
+   describe-clusters` — `Settings: [{name: containerInsights, value:
+   disabled}]`, 2026-08-04).
+2. Terraform previously hardcoded `containerInsights = "enabled"`
+   unconditionally, with no way for any caller to represent a live cluster
+   that has it disabled.
+3. `modules/ecs_cluster` now takes a required `container_insights_enabled`
+   boolean (no default — every caller must decide explicitly); this
+   staging environment's `terraform.tfvars` sets
+   `ecs_container_insights_enabled = false`, matching live exactly.
+4. The module renders `"disabled"` for this environment
+   (`var.container_insights_enabled ? "enabled" : "disabled"`).
+5. The normal new-environment default remains `"enabled"`
+   (`var.ecs_container_insights_enabled` defaults `true` at the staging
+   root, `var.container_insights_enabled` itself has no module-level
+   default — every caller, including a brand-new environment's own root
+   module, must pass it explicitly).
+6. Importing the cluster records the current, live `disabled` setting
+   into state exactly as-is.
+7. Importing does **not** authorize enabling Container Insights later —
+   any future enablement is a separate decision requiring its own explicit
+   cost and observability review, not a byproduct of this or any import.
+8. `module.ecs_cluster.aws_ecs_cluster.this`'s resource address is
+   unchanged; no exact, source-backed blocker remains — this address is
+   genuinely suitable for an individual Phase A3 canary import once this
+   correction merges.
+9. `module.ecs_cluster.aws_ecs_cluster_capacity_providers.this` — the
+   separate, already-confirmed-empty capacity-provider association — is a
+   different Terraform resource address and remains a later, independent
+   import; it is not part of this correction and was not touched by it.
+
 ## 10. Validation performed (local/static only)
 
 | Check | Result |

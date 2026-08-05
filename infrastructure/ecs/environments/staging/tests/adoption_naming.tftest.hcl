@@ -76,6 +76,28 @@ run "cluster_name_defaults_to_name_prefix_when_no_override" {
   }
 }
 
+run "container_insights_defaults_to_enabled_for_a_new_environment" {
+  command = plan
+
+  assert {
+    condition     = module.ecs_cluster.container_insights_enabled == true
+    error_message = "Without ecs_container_insights_enabled set, the cluster must default to enabled — original module design, unaffected for a brand-new environment."
+  }
+}
+
+run "container_insights_resolves_to_the_live_disabled_value_when_overridden" {
+  command = plan
+
+  variables {
+    ecs_container_insights_enabled = false
+  }
+
+  assert {
+    condition     = module.ecs_cluster.container_insights_enabled == false
+    error_message = "With ecs_container_insights_enabled=false, the cluster must resolve to disabled — this is what makes the live cluster (confirmed containerInsights=disabled via aws ecs describe-clusters) importable without leaving a permanent drift that would silently enable it on the next apply."
+  }
+}
+
 run "cluster_name_resolves_to_live_value_when_overridden" {
   command = plan
 
