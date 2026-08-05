@@ -1273,6 +1273,55 @@ task placement vs. ElastiCache subnet-group registration).
 12. `module.elasticache.aws_elasticache_replication_group.this` remains a
     later, separate import — not touched by this correction.
 
+### 9.16 ElastiCache subnet group and replication group imported; description/tag drift recorded (2026-08-05)
+
+Both ElastiCache resources referenced throughout §9.10–§9.15 have since been
+imported, each as its own individually-verified canary:
+
+1. `module.elasticache.aws_elasticache_subnet_group.this` was imported
+   (`firmsbase-staging-cache-subnets`). Live membership was re-verified as
+   the same 6 subnets immediately before and after import; the import
+   changed no AWS resource.
+2. `module.elasticache.aws_elasticache_replication_group.this` was imported
+   (`firmsbase-staging-redis`). Live topology (single node, no replica,
+   automatic failover disabled, Multi-AZ disabled, engine `valkey` version
+   `7.2.6`, node type `cache.t4g.micro`, transit/at-rest encryption enabled,
+   auth-token enabled, subnet group `firmsbase-staging-cache-subnets`,
+   parameter group `default.valkey7`, security group
+   `sg-0da3ea50262a9d20d`) and its sole member cluster
+   (`firmsbase-staging-redis-001`) were byte-identical in a read-only
+   re-check performed immediately before and after import; the import
+   changed no AWS resource. `lifecycle.ignore_changes = [auth_token]`
+   already covers the one field AWS never returns.
+3. A field-by-field comparison performed as part of this import found two
+   config/live differences for the replication group that neither the
+   import nor this correction reconciles or authorizes:
+   - **Description**: live is "Valkey for FirmsBase staging sessions,
+     cache, and queues"; `modules/elasticache` hardcodes a different
+     literal ("FirmsBase staging Redis — cache/session/queue/locks...").
+     `description` is not a ForceNew argument for
+     `aws_elasticache_replication_group`, so an unauthorized future
+     `apply` could silently overwrite the live text in place.
+   - **Tags**: the live replication group carries three tags
+     (`Environment`, `Application`, `Name`, confirmed via
+     `elasticache:ListTagsForResource`); the staging root never passes a
+     `tags` argument to `module.elasticache`, so it resolves to the
+     module's default `{}`. This mirrors the same untagged convention
+     used everywhere else in this environment's Terraform (no resource
+     in this project currently has root-supplied tags) — it is not a
+     defect introduced by this import. But an unauthorized future
+     `apply` could still strip all three live tags, since nothing in
+     `lifecycle.ignore_changes` covers `tags`.
+4. Neither difference is described as harmless or already decided. A
+   future `plan` proposing to change the description or remove the live
+   tags is an explicit **stop condition** requiring its own review
+   (does the description matter operationally? should tags be adopted
+   into Terraform for this environment generally, not just this one
+   resource?) — not a byproduct of these two imports.
+5. No import in this pass changed the classification of either resource
+   in `import-manifest.json`; both remain `import_then_migrate` because
+   the description/tag reconciliation above is still open.
+
 ## 10. Validation performed (local/static only)
 
 | Check | Result |

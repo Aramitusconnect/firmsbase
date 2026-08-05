@@ -418,6 +418,26 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
    review. The resource address is unchanged; the subnet group remains
    unimported until this correction merges, and the replication group
    remains a later, separate import.
+10. **ElastiCache subnet group and replication group imported; description
+    and tag drift recorded (2026-08-05, see
+    [state-adoption-plan.md §9.16](state-adoption-plan.md))**: both
+    `module.elasticache.aws_elasticache_subnet_group.this`
+    (`firmsbase-staging-cache-subnets`) and
+    `module.elasticache.aws_elasticache_replication_group.this`
+    (`firmsbase-staging-redis`) have been imported, each individually
+    verified live-unchanged immediately before and after. Two config/live
+    differences on the replication group remain open and are **not**
+    reconciled or authorized by these imports: (1) description — live text
+    differs from the module's hardcoded literal, and `description` is not
+    ForceNew, so an unauthorized future `apply` could silently overwrite
+    it; (2) tags — live carries 3 tags, but the module's `tags` input is
+    never set by the staging root and resolves to `{}` (consistent with
+    every other resource in this environment, not a new gap); an
+    unauthorized future `apply` could still strip them, since `tags` is
+    not in `lifecycle.ignore_changes`. Neither difference is harmless or
+    decided; a future plan proposing either change is a stop condition
+    requiring its own review. Both resources remain classified
+    `import_then_migrate` in `import-manifest.json`.
 
 **No import, apply, ECS deployment, scaling change, capacity-provider
 association, IAM permission migration, or description-drift
