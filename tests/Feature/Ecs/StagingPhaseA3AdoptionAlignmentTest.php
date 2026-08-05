@@ -554,8 +554,13 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
         $this->assertMatchesRegularExpression('/separate.{0,40}undecided migration|policy.{0,20}content.{0,40}separate/is', $matches[0]);
     }
 
-    public function test_documentation_states_elasticache_tag_read_permission_unresolved(): void
+    public function test_documentation_states_elasticache_tag_read_permission_history_and_resolution(): void
     {
+        // As of the ElastiCache subnet-membership correction, this
+        // permission is resolved (§9.13 was updated from "recorded, not
+        // resolved" to "RESOLVED"). This test now proves the doc records
+        // both the historical AccessDenied finding and the resolution,
+        // not the stale "not granted" claim.
         $doc = $this->stateAdoptionPlan();
         preg_match('/### 9\.13.*?(?=## 10\.)/s', $doc, $matches);
         $this->assertNotEmpty($matches, 'Could not locate §9.13.');
@@ -565,7 +570,8 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
         $this->assertStringContainsString('AccessDenied', $section);
         $this->assertStringContainsString('arn:aws:elasticache:us-east-1:603013471426:replicationgroup:firmsbase-staging-redis', $section);
         $this->assertStringContainsString('arn:aws:elasticache:us-east-1:603013471426:subnetgroup:firmsbase-staging-cache-subnets', $section);
-        $this->assertMatchesRegularExpression('/[Nn]ot granted in this mission/', $section);
+        $this->assertMatchesRegularExpression('/now\s+granted/i', $section);
+        $this->assertStringNotContainsString('Not granted in this mission', $section);
     }
 
     public function test_documentation_does_not_overclaim_iam_list_role_tags_as_required(): void

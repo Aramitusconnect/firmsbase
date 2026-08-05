@@ -35,7 +35,7 @@ resource "aws_security_group_rule" "redis_ingress_from_ecs_tasks" {
 
 resource "aws_elasticache_subnet_group" "this" {
   name       = coalesce(var.subnet_group_name, "${var.name_prefix}-redis")
-  subnet_ids = var.private_subnet_ids
+  subnet_ids = var.subnet_ids
 }
 
 resource "aws_elasticache_replication_group" "this" {
