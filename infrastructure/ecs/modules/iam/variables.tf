@@ -2,6 +2,31 @@ variable "name_prefix" {
   type = string
 }
 
+variable "aws_account_id" {
+  description = "AWS account ID that owns the ECS tasks assuming this module's roles. Used only to scope the shared ecs-tasks.amazonaws.com assume-role trust policy's aws:SourceAccount/aws:SourceArn conditions to this account's own ECS resources — confused-deputy protection, not a permission grant. No default, deliberately: this reusable module must never derive the account from the ambient AWS identity running `terraform apply`; every caller supplies it explicitly. See docs/ecs/state-adoption-plan.md §9.17."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.aws_account_id))
+    error_message = "aws_account_id must be exactly 12 digits."
+  }
+}
+
+variable "aws_region" {
+  description = "AWS region the ECS tasks assuming this module's roles run in. Used only to scope the shared assume-role trust policy's aws:SourceArn condition (arn:aws:ecs:<region>:<account>:*). No default, deliberately — mirrors aws_account_id above."
+  type        = string
+}
+
+variable "task_execution_role_description" {
+  description = "The task-execution role's description. No default, deliberately — this module previously declared no description argument at all on aws_iam_role.task_execution, so a default here risks silently applying a description that doesn't match a given caller's live role rather than failing loudly. This staging environment's live execution role description is \"Execution role for FirmsBase staging ECS tasks\" (confirmed via aws iam get-role). Wired only to aws_iam_role.task_execution.description — no other role in this module gets a description from this variable. See docs/ecs/state-adoption-plan.md §9.17."
+  type        = string
+
+  validation {
+    condition     = length(trimspace(var.task_execution_role_description)) > 0
+    error_message = "task_execution_role_description must not be empty."
+  }
+}
+
 variable "task_execution_role_name" {
   description = "Null (default) falls back to \"<name_prefix>-task-execution\". See docs/ecs/state-adoption-plan.md §3B — this is a naming fix only; it does not reconcile the live role's AWS-managed-policy-based permission shape with this module's custom-inline-policy shape, which remains a separate human decision."
   type        = string

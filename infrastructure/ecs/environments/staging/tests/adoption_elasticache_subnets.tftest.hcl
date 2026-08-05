@@ -56,6 +56,8 @@ variables {
   ses_authorized_from_address                                      = "no-reply@staging-mail.firmsvault.com"
   platform_notifications_recipient_fingerprint_hmac_key_secret_arn = "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/hmac-key-AbCdEf"
   iam_task_execution_policy_name                                   = "firmsbase-staging-task-execution"
+  aws_account_id                                                   = "603013471426"
+  iam_task_execution_role_description                              = "Execution role for FirmsBase staging ECS tasks"
 }
 
 run "elasticache_subnet_ids_defaults_to_private_subnet_ids_for_a_new_environment" {

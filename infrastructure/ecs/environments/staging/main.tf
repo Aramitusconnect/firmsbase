@@ -89,10 +89,13 @@ resource "aws_cloudwatch_log_group" "app" {
 module "iam" {
   source = "../../modules/iam"
 
-  name_prefix                = var.name_prefix
-  task_execution_role_name   = var.iam_task_execution_role_name
-  task_execution_policy_name = var.iam_task_execution_policy_name
-  ecr_repository_arn         = module.ecr.repository_arn
+  name_prefix                     = var.name_prefix
+  aws_account_id                  = var.aws_account_id
+  aws_region                      = var.aws_region
+  task_execution_role_name        = var.iam_task_execution_role_name
+  task_execution_role_description = var.iam_task_execution_role_description
+  task_execution_policy_name      = var.iam_task_execution_policy_name
+  ecr_repository_arn              = module.ecr.repository_arn
   # trimsuffix guards against the aws_cloudwatch_log_group.arn attribute's
   # trailing ":*" varying by provider version — normalize then re-append so
   # the IAM policy always ends up with exactly one ":*" (needed for

@@ -43,10 +43,13 @@ override_data {
 }
 
 variables {
-  name_prefix        = "firmsbase-staging"
-  ecr_repository_arn = "arn:aws:ecr:us-east-1:603013471426:repository/firmsbase-staging"
-  log_group_arns     = ["arn:aws:logs:us-east-1:603013471426:log-group:/ecs/firmsbase-staging/web:*"]
-  secret_arns        = []
+  name_prefix                     = "firmsbase-staging"
+  aws_account_id                  = "603013471426"
+  aws_region                      = "us-east-1"
+  task_execution_role_description = "Execution role for FirmsBase staging ECS tasks"
+  ecr_repository_arn              = "arn:aws:ecr:us-east-1:603013471426:repository/firmsbase-staging"
+  log_group_arns                  = ["arn:aws:logs:us-east-1:603013471426:log-group:/ecs/firmsbase-staging/web:*"]
+  secret_arns                     = []
   # task_execution_policy_name has no default (see variables.tf) — every
   # caller must set it explicitly.
   task_execution_policy_name = "firmsbase-staging-task-execution"

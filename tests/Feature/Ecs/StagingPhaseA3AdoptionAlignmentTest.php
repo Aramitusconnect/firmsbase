@@ -610,6 +610,7 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
             'module.alb.aws_lb_target_group.web',
             'module.ecs_cluster.aws_ecs_cluster.this',
             'module.ecs_cluster.aws_ecs_cluster_capacity_providers.this',
+            'module.iam.aws_iam_role.task_execution',
         ];
 
         $plan = $this->extractSection($this->stateAdoptionPlan(), '### 9\.12', '### 9\.13');
@@ -625,7 +626,6 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
     public function test_group_b_addresses_are_consistent_across_both_docs_and_the_manifest(): void
     {
         $expectedB = [
-            'module.iam.aws_iam_role.task_execution',
             'module.elasticache.aws_elasticache_subnet_group.this',
             'module.elasticache.aws_elasticache_replication_group.this',
         ];
@@ -660,8 +660,12 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
         }
     }
 
-    public function test_group_counts_are_exactly_four_three_five(): void
+    public function test_group_counts_are_exactly_five_two_five(): void
     {
+        // Was 4/3/5 before module.iam.aws_iam_role.task_execution moved
+        // from Group B to Group A (2026-08-05, see
+        // docs/ecs/state-adoption-plan.md §9.17) — a genuine, intentional
+        // reclassification, not drift.
         $groupOf = [];
         foreach (self::PHASE_A3_ADDRESSES as $address) {
             $notes = $this->manifestEntry($address)['notes'];
@@ -672,8 +676,8 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
 
         $counts = array_count_values($groupOf);
 
-        $this->assertSame(4, $counts['A'] ?? 0, 'Group A must contain exactly 4 addresses.');
-        $this->assertSame(3, $counts['B'] ?? 0, 'Group B must contain exactly 3 addresses.');
+        $this->assertSame(5, $counts['A'] ?? 0, 'Group A must contain exactly 5 addresses.');
+        $this->assertSame(2, $counts['B'] ?? 0, 'Group B must contain exactly 2 addresses.');
         $this->assertSame(5, $counts['C'] ?? 0, 'Group C must contain exactly 5 addresses.');
     }
 }

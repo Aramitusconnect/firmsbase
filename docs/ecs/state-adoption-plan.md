@@ -1059,9 +1059,10 @@ reasoning):
   `module.ecr.aws_ecr_repository.app`,
   `module.alb.aws_lb_target_group.web`,
   `module.ecs_cluster.aws_ecs_cluster.this`,
-  `module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`. The
-  capacity-providers resource **moved here from Group C** in this pass:
-  live association is confirmed empty
+  `module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`,
+  `module.iam.aws_iam_role.task_execution`. The
+  capacity-providers resource **moved here from Group C** in an earlier
+  pass: live association is confirmed empty
   (`capacityProviders: []`, `defaultCapacityProviderStrategy: []`) and
   this environment's adoption bundle now supplies the matching empty
   values (`capacity_providers = []`, so
@@ -1071,20 +1072,24 @@ reasoning):
   `FARGATE_SPOT` with the live cluster, which remains a separate,
   explicitly reviewed decision. The resource address
   (`module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`) is
-  unchanged. No exact, source-backed blocker remains for any of these
-  four — each is still an individual canary, not a batch.
+  unchanged. The IAM execution role **moved here from Group B** in this
+  pass (§9.17): its trust policy and description now match live exactly.
+  Importing the role does **not** authorize detaching
+  `AmazonECSTaskExecutionRolePolicy` or replacing the inline policy's
+  content — that decision (`module.iam.aws_iam_role_policy.task_execution`,
+  Group C) remains entirely separate and unresolved. No exact,
+  source-backed blocker remains for any of these five — each is still an
+  individual canary, not a batch.
 - **Group B — a small prerequisite or additional read verification away:**
-  `module.iam.aws_iam_role.task_execution`,
   `module.elasticache.aws_elasticache_subnet_group.this`,
-  `module.elasticache.aws_elasticache_replication_group.this`. The
-  ElastiCache read-permission gap (`elasticache:ListTagsForResource`) is
-  now resolved (§9.13), and the subnet group's membership mismatch is
-  fixed (§9.15) — a full readiness re-assessment for both ElastiCache
-  addresses is still pending as of this pass; the IAM execution role's
-  *name* is aligned, but its permission-shape decision (managed-policy +
-  narrow-inline vs. this module's broader custom-inline-policy, §11 item
-  3) is still pending — that decision, not a technical blocker, is what
-  keeps it out of Group A.
+  `module.elasticache.aws_elasticache_replication_group.this`. Both are
+  now imported (§9.16); the ElastiCache read-permission gap
+  (`elasticache:ListTagsForResource`) is resolved (§9.13). Both remain
+  Group B — not because import itself is blocked, but because each has
+  its own still-open, unauthorized-to-reconcile config/live difference
+  (the subnet group's historical 2-vs-6 membership correction, §9.15; the
+  replication group's description/tag drift, §9.16) pending a full
+  readiness re-assessment.
 - **Group C — architecture/content migration remains unresolved:**
   `module.iam.aws_iam_role_policy.task_execution`,
   `module.web.aws_ecs_service.this[0]`,
@@ -1272,6 +1277,116 @@ task placement vs. ElastiCache subnet-group registration).
     correction merges.
 12. `module.elasticache.aws_elasticache_replication_group.this` remains a
     later, separate import — not touched by this correction.
+
+### 9.16 ElastiCache subnet group and replication group imported; description/tag drift recorded (2026-08-05)
+
+Both ElastiCache resources referenced throughout §9.10–§9.15 have since been
+imported, each as its own individually-verified canary:
+
+1. `module.elasticache.aws_elasticache_subnet_group.this` was imported
+   (`firmsbase-staging-cache-subnets`). Live membership was re-verified as
+   the same 6 subnets immediately before and after import; the import
+   changed no AWS resource.
+2. `module.elasticache.aws_elasticache_replication_group.this` was imported
+   (`firmsbase-staging-redis`). Live topology (single node, no replica,
+   automatic failover disabled, Multi-AZ disabled, engine `valkey` version
+   `7.2.6`, node type `cache.t4g.micro`, transit/at-rest encryption enabled,
+   auth-token enabled, subnet group `firmsbase-staging-cache-subnets`,
+   parameter group `default.valkey7`, security group
+   `sg-0da3ea50262a9d20d`) and its sole member cluster
+   (`firmsbase-staging-redis-001`) were byte-identical in a read-only
+   re-check performed immediately before and after import; the import
+   changed no AWS resource. `lifecycle.ignore_changes = [auth_token]`
+   already covers the one field AWS never returns.
+3. A field-by-field comparison performed as part of this import found two
+   config/live differences for the replication group that neither the
+   import nor this correction reconciles or authorizes:
+   - **Description**: live is "Valkey for FirmsBase staging sessions,
+     cache, and queues"; `modules/elasticache` hardcodes a different
+     literal ("FirmsBase staging Redis — cache/session/queue/locks...").
+     `description` is not a ForceNew argument for
+     `aws_elasticache_replication_group`, so an unauthorized future
+     `apply` could silently overwrite the live text in place.
+   - **Tags**: the live replication group carries three tags
+     (`Environment`, `Application`, `Name`, confirmed via
+     `elasticache:ListTagsForResource`); the staging root never passes a
+     `tags` argument to `module.elasticache`, so it resolves to the
+     module's default `{}`. This mirrors the same untagged convention
+     used everywhere else in this environment's Terraform (no resource
+     in this project currently has root-supplied tags) — it is not a
+     defect introduced by this import. But an unauthorized future
+     `apply` could still strip all three live tags, since nothing in
+     `lifecycle.ignore_changes` covers `tags`.
+4. Neither difference is described as harmless or already decided. A
+   future `plan` proposing to change the description or remove the live
+   tags is an explicit **stop condition** requiring its own review
+   (does the description matter operationally? should tags be adopted
+   into Terraform for this environment generally, not just this one
+   resource?) — not a byproduct of these two imports.
+5. No import in this pass changed the classification of either resource
+   in `import-manifest.json`; both remain `import_then_migrate` because
+   the description/tag reconciliation above is still open.
+
+### 9.17 IAM execution-role trust policy and description alignment (2026-08-05)
+
+A read-only preflight for `module.iam.aws_iam_role.task_execution` found
+the role's *name* was already aligned (§9.10/§9.11), but a fresh
+field-by-field comparison against live surfaced two role-level gaps that
+were not previously discovered: the shared assume-role trust policy
+omitted the confused-deputy conditions live actually enforces, and the
+resource declared no `description` at all. Neither gap is cosmetic — an
+unauthorized future `apply` against the old config could have weakened
+the live trust policy or overwritten the live description.
+
+**Fresh live verification (2026-08-05):** both
+`firmsbase-staging-ecs-execution-role` and `firmsbase-staging-ecs-task-role`
+were re-read via `aws iam get-role`. Both carry an identical assume-role
+policy: principal `ecs-tasks.amazonaws.com`, action `sts:AssumeRole`,
+`StringEquals aws:SourceAccount = 603013471426`, and
+`ArnLike aws:SourceArn = arn:aws:ecs:us-east-1:603013471426:*`. Because
+both examined live roles are identical, the correction below models this
+as one shared trust-policy document, not a role-specific one.
+
+**Fixed:**
+
+1. `modules/iam`'s `data.aws_iam_policy_document.ecs_tasks_assume_role`
+   (shared by `aws_iam_role.task_execution` and all 7
+   `aws_iam_role.task[*]` roles) now takes two new required module inputs,
+   `aws_account_id` and `aws_region` (no default on either — this reusable
+   module must never derive the account from the ambient AWS identity
+   running `terraform apply`), and renders both the `StringEquals
+   aws:SourceAccount` and `ArnLike aws:SourceArn` conditions using them.
+   This staging environment's `terraform.tfvars` sets
+   `aws_account_id = "603013471426"`; `aws_region` reuses the existing
+   root `var.aws_region` (default `"us-east-1"`), already wired into
+   every other module call in this root.
+2. `aws_iam_role.task_execution` now takes a new required module input,
+   `task_execution_role_description` (no default, non-empty validated),
+   wired only to `aws_iam_role.task_execution.description`. This
+   environment's `terraform.tfvars` sets it to the exact live value,
+   `"Execution role for FirmsBase staging ECS tasks"`. No other role in
+   this module receives a description from this variable — the generic
+   task roles' own live description ("Application role for FirmsBase
+   staging ECS tasks") is a separate, unrequested change and is not made
+   here.
+3. Neither fix changes `module.iam.aws_iam_role.task_execution`'s
+   resource address, adds or removes any IAM permission, or touches
+   `module.iam.aws_iam_role_policy.task_execution`,
+   `AmazonECSTaskExecutionRolePolicy`'s attachment, or any
+   Secrets Manager/ECR/CloudWatch Logs/SSM/KMS grant. The inline-policy
+   permission-shape decision (§11 item 3) remains entirely separate and
+   unresolved.
+4. With the trust policy and description now matching live exactly, the
+   role-level configuration for `module.iam.aws_iam_role.task_execution`
+   is complete. This address **moved from Group B to Group A** in the
+   §9.12 readiness matrix — suitable for an isolated role-only import
+   after this correction merges. Importing the role does **not**
+   authorize detaching the AWS-managed policy or replacing the inline
+   policy's content; either is a stop condition requiring separate
+   review. `module.iam.aws_iam_role_policy.task_execution` remains
+   Group C, unsafe, pending that decision.
+5. Neither IAM resource was imported in this pass. No Terraform `plan`,
+   `apply`, `import`, or state mutation ran.
 
 ## 10. Validation performed (local/static only)
 
