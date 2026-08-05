@@ -120,6 +120,20 @@ ecs_capacity_providers        = []
 ecs_container_insights_enabled = false
 ecr_repository_name           = "firmsbase-staging"
 elasticache_subnet_group_name = "firmsbase-staging-cache-subnets"
+# Live ElastiCache subnet group registers 6 subnets across every AZ in the
+# VPC (confirmed via aws elasticache describe-cache-subnet-groups) — a
+# genuinely broader set than the 2 subnets ECS places tasks into
+# (private_subnet_ids). Previously this module conflated the two, silently
+# under-representing live's real subnet-group membership. Order does not
+# matter — the module compares membership as a set.
+elasticache_subnet_ids = [
+  "subnet-020540b8377bb4d0e",
+  "subnet-0d328451d742a4a3c",
+  "subnet-07efcb5d4bcf5aa59",
+  "subnet-04f36560361246d4b",
+  "subnet-0631d53a7acde6530",
+  "subnet-06cb2ddbdb7cf4d69",
+]
 elasticache_engine            = "valkey"
 elasticache_parameter_group_name = "default.valkey7"
 # Live replication group's exact reported engine version is 7.2.6 (aws

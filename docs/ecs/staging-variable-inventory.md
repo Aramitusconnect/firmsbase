@@ -342,15 +342,14 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
    it to `"FirmsBaseStagingSecretsAccess"`. Identity only — policy content
    remains a separate, undecided migration (see item 3 in
    state-adoption-plan.md §11).
-5. **ElastiCache permission blocker (recorded, not resolved)**:
-   `elasticache:ListTagsForResource` is `AccessDenied` for
+5. **ElastiCache permission blocker (RESOLVED 2026-08-05)**:
+   `elasticache:ListTagsForResource` was `AccessDenied` for
    `firmsbase-staging-operator` on both
    `arn:aws:elasticache:us-east-1:603013471426:replicationgroup:firmsbase-staging-redis`
    and
    `arn:aws:elasticache:us-east-1:603013471426:subnetgroup:firmsbase-staging-cache-subnets`
-   — confirmed via a direct read-only call on 2026-08-04. Not granted in
-   this mission; the subnet-group and replication-group imports remain
-   pending this grant and a fresh read-only re-verification.
+   — confirmed via a direct read-only call on 2026-08-04. **Both are now
+   granted**, re-confirmed via the same read-only calls on 2026-08-05.
 6. **ECR is the recommended first Phase A3 canary** — smallest, most
    isolated Group A resource, no dependents among the 12.
 7. **Corrected Group A/B/C matrix (second pass, 2026-08-04)** — full
@@ -390,6 +389,35 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
    The resource address is unchanged. The separate, already-empty
    capacity-provider association (`module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`)
    remains a different resource and a later, independent import.
+9. **ElastiCache subnet-group membership (2026-08-05, see
+   [state-adoption-plan.md §9.15](state-adoption-plan.md))**: a canary
+   import attempt against
+   `module.elasticache.aws_elasticache_subnet_group.this` was halted (no
+   state mutated) once the resolved tag-read permission (item 5 above) let
+   a fresh re-verification proceed and it found live ElastiCache
+   subnet-group membership is **6 subnets** across every AZ, while
+   `modules/elasticache` previously derived membership unconditionally
+   from ECS's `private_subnet_ids` — only 2 subnets. That previous
+   configuration was not adoption-safe: it conflated ECS task placement
+   with ElastiCache subnet-group registration and was never checked
+   against live's actual membership. Fixed: `modules/elasticache` now
+   takes a required `subnet_ids` input (no default, no longer named
+   `private_subnet_ids` inside the module); this environment's
+   `terraform.tfvars` sets the new root `elasticache_subnet_ids` variable
+   to the exact live 6-subnet set
+   (`subnet-020540b8377bb4d0e`, `subnet-0d328451d742a4a3c`,
+   `subnet-07efcb5d4bcf5aa59`, `subnet-04f36560361246d4b`,
+   `subnet-0631d53a7acde6530`, `subnet-06cb2ddbdb7cf4d69`). The
+   new-environment default remains null, falling back to
+   `private_subnet_ids` unchanged. The ECS
+   `public_subnet_ids`/`private_subnet_ids` variables and every ECS
+   service's subnet wiring are untouched by this correction. Importing the
+   subnet group records the current, correct 6-subnet membership only; it
+   does not authorize removing any subnet later — that requires a
+   separate, explicit availability, failover, networking, and maintenance
+   review. The resource address is unchanged; the subnet group remains
+   unimported until this correction merges, and the replication group
+   remains a later, separate import.
 
 **No import, apply, ECS deployment, scaling change, capacity-provider
 association, IAM permission migration, or description-drift

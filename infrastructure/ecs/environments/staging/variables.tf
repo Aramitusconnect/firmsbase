@@ -345,6 +345,17 @@ variable "elasticache_subnet_group_name" {
   default     = null
 }
 
+variable "elasticache_subnet_ids" {
+  description = "Override for the ElastiCache subnet group's subnet membership. Null (default) falls back to var.private_subnet_ids, preserving original behavior for a brand-new environment. This staging environment's live subnet group actually registers 6 subnets across every AZ in the VPC (confirmed via aws elasticache describe-cache-subnet-groups), not just the 2 ECS uses for task placement (var.private_subnet_ids) — conflating the two previously left this resource address unable to represent live's real membership. See docs/ecs/state-adoption-plan.md §9.10/§9.11/§9.15."
+  type        = list(string)
+  default     = null
+
+  validation {
+    condition     = var.elasticache_subnet_ids == null || (length(var.elasticache_subnet_ids) > 0 && length(var.elasticache_subnet_ids) == length(toset(var.elasticache_subnet_ids)))
+    error_message = "elasticache_subnet_ids must be null, or a nonempty list of unique subnet IDs (no duplicates)."
+  }
+}
+
 variable "elasticache_engine" {
   description = "ElastiCache engine. Defaults to \"redis\" (this module's original design), but this staging environment's live replication group actually runs Valkey (confirmed via aws elasticache describe-replication-groups .Engine = \"valkey\"), not Redis — the engine attribute cannot be changed in place; setting it wrong here plans a full, data-losing replacement of the live cache. Must be set to \"valkey\" for this environment before import. See docs/ecs/state-adoption-plan.md §3B/§9."
   type        = string

@@ -6,8 +6,9 @@ variable "vpc_id" {
   type = string
 }
 
-variable "private_subnet_ids" {
-  type = list(string)
+variable "subnet_ids" {
+  description = "Subnet IDs registered in the ElastiCache subnet group. No default, deliberately — this module previously reused the caller's ECS private_subnet_ids unconditionally, but ElastiCache subnet-group membership is a genuinely different, broader concern than ECS task placement (this staging environment's live subnet group registers 6 subnets across every AZ in the VPC, while ECS tasks place into only 2 of them) — conflating the two silently under-registered the live subnet group's actual membership. Every caller must supply this explicitly."
+  type        = list(string)
 }
 
 variable "ecs_tasks_security_group_id" {

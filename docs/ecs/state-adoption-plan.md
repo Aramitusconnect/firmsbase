@@ -599,16 +599,17 @@ terraform -chdir=infrastructure/ecs/environments/staging import \
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.ecs_cluster.aws_ecs_cluster_capacity_providers.this' 'firmsbase-staging-cluster'
 
-# Requires: var.elasticache_subnet_group_name = "firmsbase-staging-cache-subnets" (Group B)
-# ALSO blocked on elasticache:ListTagsForResource — AccessDenied for this
-# operator on this ARN's tag-read call — see §9.13. Not granted in this mission.
+# Requires: var.elasticache_subnet_group_name = "firmsbase-staging-cache-subnets",
+# var.elasticache_subnet_ids set to the exact live 6-subnet set (§9.15 — this module
+# previously derived membership from private_subnet_ids, only 2 subnets; fixed).
+# elasticache:ListTagsForResource is now granted (§9.13). Import itself has not been run.
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.elasticache.aws_elasticache_subnet_group.this' 'firmsbase-staging-cache-subnets'
 
 # Requires: var.elasticache_engine = "valkey", var.elasticache_parameter_group_name = "default.valkey7",
 # var.elasticache_engine_version = "7.2" (live's exact reported version is 7.2.6, but AWS requires
 # major.minor-only for Redis v6+/Valkey), and the module's ignore_changes=[auth_token] (already added).
-# Group B — ALSO blocked on elasticache:ListTagsForResource, same as the subnet group above — see §9.13.
+# elasticache:ListTagsForResource is now granted (§9.13). Import itself has not been run.
 terraform -chdir=infrastructure/ecs/environments/staging import \
   'module.elasticache.aws_elasticache_replication_group.this' 'firmsbase-staging-redis'
 
@@ -1075,9 +1076,11 @@ reasoning):
 - **Group B — a small prerequisite or additional read verification away:**
   `module.iam.aws_iam_role.task_execution`,
   `module.elasticache.aws_elasticache_subnet_group.this`,
-  `module.elasticache.aws_elasticache_replication_group.this`. The two
-  ElastiCache addresses are blocked on a narrow read permission
-  (`elasticache:ListTagsForResource`, §9.13); the IAM execution role's
+  `module.elasticache.aws_elasticache_replication_group.this`. The
+  ElastiCache read-permission gap (`elasticache:ListTagsForResource`) is
+  now resolved (§9.13), and the subnet group's membership mismatch is
+  fixed (§9.15) — a full readiness re-assessment for both ElastiCache
+  addresses is still pending as of this pass; the IAM execution role's
   *name* is aligned, but its permission-shape decision (managed-policy +
   narrow-inline vs. this module's broader custom-inline-policy, §11 item
   3) is still pending — that decision, not a technical blocker, is what
@@ -1149,28 +1152,28 @@ reasoning):
    policy's *content*/permission-shape (§11 item 3) remains the same
    separate, undecided migration.
 
-### 9.13 ElastiCache read-permission blocker (recorded, not resolved)
+### 9.13 ElastiCache read-permission blocker (RESOLVED 2026-08-05)
 
-`elasticache:ListTagsForResource` is `AccessDenied` for
+`elasticache:ListTagsForResource` was `AccessDenied` for
 `firmsbase-staging-operator` on both:
 
 - `arn:aws:elasticache:us-east-1:603013471426:replicationgroup:firmsbase-staging-redis`
 - `arn:aws:elasticache:us-east-1:603013471426:subnetgroup:firmsbase-staging-cache-subnets`
 
 confirmed via a direct read-only `aws elasticache list-tags-for-resource`
-call against each ARN on 2026-08-04. ElastiCache's `Describe*` APIs do not
+call against each ARN on 2026-08-04. **Both are now granted** —
+re-confirmed via the same direct read-only calls on 2026-08-05, both
+succeeding without `AccessDenied`. ElastiCache's `Describe*` APIs do not
 embed tags inline (unlike IAM's `GetRole`), so the AWS provider's
 `aws_elasticache_replication_group`/`aws_elasticache_subnet_group` reads
-plausibly need this permission during import — this is a **plausible**
-real blocker, not one confirmed by an actual import attempt in this pass
-(unlike `ec2:DescribeVpcAttribute`/`ec2:DescribeSecurityGroupRules`, which
-were confirmed by real failures). **Not granted in this mission.** By
-contrast, `iam:ListRoleTags` is also `AccessDenied` for this operator, but
-is *not* claimed as a required import-time permission here — IAM's
-`GetRole` (which does work) embeds `Role.Tags` inline per its own API
-shape, so the provider's `aws_iam_role` read typically does not need a
-separate tags call; this distinction is not re-verified against the
-provider's source directly.
+plausibly need this permission during import; with the grant now in
+place, this is no longer a blocker for either resource. By contrast,
+`iam:ListRoleTags` is also `AccessDenied` for this operator, but is *not*
+claimed as a required import-time permission here — IAM's `GetRole`
+(which does work) embeds `Role.Tags` inline per its own API shape, so the
+provider's `aws_iam_role` read typically does not need a separate tags
+call; this distinction is not re-verified against the provider's source
+directly.
 
 ### 9.14 ECS cluster Container Insights correction (2026-08-04, third pass)
 
@@ -1219,6 +1222,56 @@ not a no-op.
    separate, already-confirmed-empty capacity-provider association — is a
    different Terraform resource address and remains a later, independent
    import; it is not part of this correction and was not touched by it.
+
+### 9.15 ElastiCache subnet-group membership correction (2026-08-05)
+
+A canary import attempt against
+`module.elasticache.aws_elasticache_subnet_group.this` was halted before
+running (no state was mutated) after the `elasticache:ListTagsForResource`
+grant (§9.13) let a fresh, read-only re-verification proceed and it found
+**live ElastiCache subnet-group membership is 6 subnets**
+(`subnet-020540b8377bb4d0e`, `subnet-0d328451d742a4a3c`,
+`subnet-07efcb5d4bcf5aa59`, `subnet-04f36560361246d4b`,
+`subnet-0631d53a7acde6530`, `subnet-06cb2ddbdb7cf4d69` — all confirmed via
+`aws ec2 describe-subnets` and `aws elasticache
+describe-cache-subnet-groups` to exist, belong to `vpc-0fd81b688155ded2b`,
+be `available`, and match this exact set as a set, not an ordered list),
+while `modules/elasticache`'s `aws_elasticache_subnet_group.this` resource
+previously derived its `subnet_ids` unconditionally from the caller's ECS
+`private_subnet_ids` — only 2 subnets. **That previous configuration was
+not adoption-safe**: it was never checked against the live subnet group's
+actual membership, and conflated two genuinely different concerns (ECS
+task placement vs. ElastiCache subnet-group registration).
+
+**Fixed:**
+
+1. Live ElastiCache subnet-group membership is confirmed 6 subnets (see
+   above).
+2. Terraform previously inherited only the 2 ECS `private_subnet_ids`
+   subnets — a real, previously-unreviewed under-registration.
+3. That previous configuration was not adoption-safe.
+4. `modules/elasticache` now takes a required `subnet_ids` input (no
+   default), independent of `private_subnet_ids`. This module no longer
+   names it `private_subnet_ids` internally, precisely because the live
+   group's membership is broader than ECS placement.
+5. This staging environment's `terraform.tfvars` sets the new
+   `elasticache_subnet_ids` root variable to the exact live 6-subnet set.
+6. The ECS `public_subnet_ids`/`private_subnet_ids` variables and every
+   ECS service's subnet wiring are unchanged — this correction only
+   decouples ElastiCache's own subnet-group membership from them.
+7. `elasticache:ListTagsForResource` is now granted and verified for both
+   the subnet group and the replication group (§9.13).
+8. Importing the subnet group will record the current, correct 6-subnet
+   membership only.
+9. Importing does **not** authorize removing any subnet later.
+10. Any future reduction or redesign of subnet-group membership requires a
+    separate, explicit availability, failover, networking, and maintenance
+    review — not a byproduct of import.
+11. `module.elasticache.aws_elasticache_subnet_group.this`'s resource
+    address is unchanged; this subnet group remains unimported until this
+    correction merges.
+12. `module.elasticache.aws_elasticache_replication_group.this` remains a
+    later, separate import — not touched by this correction.
 
 ## 10. Validation performed (local/static only)
 
@@ -1275,14 +1328,12 @@ Terraform (`.tf`), a Terraform test (`.tftest.hcl`), documentation
 6. Security-group rule reconciliation timing (§9.6): apply the narrower
    declared rules alongside the existing broad ones now, or defer until
    the broad rules are revoked in the same change.
-7. ~~Elevated read access for `ec2:DescribeSecurityGroupRules` and
-   `ec2:DescribeVpcAttribute`~~ — **both now granted** (§9.10). Elevated
-   (or one-time delegated) read access for `cloudwatch:DescribeAlarms`,
-   `sns:ListTopics`, and (newly recorded, §9.13)
-   `elasticache:ListTagsForResource` remains an open item — not requested
-   automatically, per the mission's constraint. The `elasticache` grant
-   specifically blocks both remaining ElastiCache Phase A3 imports
-   (`aws_elasticache_subnet_group.this`, `aws_elasticache_replication_group.this`).
+7. ~~Elevated read access for `ec2:DescribeSecurityGroupRules`,
+   `ec2:DescribeVpcAttribute`, and `elasticache:ListTagsForResource`~~ —
+   **all three now granted** (§9.10, §9.13). Elevated (or one-time
+   delegated) read access for `cloudwatch:DescribeAlarms` and
+   `sns:ListTopics` remains an open item — not requested automatically,
+   per the mission's constraint.
 8. Confirmation of `module.migrate`/`module.maintenance` task-definition
    content — both are covered by the uniform `do_not_import` decision in
    §6 regardless, so this is informational for Phase B planning, not a

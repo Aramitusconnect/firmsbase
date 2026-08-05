@@ -12,6 +12,14 @@ locals {
   # real private-subnet + NAT egress exists and private_egress_ready is
   # deliberately flipped on.
   assign_public_ip = !var.private_egress_ready
+
+  # ElastiCache subnet-group membership is a genuinely different concern
+  # from ECS task placement (var.private_subnet_ids) — this staging
+  # environment's live subnet group registers 6 subnets across every AZ,
+  # not just the 2 ECS places tasks into. Null (default) preserves original
+  # behavior (falls back to private_subnet_ids) for a brand-new
+  # environment. See docs/ecs/state-adoption-plan.md §9.15.
+  elasticache_subnet_ids = coalesce(var.elasticache_subnet_ids, var.private_subnet_ids)
 }
 
 module "networking" {
@@ -52,7 +60,7 @@ module "elasticache" {
 
   name_prefix                 = var.name_prefix
   vpc_id                      = var.vpc_id
-  private_subnet_ids          = var.private_subnet_ids
+  subnet_ids                  = local.elasticache_subnet_ids
   ecs_tasks_security_group_id = module.security_groups.ecs_tasks_security_group_id
   auth_token                  = var.redis_auth_token
 
