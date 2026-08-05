@@ -516,6 +516,38 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
     the Sid label in Terraform's own configuration. A fresh
     `aws iam get-role-policy` re-verification confirmed the live policy was
     unchanged throughout.
+14. **ECS service-level adoption alignment: deployment percentages, tags,
+    log-group and IAM-read findings (2026-08-05, see
+    [state-adoption-plan.md §9.20](state-adoption-plan.md))**: all four
+    live services (`web`/`worker`/`critical-worker`/`scheduler`) now run
+    `deployment_minimum_healthy_percent`/`deployment_maximum_percent` at
+    live's exact `0`/`100` via eight new explicit staging-root variables —
+    previously only `scheduler` overrode these; `web`/`worker`/
+    `critical_worker` silently fell through to the module's `100`/`200`
+    defaults. Service-level tags are now modeled via four new per-role
+    `tags` variables wired into the module's existing `tags` input (no
+    parallel mechanism added): `web`'s exact live five-tag map (including
+    its independently-known-stale `ImageDigest` value, deliberately
+    preserved, not corrected); `worker`/`critical-worker`/`scheduler`'s
+    `{}` defaults already match their live (tagless) state. A residual,
+    out-of-module-scope mismatch is recorded: this environment's provider-
+    level `default_tags` (`Project`, `Mission`) would still be added to all
+    four services on apply regardless, since there is no per-resource way
+    to suppress them from this module alone. The log-group architecture
+    difference (Terraform's 7 per-workload log groups vs. live's 1 shared
+    log group) was re-verified and was already accurately documented as an
+    unresolved migration, not drift — no change was needed. The manifest's
+    stale `assign_public_ip`-hardcoded-false `prerequisite` claim (already
+    fixed in an earlier pass but not yet removed from the manifest text)
+    is now removed. A prior mission's verbally-reported "Group B and Group
+    C-only" framing for `scheduler` is corrected: service-level readiness
+    rank (order: `scheduler`, `worker`, `critical-worker`, `web`) and
+    Group A/B/C classification are two different axes — all four services
+    remain Group C, unchanged. The shared task role's
+    `FirmsVaultStagingSesSend` inline policy remains unreadable
+    (`iam:GetRolePolicy` AccessDenied, freshly re-confirmed); a manifest
+    note that stated its granted actions as if confirmed (an inference
+    from its name) is corrected to say plainly they remain unread.
 
 **No import, apply, ECS deployment, scaling change, capacity-provider
 association, IAM permission migration, or description-drift

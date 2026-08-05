@@ -191,6 +191,41 @@ worker_desired_count          = 1
 critical_worker_desired_count = 1
 scheduler_desired_count       = 1
 
+# ECS service deployment min/max healthy percent — all four default to this
+# module's original design intent (100/200). This staging environment's
+# live services all currently run 0/100 (confirmed via aws ecs
+# describe-services, 2026-08-05). Set all eight here to match live exactly
+# so import doesn't leave a permanent drift that would silently change
+# live's rolling-deployment behavior on the next apply. These values
+# preserve current live behavior for state adoption ONLY — they do not
+# approve keeping 0/100 for a later production-style, no-downtime cutover,
+# which is a separate, explicitly reviewed deployment decision. See
+# docs/ecs/state-adoption-plan.md §9.20.
+web_deployment_minimum_healthy_percent             = 0
+web_deployment_maximum_percent                     = 100
+worker_deployment_minimum_healthy_percent          = 0
+worker_deployment_maximum_percent                  = 100
+critical_worker_deployment_minimum_healthy_percent = 0
+critical_worker_deployment_maximum_percent         = 100
+scheduler_deployment_minimum_healthy_percent       = 0
+scheduler_deployment_maximum_percent               = 100
+
+# ECS service tags — web carries five live tags (confirmed via aws ecs
+# describe-services --include TAGS, 2026-08-05); worker/critical-worker/
+# scheduler carry none live, so their {} defaults already match and are
+# left unset here. The ImageDigest value below is preserved exactly as it
+# is live even though it is stale (does not match the currently running
+# task definition's actual image digest) — correcting that is a separate,
+# later, explicitly reviewed metadata change, not a byproduct of this
+# adoption pass. See docs/ecs/state-adoption-plan.md §9.20.
+web_tags = {
+  SourceCommit = "6a1affdaad2bc1c4a48c5e411b9e39056039cde9"
+  Environment  = "staging"
+  ManagedBy    = "manual-reviewed-deployment"
+  ImageDigest  = "sha256:92eecbeeef5225fcfe0f4256a0b375a773cd84c1f4974fc08b137811a27e46fd"
+  Application  = "FirmsBase"
+}
+
 # ALB target-group health check — these three values match the currently
 # running target group exactly (confirmed via aws elbv2
 # describe-target-groups/describe-target-group-attributes) and must be used

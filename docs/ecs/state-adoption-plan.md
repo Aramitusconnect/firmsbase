@@ -1528,6 +1528,166 @@ ARNs.
    of these three resources remains a stop condition requiring separate
    review.
 
+### 9.20 ECS service-level adoption alignment: deployment percentages, tags, log-group and IAM-read findings recorded (2026-08-05)
+
+Following the read-only ECS/task-role/task-definition preflight, this pass
+aligned the four existing live ECS services'
+(`web`/`worker`/`critical-worker`/`scheduler`) **service-level**
+configuration with live exactly, without importing, registering, deploying,
+or modifying any AWS resource.
+
+**Live re-verification (`aws ecs describe-services --include TAGS`,
+2026-08-05):** all four services remain ACTIVE and stable
+(desired/running/pending 1/1/0), `launchType=FARGATE`, no
+`capacityProviderStrategy`, deployment circuit breaker enabled with
+rollback on all four. **Deployment percentages are 0/100 (minimum/maximum)
+on all four services, with no exceptions** — this was not previously
+re-confirmed for `web`/`worker`/`critical_worker` at the same time as
+`scheduler`.
+
+**Fixed — deployment percentages:**
+
+1. Previously only `module.scheduler`'s call to `modules/ecs_service`
+   overrode `deployment_minimum_healthy_percent`/`deployment_maximum_percent`
+   (as hardcoded literals `0`/`100`, matching live). `module.web`,
+   `module.worker`, and `module.critical_worker` passed neither argument at
+   all, silently falling through to the module's own new-environment
+   design defaults (`100`/`200`) — a genuine, previously unrecorded
+   live-vs-Terraform mismatch: applying any of these three after import
+   would have proposed raising minimum-healthy from 0% to 100%, a
+   materially different rolling-deployment mechanic for a
+   `desired_count=1` service than what is live today.
+2. Eight new staging-root variables added
+   (`{web,worker,critical_worker,scheduler}_deployment_{minimum_healthy,maximum}_percent`),
+   each preserving the module's original `100`/`200` new-environment
+   defaults, each individually validated (minimum 0–100, maximum 100–200,
+   maximum not lower than minimum). All four `modules/ecs_service` calls
+   now wire these explicitly, including `scheduler` (whose previous
+   hardcoded `0`/`100` literals are now sourced from the same variable
+   pattern as the other three roles, for consistency — its live-matching
+   values did not change). `terraform.tfvars`/`terraform.tfvars.example`
+   set all eight to `0`/`100`, matching live exactly on all four services.
+3. **These 0/100 values preserve current live behavior for state-only
+   adoption ONLY.** They are not a review or approval of 0/100 as the
+   intended steady-state for a later production-style, no-downtime
+   cutover — that deployment strategy remains a separate, later,
+   explicitly reviewed decision.
+
+**Fixed — service tags:**
+
+4. `modules/ecs_service` already exposed a `tags` input (default `{}`,
+   unchanged); no staging-root caller previously wired it for any of the
+   four services. Live re-verification confirms `web` carries five
+   explicit service tags (`SourceCommit`, `Environment=staging`,
+   `ManagedBy=manual-reviewed-deployment`, `ImageDigest`,
+   `Application=FirmsBase`); `worker`/`critical-worker`/`scheduler` carry
+   none.
+5. Four new staging-root tag variables added
+   (`{web,worker,critical_worker,scheduler}_tags`, all defaulting to `{}`,
+   this module's original design intent), wired into each module call's
+   existing `tags` argument — no parallel tagging mechanism was
+   introduced. `terraform.tfvars`/`terraform.tfvars.example` set
+   `web_tags` to live's exact five-key map; `worker`/`critical_worker`/
+   `scheduler` are left at the `{}` default, which already matches their
+   live (tagless) state.
+6. `web`'s live `ImageDigest` tag value is preserved verbatim, including
+   its independently-known staleness (it does not match the currently
+   running task definition's actual image digest — a pre-existing live
+   metadata inconsistency, not introduced by Terraform). Correcting that
+   value is a separate, later, explicitly reviewed metadata change, not a
+   byproduct of this adoption pass.
+7. **Provider-level `default_tags` residual mismatch (checked, not
+   fixed):** this environment's AWS provider (`versions.tf`) sets
+   `default_tags = { Project = "firmsbase", Environment = "staging",
+   ManagedBy = "terraform", Mission = "ecs-readiness-foundation" }`,
+   which applies to every resource this provider manages — not specific
+   to the ECS service module, and unchanged by this pass. Per-key,
+   resource-level `tags` values win over `default_tags` on conflict (so
+   `web`'s resource-level `Environment`/`ManagedBy` correctly resolve to
+   live's values), but `Project`/`Mission` have no resource-level
+   counterpart on any of the four services and would still be added on
+   top of an apply — including on `worker`/`critical-worker`/`scheduler`,
+   which have zero live tags today. **This means an exact, zero-extra-key
+   live tag match is not achievable via `modules/ecs_service`'s `tags`
+   input alone**; closing it would require a provider-level `ignore_tags`
+   change, which is a cross-cutting decision affecting every resource in
+   this environment, not scoped to these four services, and is explicitly
+   out of scope for this pass.
+
+**Log-group architecture (checked, already accurately documented, no
+change required):** Terraform proposes seven workload-specific log groups
+(`aws_cloudwatch_log_group.app[<role>]`, named
+`/ecs/firmsbase-staging/<role>` for each of
+`web`/`worker`/`critical-worker`/`scheduler`/`migrate`/`maintenance`/`ses-consumer`),
+distinct from live's single shared log group
+`/ecs/firmsbase-staging/app` (differentiated only by `awslogs-stream-prefix`
+per service). This was already correctly recorded as an intentional,
+unresolved deployment migration (not drift, and not something to call
+"already aligned") in §2/§11 of this document; re-verified accurate in
+this pass. No log group was created, imported, or otherwise changed. New
+task definitions will only switch log destinations during an explicitly
+approved future deployment.
+
+**Corrected service import-readiness (service-level fields only, a
+separate axis from Group C):**
+
+8. All four services' service-level configuration (identity, launch mode,
+   subnets/security groups/public-IP, load-balancer attachment, circuit
+   breaker, deployment percentages, tags where applicable,
+   `lifecycle.ignore_changes=[task_definition]` still present and
+   unmodified) now matches live exactly, field for field.
+9. **Readiness order for an isolated, service-level state-only import,
+   independent of the Group C architecture blockers below: 1. `scheduler`,
+   2. `worker`, 3. `critical-worker`, 4. `web`.** This order reflects
+   proximity/simplicity of service-level configuration only (e.g. `web`
+   carries the ALB attachment and the five-tag map, the most
+   configuration surface of the four) — it is not a statement that any
+   service is actually clear to import, since all four remain Group C.
+10. **Correction to the prior mission's informally-reported classification:**
+    the previous read-only preflight's final report described `scheduler`
+    as simultaneously "Group B" (a configuration fix needed) and
+    "Group C-only" (once that fix landed) in the same breath — a
+    self-contradictory framing that was never written into this document
+    or the manifest, but is corrected here explicitly so it is not
+    repeated. Readiness rank (item 9 above) and Group A/B/C classification
+    (§9.12) are two different axes: rank measures how completely a
+    service's own configuration matches live; Group A/B/C measures whether
+    the broader task-role/task-definition-ownership migration has been
+    reviewed. **All four services remain Group C per §9.12, unchanged by
+    this pass** — deployment percentages and tags were the only
+    service-level fields that needed correcting, and neither reason listed
+    in §9.12 for Group C (task-definition-ownership architecture;
+    missing role-specific task roles) is affected by this pass. The
+    manifest's stale `prerequisite` text (previously citing a
+    since-already-fixed `assign_public_ip` hardcoded-false claim as a hard
+    stop) is also removed in this pass — see the four service entries in
+    `import-manifest.json`.
+
+**Shared-task-role IAM read blocker (re-confirmed, corrected):**
+
+11. `iam:GetRolePolicy` on `firmsbase-staging-ecs-task-role`'s inline
+    policy `FirmsVaultStagingSesSend` is freshly re-confirmed `AccessDenied`
+    for the operator role (2026-08-05); only the policy's name is readable
+    (`iam:ListRolePolicies` succeeds). The manifest's
+    `module.iam.aws_iam_role_policy.task_web_ses_send[0]` entry previously
+    stated this live policy "grants both `ses:SendEmail` and
+    `ses:SendRawEmail`" as if confirmed — that was never actually read and
+    was an inference from the policy's name, not a verified fact; it is
+    corrected in this pass to state plainly that the actual granted
+    actions remain unread and unconfirmed. No permission was granted to
+    read it in this pass. Role-specific IAM design for the new `web` task
+    role's `task_web_ses_send` policy cannot be finalized as a
+    like-for-like replacement of the live policy until its content is
+    actually readable and compared — this remains open.
+
+12. No Terraform `plan`, `apply`, `import`, `refresh`, `providers schema`,
+    `state show`, `state pull`, or any state mutation ran in this pass.
+    No ECS service was updated, scaled, restarted, or redeployed; no task
+    definition was registered or deregistered; no IAM role or policy was
+    created or modified; no log group, alarm, or autoscaling resource was
+    created. Managed-resource count remains 19 (verified via guarded
+    `state list`).
+
 ## 10. Validation performed (local/static only)
 
 | Check | Result |
