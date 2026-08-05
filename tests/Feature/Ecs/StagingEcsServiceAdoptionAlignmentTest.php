@@ -371,6 +371,80 @@ class StagingEcsServiceAdoptionAlignmentTest extends TestCase
         );
     }
 
+    public function test_lifecycle_ignore_changes_now_also_protects_tags_and_tags_all(): void
+    {
+        // Added 2026-08-05 (§9.21): extends the existing ignore_changes
+        // block (task_definition unchanged) to also cover tags/tags_all,
+        // freezing whatever tags exist at import/creation time so a
+        // future plan/apply does not propose reconciling live tags
+        // toward config (which always includes this environment's
+        // provider default_tags — Project/Mission — on top). Schema
+        // validity is proven via `terraform validate` in the validation
+        // suite; runtime freezing behavior is proven via
+        // modules/ecs_service/tests/service_tags_lifecycle.tftest.hcl
+        // (a real multi-apply mocked Terraform test, not just this
+        // static check).
+        $block = $this->extractResourceBlock($this->ecsServiceModuleMain(), 'aws_ecs_service', 'this');
+
+        $this->assertMatchesRegularExpression(
+            '/ignore_changes\s*=\s*\[\s*task_definition,[^\]]*\btags\b,[^\]]*\btags_all\b/s',
+            $block,
+            'ignore_changes must list task_definition, then tags, then tags_all — task_definition must remain first (unmodified from §9.9).'
+        );
+    }
+
+    public function test_tags_lifecycle_module_test_file_exists_and_covers_both_directions(): void
+    {
+        $path = base_path('infrastructure/ecs/modules/ecs_service/tests/service_tags_lifecycle.tftest.hcl');
+        $this->assertFileExists($path, 'A dedicated behavioral Terraform test for the tags/tags_all freeze must exist.');
+
+        $content = file_get_contents($path);
+        $this->assertNotFalse($content);
+
+        $this->assertStringContainsString('mock_provider "aws" {}', $content);
+        $this->assertMatchesRegularExpression('/command\s*=\s*apply/', $content);
+        // Must actually exercise BOTH the initial-creation case (no
+        // freeze effect) and the subsequent-apply case (freeze effect),
+        // not just one.
+        $this->assertMatchesRegularExpression('/initial_apply|first apply|does not yet exist/i', $content);
+        $this->assertMatchesRegularExpression('/subsequent_apply|second apply|frozen/i', $content);
+    }
+
+    public function test_create_time_tag_behavior_for_a_brand_new_resource_is_documented_separately(): void
+    {
+        // Phase 3 item 7: ignore_changes must not be misread as
+        // suppressing tags at creation — only on every apply after a
+        // resource already exists in state.
+        $doc = $this->stateAdoptionPlan();
+        $section = $this->extractSection($doc, '### 9\.21', '## 10\.');
+
+        $this->assertMatchesRegularExpression('/ses_consumer|ses-consumer/i', $section);
+        $this->assertMatchesRegularExpression('/no effect on a resource.s first creation|no effect on a brand-new resource/i', $section);
+        $this->assertMatchesRegularExpression('/does not\s*(read this fix as )?["“]?ignore_changes suppresses tags at creation["”]?|does not\b.*suppress.*creation/is', $section);
+    }
+
+    public function test_provider_default_tags_reconciliation_is_documented_as_not_decided_here(): void
+    {
+        $doc = $this->stateAdoptionPlan();
+        $section = $this->extractSection($doc, '### 9\.21', '## 10\.');
+
+        $this->assertMatchesRegularExpression('/none of that is[\s\S]{0,10}decided or authorized/i', $section);
+        $this->assertMatchesRegularExpression('/tag-governance migration/i', $section);
+    }
+
+    public function test_no_provider_wide_ignore_tags_or_alias_was_added(): void
+    {
+        $versionsTf = $this->readFile('infrastructure/ecs/environments/staging/versions.tf');
+
+        $this->assertDoesNotMatchRegularExpression('/ignore_tags/', $versionsTf, 'No provider-wide ignore_tags block should be added merely to solve four services.');
+        $this->assertDoesNotMatchRegularExpression('/provider\s+"aws"\s*\{[^}]*alias\s*=/s', $versionsTf, 'No provider alias should be added — the lifecycle-only design was proven valid.');
+
+        $doc = $this->stateAdoptionPlan();
+        $section = $this->extractSection($doc, '### 9\.21', '## 10\.');
+        $this->assertMatchesRegularExpression('/No provider-wide `?ignore_tags`? was added/i', $section);
+        $this->assertMatchesRegularExpression('/no provider alias was\s*\n?\s*created/i', $section);
+    }
+
     // ------------------------------------------------------------
     // No task-definition/role/policy/log-group resource address changed
     // ------------------------------------------------------------
@@ -409,11 +483,17 @@ class StagingEcsServiceAdoptionAlignmentTest extends TestCase
         }
     }
 
-    public function test_all_four_services_remain_group_c_unchanged_by_this_pass(): void
+    public function test_all_four_services_are_state_import_ready_and_deployment_migration_pending(): void
     {
+        // Superseded 2026-08-05 (§9.21): retired the "Group C" label in
+        // favor of two independent, explicit labels. classification
+        // (the manifest's structural field) remains import_then_migrate,
+        // unchanged — only the prose model changed.
         foreach (self::SERVICE_ROLES as $role) {
             $entry = $this->manifestEntry("module.{$role}.aws_ecs_service.this[0]");
-            $this->assertStringContainsString('Group C', $entry['notes']);
+            $this->assertMatchesRegularExpression('/READY/', $entry['notes']);
+            $this->assertMatchesRegularExpression('/PENDING/', $entry['notes']);
+            $this->assertMatchesRegularExpression('/SUPERSEDED 2026-08-05/', $entry['notes']);
             $this->assertSame('import_then_migrate', $entry['classification']);
         }
     }
@@ -425,6 +505,11 @@ class StagingEcsServiceAdoptionAlignmentTest extends TestCase
 
         $this->assertStringNotContainsString('Group B', $combined);
         $this->assertMatchesRegularExpression('/1 of 4/', $entry['notes']);
+        // scheduler must not carry a live "Group C" classification either —
+        // only the two-axis model, plus a historical quotation of the
+        // retired label inside the SUPERSEDED sentence.
+        $this->assertMatchesRegularExpression('/READY/', $entry['notes']);
+        $this->assertMatchesRegularExpression('/PENDING/', $entry['notes']);
     }
 
     public function test_readiness_rank_is_recorded_in_the_documented_order(): void
@@ -446,13 +531,27 @@ class StagingEcsServiceAdoptionAlignmentTest extends TestCase
         $this->assertMatchesRegularExpression('/scheduler.{0,20}worker.{0,30}critical-worker.{0,20}web/is', $section);
     }
 
-    public function test_readiness_rank_is_documented_as_a_separate_axis_from_group_classification(): void
+    public function test_readiness_rank_is_documented_as_a_separate_axis_from_deployment_migration_status(): void
     {
+        // Superseded 2026-08-05 (§9.21): the "Group C" label this test
+        // originally checked for is retired — service-level readiness
+        // rank and deployment-migration status are now two independent,
+        // explicitly named labels rather than one overloaded Group
+        // letter. This test now checks §9.21's corrected model instead
+        // of §9.20's superseded framing.
         $doc = $this->stateAdoptionPlan();
-        $section = $this->extractSection($doc, '### 9\.20', '## 10\.');
+        $section = $this->extractSection($doc, '### 9\.21', '## 10\.');
 
-        $this->assertMatchesRegularExpression('/separate axis|different axes/i', $section);
-        $this->assertMatchesRegularExpression('/remain(s)?\s+Group C[\s\S]{0,60}unchanged by\s+this pass|regardless of rank/i', $section);
+        $this->assertMatchesRegularExpression('/state-import readiness/i', $section);
+        $this->assertMatchesRegularExpression('/deployment-migration status/i', $section);
+        $this->assertMatchesRegularExpression('/READY/', $section);
+        $this->assertMatchesRegularExpression('/PENDING/', $section);
+        $this->assertMatchesRegularExpression('/does not make it deployment-ready/i', $section);
+
+        // §9.20's superseded item must explicitly point to §9.21, not be
+        // left silently stale.
+        $superseded920 = $this->extractSection($doc, '### 9\.20', '### 9\.21');
+        $this->assertMatchesRegularExpression('/Superseded 2026-08-05.{0,20}§9\.21/is', $superseded920);
     }
 
     // ------------------------------------------------------------

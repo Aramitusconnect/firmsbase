@@ -542,12 +542,42 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
     is now removed. A prior mission's verbally-reported "Group B and Group
     C-only" framing for `scheduler` is corrected: service-level readiness
     rank (order: `scheduler`, `worker`, `critical-worker`, `web`) and
-    Group A/B/C classification are two different axes — all four services
-    remain Group C, unchanged. The shared task role's
-    `FirmsVaultStagingSesSend` inline policy remains unreadable
-    (`iam:GetRolePolicy` AccessDenied, freshly re-confirmed); a manifest
-    note that stated its granted actions as if confirmed (an inference
-    from its name) is corrected to say plainly they remain unread.
+    deployment-migration status are two different axes (superseded by
+    item 15's two-axis model, which retires the "Group C" label
+    entirely). The shared task role's `FirmsVaultStagingSesSend` inline
+    policy remains unreadable (`iam:GetRolePolicy` AccessDenied, freshly
+    re-confirmed); a manifest note that stated its granted actions as if
+    confirmed (an inference from its name) is corrected to say plainly
+    they remain unread.
+15. **Effective-tag fix and corrected two-axis import-readiness model
+    (2026-08-05, see
+    [state-adoption-plan.md §9.21](state-adoption-plan.md))**: this
+    environment's provider `default_tags` (`Project`, `Mission`) have no
+    per-service override on any of the four existing ECS services, so
+    `Project`/`Mission` would be added to all four on any future
+    plan/apply — a real risk of `import` implicitly setting up a
+    same-config live-tag mutation on the next apply. Fixed by extending
+    `aws_ecs_service.this`'s existing `lifecycle.ignore_changes` (already
+    protecting `task_definition`) to also cover `tags`/`tags_all` — proven
+    schema-valid via `terraform validate` against the installed provider,
+    and proven behaviorally via a new mocked Terraform test showing a
+    second apply with changed tag values does not alter the first apply's
+    recorded tags. `task_definition` protection is unmodified.
+    `ignore_changes` has no effect on a brand-new resource's first
+    creation (e.g. the not-yet-existing `ses-consumer` service) — only on
+    every apply after a resource already exists in state; this is
+    documented explicitly so it is not misread as suppressing
+    create-time tags. No provider-wide `ignore_tags` and no provider
+    alias were added — the preferred lifecycle-only design was proven
+    valid. Also retires the single "Group C" label previously used for
+    the four ECS services in favor of two independent labels: **state-
+    import readiness (all four: READY)** and **deployment-migration
+    status (all four: PENDING** — role-specific task roles, new
+    Terraform-managed task-definition revisions, workload-specific log
+    groups, and explicit cutover/rollback all remain later, unauthorized
+    steps). Manifest `classification` remains `import_then_migrate` for
+    all four, unchanged — only the prose model changed. No AWS, ECS, IAM,
+    or live tag was changed in this pass.
 
 **No import, apply, ECS deployment, scaling change, capacity-provider
 association, IAM permission migration, or description-drift
