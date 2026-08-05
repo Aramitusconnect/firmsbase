@@ -1060,7 +1060,9 @@ reasoning):
   `module.alb.aws_lb_target_group.web`,
   `module.ecs_cluster.aws_ecs_cluster.this`,
   `module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`,
-  `module.iam.aws_iam_role.task_execution`. The
+  `module.iam.aws_iam_role.task_execution`,
+  `module.iam.aws_iam_role_policy_attachment.task_execution_managed`,
+  `module.iam.aws_iam_role_policy.task_execution`. The
   capacity-providers resource **moved here from Group C** in an earlier
   pass: live association is confirmed empty
   (`capacityProviders: []`, `defaultCapacityProviderStrategy: []`) and
@@ -1072,14 +1074,19 @@ reasoning):
   `FARGATE_SPOT` with the live cluster, which remains a separate,
   explicitly reviewed decision. The resource address
   (`module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`) is
-  unchanged. The IAM execution role **moved here from Group B** in this
-  pass (§9.17): its trust policy and description now match live exactly.
-  Importing the role does **not** authorize detaching
-  `AmazonECSTaskExecutionRolePolicy` or replacing the inline policy's
-  content — that decision (`module.iam.aws_iam_role_policy.task_execution`,
-  Group C) remains entirely separate and unresolved. No exact,
-  source-backed blocker remains for any of these five — each is still an
-  individual canary, not a batch.
+  unchanged. The IAM execution role **moved here from Group B** in an
+  earlier pass (§9.17): its trust policy and description now match live
+  exactly. The managed-policy attachment (a **new address**, §9.18) and
+  the inline policy (**moved here from Group C**, §9.18) are both now
+  live-aligned: the attachment models live's sole
+  `AmazonECSTaskExecutionRolePolicy` attachment as a separate,
+  non-exclusive `aws_iam_role_policy_attachment`, and the inline policy's
+  content now matches live's exact secrets-only grant (4 named secret
+  ARNs, no ECR/logs/SSM/KMS). Importing either does **not** authorize
+  ever detaching the managed policy or expanding/reducing the inline
+  policy's permissions — either is a separate, explicitly reviewed
+  decision. No exact, source-backed blocker remains for any of these
+  seven — each is still an individual canary, not a batch.
 - **Group B — a small prerequisite or additional read verification away:**
   `module.elasticache.aws_elasticache_subnet_group.this`,
   `module.elasticache.aws_elasticache_replication_group.this`. Both are
@@ -1091,15 +1098,10 @@ reasoning):
   replication group's description/tag drift, §9.16) pending a full
   readiness re-assessment.
 - **Group C — architecture/content migration remains unresolved:**
-  `module.iam.aws_iam_role_policy.task_execution`,
   `module.web.aws_ecs_service.this[0]`,
   `module.worker.aws_ecs_service.this[0]`,
   `module.critical_worker.aws_ecs_service.this[0]`,
   `module.scheduler.aws_ecs_service.this[0]`.
-  - The inline policy's *name* is now aligned (`FirmsBaseStagingSecretsAccess`),
-    but its *content*/permission shape still differs materially from live
-    (§9.12 correction 4) — the same unresolved decision as the role above,
-    applied to the policy's actual grants, not merely its identity.
   - The four ECS services are **no longer blocked by launch mode or
     desired count** — both are now resolved (see corrections 1-2 below)
     and must not be cited as a reason to withhold these imports. They
@@ -1388,6 +1390,89 @@ as one shared trust-policy document, not a role-specific one.
 5. Neither IAM resource was imported in this pass. No Terraform `plan`,
    `apply`, `import`, or state mutation ran.
 
+### 9.18 IAM execution-policy architecture aligned with live (2026-08-05)
+
+With `module.iam.aws_iam_role.task_execution` imported (§9.17) and role-level
+config matching live exactly, a read-only re-verification of
+`aws iam list-attached-role-policies`/`list-role-policies`/`get-role-policy`
+against `firmsbase-staging-ecs-execution-role` confirmed the live two-layer
+permission architecture is unchanged: one attached AWS-managed policy
+(`AmazonECSTaskExecutionRolePolicy`) plus one narrow inline policy
+(`FirmsBaseStagingSecretsAccess`, granting only `secretsmanager:GetSecretValue`
+on 4 named secret ARNs). This correction preserves that architecture in
+Terraform instead of replacing it.
+
+**A previously-undiscovered content bug**: the 4th secret ARN this module's
+inline policy granted was wrong. Live's inline policy grants
+`secretsmanager:GetSecretValue` on `app-key`, `db-password`
+("database-app"), `redis-auth-token`, and `db-migrator`
+("database-migrator") — but the module's `secret_arns` list was wired to
+`app_key_secret_arn`, `db_password_secret_arn`, `redis_auth_token_secret_arn`,
+and `platform_notifications_recipient_fingerprint_hmac_key_secret_arn`. The
+4th entry was **substituted for the wrong secret** — the HMAC-key secret,
+which live's execution-role policy does not grant at all, in place of the
+actual live 4th ARN (`database-migrator-TpsE6P`), for which **no Terraform
+variable existed**. This was not previously reviewed because no prior pass
+compared the inline policy's exact `Resource` list against
+`aws iam get-role-policy` element-by-element.
+
+**Fixed:**
+
+1. **Managed-policy attachment**: `modules/iam` now declares
+   `aws_iam_role_policy_attachment.task_execution_managed`
+   (role = `aws_iam_role.task_execution.name`, policy_arn = the new
+   required `task_execution_managed_policy_arn` module input, no
+   default). Deliberately a per-resource, **non-exclusive** attachment —
+   never `aws_iam_role_policy_attachments_exclusive`, never
+   `managed_policy_arns` directly on `aws_iam_role` — either of which
+   could detach an attachment this module doesn't fully enumerate. This
+   staging environment's `terraform.tfvars` sets it to
+   `arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy`,
+   the confirmed live value.
+2. **Inline policy, secrets-only**: the module's inline-policy data
+   source no longer declares `EcrAuth`/`EcrPull`/`WriteLogs` statements —
+   those permissions now come from the managed-policy attachment above,
+   not duplicated. A new required `task_execution_secret_arns` input
+   (nonempty, unique, no default) generates the sole `ReadTaskSecrets`
+   statement. This staging environment wires it to exactly the 4 live
+   ARNs, replacing the platform-notifications HMAC-key secret with the
+   new `db_migrator_secret_arn` variable (added this pass; no prior
+   variable represented this secret at all).
+3. **SSM/KMS, separately opt-in**: `task_execution_ssm_parameter_arns`
+   (default `[]`) and a new `task_execution_kms_decrypt_enabled` boolean
+   (no default) independently gate the execution role's own optional
+   statements — decoupled from the unrelated `kms_encryption_enabled`
+   flag, which previously gated BOTH the execution role's KMS grant AND
+   the S3-document task roles' KMS grant with a single value. This
+   staging environment sets both execution-specific inputs to
+   disabled/empty, matching live's inline policy having no SSM or KMS
+   statement at all — even though `kms_encryption_enabled = true` for
+   the (unrelated) S3-document feature. Before this fix, enabling
+   S3-document KMS encryption would have silently added an
+   unreviewed KMS statement to the execution role too.
+4. **Not addressed by this correction**: task definitions for `web` and
+   `ses_consumer` reference the platform-notifications HMAC-key secret
+   via their own `secrets` block (`local.hmac_secret`) — a planned,
+   not-yet-deployed feature (these task definitions are themselves `new`
+   Terraform resources, not yet applied to live). If/when that feature is
+   actually deployed, the execution role will also need
+   `secretsmanager:GetSecretValue` on that secret — a **permission
+   expansion** relative to today's live grant, requiring its own separate,
+   explicit review at that time. This correction does not add it now,
+   since doing so would grant a permission live does not currently have.
+5. `ecr_repository_arn`/`log_group_arns` module inputs were removed
+   entirely — both were used only by the now-removed `EcrPull`/`WriteLogs`
+   statements, with no other consumer in the module.
+6. Neither `module.iam.aws_iam_role_policy_attachment.task_execution_managed`
+   nor `module.iam.aws_iam_role_policy.task_execution` was imported in
+   this pass; both moved from Group B/C to **Group A** (§9.12) — live-
+   aligned, suitable for an isolated canary import after this correction
+   merges. Importing either does **not** authorize detaching the managed
+   policy or expanding/reducing the inline policy's permissions; a future
+   plan proposing either is a stop condition requiring separate review.
+7. No Terraform `plan`, `apply`, `import`, or state mutation ran to
+   produce this correction. No AWS or IAM resource changed.
+
 ## 10. Validation performed (local/static only)
 
 | Check | Result |
@@ -1413,15 +1498,15 @@ Terraform (`.tf`), a Terraform test (`.tftest.hcl`), documentation
 2. ECS cluster name: keep live `firmsbase-staging-cluster` (this plan's
    assumption, via `ecs_cluster_name`) vs. accept a one-time replacement
    to standardize on `name_prefix`.
-3. **IAM execution-role permission-shape decision** (§3, new this
-   revision): keep the live AWS-managed-policy + narrow-inline-policy
-   approach (would require restructuring `modules/iam`'s
-   `task_execution` resource to attach `AmazonECSTaskExecutionRolePolicy`
-   instead of building a custom inline policy), or accept Terraform's
-   broader custom-inline-policy approach as the new standard (would widen
-   the live role's permissions on first apply — a real, reviewable
-   change, not a no-op). The naming variable (§6 of variables.tf) does not
-   resolve this; it only makes the role importable by address.
+3. ~~**IAM execution-role permission-shape decision**~~ — **RESOLVED
+   2026-08-05 (§9.18)**: the live AWS-managed-policy + narrow-inline-policy
+   architecture is now preserved in Terraform. `modules/iam` attaches
+   `AmazonECSTaskExecutionRolePolicy` via a separate, non-exclusive
+   `aws_iam_role_policy_attachment`, and the inline policy's content now
+   matches live's exact secrets-only grant. No code change was needed to
+   widen anything; both resources remain unimported pending their own
+   import, and neither import authorizes detaching the managed policy or
+   expanding/reducing the inline policy's permissions.
 4. ALB target-group health-check adoption (§9.5, expanded this revision to
    cover all three mismatches, not just the path): adopt live's values
    (`/up`, 30s interval, matcher `200-399`) via the new

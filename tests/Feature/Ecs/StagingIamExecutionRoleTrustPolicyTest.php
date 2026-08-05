@@ -222,9 +222,9 @@ class StagingIamExecutionRoleTrustPolicyTest extends TestCase
     {
         $module = $this->extractSection($this->stagingMain(), 'module "iam" \{', 'module "alb"');
 
-        $this->assertStringContainsString('aws_account_id                  = var.aws_account_id', $module);
-        $this->assertStringContainsString('aws_region                      = var.aws_region', $module);
-        $this->assertStringContainsString('task_execution_role_description = var.iam_task_execution_role_description', $module);
+        $this->assertMatchesRegularExpression('/aws_account_id\s+= var\.aws_account_id/', $module);
+        $this->assertMatchesRegularExpression('/aws_region\s+= var\.aws_region/', $module);
+        $this->assertMatchesRegularExpression('/task_execution_role_description\s+= var\.iam_task_execution_role_description/', $module);
 
         $tfvars = $this->stagingTfvarsExample();
         $this->assertStringContainsString('aws_account_id = "603013471426"', $tfvars);
@@ -249,19 +249,31 @@ class StagingIamExecutionRoleTrustPolicyTest extends TestCase
         $this->assertCount(1, $matches[0], 'module.iam.aws_iam_role.task_execution resource address must remain exactly this — one declaration, unrenamed.');
     }
 
-    public function test_no_managed_policy_attachment_resource_was_added(): void
+    public function test_exactly_one_managed_policy_attachment_resource_exists(): void
     {
-        $this->assertStringNotContainsString('aws_iam_role_policy_attachment', $this->iamModuleMain());
-        $this->assertStringNotContainsString('aws_iam_role_policy_attachment', $this->stagingMain());
+        // As of the IAM execution-policy architecture correction (§9.18),
+        // a managed-policy attachment IS now modeled — deliberately,
+        // superseding the earlier trust-policy/description-only pass this
+        // class was originally written for. Full coverage lives in
+        // StagingIamExecutionPolicyArchitectureTest.php; this test only
+        // guards against a second, duplicate attachment being introduced.
+        $main = $this->iamModuleMain();
+        preg_match_all('/resource "aws_iam_role_policy_attachment" "task_execution_managed"/', $main, $matches);
+        $this->assertCount(1, $matches[0], 'Exactly one aws_iam_role_policy_attachment.task_execution_managed must exist.');
     }
 
-    public function test_task_execution_inline_policy_content_is_unchanged(): void
+    public function test_task_execution_inline_policy_is_now_secrets_only(): void
     {
+        // As of §9.18, ECR/logs statements were removed from the inline
+        // policy (superseded by the managed-policy attachment above) —
+        // see StagingIamExecutionPolicyArchitectureTest.php for full
+        // coverage of the corrected shape.
         $main = $this->iamModuleMain();
         $execPolicyDoc = $this->extractDataBlock($main, 'aws_iam_policy_document', 'task_execution');
 
-        foreach (['EcrAuth', 'EcrPull', 'WriteLogs', 'ReadTaskSecrets', 'ReadTaskParameters', 'DecryptSecretsAndParameters'] as $sid) {
-            $this->assertStringContainsString($sid, $execPolicyDoc, "Inline policy statement \"{$sid}\" must be unchanged by the trust-policy/description correction.");
+        $this->assertStringContainsString('ReadTaskSecrets', $execPolicyDoc);
+        foreach (['EcrAuth', 'EcrPull', 'WriteLogs'] as $sid) {
+            $this->assertStringNotContainsString($sid, $execPolicyDoc, "Inline policy statement \"{$sid}\" must no longer exist — those permissions now come from the managed-policy attachment (§9.18).");
         }
 
         $policyResource = $this->extractResourceBlock($main, 'aws_iam_role_policy', 'task_execution');
@@ -278,10 +290,15 @@ class StagingIamExecutionRoleTrustPolicyTest extends TestCase
         $this->assertStringContainsString('AmazonECSTaskExecutionRolePolicy', $prereq);
     }
 
-    public function test_inline_policy_resource_remains_group_c_and_separately_blocked(): void
+    public function test_inline_policy_resource_moved_to_group_a_after_content_alignment(): void
     {
+        // As of §9.18, the inline policy's CONTENT now matches live
+        // exactly (see StagingIamExecutionPolicyArchitectureTest.php), so
+        // it moved from Group C to Group A — superseding this class's
+        // original expectation (written before that correction landed).
         $entry = $this->manifestEntry('module.iam.aws_iam_role_policy.task_execution');
-        $this->assertStringContainsString('Group C', $entry['notes']);
+        $this->assertStringContainsString('Group A', $entry['notes']);
+        $this->assertSame('import_unchanged', $entry['classification']);
     }
 
     public function test_execution_role_manifest_notes_now_say_group_a(): void

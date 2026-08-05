@@ -46,6 +46,7 @@ variables {
   app_image_digest                                                 = "603013471426.dkr.ecr.us-east-1.amazonaws.com/firmsbase-staging@sha256:0000000000000000000000000000000000000000000000000000000000000000"
   app_key_secret_arn                                               = "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/app-key-QigVGy"
   db_password_secret_arn                                           = "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/database-app-8NUj2a"
+  db_migrator_secret_arn                                           = "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/database-migrator-TpsE6P"
   redis_auth_token_secret_arn                                      = "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/redis-auth-token-p6rVKN"
   redis_auth_token                                                 = "test-auth-token-not-real"
   alarm_sns_topic_arn                                              = "arn:aws:sns:us-east-1:603013471426:firmsbase-staging-alarms"
@@ -57,9 +58,10 @@ variables {
   platform_notifications_recipient_fingerprint_hmac_key_secret_arn = "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/hmac-key-AbCdEf"
   # iam_task_execution_policy_name has no default (see variables.tf) — every
   # caller must set it explicitly.
-  iam_task_execution_policy_name      = "firmsbase-staging-task-execution"
-  aws_account_id                      = "603013471426"
-  iam_task_execution_role_description = "Execution role for FirmsBase staging ECS tasks"
+  iam_task_execution_policy_name        = "firmsbase-staging-task-execution"
+  aws_account_id                        = "603013471426"
+  iam_task_execution_role_description   = "Execution role for FirmsBase staging ECS tasks"
+  iam_task_execution_managed_policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
 # --- use_capacity_provider_strategy: every caller supplies it, all false ---

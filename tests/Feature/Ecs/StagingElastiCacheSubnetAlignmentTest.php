@@ -270,10 +270,10 @@ class StagingElastiCacheSubnetAlignmentTest extends TestCase
         $summary = $manifest['summary'];
 
         $this->assertSame(66, $summary['new']);
-        $this->assertSame(6, $summary['import_unchanged']);
-        $this->assertSame(16, $summary['import_then_migrate']);
+        $this->assertSame(8, $summary['import_unchanged']);
+        $this->assertSame(15, $summary['import_then_migrate']);
         $this->assertSame(6, $summary['do_not_import']);
-        $this->assertSame(94, $summary['total']);
+        $this->assertSame(95, $summary['total']);
 
         $this->assertSame(
             'import_then_migrate',

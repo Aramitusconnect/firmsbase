@@ -18,10 +18,10 @@
   },
   "summary": {
     "new": 66,
-    "import_then_migrate": 16,
-    "import_unchanged": 6,
+    "import_then_migrate": 15,
+    "import_unchanged": 8,
     "do_not_import": 6,
-    "total": 94
+    "total": 95
   },
   "resources": [
     {
@@ -246,16 +246,25 @@
       "import_id": "firmsbase-staging-ecs-execution-role",
       "prerequisite": "CORRECTED 2026-08-05 (\u00a79.17): the name-alignment fix (var.iam_task_execution_role_name) already landed; this pass fixes the remaining role-level gaps found by a fresh field-by-field live comparison. (1) Trust policy \u2014 live's assume-role policy for BOTH firmsbase-staging-ecs-execution-role and firmsbase-staging-ecs-task-role carries identical StringEquals aws:SourceAccount=603013471426 / ArnLike aws:SourceArn=arn:aws:ecs:us-east-1:603013471426:* conditions (re-confirmed via aws iam get-role on both roles, 2026-08-05); modules/iam's shared ecs_tasks_assume_role data source previously had no conditions at all. Fixed: the shared document now takes required aws_account_id/aws_region inputs and renders both conditions for every role that uses it (task_execution and all 7 task roles), matching live exactly \u2014 not modeled as a role-specific document, since both examined live roles are identical. (2) Description \u2014 live is \"Execution role for FirmsBase staging ECS tasks\"; the module previously declared no description argument at all. Fixed: a new required task_execution_role_description module input (wired ONLY to aws_iam_role.task_execution.description) is set to the exact live value in terraform.tfvars. Neither fix touches aws_iam_role_policy.task_execution, the AmazonECSTaskExecutionRolePolicy attachment, or any permission grant \u2014 the inline-policy content/permission-shape decision (\u00a711 item 3) remains entirely separate and unresolved. With both the trust policy and description now matching live exactly, the role-level configuration is complete; this address is suitable for an isolated role-only import after this correction merges. Importing the role does not authorize detaching AmazonECSTaskExecutionRolePolicy or replacing the inline policy's content \u2014 either is a separate, explicitly reviewed decision. iam:ListRoleTags is AccessDenied for this operator, but is likely NOT a real import-time blocker: IAM's GetRole embeds Role.Tags inline (confirmed: this role currently has zero tags, consistent with an omitted Tags field), so the AWS provider's aws_iam_role Read typically does not need a separate tags call. Not claimed as a required permission without a real import proving otherwise.",
       "live_reference": null,
-      "notes": "Group A (moved here from Group B in this pass, \u00a79.17) in the corrected Phase A3 readiness matrix \u2014 see docs/ecs/state-adoption-plan.md \u00a79.12/\u00a79.17. The role-level configuration (name, trust policy, description) now matches live exactly; no exact, source-backed blocker remains for an isolated canary import. The separate inline-policy permission-shape decision (module.iam.aws_iam_role_policy.task_execution) remains unresolved and is not approved by this move.",
+      "notes": "Group A (moved here from Group B in this pass, \u00a79.17) in the corrected Phase A3 readiness matrix \u2014 see docs/ecs/state-adoption-plan.md \u00a79.12/\u00a79.17/\u00a79.18. The role-level configuration (name, trust policy, description) now matches live exactly; no exact, source-backed blocker remains for an isolated canary import. The separate policy-architecture decision (module.iam.aws_iam_role_policy_attachment.task_execution_managed, module.iam.aws_iam_role_policy.task_execution) is now resolved in code (\u00a79.18) but not approved for import by this role's own import.",
+      "live_existence_confirmed": true
+    },
+    {
+      "address": "module.iam.aws_iam_role_policy_attachment.task_execution_managed",
+      "classification": "import_unchanged",
+      "import_id": "firmsbase-staging-ecs-execution-role/arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
+      "prerequisite": null,
+      "live_reference": null,
+      "notes": "NEW address added 2026-08-05 (\u00a79.18): models the live role's sole attached managed policy (confirmed via aws iam list-attached-role-policies) as a separate, non-exclusive aws_iam_role_policy_attachment \u2014 never aws_iam_role_policy_attachments_exclusive, never managed_policy_arns directly on aws_iam_role, either of which could detach an attachment this module doesn't fully enumerate. Exactly matches live; no code change needed before import. Group A in the corrected Phase A3 readiness matrix \u2014 see docs/ecs/state-adoption-plan.md \u00a79.12/\u00a79.18. Importing this address does not authorize ever detaching AmazonECSTaskExecutionRolePolicy \u2014 a future plan proposing removal is a stop condition. Remains unimported as of this pass.",
       "live_existence_confirmed": true
     },
     {
       "address": "module.iam.aws_iam_role_policy.task_execution",
-      "classification": "import_then_migrate",
+      "classification": "import_unchanged",
       "import_id": "firmsbase-staging-ecs-execution-role:FirmsBaseStagingSecretsAccess",
-      "prerequisite": "CORRECTED 2026-08-04: this module previously hardcoded the inline policy's name to \"<name_prefix>-task-execution\", but the live policy is actually named \"FirmsBaseStagingSecretsAccess\" (confirmed via aws iam get-role-policy). aws_iam_role_policy's name is effectively immutable (renaming requires delete+recreate) \u2014 importing under the live name against the old hardcoded config would have set up a guaranteed REPLACEMENT on the very next plan, not merely a content diff. Fixed: the module now exposes var.task_execution_policy_name (no default, every caller must set it explicitly \u2014 mirrors task_execution_role_name's own no-default pattern); this environment's terraform.tfvars sets it to \"FirmsBaseStagingSecretsAccess\". This aligns identity only. Policy CONTENT still differs materially: live grants exactly secretsmanager:GetSecretValue on 4 named secret ARNs via this inline policy (permissions beyond that come from the separately-attached AmazonECSTaskExecutionRolePolicy managed policy); this module's config declares one broader custom inline policy (ECR pull + logs + secrets + KMS) with no managed-policy attachment. That content/permission-shape migration remains the same separate, explicit human decision referenced on the role entry above \u2014 not decided or applied here.",
+      "prerequisite": null,
       "live_reference": null,
-      "notes": "Group C (architecture/content migration remains unresolved) in the corrected Phase A3 readiness matrix \u2014 see docs/ecs/state-adoption-plan.md \u00a79.12. The name/identity mismatch that made this a replacement risk is fixed (task_execution_policy_name = \"FirmsBaseStagingSecretsAccess\"); the content/permission-shape mismatch is not, and importing without resolving it would leave a live, in-use execution role's actual granted permissions materially undocumented relative to config.",
+      "notes": "CORRECTED 2026-08-05 (\u00a79.18): the name/identity mismatch was fixed 2026-08-04 (task_execution_policy_name = \"FirmsBaseStagingSecretsAccess\"). This pass fixes the remaining CONTENT mismatch found by a fresh aws iam get-role-policy re-verification: live grants exactly secretsmanager:GetSecretValue on 4 named secret ARNs (app-key, db-password, redis-auth-token, db-migrator) \u2014 not the platform-notifications HMAC-key secret this module previously included instead of the migrator secret \u2014 and no ECR/logs/SSM/KMS actions (those now come from the separately-attached AmazonECSTaskExecutionRolePolicy, see module.iam.aws_iam_role_policy_attachment.task_execution_managed above). modules/iam now exposes task_execution_secret_arns (required, nonempty, unique) generating one secrets-only statement, plus separately-named task_execution_ssm_parameter_arns/task_execution_kms_decrypt_enabled opt-in inputs, both disabled for this staging environment. Content now matches live exactly \u2014 no code change needed before import. Group A in the corrected Phase A3 readiness matrix \u2014 see docs/ecs/state-adoption-plan.md \u00a79.12/\u00a79.18. Importing this address does not authorize any permission expansion or reduction \u2014 a future plan proposing either is a stop condition. Remains unimported as of this pass.",
       "live_existence_confirmed": true
     },
     {

@@ -32,6 +32,7 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
         'module.elasticache.aws_elasticache_subnet_group.this',
         'module.iam.aws_iam_role.task_execution',
         'module.iam.aws_iam_role_policy.task_execution',
+        'module.iam.aws_iam_role_policy_attachment.task_execution_managed',
         'module.scheduler.aws_ecs_service.this[0]',
         'module.web.aws_ecs_service.this[0]',
         'module.worker.aws_ecs_service.this[0]',
@@ -449,28 +450,46 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
         $this->assertMatchesRegularExpression('/address.{0,20}unchanged|unchanged/i', $combined);
     }
 
-    public function test_iam_inline_policy_remains_group_c_for_content_not_name(): void
+    public function test_iam_inline_policy_content_now_aligned_moved_to_group_a(): void
     {
+        // Superseded 2026-08-05 (§9.18): the name mismatch was fixed
+        // 2026-08-04, and this pass fixes the previously-remaining
+        // content mismatch (see StagingIamExecutionPolicyArchitectureTest.php
+        // for full coverage), so this address moved from Group C to
+        // Group A — it no longer "remains" Group C.
         $entry = $this->manifestEntry('module.iam.aws_iam_role_policy.task_execution');
         $notes = $entry['notes'];
 
-        $this->assertStringContainsString('Group C', $notes);
-        $this->assertMatchesRegularExpression('/name.{0,20}(mismatch|fixed|aligned)/is', $notes);
-        $this->assertMatchesRegularExpression('/content.{0,40}(mismatch|not|differ)/is', $notes);
+        $this->assertStringContainsString('Group A', $notes);
+        $this->assertSame('import_unchanged', $entry['classification']);
     }
 
-    public function test_manifest_totals_unchanged_since_no_classification_genuinely_changed(): void
+    public function test_manifest_totals_reflect_the_2026_08_05_policy_architecture_reclassification(): void
     {
+        // Superseded 2026-08-05 (§9.18): totals were 66/6/16/6/94 before
+        // module.iam.aws_iam_role_policy.task_execution moved
+        // import_then_migrate -> import_unchanged and the new
+        // module.iam.aws_iam_role_policy_attachment.task_execution_managed
+        // address was added as import_unchanged — a genuine, intentional
+        // reclassification, not drift.
         $manifest = $this->importManifest();
         $summary = $manifest['summary'];
 
         $this->assertSame(66, $summary['new']);
-        $this->assertSame(6, $summary['import_unchanged']);
-        $this->assertSame(16, $summary['import_then_migrate']);
+        $this->assertSame(8, $summary['import_unchanged']);
+        $this->assertSame(15, $summary['import_then_migrate']);
         $this->assertSame(6, $summary['do_not_import']);
-        $this->assertSame(94, $summary['total']);
+        $this->assertSame(95, $summary['total']);
+
+        $reclassified = [
+            'module.iam.aws_iam_role_policy.task_execution',
+            'module.iam.aws_iam_role_policy_attachment.task_execution_managed',
+        ];
 
         foreach (self::PHASE_A3_ADDRESSES as $address) {
+            if (in_array($address, $reclassified, true)) {
+                continue;
+            }
             $entry = $this->manifestEntry($address);
             $this->assertSame('import_then_migrate', $entry['classification'], "{$address}'s classification must not change in this correction.");
         }
@@ -611,6 +630,8 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
             'module.ecs_cluster.aws_ecs_cluster.this',
             'module.ecs_cluster.aws_ecs_cluster_capacity_providers.this',
             'module.iam.aws_iam_role.task_execution',
+            'module.iam.aws_iam_role_policy_attachment.task_execution_managed',
+            'module.iam.aws_iam_role_policy.task_execution',
         ];
 
         $plan = $this->extractSection($this->stateAdoptionPlan(), '### 9\.12', '### 9\.13');
@@ -643,7 +664,6 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
     public function test_group_c_addresses_are_consistent_across_both_docs_and_the_manifest(): void
     {
         $expectedC = [
-            'module.iam.aws_iam_role_policy.task_execution',
             'module.web.aws_ecs_service.this[0]',
             'module.worker.aws_ecs_service.this[0]',
             'module.critical_worker.aws_ecs_service.this[0]',
@@ -660,12 +680,15 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
         }
     }
 
-    public function test_group_counts_are_exactly_five_two_five(): void
+    public function test_group_counts_are_exactly_seven_two_four(): void
     {
-        // Was 4/3/5 before module.iam.aws_iam_role.task_execution moved
-        // from Group B to Group A (2026-08-05, see
-        // docs/ecs/state-adoption-plan.md §9.17) — a genuine, intentional
-        // reclassification, not drift.
+        // Was 4/3/5, then 5/2/5 after module.iam.aws_iam_role.task_execution
+        // moved from Group B to Group A (2026-08-05, §9.17). Now 7/2/4:
+        // module.iam.aws_iam_role_policy.task_execution moved from Group C
+        // to Group A, and the new
+        // module.iam.aws_iam_role_policy_attachment.task_execution_managed
+        // address was added directly to Group A (2026-08-05, §9.18) —
+        // genuine, intentional reclassifications, not drift.
         $groupOf = [];
         foreach (self::PHASE_A3_ADDRESSES as $address) {
             $notes = $this->manifestEntry($address)['notes'];
@@ -676,8 +699,8 @@ class StagingPhaseA3AdoptionAlignmentTest extends TestCase
 
         $counts = array_count_values($groupOf);
 
-        $this->assertSame(5, $counts['A'] ?? 0, 'Group A must contain exactly 5 addresses.');
+        $this->assertSame(7, $counts['A'] ?? 0, 'Group A must contain exactly 7 addresses.');
         $this->assertSame(2, $counts['B'] ?? 0, 'Group B must contain exactly 2 addresses.');
-        $this->assertSame(5, $counts['C'] ?? 0, 'Group C must contain exactly 5 addresses.');
+        $this->assertSame(4, $counts['C'] ?? 0, 'Group C must contain exactly 4 addresses.');
     }
 }

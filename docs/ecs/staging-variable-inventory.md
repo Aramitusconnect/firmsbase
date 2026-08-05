@@ -359,11 +359,14 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
      `module.ecs_cluster.aws_ecs_cluster.this`,
      `module.ecs_cluster.aws_ecs_cluster_capacity_providers.this`,
      `module.iam.aws_iam_role.task_execution` (moved here from Group B,
-     2026-08-05, see item 11 below).
+     2026-08-05, see item 11 below),
+     `module.iam.aws_iam_role_policy_attachment.task_execution_managed`
+     (new address, 2026-08-05, see item 12 below),
+     `module.iam.aws_iam_role_policy.task_execution` (moved here from
+     Group C, 2026-08-05, see item 12 below).
    - **Group B**: `module.elasticache.aws_elasticache_subnet_group.this`,
      `module.elasticache.aws_elasticache_replication_group.this`.
-   - **Group C**: `module.iam.aws_iam_role_policy.task_execution`,
-     `module.web.aws_ecs_service.this[0]`,
+   - **Group C**: `module.web.aws_ecs_service.this[0]`,
      `module.worker.aws_ecs_service.this[0]`,
      `module.critical_worker.aws_ecs_service.this[0]`,
      `module.scheduler.aws_ecs_service.this[0]`. Launch mode and desired
@@ -465,6 +468,36 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
     — its role-level configuration now matches live exactly, and it is
     suitable for an isolated canary import after this correction merges.
     Neither IAM resource was imported in this pass.
+12. **IAM execution-policy architecture aligned with live (2026-08-05,
+    see [state-adoption-plan.md §9.18](state-adoption-plan.md))**: a
+    fresh `aws iam get-role-policy` re-verification found the module's
+    inline-policy `secret_arns` list was wired to the wrong 4th secret —
+    the platform-notifications HMAC-key secret, which live's execution
+    role does not grant — in place of the actual live 4th ARN (the
+    `db-migrator` credential, for which no Terraform variable existed at
+    all). Fixed: `modules/iam` now attaches `AmazonECSTaskExecutionRolePolicy`
+    via a separate, non-exclusive `aws_iam_role_policy_attachment`
+    (`module.iam.aws_iam_role_policy_attachment.task_execution_managed`,
+    a new address) instead of duplicating ECR/logs permissions in the
+    inline policy; the inline policy now grants exactly
+    `secretsmanager:GetSecretValue` on the 4 correct live ARNs via a new
+    required `task_execution_secret_arns` input, with a new
+    `db_migrator_secret_arn` root variable supplying the previously
+    unmodeled 4th ARN. SSM/KMS became separately-named, explicit opt-in
+    inputs (`task_execution_ssm_parameter_arns`/
+    `task_execution_kms_decrypt_enabled`), both disabled for this staging
+    environment — decoupled from the unrelated `kms_encryption_enabled`
+    flag, which previously gated the execution role's KMS grant together
+    with the S3-document task roles' KMS grant under one value. The
+    HMAC-key secret remains referenced by not-yet-deployed task
+    definitions (`local.hmac_secret`) but is deliberately NOT added to the
+    execution role's grant here — doing so would be a permission
+    expansion beyond today's live state, a separate decision for if/when
+    that feature is actually deployed. Both
+    `module.iam.aws_iam_role_policy_attachment.task_execution_managed`
+    and `module.iam.aws_iam_role_policy.task_execution` moved to Group A;
+    neither was imported, and neither import authorizes detaching the
+    managed policy or expanding/reducing the inline policy's permissions.
 
 **No import, apply, ECS deployment, scaling change, capacity-provider
 association, IAM permission migration, or description-drift

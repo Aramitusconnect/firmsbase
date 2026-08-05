@@ -38,35 +38,40 @@ variable "task_execution_policy_name" {
   type        = string
 }
 
-variable "ecr_repository_arn" {
-  type = string
+variable "task_execution_managed_policy_arn" {
+  description = "The AWS-managed policy ARN attached to the task-execution role via a separate, non-exclusive aws_iam_role_policy_attachment (never aws_iam_role_policy_attachments_exclusive, and never managed_policy_arns directly on aws_iam_role — either could detach an unrelated attachment this module doesn't know about). No default, deliberately: this reusable module must not assume every caller uses AmazonECSTaskExecutionRolePolicy specifically. This staging environment's live role has exactly this one attached managed policy (confirmed via aws iam list-attached-role-policies): arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy. See docs/ecs/state-adoption-plan.md §9.18."
+  type        = string
 }
 
-variable "log_group_arns" {
-  description = "CloudWatch log group ARNs every task definition writes to — the execution role's logs:CreateLogStream/PutLogEvents grant is scoped to exactly these, not log-group:*."
+variable "task_execution_secret_arns" {
+  description = "Every Secrets Manager secret ARN the task-execution role's own inline policy must grant secretsmanager:GetSecretValue on. Required, nonempty, unique — no default, deliberately: this module previously defaulted to [] and bundled ECR/logs actions into the same inline policy alongside these secrets, duplicating what AmazonECSTaskExecutionRolePolicy (see task_execution_managed_policy_arn above) already grants. This staging environment's live inline policy (FirmsBaseStagingSecretsAccess, confirmed via aws iam get-role-policy) grants secretsmanager:GetSecretValue on exactly 4 secrets — app-key, db-password (\"database-app\"), redis-auth-token, and db-migrator (\"database-migrator\") — not the platform-notifications HMAC-key secret this module previously (incorrectly) included instead of the migrator secret. See docs/ecs/state-adoption-plan.md §9.18."
   type        = list(string)
+
+  validation {
+    condition     = length(var.task_execution_secret_arns) > 0 && length(var.task_execution_secret_arns) == length(toset(var.task_execution_secret_arns))
+    error_message = "task_execution_secret_arns must be a nonempty list of unique secret ARNs."
+  }
 }
 
-variable "secret_arns" {
-  description = "Every Secrets Manager secret ARN referenced by any task definition's `secrets` block (APP_KEY, DB_PASSWORD, REDIS_PASSWORD, etc. — see docs/ecs/env.ecs.example). The execution role needs secretsmanager:GetSecretValue on exactly these to resolve them at task start; it does not get access to any other secret in the account."
+variable "task_execution_ssm_parameter_arns" {
+  description = "Every SSM Parameter Store ARN the task-execution role's own inline policy must grant ssm:GetParameters on. Default [] omits the statement entirely (this staging environment's live inline policy has none — confirmed via aws iam get-role-policy). Renamed from the module's prior ssm_parameter_arns to make clear this is scoped only to the execution role's own inline policy, distinct from any other role's permissions in this module. See docs/ecs/state-adoption-plan.md §9.18."
   type        = list(string)
   default     = []
 }
 
-variable "ssm_parameter_arns" {
-  description = "Every SSM Parameter Store ARN referenced by any task definition's `secrets` block."
-  type        = list(string)
-  default     = []
+variable "task_execution_kms_decrypt_enabled" {
+  description = "Whether the task-execution role's own inline policy grants kms:Decrypt on kms_key_arn. No default, deliberately (mirrors kms_encryption_enabled's own no-default rationale below): this module previously gated the execution role's KMS decrypt statement on the SAME kms_encryption_enabled flag used for the unrelated S3-document task roles' KMS grant, so enabling one silently enabled the other. This staging environment's live inline policy has no KMS statement at all (confirmed via aws iam get-role-policy) even though kms_encryption_enabled=true for the S3-document feature — a real, previously-unmodeled distinction. Set independently from kms_encryption_enabled. See docs/ecs/state-adoption-plan.md §9.18."
+  type        = bool
 }
 
 variable "kms_key_arn" {
-  description = "KMS key used to encrypt the secrets above and/or the S3 document bucket. Value only — see kms_encryption_enabled for whether the decrypt grant is included; an unknown-until-apply ARN (e.g. before the key is created/imported) cannot be compared to null to decide a for_each instance set."
+  description = "KMS key used to encrypt the S3 document bucket, and/or the task-execution role's secrets (see task_execution_kms_decrypt_enabled above for that separate gate). Value only — see kms_encryption_enabled for whether the S3-document decrypt grant is included; an unknown-until-apply ARN (e.g. before the key is created/imported) cannot be compared to null to decide a for_each instance set."
   type        = string
   default     = null
 }
 
 variable "kms_encryption_enabled" {
-  description = "Whether to include the KMS decrypt grant for kms_key_arn. Must be a literal true/false set explicitly by every caller — never derived from whether kms_key_arn is null, since that value can be unknown during import/plan for a not-yet-created key. No default, deliberately: a default of false would let an existing caller that already passes kms_key_arn silently lose the decrypt grant by simply omitting this variable during an upgrade, rather than failing loudly at plan/validate time."
+  description = "Whether to include the KMS decrypt grant for kms_key_arn on the S3-document task roles only (see task_execution_kms_decrypt_enabled above for the task-execution role's own, independent gate on the same key). Must be a literal true/false set explicitly by every caller — never derived from whether kms_key_arn is null, since that value can be unknown during import/plan for a not-yet-created key. No default, deliberately: a default of false would let an existing caller that already passes kms_key_arn silently lose the decrypt grant by simply omitting this variable during an upgrade, rather than failing loudly at plan/validate time."
   type        = bool
 }
 

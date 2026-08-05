@@ -63,27 +63,39 @@ class StagingSecretArnDerivationTest extends TestCase
 
     public function test_module_iam_secret_arns_are_the_bare_variables_with_no_json_key_selector(): void
     {
+        // Superseded 2026-08-05 (see docs/ecs/state-adoption-plan.md
+        // §9.18): renamed to task_execution_secret_arns, and no longer
+        // includes the HMAC-key secret — a fresh aws iam get-role-policy
+        // re-verification found live's execution-role inline policy does
+        // not grant it. db_migrator_secret_arn (new, §9.18) replaces it
+        // as the 4th ARN, matching live exactly.
         preg_match('/module "iam" \{.*?\n}/s', $this->stagingMain(), $matches);
         $this->assertNotEmpty($matches, 'Could not locate module "iam" block.');
         $block = $matches[0];
 
-        preg_match('/secret_arns\s*=\s*\[(.*?)\]/s', $block, $secretArnsMatch);
-        $this->assertNotEmpty($secretArnsMatch, 'Could not locate the secret_arns list passed to module.iam.');
+        preg_match('/task_execution_secret_arns\s*=\s*\[(.*?)\]/s', $block, $secretArnsMatch);
+        $this->assertNotEmpty($secretArnsMatch, 'Could not locate the task_execution_secret_arns list passed to module.iam.');
         $list = $secretArnsMatch[1];
 
         foreach ([
             'var.app_key_secret_arn',
             'var.db_password_secret_arn',
             'var.redis_auth_token_secret_arn',
-            'var.platform_notifications_recipient_fingerprint_hmac_key_secret_arn',
+            'var.db_migrator_secret_arn',
         ] as $bareVar) {
-            $this->assertStringContainsString($bareVar, $list, "module.iam's secret_arns must include {$bareVar}.");
+            $this->assertStringContainsString($bareVar, $list, "module.iam's task_execution_secret_arns must include {$bareVar}.");
         }
+
+        $this->assertStringNotContainsString(
+            'var.platform_notifications_recipient_fingerprint_hmac_key_secret_arn',
+            $list,
+            'The HMAC-key secret must NOT be in the execution role\'s grant — live does not grant it (§9.18).'
+        );
 
         // The whole point: these are bare variable references, never
         // string-interpolated with a JSON-key selector appended.
-        $this->assertDoesNotMatchRegularExpression('/\$\{/', $list, 'module.iam.secret_arns must contain plain variable references only — no string interpolation (which would be how a JSON-key selector could sneak in).');
-        $this->assertDoesNotMatchRegularExpression('/::/', $list, 'module.iam.secret_arns must never contain a "::" JSON-key selector sequence — IAM Resource entries must be bare secret ARNs.');
+        $this->assertDoesNotMatchRegularExpression('/\$\{/', $list, 'module.iam.task_execution_secret_arns must contain plain variable references only — no string interpolation (which would be how a JSON-key selector could sneak in).');
+        $this->assertDoesNotMatchRegularExpression('/::/', $list, 'module.iam.task_execution_secret_arns must never contain a "::" JSON-key selector sequence — IAM Resource entries must be bare secret ARNs.');
     }
 
     public function test_secret_arn_variable_descriptions_document_the_bare_arn_contract(): void
