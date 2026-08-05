@@ -7,6 +7,7 @@ use App\Models\Firm;
 use App\Models\User;
 use App\Services\TimeTrackingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 class TimeTrackingServiceTest extends TestCase
@@ -18,7 +19,21 @@ class TimeTrackingServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new TimeTrackingService();
+        $this->service = new TimeTrackingService;
+    }
+
+    /**
+     * Belt-and-suspenders alongside Laravel's own automatic
+     * Carbon::setTestNow() reset (InteractsWithTestCaseLifecycle) — makes
+     * the restoration explicit and independent of framework internals, per
+     * the deterministic-time-test requirement that the clock is always
+     * restored, not just implicitly reset by the base test case.
+     */
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
     }
 
     public function test_start_creates_an_active_session(): void
@@ -35,6 +50,14 @@ class TimeTrackingServiceTest extends TestCase
 
     public function test_pause_accumulates_whole_seconds_and_clears_last_resumed_at(): void
     {
+        // Freeze time before the session is created: now()->subSeconds(90)
+        // below and the now() call inside TimeTrackingService::pause()
+        // must resolve to the exact same instant, or a real-clock second
+        // boundary crossed between the two calls makes this test flaky
+        // (accumulated_seconds occasionally 91, not 90). Restored in
+        // tearDown().
+        $this->freezeTime();
+
         $firm = Firm::factory()->create();
         $user = User::factory()->create();
 
@@ -96,6 +119,14 @@ class TimeTrackingServiceTest extends TestCase
         // clears its own internal context before returning, so both
         // ->fresh() re-reads below must be re-queried under an explicit,
         // scoped runWithFirmContext().
+        //
+        // Time frozen for the same reason as
+        // test_pause_accumulates_whole_seconds_and_clears_last_resumed_at
+        // above: now()->subSeconds(3600) and the now() call inside
+        // TimeTrackingService::stop() must resolve to the exact same
+        // instant. Restored in tearDown().
+        $this->freezeTime();
+
         $firm = Firm::factory()->create();
         $user = User::factory()->create();
         $session = $this->service->start($firm, $user);
@@ -120,6 +151,15 @@ class TimeTrackingServiceTest extends TestCase
         // Section 39A-3L, Checkpoint 20 follow-up: same fail-closed-
         // fresh()-under-no-context reasoning as
         // test_pause_throws_when_session_is_not_active() above.
+        //
+        // Time frozen for the same reason as the other whole-second
+        // assertions in this file: two separate now()->subSeconds(...)
+        // offsets below must both resolve relative to one fixed instant,
+        // not real wall-clock time (which could cross a second boundary
+        // between either offset and the corresponding pause()/stop()
+        // call). Restored in tearDown().
+        $this->freezeTime();
+
         $firm = Firm::factory()->create();
         $user = User::factory()->create();
 
