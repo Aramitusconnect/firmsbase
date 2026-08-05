@@ -162,6 +162,12 @@ iam_task_execution_policy_name = "FirmsBaseStagingSecretsAccess"
 # aws_iam_role_policy_attachment. See docs/ecs/state-adoption-plan.md §9.18.
 iam_task_execution_managed_policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 
+# Live inline policy's sole statement Sid (confirmed via aws iam
+# get-role-policy) — a prior import mission wired this module's previous
+# hardcoded "ReadTaskSecrets" instead, which never matched live. See
+# docs/ecs/state-adoption-plan.md §9.19.
+iam_task_execution_secrets_policy_sid = "ReadFirmsBaseStagingSecrets"
+
 # Both live ECS roles (firmsbase-staging-ecs-execution-role AND
 # firmsbase-staging-ecs-task-role) carry identical aws:SourceAccount /
 # aws:SourceArn confused-deputy conditions on their assume-role trust

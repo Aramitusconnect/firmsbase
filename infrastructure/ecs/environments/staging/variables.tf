@@ -410,6 +410,11 @@ variable "iam_task_execution_managed_policy_arn" {
   }
 }
 
+variable "iam_task_execution_secrets_policy_sid" {
+  description = "The Sid of the task-execution role's inline secrets-read statement. No default, deliberately — mirrors iam_task_execution_policy_name's own no-default pattern above. This staging environment's live inline policy's sole statement has Sid \"ReadFirmsBaseStagingSecrets\" (confirmed via aws iam get-role-policy) — a prior import mission wired this module's previous hardcoded \"ReadTaskSecrets\" instead, which never matched live. See docs/ecs/state-adoption-plan.md §9.19."
+  type        = string
+}
+
 variable "aws_account_id" {
   description = "AWS account ID this staging environment runs in. Wired only into module.iam's shared assume-role trust-policy scoping (aws:SourceAccount/aws:SourceArn confused-deputy conditions) — this staging environment's live execution role AND its live generic task role (firmsbase-staging-ecs-execution-role, firmsbase-staging-ecs-task-role) both carry the identical StringEquals aws:SourceAccount=603013471426 / ArnLike aws:SourceArn=arn:aws:ecs:us-east-1:603013471426:* conditions (confirmed via aws iam get-role on both, 2026-08-05), so this one value is shared, not role-specific. See docs/ecs/state-adoption-plan.md §9.17."
   type        = string

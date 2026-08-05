@@ -267,11 +267,14 @@ class StagingIamExecutionRoleTrustPolicyTest extends TestCase
         // As of §9.18, ECR/logs statements were removed from the inline
         // policy (superseded by the managed-policy attachment above) —
         // see StagingIamExecutionPolicyArchitectureTest.php for full
-        // coverage of the corrected shape.
+        // coverage of the corrected shape. The sid assertion below was
+        // updated in §9.19: the statement's sid is no longer the hardcoded
+        // "ReadTaskSecrets" literal (which never matched live) — it's now
+        // the required task_execution_secrets_policy_sid variable.
         $main = $this->iamModuleMain();
         $execPolicyDoc = $this->extractDataBlock($main, 'aws_iam_policy_document', 'task_execution');
 
-        $this->assertStringContainsString('ReadTaskSecrets', $execPolicyDoc);
+        $this->assertStringContainsString('sid       = var.task_execution_secrets_policy_sid', $execPolicyDoc);
         foreach (['EcrAuth', 'EcrPull', 'WriteLogs'] as $sid) {
             $this->assertStringNotContainsString($sid, $execPolicyDoc, "Inline policy statement \"{$sid}\" must no longer exist — those permissions now come from the managed-policy attachment (§9.18).");
         }
@@ -303,10 +306,13 @@ class StagingIamExecutionRoleTrustPolicyTest extends TestCase
 
     public function test_execution_role_manifest_notes_now_say_group_a(): void
     {
+        // Superseded 2026-08-05 (§9.19): the notes now lead with
+        // "IMPORTED 2026-08-05" (the role having since been imported as
+        // its own canary mission), with "Group A" following — so this
+        // checks containment, not a leading anchor.
         $entry = $this->manifestEntry('module.iam.aws_iam_role.task_execution');
-        // "moved here from Group B" is a legitimate historical mention, not
-        // a current classification — the notes must lead with "Group A".
-        $this->assertMatchesRegularExpression('/^Group A\b/', $entry['notes']);
+        $this->assertStringContainsString('Group A', $entry['notes']);
+        $this->assertStringContainsString('IMPORTED 2026-08-05', $entry['notes']);
     }
 
     public function test_new_variables_introduce_no_secret_or_credential(): void

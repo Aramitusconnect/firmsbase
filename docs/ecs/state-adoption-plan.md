@@ -1473,6 +1473,61 @@ compared the inline policy's exact `Resource` list against
 7. No Terraform `plan`, `apply`, `import`, or state mutation ran to
    produce this correction. No AWS or IAM resource changed.
 
+### 9.19 Execution inline-policy Sid aligned with live; all three IAM execution-role resources imported (2026-08-05)
+
+Following §9.18, all three IAM execution-role resources were individually
+imported as separate canary missions:
+
+1. `module.iam.aws_iam_role.task_execution` — imported
+   (`firmsbase-staging-ecs-execution-role`). Role-level config (name, trust
+   policy, description) matched live exactly at import time.
+2. `module.iam.aws_iam_role_policy_attachment.task_execution_managed` —
+   imported (`firmsbase-staging-ecs-execution-role/arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy`).
+   Matched live exactly at import time.
+3. `module.iam.aws_iam_role_policy.task_execution` — imported
+   (`firmsbase-staging-ecs-execution-role:FirmsBaseStagingSecretsAccess`).
+
+**Process finding**: the inline-policy import's own mission instructions
+required a canonical live-vs-Terraform comparison that explicitly covered
+Sid, action, effect, resource, and condition — and required stopping before
+import on any such difference. A Sid difference existed
+(`ReadFirmsBaseStagingSecrets` live vs. `ReadTaskSecrets` in Terraform) but
+was not treated as a stop condition at the time; the import proceeded. The
+import itself only ever writes to Terraform state — it does not call any
+AWS write API — so this did not change, and could not have changed, the live
+IAM policy. A fresh read-only `aws iam get-role-policy` re-verification
+performed at the start of this correction confirmed the live policy is
+exactly as it was before that import: Sid `ReadFirmsBaseStagingSecrets`,
+Effect `Allow`, Action `secretsmanager:GetSecretValue`, the same 4 secret
+ARNs.
+
+**Fixed:**
+
+1. `modules/iam` now takes a new required `task_execution_secrets_policy_sid`
+   input (no default, mirrors `task_execution_policy_name`'s own no-default
+   pattern — a mismatched Sid is a genuine policy-document content
+   difference, not cosmetic to Terraform's own diffing, so a default that
+   didn't match a caller's live Sid would silently plan a content change
+   rather than fail loudly). This staging environment's `terraform.tfvars`
+   sets it to the confirmed live value, `"ReadFirmsBaseStagingSecrets"`.
+2. No action, effect, resource, attachment, or permission changed by this
+   correction — only the statement's Sid label in Terraform's own
+   configuration, which now matches what was already live.
+3. `module.iam.aws_iam_role_policy.task_execution`'s resource address is
+   unchanged; the resource is not re-imported or removed by this
+   correction — only its configuration is corrected to match the state
+   that import already recorded.
+4. All three IAM execution-role resources above are now imported. Their
+   manifest `notes` fields are updated to say so; the inline-policy entry
+   additionally documents the Sid-only mismatch and its correction. No
+   manifest classification changed, since none of the three addresses'
+   classification depended on the Sid.
+5. No Terraform `plan`, `apply`, `import`, or state mutation ran to
+   produce this correction. No AWS or IAM resource changed. Any future
+   plan proposing an action/resource/effect/attachment difference on any
+   of these three resources remains a stop condition requiring separate
+   review.
+
 ## 10. Validation performed (local/static only)
 
 | Check | Result |

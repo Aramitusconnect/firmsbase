@@ -38,6 +38,7 @@ variables {
   task_execution_role_description    = "Execution role for FirmsBase staging ECS tasks"
   task_execution_managed_policy_arn  = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
   task_execution_secret_arns         = ["arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/mock-secret"]
+  task_execution_secrets_policy_sid  = "ReadFirmsBaseStagingSecrets"
   task_execution_kms_decrypt_enabled = false
   kms_key_arn                        = null
   # task_execution_policy_name has no default (see variables.tf) — every

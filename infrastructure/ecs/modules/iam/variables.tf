@@ -53,6 +53,11 @@ variable "task_execution_secret_arns" {
   }
 }
 
+variable "task_execution_secrets_policy_sid" {
+  description = "The Sid of the task-execution role's secrets-read statement. No default, deliberately — mirrors task_execution_policy_name's own no-default pattern above: a mismatched Sid is a genuine policy-document content difference (not cosmetic to Terraform's own diffing), so a default that didn't match a given caller's live Sid would silently plan a content change on the next apply rather than failing loudly. This staging environment's live inline policy's sole statement has Sid \"ReadFirmsBaseStagingSecrets\" (confirmed via aws iam get-role-policy) — a prior import mission wired this module's previous hardcoded \"ReadTaskSecrets\" instead, which never matched live; see docs/ecs/state-adoption-plan.md §9.19."
+  type        = string
+}
+
 variable "task_execution_ssm_parameter_arns" {
   description = "Every SSM Parameter Store ARN the task-execution role's own inline policy must grant ssm:GetParameters on. Default [] omits the statement entirely (this staging environment's live inline policy has none — confirmed via aws iam get-role-policy). Renamed from the module's prior ssm_parameter_arns to make clear this is scoped only to the execution role's own inline policy, distinct from any other role's permissions in this module. See docs/ecs/state-adoption-plan.md §9.18."
   type        = list(string)
