@@ -182,10 +182,10 @@ class AlbTargetGroupAdoptionTest extends TestCase
         // classification (import_then_migrate) and totals-sum invariant are
         // unaffected by that correction.
         $this->assertSame(66, $summary['new']);
-        $this->assertSame(6, $summary['import_unchanged']);
-        $this->assertSame(16, $summary['import_then_migrate']);
+        $this->assertSame(8, $summary['import_unchanged']);
+        $this->assertSame(15, $summary['import_then_migrate']);
         $this->assertSame(6, $summary['do_not_import']);
-        $this->assertSame(94, $summary['total']);
+        $this->assertSame(95, $summary['total']);
     }
 
     public function test_manifest_no_credential_or_secret_value_is_present(): void

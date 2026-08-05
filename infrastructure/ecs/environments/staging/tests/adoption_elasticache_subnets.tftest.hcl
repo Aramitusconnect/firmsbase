@@ -46,6 +46,7 @@ variables {
   app_image_digest                                                 = "603013471426.dkr.ecr.us-east-1.amazonaws.com/firmsbase-staging@sha256:0000000000000000000000000000000000000000000000000000000000000000"
   app_key_secret_arn                                               = "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/app-key-QigVGy"
   db_password_secret_arn                                           = "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/database-app-8NUj2a"
+  db_migrator_secret_arn                                           = "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/database-migrator-TpsE6P"
   redis_auth_token_secret_arn                                      = "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/redis-auth-token-p6rVKN"
   redis_auth_token                                                 = "test-auth-token-not-real"
   alarm_sns_topic_arn                                              = "arn:aws:sns:us-east-1:603013471426:firmsbase-staging-alarms"
@@ -58,6 +59,7 @@ variables {
   iam_task_execution_policy_name                                   = "firmsbase-staging-task-execution"
   aws_account_id                                                   = "603013471426"
   iam_task_execution_role_description                              = "Execution role for FirmsBase staging ECS tasks"
+  iam_task_execution_managed_policy_arn                            = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
 run "elasticache_subnet_ids_defaults_to_private_subnet_ids_for_a_new_environment" {

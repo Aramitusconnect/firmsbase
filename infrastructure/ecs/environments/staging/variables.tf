@@ -91,6 +91,16 @@ variable "db_password_secret_arn" {
   type        = string
 }
 
+variable "db_migrator_secret_arn" {
+  description = "Bare ARN of the database migrator secret — a separate, more-privileged DB credential used only by the migrate task (see module \"migrate\" below), distinct from db_password_secret_arn's regular app-user credential. Previously unmodeled entirely: the task-execution role's inline policy incorrectly granted access to the platform-notifications HMAC-key secret instead (see docs/ecs/state-adoption-plan.md §9.18). This staging environment's live inline policy (FirmsBaseStagingSecretsAccess, confirmed via aws iam get-role-policy) actually grants secretsmanager:GetSecretValue on \"firmsbase/staging/database-migrator-TpsE6P\"."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$", var.db_migrator_secret_arn))
+    error_message = "db_migrator_secret_arn must be a Secrets Manager ARN: arn:aws:secretsmanager:<region>:<12-digit-account-id>:secret:<name>."
+  }
+}
+
 variable "redis_auth_token_secret_arn" {
   description = "Bare ARN of the Redis auth-token secret (a JSON blob with a \"REDIS_PASSWORD\" key — see docs/ecs/staging-variable-inventory.md). Do not append a \":REDIS_PASSWORD::\" selector here; main.tf derives it automatically."
   type        = string
@@ -388,6 +398,16 @@ variable "iam_task_execution_role_name" {
 variable "iam_task_execution_policy_name" {
   description = "The name of the task-execution role's inline policy. No default, deliberately — mirrors modules/iam's own task_execution_policy_name (no default, since aws_iam_role_policy's name is effectively immutable and a wrong default would silently set up a replacement rather than fail loudly). This staging environment's live inline policy is named \"FirmsBaseStagingSecretsAccess\" (confirmed via aws iam get-role-policy), not the module's previous hardcoded \"<name_prefix>-task-execution\" — see docs/ecs/state-adoption-plan.md §9.10/§9.11. Aligns identity only; the policy-content/permission-shape migration referenced above for iam_task_execution_role_name remains a separate decision."
   type        = string
+}
+
+variable "iam_task_execution_managed_policy_arn" {
+  description = "The AWS-managed policy ARN attached to the task-execution role via a separate, non-exclusive aws_iam_role_policy_attachment. No default, deliberately — mirrors iam_task_execution_policy_name's own no-default pattern above. This staging environment's live role has exactly one attached managed policy (confirmed via aws iam list-attached-role-policies): arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy. See docs/ecs/state-adoption-plan.md §9.18."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws:iam::(aws|[0-9]{12}):policy/.+$", var.iam_task_execution_managed_policy_arn))
+    error_message = "iam_task_execution_managed_policy_arn must be a valid IAM policy ARN (AWS-managed or customer-managed)."
+  }
 }
 
 variable "aws_account_id" {

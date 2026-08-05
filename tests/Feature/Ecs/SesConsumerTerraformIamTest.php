@@ -485,23 +485,35 @@ class SesConsumerTerraformIamTest extends TestCase
         }
     }
 
-    public function test_execution_role_hmac_secret_access_is_exact_not_wildcarded(): void
+    public function test_execution_role_secret_access_is_exact_not_wildcarded(): void
     {
+        // Superseded 2026-08-05 (see docs/ecs/state-adoption-plan.md
+        // §9.18): a fresh aws iam get-role-policy re-verification found
+        // live's execution-role inline policy does NOT grant access to
+        // the platform-notifications HMAC-key secret at all — only
+        // app-key, db-password, redis-auth-token, and db-migrator. The
+        // module's secret_arns variable was renamed
+        // task_execution_secret_arns and the HMAC-key ARN was removed
+        // from the staging wiring; adding it back would be a permission
+        // EXPANSION beyond today's live grant (the HMAC secret is still
+        // referenced by not-yet-deployed task definitions — see §9.18
+        // correction 4 — a separate decision for if/when that feature is
+        // actually deployed).
         $iam = $this->iamMain();
 
         preg_match('/sid\s*=\s*"ReadTaskSecrets".*?\n    }\n/s', $iam, $blockMatch);
         $this->assertNotEmpty($blockMatch, 'Could not locate the execution role\'s ReadTaskSecrets statement.');
         $block = $blockMatch[0];
 
-        $this->assertMatchesRegularExpression('/resources\s*=\s*var\.secret_arns/', $block, 'The execution role\'s secret access must be the exact var.secret_arns list, never a wildcard.');
+        $this->assertMatchesRegularExpression('/resources\s*=\s*var\.task_execution_secret_arns/', $block, 'The execution role\'s secret access must be the exact var.task_execution_secret_arns list, never a wildcard.');
         $this->assertStringNotContainsString('"*"', $block);
 
-        // And the HMAC secret ARN variable is actually included in
-        // that list at the call site (main.tf), not just theoretically
-        // supported by the module.
-        preg_match('/secret_arns\s*=\s*\[(.*?)\]/s', $this->stagingMain(), $callSite);
-        $this->assertNotEmpty($callSite, 'Could not locate the secret_arns list passed to module.iam.');
-        $this->assertStringContainsString('var.platform_notifications_recipient_fingerprint_hmac_key_secret_arn', $callSite[1]);
+        // The HMAC secret ARN variable must NOT be included in the
+        // execution role's secret list — live does not grant it.
+        preg_match('/task_execution_secret_arns\s*=\s*\[(.*?)\]/s', $this->stagingMain(), $callSite);
+        $this->assertNotEmpty($callSite, 'Could not locate the task_execution_secret_arns list passed to module.iam.');
+        $this->assertStringNotContainsString('var.platform_notifications_recipient_fingerprint_hmac_key_secret_arn', $callSite[1]);
+        $this->assertStringContainsString('var.db_migrator_secret_arn', $callSite[1]);
     }
 
     private function extractVariableBlock(string $name): string

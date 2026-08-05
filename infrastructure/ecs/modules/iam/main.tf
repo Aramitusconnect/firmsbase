@@ -52,52 +52,46 @@ resource "aws_iam_role" "task_execution" {
   tags               = var.tags
 }
 
+# ECR-pull and CloudWatch Logs delivery — the standard permissions every
+# ECS execution role needs — are supplied by the separately attached
+# AWS-managed policy below, not modeled again here. This attachment is
+# deliberately a per-resource aws_iam_role_policy_attachment (non-exclusive:
+# it only asserts this one attachment exists, never removes any other
+# attachment Terraform doesn't know about) — never
+# aws_iam_role_policy_attachments_exclusive and never managed_policy_arns
+# directly on aws_iam_role, either of which could detach an unrelated
+# attachment on a live role this module doesn't fully enumerate. See
+# docs/ecs/state-adoption-plan.md §9.18.
+resource "aws_iam_role_policy_attachment" "task_execution_managed" {
+  role       = aws_iam_role.task_execution.name
+  policy_arn = var.task_execution_managed_policy_arn
+}
+
+# Secrets-only by design — see task_execution_managed_policy_arn above for
+# why ECR/logs are not modeled here. This module previously bundled
+# EcrAuth/EcrPull/WriteLogs statements into this same inline policy,
+# duplicating what the managed-policy attachment already grants, and
+# included the platform-notifications HMAC-key secret instead of the
+# actual 4th live secret (the migrator DB credential) — see
+# docs/ecs/state-adoption-plan.md §9.18 for the live-verified correction.
 data "aws_iam_policy_document" "task_execution" {
   statement {
-    sid       = "EcrAuth"
-    actions   = ["ecr:GetAuthorizationToken"]
-    resources = ["*"] # GetAuthorizationToken does not support resource-level scoping — this is the one AWS-mandated exception, not a shortcut.
-  }
-
-  statement {
-    sid = "EcrPull"
-    actions = [
-      "ecr:BatchCheckLayerAvailability",
-      "ecr:GetDownloadUrlForLayer",
-      "ecr:BatchGetImage",
-    ]
-    resources = [var.ecr_repository_arn]
-  }
-
-  statement {
-    sid = "WriteLogs"
-    actions = [
-      "logs:CreateLogStream",
-      "logs:PutLogEvents",
-    ]
-    resources = var.log_group_arns
+    sid       = "ReadTaskSecrets"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = var.task_execution_secret_arns
   }
 
   dynamic "statement" {
-    for_each = length(var.secret_arns) > 0 ? [1] : []
-    content {
-      sid       = "ReadTaskSecrets"
-      actions   = ["secretsmanager:GetSecretValue"]
-      resources = var.secret_arns
-    }
-  }
-
-  dynamic "statement" {
-    for_each = length(var.ssm_parameter_arns) > 0 ? [1] : []
+    for_each = length(var.task_execution_ssm_parameter_arns) > 0 ? [1] : []
     content {
       sid       = "ReadTaskParameters"
       actions   = ["ssm:GetParameters"]
-      resources = var.ssm_parameter_arns
+      resources = var.task_execution_ssm_parameter_arns
     }
   }
 
   dynamic "statement" {
-    for_each = var.kms_encryption_enabled ? [1] : []
+    for_each = var.task_execution_kms_decrypt_enabled ? [1] : []
     content {
       sid       = "DecryptSecretsAndParameters"
       actions   = ["kms:Decrypt"]

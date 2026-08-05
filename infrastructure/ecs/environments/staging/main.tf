@@ -89,30 +89,38 @@ resource "aws_cloudwatch_log_group" "app" {
 module "iam" {
   source = "../../modules/iam"
 
-  name_prefix                     = var.name_prefix
-  aws_account_id                  = var.aws_account_id
-  aws_region                      = var.aws_region
-  task_execution_role_name        = var.iam_task_execution_role_name
-  task_execution_role_description = var.iam_task_execution_role_description
-  task_execution_policy_name      = var.iam_task_execution_policy_name
-  ecr_repository_arn              = module.ecr.repository_arn
-  # trimsuffix guards against the aws_cloudwatch_log_group.arn attribute's
-  # trailing ":*" varying by provider version — normalize then re-append so
-  # the IAM policy always ends up with exactly one ":*" (needed for
-  # logs:PutLogEvents to match every stream within the group, not just a
-  # literal-named one).
-  log_group_arns = [for lg in aws_cloudwatch_log_group.app : "${trimsuffix(lg.arn, ":*")}:*"]
+  name_prefix                       = var.name_prefix
+  aws_account_id                    = var.aws_account_id
+  aws_region                        = var.aws_region
+  task_execution_role_name          = var.iam_task_execution_role_name
+  task_execution_role_description   = var.iam_task_execution_role_description
+  task_execution_policy_name        = var.iam_task_execution_policy_name
+  task_execution_managed_policy_arn = var.iam_task_execution_managed_policy_arn
 
   # Bare ARNs only — never a ":<json-key>::" selector. IAM's
   # secretsmanager:GetSecretValue grant applies to the whole secret; the
   # JSON-key selector ECS needs is derived separately, only for the
   # `secrets` valueFrom entries below (local.shared_secrets/local.hmac_secret).
-  secret_arns = [
+  # Exactly the 4 secrets the live inline policy grants (confirmed via aws
+  # iam get-role-policy, see docs/ecs/state-adoption-plan.md §9.18) — the
+  # platform-notifications HMAC-key secret is deliberately NOT included
+  # here; it is delivered to task definitions separately (see
+  # local.hmac_secret below) and is not part of the live execution-role
+  # grant.
+  task_execution_secret_arns = [
     var.app_key_secret_arn,
     var.db_password_secret_arn,
     var.redis_auth_token_secret_arn,
-    var.platform_notifications_recipient_fingerprint_hmac_key_secret_arn,
+    var.db_migrator_secret_arn,
   ]
+
+  # Both empty/false — this staging environment's live inline policy has
+  # no SSM or KMS statement at all (confirmed via aws iam get-role-policy,
+  # see docs/ecs/state-adoption-plan.md §9.18). Independent from
+  # kms_encryption_enabled below, which is unrelated (S3-document task
+  # roles only).
+  task_execution_ssm_parameter_arns  = []
+  task_execution_kms_decrypt_enabled = false
 
   # Literal true — this environment always provisions module.kms/
   # module.s3_documents; never derived from whether their outputs are null
@@ -186,8 +194,9 @@ locals {
 
   # Each live secret is a JSON blob with multiple keys — ECS's `secrets`
   # `valueFrom` needs the exact ":<json-key>::" selector appended, while
-  # module.iam's secret_arns list (below) must keep receiving the bare ARN
-  # unchanged, since an IAM secretsmanager:GetSecretValue Resource entry is
+  # module.iam's task_execution_secret_arns list (below) must keep
+  # receiving the bare ARN unchanged, since an IAM
+  # secretsmanager:GetSecretValue Resource entry is
   # scoped to the whole secret and must never carry a JSON-key selector
   # suffix. Deriving the selector here (rather than asking the operator to
   # supply two separately-formatted values for the same secret) means

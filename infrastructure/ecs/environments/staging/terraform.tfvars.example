@@ -44,6 +44,11 @@ app_image_digest = "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/firmsbase-app@sha
 app_key_secret_arn          = "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:firmsbase/staging/app-key-REPLACE_ME"
 db_password_secret_arn       = "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:firmsbase/staging/db-password-REPLACE_ME"
 redis_auth_token_secret_arn   = "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:firmsbase/staging/redis-auth-token-REPLACE_ME"
+# The migrate task's dedicated, more-privileged DB credential — distinct
+# from db_password_secret_arn's regular app-user credential. Live value
+# confirmed via aws iam get-role-policy (the task-execution role's own
+# inline policy grants secretsmanager:GetSecretValue on this exact ARN).
+db_migrator_secret_arn      = "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/database-migrator-TpsE6P"
 # redis_auth_token: do NOT put the real value here — pass via
 # `-var="redis_auth_token=$(aws secretsmanager get-secret-value ...)"` at
 # plan/apply time instead.
@@ -147,12 +152,15 @@ iam_task_execution_role_name  = "firmsbase-staging-ecs-execution-role"
 # from what this module previously hardcoded
 # ("${name_prefix}-task-execution") — aws_iam_role_policy's name is
 # effectively immutable, so this must be set correctly before import, never
-# used to rename the live policy. This aligns identity only — the live
-# policy's actual permission content (managed-policy + narrow-inline) still
-# differs from this module's declared content (one broader custom inline
-# policy); that is a separate, still-pending, explicitly reviewed decision —
-# see docs/ecs/state-adoption-plan.md §11 item 3 and §9.10/§9.11.
+# used to rename the live policy. As of §9.18, this module's inline-policy
+# CONTENT is also aligned to live's exact secrets-only shape — see
+# docs/ecs/state-adoption-plan.md §9.18.
 iam_task_execution_policy_name = "FirmsBaseStagingSecretsAccess"
+
+# Live's sole attached managed policy (confirmed via aws iam
+# list-attached-role-policies) — modeled as a separate, non-exclusive
+# aws_iam_role_policy_attachment. See docs/ecs/state-adoption-plan.md §9.18.
+iam_task_execution_managed_policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 
 # Both live ECS roles (firmsbase-staging-ecs-execution-role AND
 # firmsbase-staging-ecs-task-role) carry identical aws:SourceAccount /
