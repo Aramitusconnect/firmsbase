@@ -107,7 +107,7 @@ class StagingAppUrlTest extends TestCase
     {
         $main = $this->stagingMain();
 
-        foreach (['web', 'worker', 'critical_worker', 'scheduler', 'migrate', 'maintenance', 'ses_consumer'] as $role) {
+        foreach (['web', 'worker', 'critical_worker', 'scheduler', 'maintenance', 'ses_consumer'] as $role) {
             preg_match('/module "'.$role.'" \{.*?\n}/s', $main, $block);
             $this->assertNotEmpty($block, "Could not locate module \"{$role}\" block.");
             $this->assertMatchesRegularExpression(
@@ -116,6 +116,28 @@ class StagingAppUrlTest extends TestCase
                 "module \"{$role}\" must consume local.shared_environment (directly or via merge()) so it receives APP_URL — no role is exempt."
             );
         }
+
+        // migrate is a special case (see docs/ecs/state-adoption-plan.md
+        // §9.23): it consumes local.migrate_environment, not
+        // local.shared_environment directly. migrate_environment is itself
+        // a filtered `for` copy of shared_environment (excluding only the
+        // four DB_* keys that move to migrate_secrets), so APP_URL still
+        // flows through — no role, including migrate, is exempt from it.
+        preg_match('/module "migrate" \{.*?\n}/s', $main, $migrateBlock);
+        $this->assertNotEmpty($migrateBlock, 'Could not locate module "migrate" block.');
+        $this->assertMatchesRegularExpression(
+            '/environment\s*=\s*local\.migrate_environment/',
+            $migrateBlock[0],
+            'module "migrate" must consume local.migrate_environment.'
+        );
+
+        preg_match('/migrate_environment\s*=\s*\{(.*?)\n  \}/s', $main, $migrateEnvLocal);
+        $this->assertNotEmpty($migrateEnvLocal, 'Could not locate local.migrate_environment.');
+        $this->assertMatchesRegularExpression(
+            '/for\s+k,\s*v\s+in\s+local\.shared_environment\s*:/',
+            $migrateEnvLocal[1],
+            'local.migrate_environment must derive from local.shared_environment (via a for expression) so APP_URL still flows through.'
+        );
     }
 
     // ------------------------------------------------------------

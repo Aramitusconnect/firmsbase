@@ -11,9 +11,9 @@ use Tests\TestCase;
  * docs/ecs/state-adoption-plan.md §9.22): the live FirmsVaultStagingSesSend
  * policy's now-confirmed content, the corrected SES resource-scoping
  * conclusion, the seven-role IAM permission matrix, and the migrate
- * secret-wiring gap left deliberately unfixed pending administrator input —
- * against the real, committed files only, never a live AWS/Terraform call
- * (fully deterministic, no credentials needed).
+ * secret-wiring gap found during this audit and resolved in a later pass
+ * (§9.23) — against the real, committed files only, never a live
+ * AWS/Terraform call (fully deterministic, no credentials needed).
  */
 class StagingSharedTaskRolePolicyAuditTest extends TestCase
 {
@@ -279,31 +279,29 @@ class StagingSharedTaskRolePolicyAuditTest extends TestCase
         $this->assertDoesNotMatchRegularExpression('/"\*"/', $arns, 'No wildcard secret ARN may appear in task_execution_secret_arns.');
     }
 
-    public function test_migrate_secret_wiring_gap_is_documented_and_left_unfixed(): void
+    public function test_migrate_secret_wiring_gap_was_found_here_and_resolved_in_a_later_pass(): void
     {
-        // Evidence-backed finding from the audit: module.migrate's secrets
-        // map is still local.shared_secrets (the regular app-user DB
-        // credential), not a migrate-specific map referencing
-        // var.db_migrator_secret_arn — deliberately NOT guessed/fixed in
-        // this pass since the migrator secret's JSON key shape is
-        // unverifiable without retrieving its value.
-        $staging = $this->stagingMain();
-        $migrateBlock = $this->extractModuleBlock($staging, 'migrate');
-
-        $this->assertMatchesRegularExpression('/secrets\s*=\s*local\.shared_secrets/', $migrateBlock);
-
-        $this->assertSame(
-            1,
-            preg_match_all('/db_migrator_secret_arn/', $staging),
-            'var.db_migrator_secret_arn must appear exactly once in main.tf (the execution-role read grant) until an administrator confirms the secret\'s JSON key shape and this is deliberately corrected.'
-        );
-
+        // Superseded 2026-08-06 (§9.23): the gap this test originally
+        // proved was "documented and left unfixed" (module.migrate on
+        // local.shared_secrets, no evidence yet for the migrator secret's
+        // JSON key shape) is now resolved with cross-validated evidence —
+        // see StagingMigrateSecretWiringTest.php for the full proof that
+        // module.migrate now uses local.migrate_secrets correctly. This
+        // test now only confirms §9.22's original finding is still
+        // recorded as historical narrative (audit trail), and that §9.22
+        // itself points forward to §9.23 for the resolution — it no
+        // longer asserts the live .tf config is unfixed, since that
+        // would now be false.
         $doc = $this->stateAdoptionPlan();
-        $section = $this->extractSection($doc, '### 9\.22', '## 10\.');
+        $section = $this->extractSection($doc, '### 9\.22', '### 9\.23');
+
         $this->assertMatchesRegularExpression('/required configuration correction/i', $section);
         $this->assertMatchesRegularExpression('/db_migrator_secret_arn/', $section);
-        $this->assertMatchesRegularExpression('/not fixed in this pass|Not fixed in this pass/', $section);
-        $this->assertMatchesRegularExpression('/administrator/i', $section);
+        $this->assertMatchesRegularExpression('/RESOLVED 2026-08-06.{0,20}§9\.23/is', $section);
+
+        $staging = $this->stagingMain();
+        $migrateBlock = $this->extractModuleBlock($staging, 'migrate');
+        $this->assertMatchesRegularExpression('/secrets\s*=\s*local\.migrate_secrets/', $migrateBlock, 'module.migrate must now use its dedicated secrets map — see §9.23.');
     }
 
     public function test_db_username_is_a_shared_hardcoded_literal_not_migrate_specific(): void
@@ -311,9 +309,29 @@ class StagingSharedTaskRolePolicyAuditTest extends TestCase
         $staging = $this->stagingMain();
         $this->assertMatchesRegularExpression('/DB_USERNAME\s*=\s*"firmsbase_app"/', $staging);
 
-        // Only one shared_environment local should define DB_USERNAME —
-        // migrate does not override it.
-        $this->assertSame(1, preg_match_all('/DB_USERNAME\s*=/', $staging));
+        // shared_environment must define exactly one hardcoded DB_USERNAME
+        // literal ("firmsbase_app"), used by web/worker/critical_worker/
+        // scheduler/maintenance. Since §9.23's correction, migrate carries
+        // its own second DB_USERNAME entry inside local.migrate_secrets —
+        // sourced from the dedicated database-migrator secret selector, not
+        // a hardcoded literal — so the total across the file is now 2.
+        $this->assertSame(2, preg_match_all('/DB_USERNAME\s*=/', $staging));
+
+        preg_match('/shared_environment\s*=\s*\{(.*?)\n  \}/s', $staging, $sharedMatches);
+        $this->assertNotEmpty($sharedMatches, 'Could not isolate the shared_environment map body.');
+        $this->assertSame(
+            1,
+            preg_match_all('/DB_USERNAME\s*=/', $sharedMatches[1]),
+            'shared_environment must define DB_USERNAME exactly once, as the hardcoded "firmsbase_app" literal.'
+        );
+
+        preg_match('/migrate_secrets\s*=\s*\{(.*?)\n  \}/s', $staging, $migrateMatches);
+        $this->assertNotEmpty($migrateMatches, 'Could not isolate the migrate_secrets map body.');
+        $this->assertMatchesRegularExpression(
+            '/DB_USERNAME\s*=\s*"\$\{var\.db_migrator_secret_arn\}:username::"/',
+            $migrateMatches[1],
+            'migrate_secrets must source DB_USERNAME from the dedicated migrator secret selector, not a hardcoded literal.'
+        );
     }
 
     // ------------------------------------------------------------

@@ -575,6 +575,27 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
     state-adoption-plan.md §9.22 for the complete seven-role permission
     matrix, seven-task-definition matrix, secret-separation findings, and
     log-group validation.
+17. **Migrate task secret-wiring defect corrected (2026-08-06, see
+    [state-adoption-plan.md §9.23](state-adoption-plan.md))**: resolves
+    the gap item 16 (§9.22) found and deliberately left unfixed —
+    `module.migrate`'s `secrets` map still resolving `DB_PASSWORD` from
+    the regular database-app secret instead of the dedicated
+    database-migrator secret. Cross-validated evidence (the checked-in
+    `staging-deploy/firmsbase-staging-migrate.json` historical task
+    definition, plus a live, read-only `aws ecs describe-task-definition
+    firmsbase-staging-migrate:6` returning a byte-for-byte identical
+    `secrets` array) proves all five `DB_HOST`/`DB_PORT`/`DB_DATABASE`/
+    `DB_USERNAME`/`DB_PASSWORD` fields source from
+    `database-migrator-TpsE6P` with `host`/`port`/`dbname`/`username`/
+    `password` selectors — no secret value was ever retrieved; the schema
+    was fully proven before that step was needed. `module.migrate` now
+    uses dedicated `local.migrate_secrets`/`local.migrate_environment`
+    locals; every other role (`web`/`worker`/`critical_worker`/
+    `scheduler`/`maintenance`/`ses_consumer`) is unchanged. The
+    execution role's existing `db_migrator_secret_arn` read grant
+    (already present since §9.18) required no change — it was correct
+    but unused until now. `maintenance` remains the first canary;
+    `migrate` remains excluded (real schema-migration side effects).
 15. **Effective-tag fix and corrected two-axis import-readiness model
     (2026-08-05, see
     [state-adoption-plan.md §9.21](state-adoption-plan.md))**: this

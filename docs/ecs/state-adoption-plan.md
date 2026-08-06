@@ -2020,7 +2020,102 @@ schema`, `state show`, `state pull`, or state mutation ran. Files edited:
 this document, `staging-variable-inventory.md`, `import-manifest.json`,
 and test files — no `.tf` file was modified (the one identified
 configuration gap was deliberately left unfixed pending administrator
-input, per item 5 above).
+input, per item 5 above). **RESOLVED 2026-08-06 (§9.23): sufficient
+evidence to fix this correctly (without guessing) was found and
+cross-validated — see §9.23.**
+
+### 9.23 Migrate task secret-wiring defect corrected (2026-08-06)
+
+Resolves the gap §9.22 item 5 identified and deliberately left unfixed
+(module.migrate's `secrets` map still resolving `DB_PASSWORD` from the
+regular database-app secret instead of the dedicated, more-privileged
+database-migrator secret). This time the exact JSON selector schema was
+established from evidence — no guessing, no secret-value retrieval.
+
+**Evidence used (in the order applied):**
+
+1. **Repository evidence**: `staging-deploy/firmsbase-staging-migrate.json`
+   — a checked-in historical task-definition JSON — shows the migrate
+   container's `secrets` array sourcing `DB_HOST`, `DB_PORT`,
+   `DB_DATABASE`, `DB_USERNAME`, and `DB_PASSWORD` **all five** from
+   `arn:...secret:firmsbase/staging/database-migrator-TpsE6P` with
+   selectors `:host::`, `:port::`, `:dbname::`, `:username::`,
+   `:password::` respectively (`APP_KEY` and `REDIS_PASSWORD` unchanged
+   from the shared pattern). Its `environment` array has **no**
+   `DB_HOST`/`DB_PORT`/`DB_DATABASE`/`DB_USERNAME` entries at all — only
+   `DB_CONNECTION`/`DB_SSLMODE` remain plain.
+2. **Historical ECS task-definition evidence (live, read-only)**:
+   `aws ecs list-task-definitions --family-prefix firmsbase-staging-migrate`
+   confirms a real family with 6 revisions; `aws ecs describe-task-definition
+   firmsbase-staging-migrate:6` (secret selector ARNs, container name,
+   command, roles, CPU/memory, log config only — no ordinary env-var
+   values beyond what's already non-sensitive) returned a `secrets` array
+   byte-for-byte identical to the repository JSON. Family, revision, CPU
+   512/memory 1024, `taskRoleArn`/`executionRoleArn` (both shared roles,
+   matching this environment's other workloads), container name `app`,
+   command `["migrate"]`, and log config
+   (`/ecs/firmsbase-staging/app`, stream-prefix `migrate`) all
+   cross-validate cleanly against the repo file.
+3. Cross-checking `staging-deploy/firmsbase-staging-maintenance.json` (and
+   scheduler/web/critical-worker/worker) confirms **only** the migrate
+   JSON references `database-migrator` — every other role's historical
+   task definition uses `database-app-8NUj2a` with the identical key
+   shape (`host`/`port`/`dbname`/`username`/`password`), just a different
+   secret ARN. This independently confirms no other workload — including
+   `maintenance` and the not-yet-live `ses_consumer` (no historical file
+   exists for it at all) — was ever wired to the migrator secret.
+
+Evidence order stopped at step 2 (repository + live cross-validation).
+**No `describe-secret` call and no key-only `SecretString` inspection
+were needed or performed** — the schema was already fully and
+unambiguously proven by two independent, consistent sources before
+reaching that step. No secret value was retrieved, printed, saved, or
+compared at any point.
+
+**Resolved wiring (Option A confirmed by evidence — not Option B, not
+guessed)**: `module.migrate` now uses two new locals,
+`local.migrate_secrets` (7 keys: `APP_KEY`, `DB_HOST`, `DB_PORT`,
+`DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` — all five DB fields from
+`var.db_migrator_secret_arn` with the exact selectors above —
+`REDIS_PASSWORD`) and `local.migrate_environment` (`local.shared_environment`
+minus the four now-secret-sourced `DB_HOST`/`DB_PORT`/`DB_DATABASE`/
+`DB_USERNAME` keys, to avoid ECS rejecting a task definition that
+declares the same env-var name in both `environment` and `secrets`;
+`DB_CONNECTION`/`DB_SSLMODE` remain plain, matching the historical
+task's own environment array exactly). `web`, `worker`, `critical_worker`,
+`scheduler`, `maintenance`, and `ses_consumer` are entirely unchanged —
+all still reference `local.shared_environment`/`local.shared_secrets`
+(plus their own already-existing role-specific additions) exactly as
+before.
+
+The execution role's `secretsmanager:GetSecretValue` grant on
+`var.db_migrator_secret_arn` (added during the IAM policy-alignment pass,
+§9.18) required no change — it was already correctly scoped to the exact
+secret ARN; it was simply unused by any task definition's `secrets` map
+until now. No IAM permission was broadened, added, or removed.
+
+**Confirmation of Phase 4 requirements**: migrate now authenticates with
+the dedicated migrator identity (evidence-proven, not asserted);
+web/worker/critical_worker/scheduler continue on database-app
+(unchanged); no normal workload receives the migrator secret; maintenance
+receives no migrator secret (confirmed — its historical JSON uses
+database-app, matching every other non-migrate role); ses_consumer
+receives no database-migrator secret (no historical evidence exists
+suggesting otherwise, and its `secrets` map is untouched); execution-role
+secret access remains exactly the same 4 ARNs, no wildcard.
+
+`maintenance` remains the selected first deployment canary (§9.22 item
+7, unchanged). `migrate` remains excluded from the first canary — it
+still has real, hard-to-reverse schema-migration side effects unrelated
+to what a canary should validate, independent of this secret-wiring fix
+being correct.
+
+No AWS, ECS, IAM, or live secret value was changed, read, or exposed to
+produce this section. No Terraform `plan`, `apply`, `import`, `refresh`,
+`providers schema`, `state show`, `state pull`, or state mutation ran.
+Files edited: `infrastructure/ecs/environments/staging/main.tf`, this
+document, `staging-variable-inventory.md`, `import-manifest.json`, and
+test files.
 
 ## 10. Validation performed (local/static only)
 
