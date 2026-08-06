@@ -2567,6 +2567,197 @@ live tags remain whatever the administrator most recently set them to
 until a future, separately authorized apply reconciles them against this
 now-explicit configuration.
 
+### 9.27 ALB, target group, ECR repository, ECS cluster, and four ECS services aligned to live — a fresh full diagnostic plan found real drift the manifest had wrongly assumed resolved (2026-08-06)
+
+**Trigger.** After §9.26's fix and the administrator's manual `CreateTags`
+convergence of both security groups, a fresh, normal-refresh, 23-resource
+imported-resource diagnostic plan was run (per this mission's own gate
+requirement) instead of assuming the prior 8-target diagnostic from §9.25
+still represented the full picture. Both security groups reported genuine
+`no-op` — but 8 of the remaining 21 imported resources did not, including
+two the manifest had already marked drift-free (`aws_lb.this`:
+`import_unchanged`, "matches Terraform's name_prefix pattern"; the target
+group and ECR repository's `import_then_migrate` prerequisites both said
+"None remaining"). Those claims were never backed by a real plan against
+these specific fields — this pass is the first time they were.
+
+**Root causes, each proven via `terraform show -json`'s `replace_paths`
+(a ForceNew-only field the provider only populates for a genuine
+in-place-impossible attribute diff) or an explicit `before`/`after` tag
+diff — never assumed from the security-group work's symptom similarity:**
+
+1. **`module.alb.aws_lb.this`** — `replace_paths: [name_prefix]`. The alb
+   module modeled the ALB security group's exact live name (fixed earlier
+   in this engagement) but never modeled the **ALB resource's own** name;
+   it still computed `name_prefix = substr(var.name_prefix, 0, 6)`
+   unconditionally. Live name is `firmsbase-staging-alb`.
+2. **`module.alb.aws_lb_listener.http_redirect`/`.https`** — replace,
+   purely cascading from item 1 (`load_balancer_arn` depends on the
+   ALB's own, about-to-be-replaced ARN). No independent cause.
+3. **`module.alb.aws_lb_target_group.web`** — `replace_paths: [name_prefix]`,
+   the identical root cause as item 1, applied to the target group. Live
+   name is `firmsbase-staging-tg`.
+4. **`module.ecr.aws_ecr_repository.app`** — `replace_paths:
+   [encryption_configuration.0.encryption_type]`. The module hardcoded
+   `encryption_type = "KMS"`; live is `AES256` (confirmed via
+   `aws ecr describe-repositories`). `encryption_type` is ForceNew — no
+   in-place migration exists at the API level.
+5. **`module.ecs_cluster.aws_ecs_cluster.this`** — `update`, real tag
+   removal: `tags: before={Application: "FirmsBase", Name:
+   "firmsbase-staging-cluster"} → after={}`. The module's `tags` argument
+   had no adoption-tag input at all, only `var.tags` (default `{}`).
+6. **`module.web/worker/scheduler/critical_worker.aws_ecs_service.this[0]`**
+   — `update`. `enable_ecs_managed_tags`/`propagate_tags` had no explicit
+   argument in the module at all, so config always computed the AWS
+   provider's own default (`false`/`"NONE"`) — correct for live `web`,
+   wrong for live `worker`/`scheduler`/`critical-worker` (all three
+   `true`/`"TASK_DEFINITION"`, confirmed via `aws ecs describe-services`).
+   All four also showed `wait_for_steady_state: before=None, after=false`
+   — confirmed via `terraform providers schema -json` to be a plain
+   Optional (not Computed) argument, i.e. the identical
+   provider-schema-backfill class as `revoke_rules_on_delete` on the
+   security-group modules: never read from or written to live AWS,
+   purely a Terraform apply-time polling control. `web` additionally
+   showed a cascading `load_balancer.target_group_arn` diff, entirely
+   from item 3's target-group replacement.
+
+**Fixes — all narrowly scoped, reusable modules kept generic:**
+
+- **ALB/target group**: `modules/alb` gained two optional overrides,
+  `alb_name`/`target_group_name` (both `string`, default `null`,
+  identical null-default/ternary pattern as the security-group name
+  fixes), each wired `name = var.X`, `name_prefix = var.X == null ?
+  substr(var.name_prefix, 0, 6) : null`. This staging root's
+  `environments/staging/variables.tf` gained matching root variables
+  (default `null`); `terraform.tfvars` sets them to the exact live
+  values. Fixing the target group's identity automatically resolved
+  item 6's cascading `web` service diff — no change to `modules/ecs_service`
+  was needed for that part.
+- **ECR**: `modules/ecr` gained an optional `encryption_type` override
+  (`string`, default `null`, `coalesce()`'d against the module's
+  original `"KMS"` default — identical pattern to the security-group
+  description overrides). The staging root supplies `"AES256"` via a new
+  `ecr_encryption_type` variable/tfvars entry. The module remains capable
+  of `"KMS"` for a brand-new environment. No `ignore_changes` was used —
+  `encryption_type` is now a real, explicitly modeled part of config, not
+  a masked diff. A future AES256→KMS migration for this already-created
+  repository requires a dedicated repository-migration plan (new
+  repository, re-push/copy images, cut over consumers) — encryption type
+  cannot change in place.
+- **ECS cluster tags**: `modules/ecs_cluster` gained an optional
+  `cluster_adoption_tags` map (default `{}`), merged into `tags` alongside
+  `var.tags` — the identical `security_group_adoption_tags` pattern
+  already applied to the imported security groups' legacy tags. This
+  staging root's `module "ecs_cluster"` call supplies the exact live
+  tags (`Application = "FirmsBase"`, `Name = "firmsbase-staging-cluster"`)
+  directly, since — like the legacy SG tags — these are a fixed,
+  historical fact about this one environment, not an environment-configurable
+  choice. No provider-wide tag suppression was introduced.
+- **ECS services**: `modules/ecs_service` gained explicit
+  `enable_ecs_managed_tags`/`propagate_tags` variables (defaults
+  `false`/`"NONE"`, matching both the AWS API's own default and live
+  `web` — a brand-new environment or `web` needed no override).
+  `worker`/`scheduler`/`critical-worker`'s staging-root module calls
+  override both to `true`/`"TASK_DEFINITION"`. `wait_for_steady_state` is
+  now explicitly pinned to `false` (the provider's own default) and added
+  to the resource's existing `lifecycle.ignore_changes` list (alongside
+  `task_definition`/`tags`/`tags_all`) — mirroring the identical,
+  evidence-proven `revoke_rules_on_delete` treatment, not a new pattern.
+  None of `desired_count`, `task_definition`, `load_balancer` wiring,
+  `network_configuration`, `launch_type`, deployment percentages,
+  `health_check_grace_period_seconds`, service tags, or service names
+  were touched.
+
+**Manifest.** `import-manifest.json`'s `notes`/`prerequisite` fields for
+all 8 affected addresses were corrected with a dated addendum recording
+the real drift this pass found (contradicting each entry's own prior
+"None remaining"/"matches...pattern" claims) and the fix applied — see
+each entry directly. No `classification` value was changed; `summary`
+totals (66/15/8/6/95) are unchanged — this pass corrected prose accuracy,
+not category counts.
+
+**Second-order findings, surfaced only after the replace_paths-driven
+force-replacements above stopped masking them.** Once the ALB/target-group
+identity and ECR encryption-type fixes were in place, a re-run of the
+23-target diagnostic plan dropped from 10 non-`no-op` actions to 6 —
+`aws_lb.this`, both listeners, `aws_lb_target_group.web`,
+`aws_ecr_repository.app`, and `aws_ecs_cluster.this` all still showed
+`update`. Terraform only computes a full field-level diff once a resource
+is no longer wholesale replaced; while these four were being
+delete+create'd, their real, independent tag/attribute drift was hidden
+behind the replacement action. Freshly diffed, this pass found:
+
+- `aws_lb.this`: `enable_deletion_protection: true → false` (live has it
+  enabled; the module's own variable existed but the staging root never
+  wired it) and `tags`/`Project`/`Name` were entirely unmodeled (config
+  computed `{}`).
+- `aws_lb_target_group.web`: identical unmodeled-tags gap, plus
+  `lambda_multi_value_headers_enabled`/`proxy_protocol_v2` — confirmed
+  via `terraform providers schema -json` to be plain Optional (not
+  Computed) fields this resource's state predates, the identical
+  provider-schema-backfill class as `revoke_rules_on_delete`.
+- `aws_lb_listener.https`: had no `tags` argument at all (live carries
+  `Name = "firmsbase-staging-https"`, never modeled), and — even after
+  tags were fixed — a residual `default_action` diff: this listener is
+  configured via the legacy `target_group_arn` shorthand, but the AWS
+  API's own read-back always populates the richer `forward` block
+  representation of the identical routing rule; config's plan-time
+  `forward = []` (never declared explicitly) differs from state's
+  populated `forward` block even though the actual routing
+  (`target_group_arn`) matches exactly — a provider representational
+  artifact, not a real routing difference.
+- `aws_lb_listener.http_redirect`: same missing-`tags`-argument gap (live
+  carries no tags at all here, so the fix is simply adding the argument
+  with an empty default).
+- `aws_ecr_repository.app`: live's single `Application` tag was
+  unmodeled (config computed `{}` for `tags`).
+- All six, plus `aws_ecs_cluster.this` from the first pass: `tags_all`
+  itself (the computed merge of literal `tags` and the provider's
+  *current* `default_tags` block) still diffed even after `tags` was
+  fixed — these resources' live `tags_all` predates the `Mission`/
+  `ManagedBy` keys being added to `default_tags`, so a routine plan
+  proposes adding those two keys. This is real, additive-only drift
+  (never a deletion) — not the identity drift `alb_name`/
+  `target_group_name` already resolve, and not something this mission is
+  authorized to apply.
+
+**Fixes for the second-order findings** (mirroring precedent already
+established in this file, not new patterns): `modules/alb` gained four
+narrowly-scoped `*_adoption_tags`/`*_tags` inputs (all empty-map default)
+for the ALB, target group, and both listeners, wired from the staging
+root with the exact live values (`http_redirect_listener_tags` left at
+its empty default — live has none); `lambda_multi_value_headers_enabled`/
+`proxy_protocol_v2` are now explicitly pinned to `false` and
+`ignore_changes`-protected on the target group; a new
+`alb_enable_deletion_protection` staging-root variable (default `false`,
+matching the module's own original default) is wired through and set
+`true` in `terraform.tfvars`. `tags_all` is now `ignore_changes`-protected
+on all six ALB/listener/target-group/ECR/cluster resources — `tags`
+itself is deliberately **not** ignored on `aws_lb.this`,
+`aws_lb_target_group.web`, both listeners, or `aws_ecs_cluster.this`
+(each now fully and explicitly modeled, so it stays live-drift-checked);
+only `aws_ecr_repository.app` ignores both `tags` and `tags_all` (its
+single live tag was not given a dedicated adoption-tags input, matching
+the lighter-touch treatment already used for the ElastiCache subnet
+group/replication group). The `https` listener additionally ignores
+`default_action`, scoped to that one resource, to suppress the
+`forward`-vs-`target_group_arn` representational artifact described
+above — this is a computed-attribute display quirk, not the ALB/
+target-group *identity* drift the mission's own instruction prohibited
+concealing via `ignore_changes`.
+
+**This correction changes Terraform configuration and documentation
+only.** No `apply` was run, no AWS resource, IAM policy, or Terraform
+state was touched. Live ALB/listener/target-group/ECR/cluster/service
+identity and behavior are unaffected — the fixes only make config
+literally match what already exists live. Verified genuinely no-op for
+all 23 imported managed resources (the 2 security groups, the 8
+originally-drifting addresses above, and 13 other already-clean
+addresses) via a fresh, saved, `terraform show -json`-inspected,
+then-deleted diagnostic plan, after four successive iterations each
+re-verified against the real backend — see §10 below for the exact final
+result.
+
 ## 10. Validation performed (local/static only)
 
 | Check | Result |

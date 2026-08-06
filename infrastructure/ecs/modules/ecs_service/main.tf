@@ -117,6 +117,34 @@ resource "aws_ecs_service" "this" {
   # considers them steady; other roles have no load balancer to wait on.
   health_check_grace_period_seconds = var.attach_target_group ? 60 : null
 
+  # enable_ecs_managed_tags/propagate_tags: real, live-tracked AWS
+  # attributes (confirmed via the installed provider's own schema — both
+  # Optional, not Computed — and via aws ecs describe-services, which
+  # returns them directly). No default previously set explicitly here
+  # (the AWS API default is enableECSManagedTags=false/propagateTags=NONE,
+  # matching this staging environment's own live "web" service); the other
+  # three live services (worker/scheduler/critical-worker) were configured
+  # with enableECSManagedTags=true/propagateTags=TASK_DEFINITION by an
+  # earlier, non-Terraform process, so every caller must decide explicitly
+  # via var.enable_ecs_managed_tags/var.propagate_tags rather than silently
+  # inheriting a value that may not match the live service being adopted.
+  # See docs/ecs/state-adoption-plan.md.
+  enable_ecs_managed_tags = var.enable_ecs_managed_tags
+  propagate_tags          = var.propagate_tags
+
+  # wait_for_steady_state: confirmed via the installed AWS provider's own
+  # schema to be a plain Optional argument (not Computed) — the ECS API has
+  # no concept of "wait for steady state" at all; it purely controls this
+  # provider's own apply-time polling behavior and is never read from or
+  # written to live AWS. This already-imported resource's state predates
+  # this schema field entirely, so even with the exact same value
+  # explicitly configured (false, the provider's own default, above), a
+  # plan still proposes "adding" it once — a one-time, harmless
+  # state-bookkeeping backfill, not a live mutation. Mirrors the identical,
+  # evidence-proven revoke_rules_on_delete pattern already applied to the
+  # security-group modules. See docs/ecs/state-adoption-plan.md.
+  wait_for_steady_state = false
+
   tags = var.tags
 
   # tags/tags_all: this environment's AWS provider default_tags (Project,
@@ -136,6 +164,7 @@ resource "aws_ecs_service" "this" {
       task_definition, # deploys update this via the CI/CD pipeline (see docs/ecs/env.ecs.example and .github/workflows/ecs-pipeline.yml), not via `terraform apply` re-running with a stale local image reference
       tags,
       tags_all,
+      wait_for_steady_state, # see rationale above — Terraform-side-only, never read from live AWS
     ]
   }
 }

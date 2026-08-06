@@ -38,6 +38,7 @@ module "kms" {
 module "ecr" {
   source          = "../../modules/ecr"
   repository_name = local.ecr_repository_name
+  encryption_type = var.ecr_encryption_type
 }
 
 module "security_groups" {
@@ -108,6 +109,16 @@ module "ecs_cluster" {
   capacity_providers         = var.ecs_capacity_providers
   default_capacity_provider  = var.ecs_default_capacity_provider
   container_insights_enabled = var.ecs_container_insights_enabled
+
+  # This staging environment's live cluster carries tags that predate
+  # Terraform adoption (confirmed via aws ecs describe-clusters) — a
+  # fixed, historical fact about this one environment, not a reusable
+  # module default, so it's supplied here rather than hardcoded in
+  # modules/ecs_cluster. See docs/ecs/state-adoption-plan.md.
+  cluster_adoption_tags = {
+    Application = "FirmsBase"
+    Name        = "firmsbase-staging-cluster"
+  }
 }
 
 resource "aws_cloudwatch_log_group" "app" {
@@ -179,9 +190,35 @@ module "alb" {
   security_group_id   = module.security_groups.alb_security_group_id
   acm_certificate_arn = var.acm_certificate_arn
 
+  alb_name          = var.alb_name
+  target_group_name = var.alb_target_group_name
+
+  # This staging environment's live ALB has deletion protection enabled
+  # (confirmed via aws elbv2 describe-load-balancer-attributes) — the
+  # module's own default (false) is fine for a brand-new environment.
+  enable_deletion_protection = var.alb_enable_deletion_protection
+
   readiness_health_check_path   = var.alb_health_check_path
   health_check_interval_seconds = var.alb_health_check_interval_seconds
   health_check_matcher          = var.alb_health_check_matcher
+
+  # These four resources' live tags predate Terraform adoption (confirmed
+  # via aws elbv2 describe-tags) — fixed, historical facts about this one
+  # environment, not reusable module defaults, so they're supplied here
+  # rather than hardcoded in modules/alb. http_redirect_listener_tags is
+  # deliberately omitted: the live resource carries no tags at all. See
+  # docs/ecs/state-adoption-plan.md.
+  alb_adoption_tags = {
+    Name    = "firmsbase-staging-alb"
+    Project = "FirmsBase"
+  }
+  target_group_adoption_tags = {
+    Name    = "firmsbase-staging-tg"
+    Project = "FirmsBase"
+  }
+  https_listener_tags = {
+    Name = "firmsbase-staging-https"
+  }
 }
 
 locals {
@@ -398,6 +435,13 @@ module "worker" {
   deployment_maximum_percent         = var.worker_deployment_maximum_percent
   tags                               = var.worker_tags
 
+  # Live-adoption values (confirmed via aws ecs describe-services) — an
+  # earlier, non-Terraform process set these true/TASK_DEFINITION on this
+  # service, unlike web's false/NONE. See ecs_service module variables.tf
+  # and docs/ecs/state-adoption-plan.md.
+  enable_ecs_managed_tags = true
+  propagate_tags          = "TASK_DEFINITION"
+
   enable_autoscaling             = true
   autoscaling_min_capacity       = 1
   autoscaling_max_capacity       = 6
@@ -450,6 +494,11 @@ module "critical_worker" {
   deployment_maximum_percent         = var.critical_worker_deployment_maximum_percent
   tags                               = var.critical_worker_tags
 
+  # Live-adoption values — see module.worker's identical override above
+  # for rationale.
+  enable_ecs_managed_tags = true
+  propagate_tags          = "TASK_DEFINITION"
+
   enable_autoscaling = false
 }
 
@@ -494,6 +543,11 @@ module "scheduler" {
   deployment_minimum_healthy_percent = var.scheduler_deployment_minimum_healthy_percent
   deployment_maximum_percent         = var.scheduler_deployment_maximum_percent
   tags                               = var.scheduler_tags
+
+  # Live-adoption values — see module.worker's identical override above
+  # for rationale.
+  enable_ecs_managed_tags = true
+  propagate_tags          = "TASK_DEFINITION"
 
   enable_autoscaling = false
 }

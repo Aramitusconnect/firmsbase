@@ -524,6 +524,12 @@ variable "ecr_repository_name" {
   default     = null
 }
 
+variable "ecr_encryption_type" {
+  description = "Override for the ECR repository's encryption type (\"AES256\" or \"KMS\"). Null (default) falls back to the ecr module's own KMS default, fine for a brand-new environment. This staging environment's live repository uses \"AES256\" (confirmed via aws ecr describe-repositories) — encryption_type is ForceNew, so leaving this null against an already-imported live repository plans a disruptive replacement of the entire image repository. See docs/ecs/state-adoption-plan.md."
+  type        = string
+  default     = null
+}
+
 variable "elasticache_subnet_group_name" {
   description = "Override for the ElastiCache subnet group name. Null (default) falls back to \"<name_prefix>-redis\". This staging environment's live subnet group (referenced by the live replication group) is \"firmsbase-staging-cache-subnets\". See docs/ecs/state-adoption-plan.md §3B."
   type        = string
@@ -598,6 +604,24 @@ variable "alb_security_group_description" {
   description = "Override for the security_groups module's ALB security group description. Null (default) falls back to the module's own description, fine for a brand-new environment. description is ForceNew on aws_security_group (same reason as alb_security_group_name above — no in-place UpdateSecurityGroupDescription call exists). This staging environment's live description is \"Public ALB access for FirmsBase staging\" (confirmed via aws ec2 describe-security-groups) — leaving this null against an already-imported live security group plans a disruptive replacement."
   type        = string
   default     = null
+}
+
+variable "alb_name" {
+  description = "Override for the ALB resource's (not its security group's) exact name. Null (default) falls back to the alb module's own name_prefix-generated pattern, fine for a brand-new environment. name/name_prefix are ForceNew on aws_lb (the ELBv2 API has no in-place rename) — this staging environment's live ALB has a fixed, pre-existing name \"firmsbase-staging-alb\" (confirmed via aws elbv2 describe-load-balancers) — leaving this null against an already-imported live ALB plans a disruptive replacement of a load balancer actively serving traffic, cascading into both its listeners. See alb_target_group_name below (same ForceNew rationale) and docs/ecs/state-adoption-plan.md."
+  type        = string
+  default     = null
+}
+
+variable "alb_target_group_name" {
+  description = "Override for the ALB module's web target group exact name. Null (default) falls back to the module's own name_prefix-generated pattern, fine for a brand-new environment. name/name_prefix are ForceNew on aws_lb_target_group — this staging environment's live target group has a fixed, pre-existing name \"firmsbase-staging-tg\" (confirmed via aws elbv2 describe-target-groups) — leaving this null against an already-imported live target group plans a disruptive replacement of a target group actively registered with the live ALB and the web ECS service."
+  type        = string
+  default     = null
+}
+
+variable "alb_enable_deletion_protection" {
+  description = "Override for the ALB's deletion-protection setting. Defaults to false, matching the alb module's own original default — safe for a brand-new environment. This staging environment's live ALB has deletion protection enabled (confirmed via aws elbv2 describe-load-balancer-attributes) — deletion protection is safely updatable in place (never ForceNew), but leaving this false against an already-imported live ALB proposes disabling a real safety setting on the next apply."
+  type        = bool
+  default     = false
 }
 
 variable "elasticache_subnet_group_description" {

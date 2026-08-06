@@ -672,6 +672,55 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
     failures. Configuration-only change — no AWS resource, IAM policy, or
     Terraform state was touched; live security-group identity and rule
     topology are unaffected.
+20. **ALB, target group, ECR repository, ECS cluster, and four ECS
+    services aligned to live (2026-08-06, see
+    [state-adoption-plan.md §9.27](state-adoption-plan.md))**: a fresh,
+    full 23-resource imported-resource diagnostic plan (run per this
+    mission's own gate requirement, not reused from an earlier, narrower
+    one) found 8 resources the manifest had wrongly assumed drift-free
+    proposing real `create+delete`/`update` actions. Four new,
+    narrowly-scoped, null/empty-default module overrides fixed all of
+    them: `alb_name`/`target_group_name` (`modules/alb`, both null by
+    default) model the ALB's and target group's exact live names — live
+    values `"firmsbase-staging-alb"`/`"firmsbase-staging-tg"`, set only
+    via `terraform.tfvars`; `encryption_type` (`modules/ecr`, null
+    default preserving the module's original KMS design) models the
+    live repository's `AES256` encryption — ECR encryption type is
+    ForceNew, so this was a real replace-the-whole-repository risk, not
+    cosmetic; `cluster_adoption_tags` (`modules/ecs_cluster`, empty-map
+    default) models the live cluster's `Application`/`Name` tags the
+    same way the imported security groups' legacy tags are modeled,
+    supplied directly from the staging root as a fixed historical fact;
+    and `enable_ecs_managed_tags`/`propagate_tags`
+    (`modules/ecs_service`, defaults `false`/`"NONE"` matching both the
+    AWS API and live `web`) model `worker`/`scheduler`/`critical-worker`'s
+    live `true`/`"TASK_DEFINITION"` values, while `wait_for_steady_state`
+    is now pinned and `ignore_changes`-protected the same way as the
+    security groups' `revoke_rules_on_delete`. Fixing the target group's
+    identity also resolved a cascading `target_group_arn` diff on the
+    `web` service with no `modules/ecs_service` change required. A second
+    diagnostic-plan iteration, once the replace_paths-driven replacements
+    above stopped masking full field-level diffs, surfaced second-order
+    drift on the same six ALB/ECR/cluster resources: unmodeled live tags
+    on the ALB, target group, and both listeners; a live
+    `enable_deletion_protection = true` the staging root never wired;
+    two more provider-schema-backfill fields on the target group
+    (`lambda_multi_value_headers_enabled`/`proxy_protocol_v2`); a
+    `default_action` `forward`-vs-`target_group_arn` representational
+    artifact on the HTTPS listener; and `tags_all` itself lagging this
+    environment's provider `default_tags` block, which grew (`Mission`/
+    `ManagedBy`) after these six resources were created. All fixed with
+    the same narrowly-scoped, empty-default patterns already established
+    — new adoption-tag inputs where `tags` itself was wrong, `tags_all`-
+    only `ignore_changes` (not `tags`) where the resource's own tags are
+    now explicitly modeled and should stay drift-checked. All 23 imported
+    managed resources (the 2 security groups, the 8 addresses above, and
+    13 other already-clean addresses) re-verified genuinely `no-op` via a
+    fresh, saved, JSON-inspected, then-deleted diagnostic plan, after four
+    successive iterations against the real backend. Configuration and
+    documentation only — no AWS resource, IAM policy, or Terraform state
+    was touched; no `import-manifest.json` classification changed, only
+    notes accuracy.
 
 **No import, apply, ECS deployment, scaling change, capacity-provider
 association, IAM permission migration, or description-drift

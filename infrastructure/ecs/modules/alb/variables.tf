@@ -2,6 +2,18 @@ variable "name_prefix" {
   type = string
 }
 
+variable "alb_name" {
+  description = "Override for the ALB's exact name. Null (default) preserves this module's original name_prefix-generated pattern (\"<6-char-prefix>-<random>\") — the AWS-recommended way to avoid name collisions when Terraform creates a brand-new load balancer. name (like name_prefix) is ForceNew on aws_lb — an already-imported live ALB with a fixed, pre-existing name MUST have this set to the exact live value, or the very next apply plans a disruptive replacement of a load balancer actively serving traffic. See target_group_name below (also ForceNew, same rationale)."
+  type        = string
+  default     = null
+}
+
+variable "target_group_name" {
+  description = "Override for the web target group's exact name. Null (default) preserves this module's original name_prefix-generated pattern. name (like name_prefix) is ForceNew on aws_lb_target_group — an already-imported live target group with a fixed, pre-existing name MUST have this set to the exact live value, or the very next apply plans a disruptive replacement of a target group actively registered with the live ALB and ECS service."
+  type        = string
+  default     = null
+}
+
 variable "vpc_id" {
   type = string
 }
@@ -89,4 +101,28 @@ variable "access_logs_bucket" {
 variable "tags" {
   type    = map(string)
   default = {}
+}
+
+variable "alb_adoption_tags" {
+  description = "Extra literal tags merged onto the ALB, meant for exactly one purpose: reproducing a pre-Terraform-adoption tag set an already-imported live ALB carries so it becomes part of this resource's real, managed tag set instead of being silently dropped by the next apply. Empty (default) for a brand-new environment. Never used for ordinary environment-wide tagging — use var.tags for that."
+  type        = map(string)
+  default     = {}
+}
+
+variable "target_group_adoption_tags" {
+  description = "Extra literal tags merged onto the web target group — see alb_adoption_tags above for the identical rationale, applied to this sibling resource."
+  type        = map(string)
+  default     = {}
+}
+
+variable "https_listener_tags" {
+  description = "Extra literal tags merged onto the HTTPS listener — see alb_adoption_tags above for the identical rationale, applied to this sibling resource."
+  type        = map(string)
+  default     = {}
+}
+
+variable "http_redirect_listener_tags" {
+  description = "Extra literal tags merged onto the HTTP-redirect listener — see alb_adoption_tags above for the identical rationale, applied to this sibling resource."
+  type        = map(string)
+  default     = {}
 }

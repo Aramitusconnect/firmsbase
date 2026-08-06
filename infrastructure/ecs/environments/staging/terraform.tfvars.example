@@ -168,6 +168,28 @@ ecs_tasks_security_group_description = "FirmsBase staging ECS tasks"
 alb_security_group_name        = "firmsbase-staging-alb-sg"
 alb_security_group_description = "Public ALB access for FirmsBase staging"
 
+# The ALB resource and its target group have fixed, pre-existing names
+# distinct from their security group's name above (aws elbv2
+# describe-load-balancers/describe-target-groups) — name/name_prefix are
+# both ForceNew on aws_lb/aws_lb_target_group, so leaving these null
+# against an already-imported live ALB plans a disruptive replacement
+# cascading into both listeners.
+alb_name               = "firmsbase-staging-alb"
+alb_target_group_name  = "firmsbase-staging-tg"
+
+# Live ALB has deletion protection enabled (aws elbv2
+# describe-load-balancer-attributes) — safely updatable in place, but
+# left false (the module's own default) it would propose disabling a
+# real safety setting on the next apply.
+alb_enable_deletion_protection = true
+
+# Live ECR repository uses AES256 encryption (aws ecr
+# describe-repositories) — encryption_type is ForceNew, so leaving this
+# null (falls back to this module's KMS default) against an
+# already-imported live repository plans a disruptive replacement of the
+# entire image repository.
+ecr_encryption_type = "AES256"
+
 # Live subnet group/replication group descriptions (aws elasticache
 # describe-cache-subnet-groups / describe-replication-groups) — both safely
 # updatable in place, but left null they'd be silently overwritten on

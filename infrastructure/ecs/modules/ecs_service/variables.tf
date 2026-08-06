@@ -176,3 +176,20 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "enable_ecs_managed_tags" {
+  description = "Whether ECS-managed tags (e.g. aws:ecs:serviceName) are applied to tasks. Defaults to false, matching the AWS API's own default and this staging environment's live \"web\" service. The other three live services here (worker/scheduler/critical-worker) currently run with this set true — every caller adopting an already-imported service must decide explicitly rather than silently inheriting a value that may not match the live service being adopted. See docs/ecs/state-adoption-plan.md."
+  type        = bool
+  default     = false
+}
+
+variable "propagate_tags" {
+  description = "Whether/how tags propagate from the task definition or service to tasks — \"NONE\", \"SERVICE\", or \"TASK_DEFINITION\". Defaults to \"NONE\", matching the AWS API's own default and this staging environment's live \"web\" service. The other three live services here (worker/scheduler/critical-worker) currently run with this set to \"TASK_DEFINITION\" — every caller adopting an already-imported service must decide explicitly. See docs/ecs/state-adoption-plan.md."
+  type        = string
+  default     = "NONE"
+
+  validation {
+    condition     = contains(["NONE", "SERVICE", "TASK_DEFINITION"], var.propagate_tags)
+    error_message = "propagate_tags must be \"NONE\", \"SERVICE\", or \"TASK_DEFINITION\"."
+  }
+}

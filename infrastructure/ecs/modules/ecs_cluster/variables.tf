@@ -7,6 +7,12 @@ variable "tags" {
   default = {}
 }
 
+variable "cluster_adoption_tags" {
+  description = "Extra literal tags merged onto the cluster, meant for exactly one purpose: reproducing pre-Terraform-adoption tags an already-imported live cluster carries (e.g. Application/Name keys an earlier, non-Terraform process set) so they become part of this resource's real, managed tag set instead of being silently dropped by the next apply. Empty (default) for a brand-new environment. Never used for ordinary environment-wide tagging — use var.tags for that."
+  type        = map(string)
+  default     = {}
+}
+
 variable "container_insights_enabled" {
   description = "Whether the cluster's containerInsights setting is \"enabled\" or \"disabled\". No default, deliberately — this module previously hardcoded \"enabled\" unconditionally. This staging environment's live cluster actually has it disabled (confirmed via aws ecs describe-clusters — Settings: [{name: containerInsights, value: disabled}]) — see docs/ecs/state-adoption-plan.md §9.10/§9.11. Every caller must decide explicitly rather than silently inheriting a value that may not match the live cluster it's importing against."
   type        = bool
