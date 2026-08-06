@@ -588,6 +588,18 @@ variable "ecs_tasks_security_group_description" {
   default     = null
 }
 
+variable "alb_security_group_name" {
+  description = "Override for the security_groups module's ALB security group name. Null (default) falls back to the module's own name_prefix-generated pattern, fine for a brand-new environment. This staging environment's live security group has a fixed, pre-existing name \"firmsbase-staging-alb-sg\" (confirmed via aws ec2 describe-security-groups) — name/name_prefix are ForceNew on aws_security_group (the EC2 API has no in-place rename), so leaving this null against an already-imported live security group plans a disruptive replacement of a security group actively referenced by the ecs_tasks_ingress_from_alb rule. See alb_security_group_description below (same ForceNew rationale) and docs/ecs/state-adoption-plan.md."
+  type        = string
+  default     = null
+}
+
+variable "alb_security_group_description" {
+  description = "Override for the security_groups module's ALB security group description. Null (default) falls back to the module's own description, fine for a brand-new environment. description is ForceNew on aws_security_group (same reason as alb_security_group_name above — no in-place UpdateSecurityGroupDescription call exists). This staging environment's live description is \"Public ALB access for FirmsBase staging\" (confirmed via aws ec2 describe-security-groups) — leaving this null against an already-imported live security group plans a disruptive replacement."
+  type        = string
+  default     = null
+}
+
 variable "elasticache_subnet_group_description" {
   description = "Override for the ElastiCache subnet group's description. Null (default) leaves the module's own argument unset, which the AWS provider schema then defaults to \"Managed by Terraform\" — fine for a brand-new environment. description is safely updatable in place (never ForceNew), but this staging environment's live subnet group has a real, human-written description, \"Subnets for FirmsBase staging Valkey\" (confirmed via aws elasticache describe-cache-subnet-groups) — leaving this null would propose silently overwriting it with the generic placeholder on every plan."
   type        = string

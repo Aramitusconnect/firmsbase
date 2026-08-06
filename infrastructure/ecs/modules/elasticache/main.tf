@@ -72,7 +72,10 @@ resource "aws_security_group_rule" "redis_ingress_from_ecs_tasks" {
   protocol                 = "tcp"
   source_security_group_id = var.ecs_tasks_security_group_id
   security_group_id        = aws_security_group.redis.id
-  description              = "ECS tasks to Redis"
+  # No description — the live, pre-Terraform-created rule (confirmed via
+  # aws ec2 describe-security-group-rules) has none. Adding cosmetic
+  # documentation to an already-imported live rule during adoption is
+  # explicitly out of scope for this correction.
 }
 
 resource "aws_elasticache_subnet_group" "this" {

@@ -142,17 +142,42 @@ class StagingEcsTaskSecurityGroupAlignmentTest extends TestCase
         );
     }
 
-    public function test_alb_security_group_was_not_touched(): void
+    public function test_alb_security_group_models_live_name_and_description_instead_of_forcing_replacement(): void
     {
-        // A newly discovered, out-of-scope blocker (identical ForceNew
-        // pattern on the ALB security group) was found but deliberately
-        // NOT corrected in this mission — confirm its config is
-        // unchanged, still using the original name_prefix/hardcoded
-        // description this mission never modified.
+        // A subsequent mission found and corrected this — the identical
+        // ForceNew pattern already fixed on the ECS-tasks and Redis
+        // security groups. See docs/ecs/state-adoption-plan.md.
         $block = $this->extractResourceBlock($this->securityGroupsModuleMain(), 'aws_security_group', 'alb');
 
-        $this->assertMatchesRegularExpression('/name_prefix\s*=\s*"\$\{var\.name_prefix\}-alb-"/', $block);
+        $this->assertMatchesRegularExpression('/name\s*=\s*var\.alb_security_group_name/', $block);
+        $this->assertMatchesRegularExpression(
+            '/name_prefix\s*=\s*var\.alb_security_group_name\s*==\s*null\s*\?\s*"\$\{var\.name_prefix\}-alb-"\s*:\s*null/',
+            $block
+        );
+        $this->assertMatchesRegularExpression('/description\s*=\s*coalesce\(var\.alb_security_group_description/', $block);
         $this->assertDoesNotMatchRegularExpression('/ecs_tasks_security_group_name/', $block, 'The ALB security group must not reference the ecs_tasks-specific override variables.');
+    }
+
+    public function test_alb_security_group_has_scoped_tags_and_revoke_rules_lifecycle_protection(): void
+    {
+        $block = $this->extractResourceBlock($this->securityGroupsModuleMain(), 'aws_security_group', 'alb');
+
+        $this->assertMatchesRegularExpression('/revoke_rules_on_delete\s*=\s*false/', $block);
+        $this->assertMatchesRegularExpression(
+            '/ignore_changes\s*=\s*\[\s*revoke_rules_on_delete\s*,\s*tags\s*,\s*tags_all\s*\]/',
+            $block
+        );
+    }
+
+    public function test_staging_root_wires_alb_overrides_into_the_module_call(): void
+    {
+        $staging = $this->stagingMain();
+        preg_match('/module\s+"security_groups"\s*\{.*?\n\}\n/s', $staging, $matches);
+        $this->assertNotEmpty($matches, 'Could not locate module "security_groups".');
+        $block = $matches[0];
+
+        $this->assertStringContainsString('alb_security_group_name        = var.alb_security_group_name', $block);
+        $this->assertStringContainsString('alb_security_group_description = var.alb_security_group_description', $block);
     }
 
     // ------------------------------------------------------------
@@ -182,6 +207,39 @@ class StagingEcsTaskSecurityGroupAlignmentTest extends TestCase
         $this->assertMatchesRegularExpression('/to_port\s*=\s*6379/', $block);
         $this->assertMatchesRegularExpression('/protocol\s*=\s*"tcp"/', $block);
         $this->assertMatchesRegularExpression('/type\s*=\s*"ingress"/', $block);
+    }
+
+    // ------------------------------------------------------------
+    // Rule descriptions preserve live's absence — no cosmetic text
+    // added to already-imported live rules during adoption
+    // ------------------------------------------------------------
+
+    public function test_ecs_tasks_ingress_and_rds_ingress_rules_have_no_description(): void
+    {
+        // Freshly confirmed via aws ec2 describe-security-group-rules:
+        // neither live rule has ever carried a description. Adding one
+        // during adoption would be cosmetic, not evidence-backed.
+        $secGroups = $this->securityGroupsModuleMain();
+
+        $ingressBlock = $this->extractResourceBlock($secGroups, 'aws_security_group_rule', 'ecs_tasks_ingress_from_alb');
+        $this->assertDoesNotMatchRegularExpression('/description\s*=/', $ingressBlock);
+
+        $rdsBlock = $this->extractResourceBlock($secGroups, 'aws_security_group_rule', 'rds_ingress_from_ecs_tasks');
+        $this->assertDoesNotMatchRegularExpression('/description\s*=/', $rdsBlock);
+    }
+
+    public function test_alb_ingress_https_rule_has_no_description(): void
+    {
+        $block = $this->extractResourceBlock($this->securityGroupsModuleMain(), 'aws_security_group_rule', 'alb_ingress_https');
+
+        $this->assertDoesNotMatchRegularExpression('/description\s*=/', $block);
+    }
+
+    public function test_redis_ingress_rule_has_no_description(): void
+    {
+        $block = $this->extractResourceBlock($this->elasticacheModuleMain(), 'aws_security_group_rule', 'redis_ingress_from_ecs_tasks');
+
+        $this->assertDoesNotMatchRegularExpression('/description\s*=/', $block);
     }
 
     // ------------------------------------------------------------

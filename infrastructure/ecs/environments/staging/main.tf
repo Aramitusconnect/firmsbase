@@ -50,6 +50,9 @@ module "security_groups" {
 
   ecs_tasks_security_group_name        = var.ecs_tasks_security_group_name
   ecs_tasks_security_group_description = var.ecs_tasks_security_group_description
+
+  alb_security_group_name        = var.alb_security_group_name
+  alb_security_group_description = var.alb_security_group_description
 }
 
 module "s3_documents" {

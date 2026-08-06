@@ -161,6 +161,13 @@ elasticache_security_group_description = "Valkey access from FirmsBase staging E
 ecs_tasks_security_group_name        = "firmsbase-staging-ecs-sg"
 ecs_tasks_security_group_description = "FirmsBase staging ECS tasks"
 
+# Same ForceNew rationale as ecs_tasks_security_group_name/description
+# above, for the ALB security group (referenced by the
+# ecs_tasks_ingress_from_alb rule — leaving this null forces its
+# replacement).
+alb_security_group_name        = "firmsbase-staging-alb-sg"
+alb_security_group_description = "Public ALB access for FirmsBase staging"
+
 # Live subnet group/replication group descriptions (aws elasticache
 # describe-cache-subnet-groups / describe-replication-groups) — both safely
 # updatable in place, but left null they'd be silently overwritten on
