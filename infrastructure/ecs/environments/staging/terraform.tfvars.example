@@ -146,6 +146,27 @@ elasticache_parameter_group_name = "default.valkey7"
 # aws_elasticache_replication_group requires major.minor-only format for
 # Redis v6+/Valkey and rejects "7.2.6" outright; supply "7.2" here.
 elasticache_engine_version        = "7.2"
+
+# Live security group has a fixed, pre-existing name/description (aws ec2
+# describe-security-groups) — name/description are both ForceNew on
+# aws_security_group, so leaving these null against an already-imported
+# live security group plans a disruptive replacement.
+elasticache_security_group_name        = "firmsbase-staging-redis-sg"
+elasticache_security_group_description = "Valkey access from FirmsBase staging ECS tasks"
+
+# Live subnet group/replication group descriptions (aws elasticache
+# describe-cache-subnet-groups / describe-replication-groups) — both safely
+# updatable in place, but left null they'd be silently overwritten on
+# every plan (subnet group falls back to the generic "Managed by
+# Terraform" placeholder).
+elasticache_subnet_group_description      = "Subnets for FirmsBase staging Valkey"
+elasticache_replication_group_description = "Valkey for FirmsBase staging sessions, cache, and queues"
+
+# Live replication group already has automatic backups enabled at
+# SnapshotRetentionLimit=1 (aws elasticache describe-replication-groups) —
+# the module's own default of 0 (disabled) is safe only for a brand-new
+# environment; leaving this at 0 here would propose disabling live backups.
+elasticache_snapshot_retention_limit = 1
 iam_task_execution_role_name  = "firmsbase-staging-ecs-execution-role"
 
 # Live inline policy name (confirmed via aws iam get-role-policy) differs

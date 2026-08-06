@@ -564,6 +564,36 @@ variable "elasticache_engine_version" {
   default     = "7.1"
 }
 
+variable "elasticache_security_group_name" {
+  description = "Override for the ElastiCache module's Redis security group name. Null (default) falls back to the module's own name_prefix-generated pattern, fine for a brand-new environment. This staging environment's live security group has a fixed, pre-existing name \"firmsbase-staging-redis-sg\" (confirmed via aws ec2 describe-security-groups) — name/name_prefix are ForceNew on aws_security_group (the EC2 API has no in-place rename), so leaving this null against an already-imported live security group plans a disruptive replacement of a security group actively in use by the running ElastiCache cluster. See elasticache_security_group_description below (same ForceNew rationale) and docs/ecs/state-adoption-plan.md."
+  type        = string
+  default     = null
+}
+
+variable "elasticache_security_group_description" {
+  description = "Override for the ElastiCache module's Redis security group description. Null (default) falls back to the module's own description, fine for a brand-new environment. description is ForceNew on aws_security_group (same reason as elasticache_security_group_name above — no in-place UpdateSecurityGroupDescription call exists). This staging environment's live description is \"Valkey access from FirmsBase staging ECS tasks\" (confirmed via aws ec2 describe-security-groups) — leaving this null against an already-imported live security group plans a disruptive replacement."
+  type        = string
+  default     = null
+}
+
+variable "elasticache_subnet_group_description" {
+  description = "Override for the ElastiCache subnet group's description. Null (default) leaves the module's own argument unset, which the AWS provider schema then defaults to \"Managed by Terraform\" — fine for a brand-new environment. description is safely updatable in place (never ForceNew), but this staging environment's live subnet group has a real, human-written description, \"Subnets for FirmsBase staging Valkey\" (confirmed via aws elasticache describe-cache-subnet-groups) — leaving this null would propose silently overwriting it with the generic placeholder on every plan."
+  type        = string
+  default     = null
+}
+
+variable "elasticache_replication_group_description" {
+  description = "Override for the replication group's description. Null (default) falls back to the module's own description, fine for a brand-new environment. description is safely updatable in place (never ForceNew), but this staging environment's live replication group has a real, human-written description, \"Valkey for FirmsBase staging sessions, cache, and queues\" (confirmed via aws elasticache describe-replication-groups) — leaving this null would propose silently overwriting it on every plan."
+  type        = string
+  default     = null
+}
+
+variable "elasticache_snapshot_retention_limit" {
+  description = "Number of days to retain automatic ElastiCache snapshots. Defaults to 0 (disabled) — appropriate for a brand-new staging environment, matching the elasticache module's own \"no durable business data in Redis\" design. This staging environment's live replication group already has automatic backups enabled with SnapshotRetentionLimit=1 (confirmed via aws elasticache describe-replication-groups) — leaving this at the default 0 against an already-imported live replication group proposes a real, live mutation disabling backups, not a cosmetic diff."
+  type        = number
+  default     = 0
+}
+
 variable "iam_task_execution_role_name" {
   description = "Override for the shared ECS task-execution IAM role name. Null (default) falls back to \"<name_prefix>-task-execution\". This staging environment's live execution role is \"firmsbase-staging-ecs-execution-role\" — a naming fix alone is NOT sufficient to make this role import-clean; the live role's permissions come from the AWS-managed AmazonECSTaskExecutionRolePolicy plus one narrow inline policy, while this module builds one broader custom inline policy with no managed-policy attachment. That permission-shape reconciliation is a separate, explicit human decision — see docs/ecs/state-adoption-plan.md §3B/§8 — this variable only fixes the name, not the policy shape."
   type        = string

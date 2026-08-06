@@ -2117,6 +2117,201 @@ Files edited: `infrastructure/ecs/environments/staging/main.tf`, this
 document, `staging-variable-inventory.md`, `import-manifest.json`, and
 test files.
 
+### 9.24 First maintenance-canary targeted-plan blockers resolved: imported-resource alignment, foundation wave scoped, output-evaluation errors corrected (2026-08-06)
+
+A prior mission ran a narrowly-targeted plan for the five maintenance-canary
+resources and stopped without applying, because Terraform proposed changes
+far outside that five-address allowlist. This section records the
+root-cause investigation (read-only AWS calls plus a full read of the
+relevant Terraform config) and the evidence-backed corrections applied.
+No AWS, ECS, IAM, ElastiCache, KMS, or S3 resource was created, updated,
+replaced, or deleted to produce this section — only `terraform validate`,
+`terraform fmt`, an isolated local-backend `terraform console`, and a
+guarded `state list` (never `state show`) were used against real
+infrastructure.
+
+**A. Imported-resource drift — exact causes and corrections.**
+
+1. **`module.iam.aws_iam_role.task_execution` — proposed `tags_all` update.**
+   Cause: this role's `tags` argument is (and always was) `var.tags = {}`,
+   exactly matching the live role's actual tags (confirmed via
+   `aws iam get-role` — no `Tags` field returned). The diff came entirely
+   from this environment's provider `default_tags` block (`versions.tf`:
+   `Project`/`Environment`/`ManagedBy`/`Mission`), added after this role
+   was imported, with no corresponding lifecycle protection — a real,
+   live `iam:TagRole` mutation risk, not a cosmetic diff. Corrected with a
+   `lifecycle { ignore_changes = [tags, tags_all] }` scoped to this one
+   resource in `infrastructure/ecs/modules/iam/main.tf`.
+
+2. **`module.elasticache.aws_elasticache_subnet_group.this` — proposed
+   description/tag update.** Cause: the resource set no `description`
+   argument at all, so the AWS provider's own schema default
+   ("Managed by Terraform") applied instead of live's real description
+   ("Subnets for FirmsBase staging Valkey", confirmed via
+   `aws elasticache describe-cache-subnet-groups`); and no `tags` argument
+   at all, so only provider `default_tags` populated `tags_all`, which
+   doesn't match live's actual tags (`Environment`/`Application`/`Name`).
+   Corrected via a new `elasticache_subnet_group_description` override
+   (staging root → module) plus an explicit `tags = var.tags` argument
+   with `lifecycle { ignore_changes = [tags, tags_all] }` scoped to this
+   resource.
+
+3. **`module.elasticache.aws_elasticache_replication_group.this` —
+   proposed description/tag/snapshot-retention changes.** Cause:
+   `description` was hardcoded to a different literal than live's real
+   description ("Valkey for FirmsBase staging sessions, cache, and
+   queues", confirmed via `aws elasticache describe-replication-groups`);
+   `snapshot_retention_limit` was never set at all (defaulting to
+   null/0), while live has `SnapshotRetentionLimit=1` (confirmed via the
+   same read-only call) — this alone would have been a real, live mutation
+   disabling automatic backups had it been applied; and `tags` had the
+   same drift as item 2. Corrected via new
+   `elasticache_replication_group_description` and
+   `elasticache_snapshot_retention_limit` overrides (the module's own
+   default for the latter remains `0`, safe for a brand-new environment;
+   this staging environment's tfvars sets it to the verified live value
+   `1`), plus the same scoped `ignore_changes = [tags, tags_all]`.
+
+4. **`module.elasticache.aws_security_group.redis` — proposed
+   replacement; `security_group_ids` on the replication group shown as
+   unknown.** Cause, confirmed by direct evidence, **not assumed**: the
+   resource used `name_prefix = "${var.name_prefix}-redis-"` and a
+   hardcoded `description`, while live has a fixed, pre-existing
+   `GroupName = "firmsbase-staging-redis-sg"` and
+   `Description = "Valkey access from FirmsBase staging ECS tasks"`
+   (confirmed via `aws ec2 describe-security-groups`) — both `name`/
+   `name_prefix` and `description` are ForceNew on `aws_security_group`
+   (the EC2 API has no in-place rename or UpdateSecurityGroupDescription
+   call), and both differed. This is the sole cause; it has no
+   relationship to the missing KMS key or S3 bucket (item B below).
+   `security_group_ids` on the replication group showed
+   `(known after apply)` purely as a downstream cascade of this
+   resource's own planned replacement, not an independent condition.
+   Corrected via new `elasticache_security_group_name`/
+   `elasticache_security_group_description` overrides modeling the exact
+   live values — `name`/`name_prefix` are now mutually exclusive based on
+   whether the override is set, and the module's own resource no longer
+   ever proposes replacing this live, in-use security group. VPC
+   (`vpc_id = var.vpc_id`) was confirmed to already match live and was
+   never a contributing cause. Live tags (a single manually-set,
+   empty-value tag) are preserved via the same scoped
+   `ignore_changes = [tags, tags_all]` pattern as items 2–3 — never a
+   provider-wide `ignore_tags`.
+
+No existing imported Terraform resource address changed. No state move or
+re-import occurred. `snapshot_retention_limit` preserves the verified live
+value of `1`. The Redis security-group's exact live identity remains
+represented by `module.elasticache.aws_security_group.redis` — its
+resource address is unchanged, only its `name`/`description` arguments now
+model live instead of forcing a replacement.
+
+**B. Foundation wave (`module.kms` / `module.s3_documents`) — scoped, not
+built here.** Confirmed complete resource set (7 resources, matching
+`import-manifest.json`'s existing `new` classification for every one,
+unchanged by this section):
+
+- `module.kms.aws_kms_key.this`
+- `module.kms.aws_kms_alias.this`
+- `module.s3_documents.aws_s3_bucket.documents`
+- `module.s3_documents.aws_s3_bucket_public_access_block.documents`
+- `module.s3_documents.aws_s3_bucket_versioning.documents`
+- `module.s3_documents.aws_s3_bucket_server_side_encryption_configuration.documents`
+- `module.s3_documents.aws_s3_bucket_ownership_controls.documents`
+
+These form a single, separate **foundation deployment wave**: the bucket's
+entire secured configuration (private + versioned + KMS-encrypted +
+public-access-blocked + bucket-owner-enforced ownership) and the KMS key
+backing both it and the maintenance role's S3 permissions must be reviewed
+and created together, as one deliberate, explicitly-approved apply — never
+partially, and never as an incidental side effect of a different target's
+dependency closure. Creating only the bucket, or only the key, because a
+targeted plan for an unrelated resource happened to pull in a minimal
+dependency subset, is **not approved**. The maintenance-canary plan cannot
+proceed to an apply until this foundation wave has been separately
+reviewed and applied. Maintenance's intended permissions
+(`task_s3_documents["maintenance"]`) and its KMS-encrypted log group
+(`aws_cloudwatch_log_group.app["maintenance"]`, `kms_key_id =
+module.kms.key_arn`) were not weakened, narrowed, or worked around to
+avoid this dependency — the correct fix is deploying the foundation wave
+first, not reducing what maintenance is granted.
+
+**C. Output-evaluation errors — exact cause and correction.** The prior
+targeted plan failed at output evaluation with `Invalid index` errors on
+`output "ses_consumer_task_role_arn"` (`module.iam.task_role_arns["ses_consumer"]`)
+and `output "ses_consumer_log_group_name"`
+(`aws_cloudwatch_log_group.app["ses-consumer"]`). Root cause, determined
+via an isolated local-backend copy: both outputs index into a `for_each`
+map (`module.iam.aws_iam_role.task`, `aws_cloudwatch_log_group.app`) using
+a **literal, hardcoded key** (`"ses_consumer"` / `"ses-consumer"`) rather
+than deriving the key from the resource's own instance set. Under a
+`-target` plan whose target closure excludes every `ses_consumer`-related
+resource, Terraform only knows about the `for_each` instances it actually
+planned (here, only `"maintenance"`), so the hardcoded-key index reads
+past the known instance set and errors — this is a genuine, pre-existing
+fragility in the outputs themselves, not an artifact of an "unrelated
+optional resource" being left out of the target list. A normal,
+untargeted `terraform plan`/`apply` (the whole configuration, every
+`for_each` instance present) never triggers it. Corrected in
+`infrastructure/ecs/environments/staging/outputs.tf` by wrapping each
+hardcoded-key lookup in `try(..., null)`, narrowly and with documentation
+— never a bare `try()`/`can()` that would silently swallow a genuinely
+missing production dependency in a normal, untargeted apply (a full apply
+always has both keys present, since `ses_consumer` is an unconditional
+member of `local.roles`/`local.task_role_names`), and never a fake
+placeholder ARN/endpoint/ID. See the focused test added for this in
+§9.24's test coverage below and `tests/Feature/Ecs/`.
+
+**D. The diagnostic zero-change plan did not fully succeed — honestly
+recorded, not applied.** A guarded, saved, targeted plan (`input=false`,
+`lock=true`, `refresh=false`, no apply) against exactly the five resources
+in item A above was run twice (before and after two further, narrowly
+in-scope corrections below) against the real backend. It did **not**
+reach zero planned actions; the remaining actions were fully investigated
+before being accepted as either genuinely unavoidable in this mission's
+scope or a new, separately-scoped finding — nothing was applied, and no
+target list was broadened to try to force a false "clean" result.
+
+1. **Two residual "updates," now traced to provider-schema-version
+   backfill, not config drift.** `module.elasticache.aws_security_group.redis`
+   and `module.elasticache.aws_elasticache_replication_group.this` each
+   still proposed adding one or two attributes
+   (`revoke_rules_on_delete`, `apply_immediately`,
+   `auth_token_update_strategy`) that exist in the currently-installed AWS
+   provider's resource schema but were never recorded in either
+   resource's state (imported before these attributes existed in that
+   schema). Both resources' config was updated to pin these attributes
+   explicitly to the exact value the plan itself showed — and the
+   diagnostic plan still proposed the identical "add" action afterward,
+   confirming this is a one-time state-backfill an actual `apply` would
+   perform, not something any config content can suppress. This is
+   evidence-based, not assumed: the same values before and after config
+   pinning rules out a config-vs-live mismatch as the cause.
+
+2. **A new, previously out-of-scope blocker discovered: `module.security_groups.aws_security_group.ecs_tasks`.**
+   This targeted plan's dependency closure pulled in this entirely
+   different, never-before-named security group (governing the four
+   existing ECS services' own network ingress/egress, live name
+   `firmsbase-staging-ecs-sg`, live description `"FirmsBase staging ECS
+   tasks"`) because `module.elasticache.aws_security_group_rule.redis_ingress_from_ecs_tasks`
+   — one of the five authorized targets — references its ID
+   (`source_security_group_id`). It has the **identical** root cause
+   already fixed for the Redis security group in item A above:
+   `name_prefix`/a mismatched `description` (both ForceNew) versus a
+   fixed, pre-existing live name/description. Terraform proposed
+   replacing it, which cascades into a forced replacement of the
+   already-targeted ingress rule. This resource and module were never
+   named anywhere in this mission's authorized scope (item A above lists
+   only the execution role, ElastiCache subnet group, replication group,
+   and Redis security group) — fixing it was **not** attempted here.
+   **This requires a separate, explicitly-authorized follow-up mission**,
+   using the identical `security_group_name`/`security_group_description`
+   override pattern already proven safe in this mission.
+
+No AWS, ECS, IAM, ElastiCache, KMS, or S3 resource was created, updated,
+replaced, or deleted to produce this finding — only guarded, saved,
+never-applied `plan` runs against the real backend, immediately deleted
+afterward.
+
 ## 10. Validation performed (local/static only)
 
 | Check | Result |

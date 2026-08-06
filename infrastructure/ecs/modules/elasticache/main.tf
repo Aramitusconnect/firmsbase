@@ -12,14 +12,43 @@
 # supported on the replication-group resource, not the plain cluster one.
 
 resource "aws_security_group" "redis" {
-  name_prefix = "${var.name_prefix}-redis-"
-  description = "FirmsBase ElastiCache Redis — ingress from ECS tasks only."
+  # name/name_prefix and description are all ForceNew on aws_security_group
+  # (the EC2 API has no in-place rename or UpdateSecurityGroupDescription
+  # call) — see security_group_name/security_group_description in
+  # variables.tf. var.security_group_name null (the default) preserves the
+  # original name_prefix-generated behavior for a brand-new environment;
+  # set, it selects the exact live name instead, so name_prefix must be
+  # omitted (both cannot be set on the same resource).
+  name        = var.security_group_name
+  name_prefix = var.security_group_name == null ? "${var.name_prefix}-redis-" : null
+  # Explicitly coalesced, not a bare var reference — a caller passing an
+  # explicit null (e.g. an unset root-module override) does not itself
+  # trigger this variable's own default, since nullable is not set to
+  # false. See replication_group_description below for the same pattern.
+  description = coalesce(var.security_group_description, "FirmsBase ElastiCache Redis — ingress from ECS tasks only.")
   vpc_id      = var.vpc_id
+
+  # Explicit, not left to the provider schema default (also false) — a
+  # diagnostic plan against this already-imported live security group
+  # otherwise proposes "adding" this attribute (a newer AWS provider
+  # schema field this resource's state predates), a real plan action even
+  # though the effective behavior is unchanged.
+  revoke_rules_on_delete = false
 
   tags = merge(var.tags, { Name = "${var.name_prefix}-redis" })
 
   lifecycle {
     create_before_destroy = true
+
+    # This staging environment's live security group carries a single,
+    # manually-set tag (key "firmsbase-staging-redis-sg", empty value) that
+    # predates Terraform adoption — externally established adoption
+    # metadata, not something this config should silently overwrite with
+    # the Name-tag convention above. Tags (unlike name/description above)
+    # are NOT ForceNew, so without this a routine plan would propose a
+    # real, live tag mutation. Scoped to this one resource only — never a
+    # provider-wide ignore_tags.
+    ignore_changes = [tags, tags_all]
   }
 }
 
@@ -34,13 +63,31 @@ resource "aws_security_group_rule" "redis_ingress_from_ecs_tasks" {
 }
 
 resource "aws_elasticache_subnet_group" "this" {
-  name       = coalesce(var.subnet_group_name, "${var.name_prefix}-redis")
-  subnet_ids = var.subnet_ids
+  name = coalesce(var.subnet_group_name, "${var.name_prefix}-redis")
+  # Explicitly coalesced rather than left to the AWS provider schema's own
+  # "Managed by Terraform" default — an already-imported live subnet group
+  # with a real, human-written description should keep it, not have it
+  # silently overwritten on the next routine plan.
+  description = coalesce(var.subnet_group_description, "Managed by Terraform")
+  subnet_ids  = var.subnet_ids
+  tags        = var.tags
+
+  lifecycle {
+    # This staging environment's live subnet group carries manually-set
+    # tags (Environment/Application/Name) that predate Terraform adoption
+    # and don't match this module's tags/default_tags shape — externally
+    # established adoption metadata, not something to silently overwrite.
+    # Scoped to this one resource only — never a provider-wide ignore_tags.
+    ignore_changes = [tags, tags_all]
+  }
 }
 
 resource "aws_elasticache_replication_group" "this" {
   replication_group_id = "${var.name_prefix}-redis"
-  description          = "FirmsBase staging Redis — cache/session/queue/locks (see docs/ecs/queue-and-redis-architecture.md)"
+  # Explicitly coalesced (see subnet_group description above for the same
+  # rationale) — an already-imported live replication group's real
+  # description should be preserved, not silently overwritten.
+  description = coalesce(var.replication_group_description, "FirmsBase staging Redis — cache/session/queue/locks (see docs/ecs/queue-and-redis-architecture.md)")
 
   engine               = var.engine
   engine_version       = var.engine_version
@@ -61,6 +108,19 @@ resource "aws_elasticache_replication_group" "this" {
   transit_encryption_enabled = true
   at_rest_encryption_enabled = true
   auth_token                 = var.auth_token
+  # Explicit, not left to the provider schema default (also "ROTATE") — a
+  # diagnostic plan against this already-imported live replication group
+  # otherwise proposes "adding" this attribute (a newer AWS provider
+  # schema field this resource's state predates), a real plan action even
+  # though the effective behavior is unchanged. See revoke_rules_on_delete
+  # on aws_security_group.redis above for the identical pattern.
+  auth_token_update_strategy = "ROTATE"
+
+  # Defaults to 0 (disabled) for a brand-new environment — see
+  # snapshot_retention_limit's own description in variables.tf. An
+  # already-imported live replication group with backups enabled at a
+  # specific retention should have this set to the exact live value.
+  snapshot_retention_limit = var.snapshot_retention_limit
 
   apply_immediately = false
 
@@ -71,6 +131,12 @@ resource "aws_elasticache_replication_group" "this" {
     # read API, so a post-import plan would otherwise show a permanent
     # diff (or attempt a disruptive in-place auth-token rotation) every
     # time. See docs/ecs/state-adoption-plan.md §9.4.
-    ignore_changes = [auth_token]
+    #
+    # tags/tags_all: same externally-established-adoption-metadata
+    # rationale as aws_elasticache_subnet_group.this above — this live
+    # replication group's tags predate Terraform adoption and don't match
+    # this module's tags/default_tags shape. Scoped to this one resource
+    # only.
+    ignore_changes = [auth_token, tags, tags_all]
   }
 }

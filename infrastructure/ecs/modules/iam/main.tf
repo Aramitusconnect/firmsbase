@@ -50,6 +50,20 @@ resource "aws_iam_role" "task_execution" {
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
   description        = var.task_execution_role_description
   tags               = var.tags
+
+  # This staging environment's live role carries zero tags (confirmed via
+  # aws iam get-role — no Tags field returned), imported before this
+  # environment's provider default_tags block (see versions.tf) existed.
+  # Without this, every plan proposes a real, live iam:TagRole mutation
+  # adding the 4 default tags to an already-imported role that has none —
+  # not a cosmetic Terraform-only diff. Scoped to this one resource only
+  # (never a provider-wide ignore_tags/ignore_tags_prefix), so any FUTURE,
+  # deliberately-authorized tagging decision for this specific role still
+  # requires an explicit config change here, not a silent provider-level
+  # exemption. See docs/ecs/state-adoption-plan.md.
+  lifecycle {
+    ignore_changes = [tags, tags_all]
+  }
 }
 
 # ECR-pull and CloudWatch Logs delivery — the standard permissions every

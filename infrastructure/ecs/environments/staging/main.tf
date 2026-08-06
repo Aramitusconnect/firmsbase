@@ -68,6 +68,12 @@ module "elasticache" {
   engine               = var.elasticache_engine
   engine_version       = var.elasticache_engine_version
   parameter_group_name = var.elasticache_parameter_group_name
+
+  security_group_name           = var.elasticache_security_group_name
+  security_group_description    = var.elasticache_security_group_description
+  subnet_group_description      = var.elasticache_subnet_group_description
+  replication_group_description = var.elasticache_replication_group_description
+  snapshot_retention_limit      = var.elasticache_snapshot_retention_limit
 }
 
 module "ecs_cluster" {
