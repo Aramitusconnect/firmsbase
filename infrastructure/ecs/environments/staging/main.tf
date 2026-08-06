@@ -221,6 +221,43 @@ locals {
     PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY = var.platform_notifications_recipient_fingerprint_hmac_key_secret_arn
   }
 
+  # migrate-only — deliberately NOT folded into shared_secrets/
+  # shared_environment above. Evidence (staging-deploy/firmsbase-staging-migrate.json,
+  # cross-validated live via aws ecs describe-task-definition
+  # firmsbase-staging-migrate:6, 2026-08-06) proves the historical migrate
+  # task sources ALL FIVE DB_HOST/DB_PORT/DB_DATABASE/DB_USERNAME/DB_PASSWORD
+  # fields from the dedicated, more-privileged database-migrator secret
+  # (var.db_migrator_secret_arn) — not the regular database-app secret
+  # every other role uses (var.db_password_secret_arn, via shared_secrets'
+  # DB_PASSWORD-only selector, with host/port/database left as plain
+  # shared_environment values for those roles). The execution role has
+  # already carried secretsmanager:GetSecretValue on db_migrator_secret_arn
+  # since the IAM policy-alignment pass (see docs/ecs/state-adoption-plan.md
+  # §9.18) — that grant was correct but previously unused, since no
+  # task definition's secrets map actually referenced it. See
+  # docs/ecs/state-adoption-plan.md §9.23 for the full audit.
+  migrate_secrets = {
+    APP_KEY        = "${var.app_key_secret_arn}:APP_KEY::"
+    DB_HOST        = "${var.db_migrator_secret_arn}:host::"
+    DB_PORT        = "${var.db_migrator_secret_arn}:port::"
+    DB_DATABASE    = "${var.db_migrator_secret_arn}:dbname::"
+    DB_USERNAME    = "${var.db_migrator_secret_arn}:username::"
+    DB_PASSWORD    = "${var.db_migrator_secret_arn}:password::"
+    REDIS_PASSWORD = "${var.redis_auth_token_secret_arn}:REDIS_PASSWORD::"
+  }
+
+  # DB_HOST/DB_PORT/DB_DATABASE/DB_USERNAME move to migrate_secrets above
+  # for migrate specifically — ECS rejects a task definition that declares
+  # the same env var name in both `environment` and `secrets`, so they
+  # must be excluded here. DB_CONNECTION and DB_SSLMODE are protocol/mode
+  # flags, not credentials, and remain plain — matching the historical
+  # migrate task definition's own environment array exactly (it has no
+  # DB_HOST/DB_PORT/DB_DATABASE/DB_USERNAME entries at all).
+  migrate_environment = {
+    for k, v in local.shared_environment : k => v
+    if !contains(["DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME"], k)
+  }
+
   # Plain (non-secret) SES consumer tuning — shared by web (which doesn't
   # use it) intentionally excluded; only ses-consumer's own environment
   # merges this in, below.
@@ -442,8 +479,13 @@ module "migrate" {
   execution_role_arn = module.iam.task_execution_role_arn
   task_role_arn      = module.iam.task_role_arns["migrate"]
 
-  environment = local.shared_environment
-  secrets     = local.shared_secrets
+  # migrate uses its own dedicated database-migrator credentials — see
+  # local.migrate_secrets/local.migrate_environment above and
+  # docs/ecs/state-adoption-plan.md §9.23. Every other role continues on
+  # local.shared_environment/local.shared_secrets (database-app),
+  # unchanged.
+  environment = local.migrate_environment
+  secrets     = local.migrate_secrets
 
   log_group_name = aws_cloudwatch_log_group.app["migrate"].name
   aws_region     = var.aws_region

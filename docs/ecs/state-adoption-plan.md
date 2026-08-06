@@ -1683,7 +1683,7 @@ two-axis model in §9.21, which additionally protects tags/tags_all):**
     that fix: tags were live-aligned in config but not yet protected from
     reconciliation on a future apply).**
 
-**Shared-task-role IAM read blocker (re-confirmed, corrected):**
+**Shared-task-role IAM read blocker (re-confirmed, corrected; RESOLVED 2026-08-06, see §9.22):**
 
 11. `iam:GetRolePolicy` on `firmsbase-staging-ecs-task-role`'s inline
     policy `FirmsVaultStagingSesSend` is freshly re-confirmed `AccessDenied`
@@ -1698,7 +1698,12 @@ two-axis model in §9.21, which additionally protects tags/tags_all):**
     read it in this pass. Role-specific IAM design for the new `web` task
     role's `task_web_ses_send` policy cannot be finalized as a
     like-for-like replacement of the live policy until its content is
-    actually readable and compared — this remains open.
+    actually readable and compared — this remains open. **RESOLVED
+    2026-08-06 (§9.22): an approved administrator granted the operator a
+    narrowly scoped `iam:GetRolePolicy` permission on exactly this role
+    ARN; the policy has since been read, canonicalized, and compared
+    against the proposed role-specific architecture. See §9.22 for the
+    full audit — the actions are no longer "unread and unconfirmed."**
 
 12. No Terraform `plan`, `apply`, `import`, `refresh`, `providers schema`,
     `state show`, `state pull`, or any state mutation ran in this pass.
@@ -1841,6 +1846,276 @@ changes it.
     Only `modules/ecs_service/main.tf`, this document,
     `staging-variable-inventory.md`, `import-manifest.json`, and test
     files were edited.
+
+### 9.22 Shared task-role policy audit resolved; role-specific architecture finalized in configuration (2026-08-06)
+
+Following an approved administrator granting the operator a narrowly
+scoped `iam:GetRolePolicy` permission on exactly
+`arn:aws:iam::603013471426:role/firmsbase-staging-ecs-task-role` (and
+nothing broader), the live inline policy was read for the first time and
+compared against every proposed role-specific IAM/task-definition/log-group
+address. This section is a configuration-review pass only — no AWS
+resource was created or modified.
+
+**1. Canonical live shared policy** (`FirmsVaultStagingSesSend`, the
+task role's *only* policy — confirmed zero attached managed policies via
+`iam:ListAttachedRolePolicies`):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowOnlyFirmsVaultStagingSender",
+      "Effect": "Allow",
+      "Action": ["ses:SendEmail", "ses:SendRawEmail"],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "ses:FromAddress": "no-reply@staging-mail.firmsvault.com"
+        }
+      }
+    }
+  ]
+}
+```
+
+**2. Corrected SES resource-scoping conclusion**: an earlier pass's
+notes did not claim SES send actions *require* `Resource: "*"`, but for
+the avoidance of doubt this is recorded explicitly now — `ses:SendEmail`
+and `ses:SendRawEmail` **do** support identity-ARN resource scoping (the
+live policy's `Resource: "*"` is simply how it happens to be written
+today, not an AWS requirement). The proposed `task_web_ses_send` policy's
+`Resource = var.ses_sending_identity_arn` is therefore a genuine,
+intentional least-privilege narrowing, not a workaround for a
+nonexistent SES resource-scoping limitation.
+
+**3. Seven-role permission matrix** (from
+`infrastructure/ecs/modules/iam/main.tf`, cross-checked against
+`infrastructure/ecs/modules/iam/tests/task_role_and_flags.tftest.hcl`):
+
+| Role | Trust policy | Role name | Description | Metrics | S3 documents | KMS | SES send | SQS consumer | Secrets (task-role level) |
+|---|---|---|---|---|---|---|---|---|---|
+| web | shared `ecs_tasks_assume_role` | `firmsbase-staging-task-web` | none | yes | yes | yes (via S3 statement) | `ses:SendRawEmail` only, `Resource=arn:aws:ses:us-east-1:603013471426:identity/staging-mail.firmsvault.com`, `Condition ses:FromAddress=no-reply@staging-mail.firmsvault.com` | none | none |
+| worker | shared | `firmsbase-staging-task-worker` | none | yes | yes | yes (via S3 statement) | none | none | none |
+| critical_worker | shared | `firmsbase-staging-task-critical-worker` | none | yes | yes | yes (via S3 statement) | none | none | none |
+| scheduler | shared | `firmsbase-staging-task-scheduler` | none | yes | **no** (not in `s3_document_role_names`) | no | none | none | none |
+| migrate | shared | `firmsbase-staging-task-migrate` | none | yes | **no** | no | none | none | none |
+| maintenance | shared | `firmsbase-staging-task-maintenance` | none | yes | yes | yes (via S3 statement) | none | none | none |
+| ses_consumer | shared | `firmsbase-staging-task-ses-consumer` | none | yes | **no** | no | none (deliberately excluded — see module comment) | `sqs:ReceiveMessage`/`sqs:DeleteMessage` on `var.ses_events_queue_arn` only (never the DLQ) | none |
+
+No task role is granted `secretsmanager:*` directly — all secret **read**
+authority lives on the shared task-*execution* role (which injects secret
+values as container env vars at launch); no task role calls Secrets
+Manager itself at runtime. `metrics` (namespaced `cloudwatch:PutMetricData`)
+is a uniform, deliberately blanket, low-risk grant applied to all 7 roles
+per the module's own comment ("cheap to allow and useful regardless of
+role") — not a role-specific verified need for any one role, but not an
+unexplained or cross-role leak either. **No unexplained or cross-role
+permission was found; the audit did not stop.**
+
+**4. Seven-task-definition matrix** (from
+`infrastructure/ecs/environments/staging/main.tf`) — every one of the four
+existing workloads (web/worker/critical_worker/scheduler) was already
+audited field-by-field against its live historical task definition in
+earlier missions (image digest, CPU/memory, command, network mode,
+Fargate compatibility, environment names, secret selectors, log group,
+stream prefix, port mapping, health checks, `readonlyRootFilesystem`, and
+tags — all previously classified). This pass re-confirms those
+classifications and adds the three not-yet-live workloads:
+
+| Role | Address | Family | Intended task role | Execution role | Classification |
+|---|---|---|---|---|---|
+| web | `module.web.aws_ecs_task_definition.this` | `firmsbase-staging-web` | `task["web"]` (new) | shared, imported | **B** — role migration (new role-specific task role replaces shared role); container/network/health-check fields otherwise **A** (exact preservation) |
+| worker | `module.worker.aws_ecs_task_definition.this` | `firmsbase-staging-worker` | `task["worker"]` (new) | shared, imported | **B**; otherwise **A** |
+| critical_worker | `module.critical_worker.aws_ecs_task_definition.this` | `firmsbase-staging-critical-worker` | `task["critical_worker"]` (new) | shared, imported | **B**; otherwise **A** |
+| scheduler | `module.scheduler.aws_ecs_task_definition.this` | `firmsbase-staging-scheduler` | `task["scheduler"]` (new) | shared, imported | **B**; otherwise **A** |
+| migrate | `module.migrate.aws_ecs_task_definition.this` | `firmsbase-staging-migrate` | `task["migrate"]` (new) | shared, imported | **D** — required configuration correction (see §5 below); no live counterpart to compare against otherwise |
+| maintenance | `module.maintenance.aws_ecs_task_definition.this` | `firmsbase-staging-maintenance` | `task["maintenance"]` (new) | shared, imported | no live counterpart; config internally consistent |
+| ses_consumer | `module.ses_consumer.aws_ecs_task_definition.this` | `firmsbase-staging-ses-consumer` | `task["ses_consumer"]` (new) | shared, imported | no live counterpart; config internally consistent |
+
+All seven use the same `var.app_image_digest`, `network_mode=awsvpc`,
+`requires_compatibilities=["FARGATE"]`, and the module's fixed
+`readonlyRootFilesystem=false` (writable `storage/`/`bootstrap/cache` —
+documented, unchanged). Log group and stream prefix are **C** (intentional
+log-destination migration) for all seven — see §6.
+
+**5. Secret-separation findings**:
+
+- Execution-role read authority is unchanged and correct: exactly the 4
+  previously-verified secrets (`app_key_secret_arn`, `db_password_secret_arn`,
+  `redis_auth_token_secret_arn`, `db_migrator_secret_arn`) — no wildcard
+  ARN anywhere in `task_execution_secret_arns`.
+- `web` and `ses_consumer` — and **only** these two — receive
+  `PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY` (via
+  `local.hmac_secret`, merged into their `secrets` map). `worker`,
+  `critical_worker`, `scheduler`, `migrate`, `maintenance` do not.
+  Matches the documented rationale (only the synchronous web
+  password-reset/invitation path and the ses-consumer's correlation
+  lookup use this key). No cross-role exposure.
+- `REDIS_PASSWORD` handling is unchanged (`local.shared_secrets`,
+  identical selector, all roles that reference `local.shared_secrets`).
+- **D — required configuration correction found**: `module.migrate`'s
+  `secrets` argument is `local.shared_secrets` — **the same map every
+  other role uses** — so `DB_PASSWORD` for the `migrate` task definition
+  resolves to `var.db_password_secret_arn` (the regular app-user
+  credential), not `var.db_migrator_secret_arn`. Grepping
+  `infrastructure/ecs/environments/staging/main.tf` for
+  `db_migrator_secret_arn` finds exactly one reference — inside
+  `module.iam`'s `task_execution_secret_arns` list (a *read-permission*
+  grant on the execution role) — and zero references inside any
+  `secrets` map that would actually inject its value into a container.
+  `var.db_migrator_secret_arn`'s own description states it is "a
+  separate, more-privileged DB credential used only by the migrate
+  task," so this is a real, evidence-backed gap: the execution role can
+  read the migrator secret, but no task definition's container ever
+  receives it. Compounding this, `DB_USERNAME` is a hardcoded literal
+  (`"firmsbase_app"`) in `local.shared_environment`, used unconditionally
+  by `migrate` too — so even the username is not distinguished for the
+  migration workload today.
+  **Not fixed in this pass**: the correct fix requires knowing the
+  migrator secret's internal JSON key name (e.g., whether it uses a
+  `password` key like `db_password_secret_arn`, or something else) to
+  build the right `":<key>::"` selector — and that can only be learned by
+  retrieving the secret's actual value, which this mission (and every
+  prior one) explicitly prohibits. Implementing a guessed selector would
+  itself be exactly the kind of speculative, unverified change this
+  audit process exists to prevent — a wrong guess would silently
+  misconfigure the one workload (schema migrations) where getting the
+  credential wrong carries the highest risk. **This is recorded as an
+  open item requiring an administrator to confirm the migrator secret's
+  JSON key shape before `module.migrate`'s `secrets` map is corrected to
+  reference `var.db_migrator_secret_arn` instead of
+  `var.db_password_secret_arn` for `DB_PASSWORD` (and, separately, decide
+  whether `DB_USERNAME` needs a migrate-specific override too).**
+
+**6. Log-group migration findings** (re-confirmed, unchanged from §9.20/§9.21):
+live historical task definitions use the single shared
+`/ecs/firmsbase-staging/app` log group (differentiated only by
+`awslogs-stream-prefix` per service); Terraform's `aws_cloudwatch_log_group.app`
+(`for_each = toset(local.roles)`) declares 7 workload-specific log groups
+(`/ecs/firmsbase-staging/{web,worker,critical-worker,scheduler,migrate,maintenance,ses-consumer}`),
+each `retention_in_days=30`, KMS-encrypted (`kms_key_id=module.kms.key_arn`).
+No naming collision with the historical shared log group (`app` is a role
+name here, not reused). None of the 7 is created, imported, or repurposed
+in this pass. **The historical shared log group must remain available,
+untouched, for rollback to any old task-definition revision** — no
+action in this pass affects it.
+
+**7. First deployment canary selection**: **`maintenance`**, not
+`migrate` and not `web`. `migrate` is explicitly excluded as the canary
+because (a) it has real, hard-to-reverse side effects (schema
+migrations) unrelated to what a canary should validate, and (b) §5's
+newly-found secret-wiring gap means running it now would use the wrong
+(regular app-user, not migrator) DB credential — compounding rather than
+isolating risk. `maintenance`'s baseline command (`["maintenance",
+"list"]`) is a safe, side-effect-free placeholder Artisan invocation.
+See the mission's final report for the exact canary command structure,
+prerequisites, and rollback path (not reproduced here to avoid drift
+between two copies of the same command).
+
+**8. No AWS, ECS, IAM, or live policy was changed to produce this
+section.** No Terraform `plan`, `apply`, `import`, `refresh`, `providers
+schema`, `state show`, `state pull`, or state mutation ran. Files edited:
+this document, `staging-variable-inventory.md`, `import-manifest.json`,
+and test files — no `.tf` file was modified (the one identified
+configuration gap was deliberately left unfixed pending administrator
+input, per item 5 above). **RESOLVED 2026-08-06 (§9.23): sufficient
+evidence to fix this correctly (without guessing) was found and
+cross-validated — see §9.23.**
+
+### 9.23 Migrate task secret-wiring defect corrected (2026-08-06)
+
+Resolves the gap §9.22 item 5 identified and deliberately left unfixed
+(module.migrate's `secrets` map still resolving `DB_PASSWORD` from the
+regular database-app secret instead of the dedicated, more-privileged
+database-migrator secret). This time the exact JSON selector schema was
+established from evidence — no guessing, no secret-value retrieval.
+
+**Evidence used (in the order applied):**
+
+1. **Repository evidence**: `staging-deploy/firmsbase-staging-migrate.json`
+   — a checked-in historical task-definition JSON — shows the migrate
+   container's `secrets` array sourcing `DB_HOST`, `DB_PORT`,
+   `DB_DATABASE`, `DB_USERNAME`, and `DB_PASSWORD` **all five** from
+   `arn:...secret:firmsbase/staging/database-migrator-TpsE6P` with
+   selectors `:host::`, `:port::`, `:dbname::`, `:username::`,
+   `:password::` respectively (`APP_KEY` and `REDIS_PASSWORD` unchanged
+   from the shared pattern). Its `environment` array has **no**
+   `DB_HOST`/`DB_PORT`/`DB_DATABASE`/`DB_USERNAME` entries at all — only
+   `DB_CONNECTION`/`DB_SSLMODE` remain plain.
+2. **Historical ECS task-definition evidence (live, read-only)**:
+   `aws ecs list-task-definitions --family-prefix firmsbase-staging-migrate`
+   confirms a real family with 6 revisions; `aws ecs describe-task-definition
+   firmsbase-staging-migrate:6` (secret selector ARNs, container name,
+   command, roles, CPU/memory, log config only — no ordinary env-var
+   values beyond what's already non-sensitive) returned a `secrets` array
+   byte-for-byte identical to the repository JSON. Family, revision, CPU
+   512/memory 1024, `taskRoleArn`/`executionRoleArn` (both shared roles,
+   matching this environment's other workloads), container name `app`,
+   command `["migrate"]`, and log config
+   (`/ecs/firmsbase-staging/app`, stream-prefix `migrate`) all
+   cross-validate cleanly against the repo file.
+3. Cross-checking `staging-deploy/firmsbase-staging-maintenance.json` (and
+   scheduler/web/critical-worker/worker) confirms **only** the migrate
+   JSON references `database-migrator` — every other role's historical
+   task definition uses `database-app-8NUj2a` with the identical key
+   shape (`host`/`port`/`dbname`/`username`/`password`), just a different
+   secret ARN. This independently confirms no other workload — including
+   `maintenance` and the not-yet-live `ses_consumer` (no historical file
+   exists for it at all) — was ever wired to the migrator secret.
+
+Evidence order stopped at step 2 (repository + live cross-validation).
+**No `describe-secret` call and no key-only `SecretString` inspection
+were needed or performed** — the schema was already fully and
+unambiguously proven by two independent, consistent sources before
+reaching that step. No secret value was retrieved, printed, saved, or
+compared at any point.
+
+**Resolved wiring (Option A confirmed by evidence — not Option B, not
+guessed)**: `module.migrate` now uses two new locals,
+`local.migrate_secrets` (7 keys: `APP_KEY`, `DB_HOST`, `DB_PORT`,
+`DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` — all five DB fields from
+`var.db_migrator_secret_arn` with the exact selectors above —
+`REDIS_PASSWORD`) and `local.migrate_environment` (`local.shared_environment`
+minus the four now-secret-sourced `DB_HOST`/`DB_PORT`/`DB_DATABASE`/
+`DB_USERNAME` keys, to avoid ECS rejecting a task definition that
+declares the same env-var name in both `environment` and `secrets`;
+`DB_CONNECTION`/`DB_SSLMODE` remain plain, matching the historical
+task's own environment array exactly). `web`, `worker`, `critical_worker`,
+`scheduler`, `maintenance`, and `ses_consumer` are entirely unchanged —
+all still reference `local.shared_environment`/`local.shared_secrets`
+(plus their own already-existing role-specific additions) exactly as
+before.
+
+The execution role's `secretsmanager:GetSecretValue` grant on
+`var.db_migrator_secret_arn` (added during the IAM policy-alignment pass,
+§9.18) required no change — it was already correctly scoped to the exact
+secret ARN; it was simply unused by any task definition's `secrets` map
+until now. No IAM permission was broadened, added, or removed.
+
+**Confirmation of Phase 4 requirements**: migrate now authenticates with
+the dedicated migrator identity (evidence-proven, not asserted);
+web/worker/critical_worker/scheduler continue on database-app
+(unchanged); no normal workload receives the migrator secret; maintenance
+receives no migrator secret (confirmed — its historical JSON uses
+database-app, matching every other non-migrate role); ses_consumer
+receives no database-migrator secret (no historical evidence exists
+suggesting otherwise, and its `secrets` map is untouched); execution-role
+secret access remains exactly the same 4 ARNs, no wildcard.
+
+`maintenance` remains the selected first deployment canary (§9.22 item
+7, unchanged). `migrate` remains excluded from the first canary — it
+still has real, hard-to-reverse schema-migration side effects unrelated
+to what a canary should validate, independent of this secret-wiring fix
+being correct.
+
+No AWS, ECS, IAM, or live secret value was changed, read, or exposed to
+produce this section. No Terraform `plan`, `apply`, `import`, `refresh`,
+`providers schema`, `state show`, `state pull`, or state mutation ran.
+Files edited: `infrastructure/ecs/environments/staging/main.tf`, this
+document, `staging-variable-inventory.md`, `import-manifest.json`, and
+test files.
 
 ## 10. Validation performed (local/static only)
 

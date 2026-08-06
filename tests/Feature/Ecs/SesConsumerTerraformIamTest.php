@@ -185,12 +185,21 @@ class SesConsumerTerraformIamTest extends TestCase
     {
         $main = $this->stagingMain();
 
-        foreach (['worker', 'critical_worker', 'scheduler', 'migrate', 'maintenance'] as $role) {
+        foreach (['worker', 'critical_worker', 'scheduler', 'maintenance'] as $role) {
             preg_match('/module "'.$role.'" \{.*?\n}/s', $main, $block);
             $this->assertNotEmpty($block, "Could not locate module \"{$role}\" block.");
             $this->assertStringNotContainsString('hmac_secret', $block[0], "module \"{$role}\" must not reference local.hmac_secret.");
             $this->assertMatchesRegularExpression('/secrets\s*=\s*local\.shared_secrets/', $block[0], "module \"{$role}\" should use the plain shared_secrets map, unmodified.");
         }
+
+        // migrate is a special case (see docs/ecs/state-adoption-plan.md
+        // §9.23): it uses local.migrate_secrets (dedicated database-migrator
+        // credentials), not local.shared_secrets — but it must still never
+        // reference the HMAC secret, same as every other non-web/ses role.
+        preg_match('/module "migrate" \{.*?\n}/s', $main, $migrateBlock);
+        $this->assertNotEmpty($migrateBlock, 'Could not locate module "migrate" block.');
+        $this->assertStringNotContainsString('hmac_secret', $migrateBlock[0], 'module "migrate" must not reference local.hmac_secret.');
+        $this->assertMatchesRegularExpression('/secrets\s*=\s*local\.migrate_secrets/', $migrateBlock[0], 'module "migrate" should use its dedicated migrate_secrets map.');
     }
 
     public function test_hmac_secret_local_defines_exactly_the_platform_notifications_env_var(): void

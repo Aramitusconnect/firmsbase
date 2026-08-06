@@ -558,17 +558,22 @@ class StagingEcsServiceAdoptionAlignmentTest extends TestCase
     // Shared task-role IAM read blocker
     // ------------------------------------------------------------
 
-    public function test_manifest_ses_send_policy_note_no_longer_asserts_unverified_actions(): void
+    public function test_manifest_ses_send_policy_note_reflects_the_now_confirmed_live_content(): void
     {
+        // Superseded 2026-08-06 (§9.22): the policy read blocker is
+        // resolved — an approved administrator granted a narrowly scoped
+        // iam:GetRolePolicy permission, and the policy was successfully
+        // read. This note no longer claims the actions are unverified/
+        // AccessDenied; it now records the actual confirmed content.
         $entry = $this->manifestEntry('module.iam.aws_iam_role_policy.task_web_ses_send[0]');
         $notes = $entry['notes'];
 
-        $this->assertStringNotContainsString(
-            'granting both ses:SendEmail and ses:SendRawEmail',
-            $notes
-        );
-        $this->assertMatchesRegularExpression('/AccessDenied/', $notes);
-        $this->assertMatchesRegularExpression('/never actually read|inference from the policy.s name|remain unread/i', $notes);
+        $this->assertStringNotContainsString('AccessDenied', $notes);
+        $this->assertStringNotContainsString('remain unread and unconfirmed', $notes);
+        $this->assertMatchesRegularExpression('/successfully read/i', $notes);
+        $this->assertStringContainsString('ses:SendEmail', $notes);
+        $this->assertStringContainsString('ses:SendRawEmail', $notes);
+        $this->assertStringContainsString('AllowOnlyFirmsVaultStagingSender', $notes);
     }
 
     public function test_documentation_records_the_ses_policy_read_blocker_without_inferring_actions(): void
