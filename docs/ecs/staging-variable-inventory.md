@@ -548,7 +548,33 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
     policy remains unreadable (`iam:GetRolePolicy` AccessDenied, freshly
     re-confirmed); a manifest note that stated its granted actions as if
     confirmed (an inference from its name) is corrected to say plainly
-    they remain unread.
+    they remain unread. **RESOLVED 2026-08-06 (see item 16 below): the
+    policy has since been read after an approved administrator granted a
+    narrowly scoped read permission.**
+16. **Shared task-role policy audit and role-specific architecture
+    finalization (2026-08-06, see
+    [state-adoption-plan.md §9.22](state-adoption-plan.md))**: the live
+    inline policy `FirmsVaultStagingSesSend` was successfully read —
+    Version `2012-10-17`, one statement (Sid
+    `AllowOnlyFirmsVaultStagingSender`), Effect `Allow`, Action
+    `[ses:SendEmail, ses:SendRawEmail]`, Resource `*` (wildcard),
+    Condition `StringEquals ses:FromAddress=no-reply@staging-mail.firmsvault.com`.
+    The shared role has zero attached managed policies — this is its
+    entire live permission set. The proposed `web` role's
+    `task_web_ses_send` policy intentionally narrows this three ways: (1)
+    drops the unused `ses:SendEmail` action (confirmed by code inspection
+    that `SesTransport` only calls `ses:SendRawEmail`); (2) scopes
+    `Resource` from wildcard to the exact verified identity ARN — SES
+    `SendEmail`/`SendRawEmail` support identity-ARN resource scoping, so
+    this is a genuine least-privilege narrowing, not something the
+    wildcard was ever required for; (3) moves the grant off the shared
+    role (technically reachable by worker/critical-worker/scheduler even
+    though none of them call SES) onto `web` only. The `FromAddress`
+    condition value is preserved exactly. The audit found no unexplained
+    permission difference across all seven proposed task roles — see
+    state-adoption-plan.md §9.22 for the complete seven-role permission
+    matrix, seven-task-definition matrix, secret-separation findings, and
+    log-group validation.
 15. **Effective-tag fix and corrected two-axis import-readiness model
     (2026-08-05, see
     [state-adoption-plan.md §9.21](state-adoption-plan.md))**: this
