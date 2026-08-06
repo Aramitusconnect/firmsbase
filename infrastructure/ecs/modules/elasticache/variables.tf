@@ -73,6 +73,12 @@ variable "security_group_description" {
   default     = "FirmsBase ElastiCache Redis — ingress from ECS tasks only."
 }
 
+variable "security_group_adoption_tags" {
+  description = "Extra literal tags merged onto the Redis security group ahead of the Name tag, meant for exactly one purpose: reproducing a pre-Terraform-adoption tag an already-imported live security group carries (e.g. a legacy empty-value key an earlier, non-Terraform process set) so it becomes part of this resource's real, managed tag set instead of being masked by ignore_changes. Empty (default) for a brand-new environment. Never used for ordinary environment-wide tagging — use var.tags for that."
+  type        = map(string)
+  default     = {}
+}
+
 variable "subnet_group_description" {
   description = "Override for the ElastiCache subnet group's description. Null (default) leaves the argument unset, which the AWS provider's own schema then defaults to \"Managed by Terraform\" — fine for a brand-new environment. description IS safely updatable in place (never ForceNew) on aws_elasticache_subnet_group, but an already-imported live subnet group with a real, human-written description should have this set to the exact live value so a routine plan does not propose overwriting it with the generic placeholder."
   type        = string

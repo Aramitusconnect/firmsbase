@@ -107,19 +107,26 @@ resource "aws_security_group" "ecs_tasks" {
   # though the effective behavior is unchanged.
   revoke_rules_on_delete = false
 
-  tags = merge(var.tags, { Name = "${var.name_prefix}-ecs-tasks" })
+  # var.ecs_tasks_security_group_adoption_tags carries this one resource's
+  # pre-Terraform-adoption legacy tag (e.g. {"firmsbase-staging-ecs-sg" = ""}
+  # for staging) — an explicit, narrowly-scoped module input rather than a
+  # hardcoded literal, so the module stays generic for a brand-new
+  # environment (default {}) while the staging root supplies the exact
+  # historical value. See variables.tf and docs/ecs/state-adoption-plan.md.
+  tags = merge(var.tags, var.ecs_tasks_security_group_adoption_tags, { Name = "${var.name_prefix}-ecs-tasks" })
 
   lifecycle {
     create_before_destroy = true
 
-    # This staging environment's live security group carries a single,
-    # manually-set tag (key "firmsbase-staging-ecs-sg", empty value) that
-    # predates Terraform adoption — externally established adoption
-    # metadata, not something this config should silently overwrite with
-    # the Name-tag convention above. Tags (unlike name/description above)
-    # are NOT ForceNew, so without this a routine plan would propose a
-    # real, live tag mutation. Scoped to this one resource only — never a
-    # provider-wide ignore_tags.
+    # tags/tags_all are deliberately NOT ignored here (unlike the alb
+    # sibling resource above): the legacy pre-Terraform tag is now
+    # explicitly modeled via var.ecs_tasks_security_group_adoption_tags
+    # above, merged with the Name tag and the provider's default_tags, so
+    # a routine plan can verify the live security group's tags match
+    # config exactly rather than masking any drift. Previously this tag
+    # was protected only by an ignore_changes entry, which — per
+    # docs/ecs/state-adoption-plan.md — does not reliably survive a real
+    # apply's tag-reconciliation call.
     #
     # revoke_rules_on_delete: confirmed via the installed AWS provider's
     # own schema (`terraform providers schema -json`) to be a plain
@@ -133,7 +140,7 @@ resource "aws_security_group" "ecs_tasks" {
     # mutation. Ignoring it here does not hide a security or availability
     # setting: it only ever affects a future, unplanned `destroy`, which
     # this mission does not perform. See docs/ecs/state-adoption-plan.md.
-    ignore_changes = [revoke_rules_on_delete, tags, tags_all]
+    ignore_changes = [revoke_rules_on_delete]
   }
 }
 

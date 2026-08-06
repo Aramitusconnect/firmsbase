@@ -4,7 +4,10 @@
 # instead of forcing its replacement; subnet_group_description/
 # replication_group_description preserve live descriptions instead of
 # being silently overwritten; snapshot_retention_limit preserves the
-# verified live value instead of silently disabling backups.
+# verified live value instead of silently disabling backups. Also proves
+# §9.26: security_group_adoption_tags defaults to {} for a brand-new
+# environment and, when supplied, merges the legacy pre-Terraform-adoption
+# tag alongside the Name tag — explicitly modeled, not ignore_changes-only.
 #
 # Run with: terraform test (from infrastructure/ecs/modules/elasticache)
 
@@ -130,6 +133,30 @@ run "snapshot_retention_limit_preserves_the_verified_live_value_when_overridden"
   assert {
     condition     = aws_elasticache_replication_group.this.snapshot_retention_limit == 1
     error_message = "snapshot_retention_limit must resolve to the exact verified live value (1), never silently reset to 0."
+  }
+}
+
+run "security_group_adoption_tags_defaults_to_empty_for_a_brand_new_environment" {
+  command = plan
+
+  assert {
+    condition     = aws_security_group.redis.tags == tomap({ Name = "firmsbase-staging-redis" })
+    error_message = "Without security_group_adoption_tags set, the security group's tags must contain only the Name tag this module always sets — a brand-new environment must be unaffected."
+  }
+}
+
+run "security_group_adoption_tags_models_the_exact_legacy_tag_when_supplied" {
+  command = plan
+
+  variables {
+    security_group_adoption_tags = {
+      "firmsbase-staging-redis-sg" = ""
+    }
+  }
+
+  assert {
+    condition     = aws_security_group.redis.tags == tomap({ Name = "firmsbase-staging-redis", "firmsbase-staging-redis-sg" = "" })
+    error_message = "security_group_adoption_tags must be merged onto the security group alongside the Name tag, exactly reproducing the confirmed live legacy tag."
   }
 }
 

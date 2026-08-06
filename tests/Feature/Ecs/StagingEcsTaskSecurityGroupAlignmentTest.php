@@ -120,14 +120,21 @@ class StagingEcsTaskSecurityGroupAlignmentTest extends TestCase
     // Tags do not mutate the live imported SG
     // ------------------------------------------------------------
 
-    public function test_ecs_tasks_sg_has_scoped_tags_lifecycle_protection(): void
+    public function test_ecs_tasks_sg_no_longer_relies_on_ignore_changes_for_tags(): void
     {
+        // See docs/ecs/state-adoption-plan.md §9.26 — tags/tags_all were
+        // removed from this resource's ignore_changes once the legacy tag
+        // became explicitly modeled via var.ecs_tasks_security_group_adoption_tags
+        // below; ignore_changes alone was proven (via two real, failed
+        // live applies) not to survive the AWS provider's own tag-
+        // reconciliation call. Only revoke_rules_on_delete (unrelated
+        // provider-schema bookkeeping) remains ignored.
         $block = $this->extractResourceBlock($this->securityGroupsModuleMain(), 'aws_security_group', 'ecs_tasks');
 
         $this->assertMatchesRegularExpression(
-            '/ignore_changes\s*=\s*\[\s*revoke_rules_on_delete\s*,\s*tags\s*,\s*tags_all\s*\]/',
+            '/ignore_changes\s*=\s*\[\s*revoke_rules_on_delete\s*\]/',
             $block,
-            'aws_security_group.ecs_tasks must ignore_changes on tags/tags_all (adoption metadata) and revoke_rules_on_delete (provider bookkeeping).'
+            'aws_security_group.ecs_tasks must ignore_changes only revoke_rules_on_delete — tags/tags_all are now explicitly modeled, not ignored.'
         );
     }
 
@@ -260,10 +267,14 @@ class StagingEcsTaskSecurityGroupAlignmentTest extends TestCase
 
     public function test_redis_sg_revoke_rules_on_delete_is_pinned_and_protected(): void
     {
+        // See docs/ecs/state-adoption-plan.md §9.26 — tags/tags_all were
+        // removed from this resource's ignore_changes once the legacy tag
+        // became explicitly modeled via var.security_group_adoption_tags
+        // below. Only revoke_rules_on_delete remains ignored.
         $block = $this->extractResourceBlock($this->elasticacheModuleMain(), 'aws_security_group', 'redis');
 
         $this->assertMatchesRegularExpression('/revoke_rules_on_delete\s*=\s*false/', $block);
-        $this->assertMatchesRegularExpression('/ignore_changes\s*=\s*\[\s*revoke_rules_on_delete\s*,\s*tags\s*,\s*tags_all\s*\]/', $block);
+        $this->assertMatchesRegularExpression('/ignore_changes\s*=\s*\[\s*revoke_rules_on_delete\s*\]/', $block);
     }
 
     // ------------------------------------------------------------
@@ -337,5 +348,113 @@ class StagingEcsTaskSecurityGroupAlignmentTest extends TestCase
         $this->assertMatchesRegularExpression('/is NOT\s+zero-change/', $section);
         $this->assertMatchesRegularExpression('/No apply was performed/i', $section);
         $this->assertMatchesRegularExpression('/not\s+(?:represented\s+as|claimed\s+to\s+be)\s+clean/i', $section, 'The diagnostic plan must not be overstated as clean.');
+    }
+
+    // ------------------------------------------------------------
+    // §9.26 — legacy tags explicitly modeled via a narrowly scoped,
+    // generic adoption-tag module input (not ignore_changes, not a
+    // hardcoded literal inside either reusable module)
+    // ------------------------------------------------------------
+
+    private function elasticacheModuleVariables(): string
+    {
+        return $this->readFile('infrastructure/ecs/modules/elasticache/variables.tf');
+    }
+
+    private function securityGroupsModuleVariables(): string
+    {
+        return $this->readFile('infrastructure/ecs/modules/security_groups/variables.tf');
+    }
+
+    public function test_elasticache_module_declares_a_generic_empty_default_adoption_tags_input(): void
+    {
+        $vars = $this->elasticacheModuleVariables();
+        preg_match('/variable\s+"security_group_adoption_tags"\s*\{.*?\n\}\n/s', $vars, $matches);
+        $this->assertNotEmpty($matches, 'Could not locate variable "security_group_adoption_tags" in modules/elasticache/variables.tf.');
+        $block = $matches[0];
+
+        $this->assertMatchesRegularExpression('/type\s*=\s*map\(string\)/', $block);
+        $this->assertMatchesRegularExpression('/default\s*=\s*\{\s*\}/', $block, 'Must default to an empty map — a brand-new environment must be unaffected.');
+    }
+
+    public function test_security_groups_module_declares_a_generic_empty_default_adoption_tags_input(): void
+    {
+        $vars = $this->securityGroupsModuleVariables();
+        preg_match('/variable\s+"ecs_tasks_security_group_adoption_tags"\s*\{.*?\n\}\n/s', $vars, $matches);
+        $this->assertNotEmpty($matches, 'Could not locate variable "ecs_tasks_security_group_adoption_tags" in modules/security_groups/variables.tf.');
+        $block = $matches[0];
+
+        $this->assertMatchesRegularExpression('/type\s*=\s*map\(string\)/', $block);
+        $this->assertMatchesRegularExpression('/default\s*=\s*\{\s*\}/', $block, 'Must default to an empty map — a brand-new environment must be unaffected.');
+    }
+
+    public function test_redis_resource_merges_adoption_tags_ahead_of_the_name_tag(): void
+    {
+        $block = $this->extractResourceBlock($this->elasticacheModuleMain(), 'aws_security_group', 'redis');
+
+        $this->assertMatchesRegularExpression(
+            '/tags\s*=\s*merge\(var\.tags,\s*var\.security_group_adoption_tags,\s*\{\s*Name\s*=\s*"\$\{var\.name_prefix\}-redis"\s*\}\)/',
+            $block
+        );
+    }
+
+    public function test_ecs_tasks_resource_merges_adoption_tags_ahead_of_the_name_tag(): void
+    {
+        $block = $this->extractResourceBlock($this->securityGroupsModuleMain(), 'aws_security_group', 'ecs_tasks');
+
+        $this->assertMatchesRegularExpression(
+            '/tags\s*=\s*merge\(var\.tags,\s*var\.ecs_tasks_security_group_adoption_tags,\s*\{\s*Name\s*=\s*"\$\{var\.name_prefix\}-ecs-tasks"\s*\}\)/',
+            $block
+        );
+    }
+
+    public function test_neither_reusable_module_hardcodes_the_staging_only_legacy_tag_literal(): void
+    {
+        // The exact historical tag keys must appear only in the staging
+        // root (main.tf) and in comments/docs — never as a literal inside
+        // either reusable module's resource/variable definitions.
+        foreach ([
+            $this->elasticacheModuleMain(),
+            $this->securityGroupsModuleMain(),
+        ] as $moduleSource) {
+            $this->assertDoesNotMatchRegularExpression(
+                '/tags\s*=\s*merge\([^)]*"firmsbase-staging-(?:redis|ecs)-sg"/',
+                $moduleSource,
+                'A reusable module must never hardcode the staging-only legacy tag key directly into a resource tags argument.'
+            );
+        }
+    }
+
+    public function test_staging_root_supplies_the_exact_legacy_tag_only_from_the_staging_root(): void
+    {
+        $staging = $this->stagingMain();
+
+        preg_match('/module\s+"elasticache"\s*\{.*?\n\}\n/s', $staging, $elasticacheMatches);
+        $this->assertNotEmpty($elasticacheMatches, 'Could not locate module "elasticache".');
+        $this->assertMatchesRegularExpression(
+            '/security_group_adoption_tags\s*=\s*\{\s*"firmsbase-staging-redis-sg"\s*=\s*""\s*\}/',
+            $elasticacheMatches[0]
+        );
+
+        preg_match('/module\s+"security_groups"\s*\{.*?\n\}\n/s', $staging, $secGroupsMatches);
+        $this->assertNotEmpty($secGroupsMatches, 'Could not locate module "security_groups".');
+        $this->assertMatchesRegularExpression(
+            '/ecs_tasks_security_group_adoption_tags\s*=\s*\{\s*"firmsbase-staging-ecs-sg"\s*=\s*""\s*\}/',
+            $secGroupsMatches[0]
+        );
+    }
+
+    public function test_documentation_records_the_root_cause_and_expected_tags_all_maps(): void
+    {
+        $doc = $this->stateAdoptionPlan();
+        preg_match('/### 9\.26.*?(?=\n## \d)/s', $doc, $matches);
+        $this->assertNotEmpty($matches, 'Could not locate §9.26 in state-adoption-plan.md.');
+        $section = $matches[0];
+
+        $this->assertMatchesRegularExpression('/DeleteTags/', $section);
+        $this->assertMatchesRegularExpression('/CreateTags/', $section);
+        $this->assertStringContainsString('firmsbase-staging-redis-sg', $section);
+        $this->assertStringContainsString('firmsbase-staging-ecs-sg', $section);
+        $this->assertMatchesRegularExpression('/No\s+`apply`\s+was\s+run/i', $section, 'Must honestly record this correction is configuration-only.');
     }
 }

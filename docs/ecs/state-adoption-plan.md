@@ -2478,6 +2478,95 @@ before §9.24) remains blocked pending (a) the foundation KMS/S3 wave
 ALB security group in a future, explicitly-authorized mission using the
 identical, already-proven pattern.
 
+### 9.26 Redis and ECS-tasks legacy security-group tags explicitly modeled — `ignore_changes` alone does not survive a real apply (2026-08-06)
+
+**Root cause, established by a read-only investigation, not assumption.**
+§9.25's item 6 above reported the `tags_all` `(known after apply)` residual
+as an unresolved plan-time anomaly. Three subsequent live `apply` attempts
+against `module.elasticache.aws_security_group.redis` and
+`module.security_groups.aws_security_group.ecs_tasks` (each under a
+separately, explicitly authorized temporary IAM tag-management grant)
+converted that anomaly into a real, repeated incident: each attempt's
+`DeleteTags` call succeeded — removing the live legacy tag
+(`firmsbase-staging-redis-sg = ""` / `firmsbase-staging-ecs-sg = ""`)
+entirely — before the paired `CreateTags` call failed on
+`UnauthorizedOperation`, leaving both security groups tagless twice. The
+pattern proves `lifecycle.ignore_changes = [tags, tags_all]` only
+suppresses the *displayed plan diff*; the AWS provider's own internal
+tag-reconciliation subroutine (the code path that issues the raw
+`DeleteTags`/`CreateTags` EC2 calls) computes its desired tag set fresh
+from the literal `tags` argument merged with provider `default_tags` —
+**not** from the `ignore_changes`-frozen prior-state value. Since the
+legacy tag was never literally written into either resource's `tags`
+argument (only preserved out-of-band in state, nominally shielded by
+`ignore_changes`), the provider's real reconciliation target excluded it,
+so `DeleteTags` correctly (from the provider's perspective) removed
+exactly the one tag present in state but absent from the computed
+desired-state.
+
+**Fix — the legacy tags are now explicitly modeled, not
+`ignore_changes`-protected.** Both `modules/elasticache` and
+`modules/security_groups` gained a narrowly scoped, generic module input
+(`security_group_adoption_tags` / `ecs_tasks_security_group_adoption_tags`
+respectively — map(string), default `{}`, so a brand-new environment is
+unaffected) merged into the resource's literal `tags` argument ahead of
+the `Name` tag. This staging root's `module "elasticache"` and
+`module "security_groups"` calls supply the exact two historical values —
+`{"firmsbase-staging-redis-sg" = ""}` and
+`{"firmsbase-staging-ecs-sg" = ""}` — as the only place either literal
+legacy key appears (never hardcoded into a reusable module). With the
+legacy tag now part of the literal config, `tags`/`tags_all` were removed
+from both resources' `ignore_changes` lists (only `revoke_rules_on_delete`
+remains ignored there), so a future diagnostic plan can genuinely verify
+live tags match config instead of masking the difference.
+
+**Expected `tags_all` once live tags are next reconciled (not yet
+applied — this correction is configuration-only):**
+
+```json
+// module.elasticache.aws_security_group.redis (sg-0da3ea50262a9d20d)
+{
+  "firmsbase-staging-redis-sg": "",
+  "Name": "firmsbase-staging-redis",
+  "Project": "firmsbase",
+  "Environment": "staging",
+  "ManagedBy": "terraform",
+  "Mission": "ecs-readiness-foundation"
+}
+
+// module.security_groups.aws_security_group.ecs_tasks (sg-0db14e50ea5c5466c)
+{
+  "firmsbase-staging-ecs-sg": "",
+  "Name": "firmsbase-staging-ecs-tasks",
+  "Project": "firmsbase",
+  "Environment": "staging",
+  "ManagedBy": "terraform",
+  "Mission": "ecs-readiness-foundation"
+}
+```
+
+**A related, separate finding worth recording**: the prior temporary IAM
+tag-management allowlist granted for the failed apply attempts
+(`firmsbase-staging-redis-sg`, `firmsbase-staging-ecs-sg`, `Project`,
+`Environment`, `ManagedBy`, `Mission` — six tag *keys*) never included
+`Name`, even though both resources' literal `tags` argument has always
+unconditionally set `Name`. If that grant was scoped by a tag-key
+condition (e.g. `aws:TagKeys`), a `CreateTags` call writing `Name` would
+be denied by the policy's own shape — a plausible, evidence-consistent
+contributor to the repeated `CreateTags UnauthorizedOperation` failures,
+independent of whatever a `DryRunOperation` check without the exact
+tag-key parameter validated. Any future IAM grant for a real apply against
+these two resources should include `Name` in the tag-key allowlist.
+
+**This correction changes Terraform configuration only.** No `apply` was
+run, no AWS resource, IAM policy, or Terraform state was touched. Live
+security-group identity (IDs, names, descriptions, VPC, ingress/egress
+rule topology) is unaffected — only the `tags`/`security_group_adoption_tags`
+input and the `ignore_changes` list changed. The two security groups'
+live tags remain whatever the administrator most recently set them to
+until a future, separately authorized apply reconciles them against this
+now-explicit configuration.
+
 ## 10. Validation performed (local/static only)
 
 | Check | Result |

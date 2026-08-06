@@ -40,6 +40,12 @@ variable "ecs_tasks_security_group_description" {
   default     = "FirmsBase ECS tasks (web/worker/scheduler/migrate/maintenance) — no direct internet ingress."
 }
 
+variable "ecs_tasks_security_group_adoption_tags" {
+  description = "Extra literal tags merged onto the ECS-tasks security group ahead of the Name tag, meant for exactly one purpose: reproducing a pre-Terraform-adoption tag an already-imported live security group carries (e.g. a legacy empty-value key an earlier, non-Terraform process set) so it becomes part of this resource's real, managed tag set instead of being masked by ignore_changes. Empty (default) for a brand-new environment. Never used for ordinary environment-wide tagging — use var.tags for that. Scoped to the ecs_tasks security group only — the sibling alb security group has its own, different live tags and is out of scope here."
+  type        = map(string)
+  default     = {}
+}
+
 variable "alb_security_group_name" {
   description = "Override for the ALB security group's exact name. Null (default) preserves this module's original name_prefix-generated pattern (\"<name_prefix>-alb-<random>\") — the AWS-recommended way to avoid name collisions when Terraform creates a brand-new security group. name (like name_prefix) is ForceNew on aws_security_group — an already-imported live security group with a fixed, pre-existing name (not the name_prefix pattern) MUST have this set to the exact live value, or the very next apply plans a disruptive replacement of a security group already in active use (referenced by the ecs_tasks_ingress_from_alb rule). See alb_security_group_description below (also ForceNew, same rationale)."
   type        = string

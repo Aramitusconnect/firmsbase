@@ -2,7 +2,11 @@
 # docs/ecs/state-adoption-plan.md §9.25): ecs_tasks_security_group_name/
 # ecs_tasks_security_group_description model the exact live security
 # group instead of forcing its replacement — the identical, already-proven
-# pattern applied to module.elasticache.aws_security_group.redis.
+# pattern applied to module.elasticache.aws_security_group.redis. Also
+# proves §9.26: ecs_tasks_security_group_adoption_tags defaults to {} for
+# a brand-new environment and, when supplied, merges the legacy
+# pre-Terraform-adoption tag alongside the Name tag — explicitly modeled,
+# not ignore_changes-only.
 #
 # Run with: terraform test (from infrastructure/ecs/modules/security_groups)
 
@@ -58,6 +62,35 @@ run "ecs_tasks_sg_resource_address_and_vpc_are_unaffected" {
   assert {
     condition     = aws_security_group.ecs_tasks.vpc_id == "vpc-0fd81b688155ded2b"
     error_message = "The security group's VPC must be unaffected by these overrides."
+  }
+}
+
+run "ecs_tasks_adoption_tags_defaults_to_empty_for_a_brand_new_environment" {
+  command = plan
+
+  assert {
+    condition     = aws_security_group.ecs_tasks.tags == tomap({ Name = "firmsbase-staging-ecs-tasks" })
+    error_message = "Without ecs_tasks_security_group_adoption_tags set, the security group's tags must contain only the Name tag this module always sets — a brand-new environment must be unaffected."
+  }
+}
+
+run "ecs_tasks_adoption_tags_models_the_exact_legacy_tag_when_supplied" {
+  command = plan
+
+  variables {
+    ecs_tasks_security_group_adoption_tags = {
+      "firmsbase-staging-ecs-sg" = ""
+    }
+  }
+
+  assert {
+    condition     = aws_security_group.ecs_tasks.tags == tomap({ Name = "firmsbase-staging-ecs-tasks", "firmsbase-staging-ecs-sg" = "" })
+    error_message = "ecs_tasks_security_group_adoption_tags must be merged onto the security group alongside the Name tag, exactly reproducing the confirmed live legacy tag."
+  }
+
+  assert {
+    condition     = aws_security_group.alb.tags == tomap({ Name = "firmsbase-staging-alb" })
+    error_message = "module.security_groups.aws_security_group.alb must be unaffected by the ecs_tasks-specific adoption tags — it is a separate, out-of-scope resource."
   }
 }
 

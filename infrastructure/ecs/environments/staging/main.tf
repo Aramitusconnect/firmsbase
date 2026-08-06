@@ -51,6 +51,16 @@ module "security_groups" {
   ecs_tasks_security_group_name        = var.ecs_tasks_security_group_name
   ecs_tasks_security_group_description = var.ecs_tasks_security_group_description
 
+  # This staging environment's live ECS-tasks security group carries a
+  # single, pre-Terraform-adoption tag with an empty value (confirmed via
+  # aws ec2 describe-security-groups) — a fixed, historical fact about this
+  # one environment, not a reusable module default, so it's supplied here
+  # rather than hardcoded in modules/security_groups. See
+  # docs/ecs/state-adoption-plan.md.
+  ecs_tasks_security_group_adoption_tags = {
+    "firmsbase-staging-ecs-sg" = ""
+  }
+
   alb_security_group_name        = var.alb_security_group_name
   alb_security_group_description = var.alb_security_group_description
 }
@@ -80,6 +90,16 @@ module "elasticache" {
   subnet_group_description      = var.elasticache_subnet_group_description
   replication_group_description = var.elasticache_replication_group_description
   snapshot_retention_limit      = var.elasticache_snapshot_retention_limit
+
+  # This staging environment's live Redis security group carries a single,
+  # pre-Terraform-adoption tag with an empty value (confirmed via aws ec2
+  # describe-security-groups) — a fixed, historical fact about this one
+  # environment, not a reusable module default, so it's supplied here
+  # rather than hardcoded in modules/elasticache. See
+  # docs/ecs/state-adoption-plan.md.
+  security_group_adoption_tags = {
+    "firmsbase-staging-redis-sg" = ""
+  }
 }
 
 module "ecs_cluster" {

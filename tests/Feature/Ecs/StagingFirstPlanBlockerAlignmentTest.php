@@ -208,18 +208,20 @@ class StagingFirstPlanBlockerAlignmentTest extends TestCase
         $this->assertMatchesRegularExpression('/description\s*=\s*coalesce\(var\.security_group_description/', $block);
     }
 
-    public function test_redis_security_group_has_scoped_tags_lifecycle_protection(): void
+    public function test_redis_security_group_has_scoped_revoke_rules_lifecycle_protection(): void
     {
         $block = $this->extractResourceBlock($this->elasticacheModuleMain(), 'aws_security_group', 'redis');
 
-        // §9.25 extended this list to also cover revoke_rules_on_delete
-        // (provider-schema bookkeeping — see
+        // §9.26 removed tags/tags_all from this list — the legacy
+        // adoption tag is now explicitly modeled via
+        // var.security_group_adoption_tags (see
         // StagingEcsTaskSecurityGroupAlignmentTest for the dedicated
-        // assertion on that field).
+        // assertions on that). Only revoke_rules_on_delete (provider-
+        // schema bookkeeping, §9.25) remains ignored.
         $this->assertMatchesRegularExpression(
-            '/ignore_changes\s*=\s*\[\s*revoke_rules_on_delete\s*,\s*tags\s*,\s*tags_all\s*\]/',
+            '/ignore_changes\s*=\s*\[\s*revoke_rules_on_delete\s*\]/',
             $block,
-            'aws_security_group.redis must ignore_changes on revoke_rules_on_delete (§9.25) and tags/tags_all to preserve the live, manually-set adoption tag.'
+            'aws_security_group.redis must ignore_changes only revoke_rules_on_delete — tags/tags_all are now explicitly modeled, not ignored (§9.26).'
         );
     }
 

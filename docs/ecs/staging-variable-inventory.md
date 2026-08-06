@@ -646,6 +646,32 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
     steps). Manifest `classification` remains `import_then_migrate` for
     all four, unchanged — only the prose model changed. No AWS, ECS, IAM,
     or live tag was changed in this pass.
+19. **Redis and ECS-tasks legacy security-group tags explicitly modeled
+    (2026-08-06, see
+    [state-adoption-plan.md §9.26](state-adoption-plan.md))**: two
+    repeated live-apply incidents proved `lifecycle.ignore_changes =
+    [tags, tags_all]` does not survive a real apply on
+    `aws_security_group` — the provider's own tag-reconciliation
+    subroutine computes its desired tag set from the literal `tags`
+    argument, not the `ignore_changes`-frozen state value, so both
+    attempts' `DeleteTags` call removed the legacy tag before the paired
+    `CreateTags` call failed. Fixed by adding a narrowly scoped, generic
+    module input to each module — `security_group_adoption_tags` on
+    `modules/elasticache` and `ecs_tasks_security_group_adoption_tags` on
+    `modules/security_groups`, both `map(string)` defaulting to `{}` —
+    merged into each resource's literal `tags` argument ahead of `Name`.
+    This staging root's module calls supply the exact two historical
+    values (`{"firmsbase-staging-redis-sg" = ""}` and
+    `{"firmsbase-staging-ecs-sg" = ""}`) as the only place either literal
+    key appears; neither reusable module hardcodes a staging-only tag
+    name. `tags`/`tags_all` were removed from both resources'
+    `ignore_changes` (only `revoke_rules_on_delete` remains ignored
+    there) now that the full tag set is genuinely modeled in config. Also
+    recorded: the prior temporary IAM tag-key allowlist never included
+    `Name`, a plausible contributor to the repeated `CreateTags`
+    failures. Configuration-only change — no AWS resource, IAM policy, or
+    Terraform state was touched; live security-group identity and rule
+    topology are unaffected.
 
 **No import, apply, ECS deployment, scaling change, capacity-provider
 association, IAM permission migration, or description-drift
