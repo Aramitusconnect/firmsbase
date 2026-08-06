@@ -596,6 +596,27 @@ Group A/B/C readiness matrix and reasoning per address. Summary:
     (already present since §9.18) required no change — it was correct
     but unused until now. `maintenance` remains the first canary;
     `migrate` remains excluded (real schema-migration side effects).
+18. **ECS-task security group aligned to live; provider-schema backfill
+    fields resolved (2026-08-06, see
+    [state-adoption-plan.md §9.25](state-adoption-plan.md))**: two new
+    variables, `ecs_tasks_security_group_name` =
+    `"firmsbase-staging-ecs-sg"` and
+    `ecs_tasks_security_group_description` = `"FirmsBase staging ECS
+    tasks"`, model the security_groups module's ECS-tasks security
+    group's exact live name/description (both ForceNew on
+    `aws_security_group`) — confirmed, not assumed, to be the sole
+    replacement cause via the plan's own `# forces replacement`
+    annotations, resolving the cascading forced replacement of both the
+    RDS and Redis ingress rules that reference it. `revoke_rules_on_delete`
+    (both security groups) and the replication group's
+    `apply_immediately`/`auth_token_update_strategy` are confirmed via the
+    installed AWS provider's own schema to be pure Terraform-side
+    bookkeeping with no live behavioral effect in this environment, and
+    are now `ignore_changes`-protected on exactly the resources they
+    apply to. A newly discovered, out-of-scope blocker
+    (`module.security_groups.aws_security_group.alb`, the identical
+    name/description ForceNew pattern) was found but **not** corrected —
+    it requires a separate, explicitly-authorized follow-up mission.
 15. **Effective-tag fix and corrected two-axis import-readiness model
     (2026-08-05, see
     [state-adoption-plan.md §9.21](state-adoption-plan.md))**: this

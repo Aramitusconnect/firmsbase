@@ -31,14 +31,61 @@ resource "aws_security_group_rule" "alb_egress_to_ecs_tasks" {
 }
 
 resource "aws_security_group" "ecs_tasks" {
-  name_prefix = "${var.name_prefix}-ecs-tasks-"
-  description = "FirmsBase ECS tasks (web/worker/scheduler/migrate/maintenance) — no direct internet ingress."
+  # name/name_prefix and description are all ForceNew on aws_security_group
+  # (the EC2 API has no in-place rename or UpdateSecurityGroupDescription
+  # call) — see ecs_tasks_security_group_name/ecs_tasks_security_group_description
+  # in variables.tf. var.ecs_tasks_security_group_name null (the default)
+  # preserves the original name_prefix-generated behavior for a brand-new
+  # environment; set, it selects the exact live name instead, so
+  # name_prefix must be omitted (both cannot be set on the same resource).
+  # This mirrors the identical, evidence-proven pattern already applied to
+  # module.elasticache.aws_security_group.redis — confirmed via a real
+  # diagnostic plan's own "# forces replacement" annotations on both name
+  # and description for this specific resource, not assumed from symptom
+  # similarity alone. See docs/ecs/state-adoption-plan.md.
+  name        = var.ecs_tasks_security_group_name
+  name_prefix = var.ecs_tasks_security_group_name == null ? "${var.name_prefix}-ecs-tasks-" : null
+  # Explicitly coalesced, not a bare var reference — a caller passing an
+  # explicit null (e.g. an unset root-module override) does not itself
+  # trigger this variable's own default, since nullable is not set to
+  # false.
+  description = coalesce(var.ecs_tasks_security_group_description, "FirmsBase ECS tasks (web/worker/scheduler/migrate/maintenance) — no direct internet ingress.")
   vpc_id      = var.vpc_id
+
+  # Explicit, not left to the provider schema default (also false) — a
+  # diagnostic plan against this already-imported live security group
+  # otherwise proposes "adding" this attribute (a newer AWS provider
+  # schema field this resource's state predates), a real plan action even
+  # though the effective behavior is unchanged.
+  revoke_rules_on_delete = false
 
   tags = merge(var.tags, { Name = "${var.name_prefix}-ecs-tasks" })
 
   lifecycle {
     create_before_destroy = true
+
+    # This staging environment's live security group carries a single,
+    # manually-set tag (key "firmsbase-staging-ecs-sg", empty value) that
+    # predates Terraform adoption — externally established adoption
+    # metadata, not something this config should silently overwrite with
+    # the Name-tag convention above. Tags (unlike name/description above)
+    # are NOT ForceNew, so without this a routine plan would propose a
+    # real, live tag mutation. Scoped to this one resource only — never a
+    # provider-wide ignore_tags.
+    #
+    # revoke_rules_on_delete: confirmed via the installed AWS provider's
+    # own schema (`terraform providers schema -json`) to be a plain
+    # Optional argument (not Computed) — the EC2 API has no concept of
+    # "revoke rules on delete" at all; it purely controls this provider's
+    # own DELETE-time behavior and is never read from or written to live
+    # AWS on apply. This already-imported resource's state predates this
+    # schema field entirely, so even with the exact same value explicitly
+    # configured (false, above), a plan still proposes "adding" it once —
+    # a one-time, harmless state-bookkeeping backfill, not a live
+    # mutation. Ignoring it here does not hide a security or availability
+    # setting: it only ever affects a future, unplanned `destroy`, which
+    # this mission does not perform. See docs/ecs/state-adoption-plan.md.
+    ignore_changes = [revoke_rules_on_delete, tags, tags_all]
   }
 }
 

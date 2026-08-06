@@ -48,7 +48,20 @@ resource "aws_security_group" "redis" {
     # are NOT ForceNew, so without this a routine plan would propose a
     # real, live tag mutation. Scoped to this one resource only — never a
     # provider-wide ignore_tags.
-    ignore_changes = [tags, tags_all]
+    #
+    # revoke_rules_on_delete: confirmed via the installed AWS provider's
+    # own schema (`terraform providers schema -json`) to be a plain
+    # Optional argument (not Computed) — the EC2 API has no concept of
+    # "revoke rules on delete" at all; it purely controls this provider's
+    # own DELETE-time behavior and is never read from or written to live
+    # AWS on apply. This already-imported resource's state predates this
+    # schema field entirely, so even with the exact same value explicitly
+    # configured (false, above), a plan still proposes "adding" it once —
+    # a one-time, harmless state-bookkeeping backfill, not a live
+    # mutation. Ignoring it here does not hide a security or availability
+    # setting: it only ever affects a future, unplanned `destroy`, which
+    # this mission does not perform. See docs/ecs/state-adoption-plan.md.
+    ignore_changes = [revoke_rules_on_delete, tags, tags_all]
   }
 }
 
@@ -137,6 +150,25 @@ resource "aws_elasticache_replication_group" "this" {
     # replication group's tags predate Terraform adoption and don't match
     # this module's tags/default_tags shape. Scoped to this one resource
     # only.
-    ignore_changes = [auth_token, tags, tags_all]
+    #
+    # apply_immediately: confirmed via the installed AWS provider's own
+    # schema to be Optional+Computed — a write-only control parameter for
+    # HOW a future change is applied (immediately vs. next maintenance
+    # window), never itself read back from or persisted by the
+    # ElastiCache API. It has no effect here: every other attribute this
+    # resource could otherwise drift on (auth_token, tags, tags_all) is
+    # already ignored above, so no code path exists through which
+    # apply_immediately's value could ever matter. This already-imported
+    # resource's state predates the field, so even the exact same value
+    # explicitly configured (false, above) still proposes adding it once
+    # — a one-time, harmless bookkeeping backfill, not a live mutation.
+    #
+    # auth_token_update_strategy: same rationale — Optional (not
+    # Computed), write-only, controls only HOW an auth-token rotation is
+    # applied if one is ever attempted. Since auth_token itself is
+    # ignore_changes'd above, Terraform never attempts that operation
+    # through this resource, so this field can never trigger a live call.
+    # See docs/ecs/state-adoption-plan.md.
+    ignore_changes = [auth_token, apply_immediately, auth_token_update_strategy, tags, tags_all]
   }
 }

@@ -27,3 +27,15 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "ecs_tasks_security_group_name" {
+  description = "Override for the ECS-tasks security group's exact name. Null (default) preserves this module's original name_prefix-generated pattern (\"<name_prefix>-ecs-tasks-<random>\") — the AWS-recommended way to avoid name collisions when Terraform creates a brand-new security group. name (like name_prefix) is ForceNew on aws_security_group — an already-imported live security group with a fixed, pre-existing name (not the name_prefix pattern) MUST have this set to the exact live value, or the very next apply plans a disruptive replacement of a security group that is already in active use (referenced by the RDS ingress rule and the Redis ingress rule alike). See ecs_tasks_security_group_description below (also ForceNew, same rationale)."
+  type        = string
+  default     = null
+}
+
+variable "ecs_tasks_security_group_description" {
+  description = "Override for the ECS-tasks security group's exact description. Defaults to this module's original description (\"FirmsBase ECS tasks (web/worker/scheduler/migrate/maintenance) — no direct internet ingress.\"), fine when Terraform creates a brand-new security group. description is ForceNew on aws_security_group (same as name/name_prefix above, and for the same underlying reason — the EC2 API has no in-place UpdateSecurityGroupDescription call) — an already-imported live security group whose description differs from this default MUST override it to the exact live value, or the very next apply plans a disruptive replacement."
+  type        = string
+  default     = "FirmsBase ECS tasks (web/worker/scheduler/migrate/maintenance) — no direct internet ingress."
+}

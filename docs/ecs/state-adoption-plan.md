@@ -2312,6 +2312,172 @@ replaced, or deleted to produce this finding — only guarded, saved,
 never-applied `plan` runs against the real backend, immediately deleted
 afterward.
 
+### 9.25 ECS-task security group aligned to live; provider-schema backfill fields resolved via scoped ignore_changes (2026-08-06)
+
+Following §9.24, a fresh diagnostic-plan investigation targeted the
+remaining imported-resource blockers. No AWS, ECS, IAM, ElastiCache, or
+networking resource was created, updated, replaced, or deleted to produce
+this section — only read-only EC2/EC2-security-group-rule calls, a full
+read of the relevant configuration, `terraform providers schema -json`
+(provider schema only, never state), and guarded, saved, never-applied
+`plan` runs against the real backend.
+
+**1. Exact ECS-task-SG replacement cause — confirmed, not assumed.**
+`module.security_groups.aws_security_group.ecs_tasks` used
+`name_prefix = "${var.name_prefix}-ecs-tasks-"` and a hardcoded
+description, while live has a fixed `GroupName = "firmsbase-staging-ecs-sg"`
+and `Description = "FirmsBase staging ECS tasks"` (confirmed via
+`aws ec2 describe-security-groups`). Both `name`/`name_prefix` and
+`description` are ForceNew — confirmed independently via this resource's
+own `# forces replacement` plan annotations (not inferred from the Redis
+SG's earlier, superficially similar symptom). VPC (`vpc_id = var.vpc_id`)
+already matched live and was never a cause. `revoke_rules_on_delete`
+("+" in the diff) and the tags/`Name`-tag mismatch were co-displayed
+because the whole resource was already replacing for the two ForceNew
+reasons above — neither is independently a replacement cause (tags are
+never ForceNew on `aws_security_group`; `revoke_rules_on_delete` is
+provider bookkeeping, see item 5 below).
+
+**Correction**: new `ecs_tasks_security_group_name`/
+`ecs_tasks_security_group_description` overrides (mirroring the identical,
+already-proven Redis SG pattern) set to the exact live values, so `name`/
+`name_prefix` are now mutually exclusive based on the override, and the
+security group is no longer replaced.
+
+**2. Redis ingress-rule cascade — cause and resolution confirmed.**
+`module.elasticache.aws_security_group_rule.redis_ingress_from_ecs_tasks`
+references `var.ecs_tasks_security_group_id` (→
+`module.security_groups.ecs_tasks_security_group_id` →
+`aws_security_group.ecs_tasks.id`) as its `source_security_group_id` —
+ForceNew on `aws_security_group_rule`. With the ECS-tasks SG replacing,
+its `id` became unknown-until-apply, forcing this rule to replace too,
+even though the rule's own type/protocol/port/security-group-id fields
+never changed. After item 1's correction, a fresh targeted check
+confirmed this rule no longer proposes replacement — only a benign
+`update in-place` remains (see item 6). Type (`ingress`), protocol
+(`tcp`), port (`6379`), Redis destination security group
+(`aws_security_group.redis.id`), ECS-task source security group, and the
+Terraform address are all unchanged.
+
+**3. `module.security_groups.aws_security_group_rule.rds_ingress_from_ecs_tasks[0]`**
+has the identical `source_security_group_id` dependency on the ECS-tasks
+SG and was equally forced to replace before item 1's fix — now likewise
+only an `update in-place` (see item 6). Not named in this mission's
+"remaining diagnostic findings," but evidenced directly via the same
+targeted-plan mechanism as item 2, and resolved by the same, single
+underlying correction.
+
+**4. A new, previously undiscovered blocker: `module.security_groups.aws_security_group.alb`.**
+An early verification check (targeting the ECS-tasks SG and its three
+direct rule dependents) surfaced that `module.security_groups.aws_security_group_rule.ecs_tasks_ingress_from_alb`
+still proposes **replacement** — caused by `module.security_groups.aws_security_group.alb`
+itself proposing replacement, via the **identical** `name_prefix`/
+mismatched-`description` ForceNew pattern already fixed twice above
+(live `GroupName = "firmsbase-staging-alb-sg"`, live
+`Description = "Public ALB access for FirmsBase staging"`, versus
+config's `name_prefix`+different hardcoded description). This resource
+and its cascade were **not named anywhere in this mission's authorized
+scope** (which is specifically the ECS-task security group, per Phase
+10's own commit title) — consistent with this engagement's established
+precedent (§9.24 item B.2: a newly-discovered, out-of-scope blocker is
+recorded, not silently fixed). **Not corrected here; requires a separate,
+explicitly-authorized follow-up mission**, using the identical
+`name`/`description`-override pattern already proven safe twice in this
+engagement.
+
+**5. Provider-schema backfill fields — classified via the installed AWS
+provider's own schema (`terraform providers schema -json`; provider
+schema only, never state or a live read):**
+
+| Field | Resource | Schema | Classification |
+|---|---|---|---|
+| `revoke_rules_on_delete` | `aws_security_group` (both Redis and ECS-tasks) | `optional` (not computed) | Terraform-only delete-time behavior; the EC2 API has no such concept. Never read from or written to live AWS on apply — only affects a future `destroy`, which this mission never performs. |
+| `apply_immediately` | `aws_elasticache_replication_group` | `optional, computed` | Write-only timing control for *other* changes; has no effect here since every other attribute this resource could drift on (`auth_token`, `tags`, `tags_all`) is already `ignore_changes`-protected. |
+| `auth_token_update_strategy` | `aws_elasticache_replication_group` | `optional` (not computed) | Write-only control for *how* an auth-token rotation applies; `auth_token` itself is `ignore_changes`-protected, so this field can never be exercised. |
+
+None of the three is a genuine live mutation (classification 4) or a
+value that should be left unset as read-only/computed-only (classification
+2). All three are genuinely configurable and are explicitly, correctly
+modeled in config (matching this environment's deliberate, conservative
+choices: never auto-revoke rules; apply changes only during the
+maintenance window; rotate rather than blind-set an auth token) —
+**and**, because each already-imported resource's state predates that
+schema field entirely, even the exact matching value still proposed a
+one-time "add" with no config change able to suppress it (verified by
+re-running the diagnostic plan after explicitly setting each value, which
+produced no change to the outcome). Since each field is proven — via
+provider-schema evidence, not assumption — to be pure bookkeeping with no
+live behavioral effect in this environment's actual usage, a narrowly
+scoped `lifecycle { ignore_changes = [...] }` entry was added for each,
+on exactly the resource it applies to. This is not claimed to be "zero
+drift" in the sense of nothing pending — a future approved apply would
+still be the moment these fields are written into state for the first
+time; `ignore_changes` means that moment is deferred indefinitely rather
+than forced now, since forcing it is out of this mission's scope
+(no apply is authorized here).
+
+**6. A further, minor content difference found via the same evidence
+trail: `aws_security_group_rule.description` on the RDS and Redis
+ingress rules.** Both `rds_ingress_from_ecs_tasks[0]` and
+`redis_ingress_from_ecs_tasks` propose adding a `description` value
+(`"ECS tasks to RDS PostgreSQL"` / `"ECS tasks to Redis"`) that the live,
+pre-Terraform-created rules never had. `description` is Optional and
+**not** ForceNew on `aws_security_group_rule` (confirmed via provider
+schema) — this is a genuine, low-risk content difference (config has
+always carried a real, accurate description; live simply predates it),
+not provider-schema backfill and not a security- or availability-relevant
+change. Left as-is (not suppressed via `ignore_changes`): adding
+human-readable rule documentation is desirable and requires no
+correction, only a future apply to take effect.
+
+**7. The 8-resource diagnostic plan (Phase 8) — exact, machine-verified
+result, not claimed clean.** A guarded, saved, never-applied plan
+targeting exactly `module.security_groups.aws_security_group.ecs_tasks`,
+`module.security_groups.aws_security_group_rule.ecs_tasks_ingress_from_alb`,
+`module.security_groups.aws_security_group_rule.rds_ingress_from_ecs_tasks[0]`,
+`module.elasticache.aws_security_group.redis`,
+`module.elasticache.aws_security_group_rule.redis_ingress_from_ecs_tasks`,
+`module.elasticache.aws_elasticache_subnet_group.this`,
+`module.elasticache.aws_elasticache_replication_group.this`, and
+`module.iam.aws_iam_role.task_execution` was inspected via
+`terraform show -json` (the saved plan file only, never state):
+
+- **Genuinely zero-change (`no-op`, machine-confirmed)**: the
+  replication group, the subnet group, and the execution role — all
+  three of §9.24's fixes are now fully clean under this exact target set.
+- **`update` (real, but individually classified)**:
+  - `module.elasticache.aws_security_group_rule.redis_ingress_from_ecs_tasks`
+    and `module.security_groups.aws_security_group_rule.rds_ingress_from_ecs_tasks[0]`
+    — only the benign `description` addition from item 6 above.
+  - `module.elasticache.aws_security_group.redis` and
+    `module.security_groups.aws_security_group.ecs_tasks` — `tags`
+    itself is confirmed unchanged (before == after in the JSON plan),
+    and `revoke_rules_on_delete` no longer appears at all (fully
+    suppressed by its `ignore_changes` entry, machine-confirmed). Their
+    `tags_all`, however, **still shows `(known after apply)` despite the
+    `ignore_changes` entry covering it** — a distinct AWS-provider
+    behavior specific to how `aws_security_group.tags_all` recomputes
+    against provider `default_tags` at plan time, not the same
+    schema-backfill mechanism as item 5's three fields (which `ignore_changes`
+    fully suppresses, as proven by the subnet group/replication
+    group/execution role all reaching `no-op` above). This is reported
+    honestly as an unresolved residual, not claimed to be safely
+    suppressed — a provider-wide `ignore_tags` would suppress the
+    display but is explicitly not used here.
+- **`replace` (create+delete, machine-confirmed) — the plan is NOT
+  zero-change**: `module.security_groups.aws_security_group.alb` and
+  `module.security_groups.aws_security_group_rule.ecs_tasks_ingress_from_alb`
+  (one of the 8 explicitly targeted resources) both still replace,
+  entirely because of item 4's out-of-scope ALB security group — pulled
+  into this plan's dependency closure by the targeted ingress rule.
+
+**No apply was performed. This diagnostic plan is not clean and is not
+represented as clean.** The maintenance-canary targeted plan (mission
+before §9.24) remains blocked pending (a) the foundation KMS/S3 wave
+(§9.24 item B, still separate and unbuilt) and (b) resolving item 4's
+ALB security group in a future, explicitly-authorized mission using the
+identical, already-proven pattern.
+
 ## 10. Validation performed (local/static only)
 
 | Check | Result |

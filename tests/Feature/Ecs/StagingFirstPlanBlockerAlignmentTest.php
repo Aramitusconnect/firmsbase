@@ -146,10 +146,14 @@ class StagingFirstPlanBlockerAlignmentTest extends TestCase
     {
         $block = $this->extractResourceBlock($this->elasticacheModuleMain(), 'aws_elasticache_replication_group', 'this');
 
+        // §9.25 extended this list to also cover apply_immediately/
+        // auth_token_update_strategy (provider-schema bookkeeping — see
+        // StagingEcsTaskSecurityGroupAlignmentTest for the dedicated
+        // assertion on that pair).
         $this->assertMatchesRegularExpression(
-            '/ignore_changes\s*=\s*\[\s*auth_token\s*,\s*tags\s*,\s*tags_all\s*\]/',
+            '/ignore_changes\s*=\s*\[\s*auth_token\s*,\s*apply_immediately\s*,\s*auth_token_update_strategy\s*,\s*tags\s*,\s*tags_all\s*\]/',
             $block,
-            'aws_elasticache_replication_group.this must ignore_changes on auth_token (pre-existing) AND tags/tags_all (new).'
+            'aws_elasticache_replication_group.this must ignore_changes on auth_token (pre-existing), apply_immediately/auth_token_update_strategy (§9.25), and tags/tags_all.'
         );
     }
 
@@ -208,10 +212,14 @@ class StagingFirstPlanBlockerAlignmentTest extends TestCase
     {
         $block = $this->extractResourceBlock($this->elasticacheModuleMain(), 'aws_security_group', 'redis');
 
+        // §9.25 extended this list to also cover revoke_rules_on_delete
+        // (provider-schema bookkeeping — see
+        // StagingEcsTaskSecurityGroupAlignmentTest for the dedicated
+        // assertion on that field).
         $this->assertMatchesRegularExpression(
-            '/ignore_changes\s*=\s*\[\s*tags\s*,\s*tags_all\s*\]/',
+            '/ignore_changes\s*=\s*\[\s*revoke_rules_on_delete\s*,\s*tags\s*,\s*tags_all\s*\]/',
             $block,
-            'aws_security_group.redis must ignore_changes on tags/tags_all to preserve the live, manually-set adoption tag.'
+            'aws_security_group.redis must ignore_changes on revoke_rules_on_delete (§9.25) and tags/tags_all to preserve the live, manually-set adoption tag.'
         );
     }
 

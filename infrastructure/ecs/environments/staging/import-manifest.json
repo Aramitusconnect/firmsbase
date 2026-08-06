@@ -84,7 +84,7 @@
       "import_id": "sg-0db14e50ea5c5466c",
       "prerequisite": null,
       "live_reference": null,
-      "notes": "Live name 'firmsbase-staging-ecs-sg'; name_prefix-based, same reasoning as ALB SG.",
+      "notes": "Live name 'firmsbase-staging-ecs-sg'; name_prefix-based, same reasoning as ALB SG. CORRECTED 2026-08-06 (§9.25): a subsequent diagnostic-plan investigation found this resource's config (name_prefix + a different description) diverged from the live name/description recorded here, which would have forced a disruptive replacement of this in-use security group — name and description are both ForceNew on aws_security_group — cascading into forced replacement of both the RDS and Redis ingress rules that reference it as source_security_group_id. Corrected via new ecs_tasks_security_group_name/ecs_tasks_security_group_description overrides (identical pattern to module.elasticache.aws_security_group.redis) so config now models the exact live name and description; classification remains unchanged. See docs/ecs/state-adoption-plan.md §9.25.",
       "live_existence_confirmed": true
     },
     {

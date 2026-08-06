@@ -154,6 +154,13 @@ elasticache_engine_version        = "7.2"
 elasticache_security_group_name        = "firmsbase-staging-redis-sg"
 elasticache_security_group_description = "Valkey access from FirmsBase staging ECS tasks"
 
+# Same ForceNew rationale as elasticache_security_group_name/description
+# above, for the ECS-tasks security group (referenced by both the RDS
+# ingress rule and the Redis ingress rule — leaving this null forces a
+# cascading replacement of both).
+ecs_tasks_security_group_name        = "firmsbase-staging-ecs-sg"
+ecs_tasks_security_group_description = "FirmsBase staging ECS tasks"
+
 # Live subnet group/replication group descriptions (aws elasticache
 # describe-cache-subnet-groups / describe-replication-groups) — both safely
 # updatable in place, but left null they'd be silently overwritten on

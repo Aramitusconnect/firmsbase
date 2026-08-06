@@ -47,6 +47,9 @@ module "security_groups" {
   vpc_id                         = var.vpc_id
   alb_ingress_cidr_blocks        = var.alb_ingress_cidr_blocks
   existing_rds_security_group_id = var.rds_security_group_id
+
+  ecs_tasks_security_group_name        = var.ecs_tasks_security_group_name
+  ecs_tasks_security_group_description = var.ecs_tasks_security_group_description
 }
 
 module "s3_documents" {
