@@ -2758,6 +2758,89 @@ then-deleted diagnostic plan, after four successive iterations each
 re-verified against the real backend — see §10 below for the exact final
 result.
 
+### 9.28 KMS key policy corrected for CloudWatch Logs access; maintenance-canary blocker root-caused (2026-08-07)
+
+**The maintenance-canary apply (§9.24's targeted, 5-resource plan) failed**
+with two `AccessDeniedException`/`AccessDenied` errors when actually
+applied against live AWS:
+
+1. `aws_cloudwatch_log_group.app["maintenance"]` failed with
+   `AccessDeniedException: The specified KMS key does not exist or is not
+   allowed to be used` when creating with `kms_key_id` pointed at this
+   environment's KMS key.
+2. `module.iam.aws_iam_role.task["maintenance"]` failed because the
+   staging operator's temporary permission set lacked `iam:CreateRole`.
+
+Confirmed read-only (no partial resources exist): `aws logs
+describe-log-groups` found no `/ecs/firmsbase-staging/maintenance` log
+group, and `CreateRole` is atomic (no partial IAM role is left behind on
+failure). Live ECS services remained stable throughout (4/4 `ACTIVE`).
+Neither Terraform state nor any AWS resource was modified investigating
+this.
+
+**Root cause of finding 1** (KMS, the only one config-fixable here — the
+`iam:CreateRole` gap is an operator-permission issue, not a Terraform
+issue, and is handled via the temporary operator permission manifest
+below): the KMS key's policy — left at AWS's own default when the key was
+created in the §"KMS/S3 foundation" apply — grants `kms:*` only to the
+account root (the standard `Enable IAM User Permissions` statement every
+AWS-console-created key gets by default; confirmed byte-for-byte via a
+real, read-only `aws kms get-key-policy` against the live key). CloudWatch
+Logs performs its own `Encrypt`/`Decrypt`/`GenerateDataKey` calls against
+a KMS-encrypted log group's key using **its own service-linked trust**,
+authorized exclusively through the key's resource policy — never through
+the calling IAM identity's own permissions. No IAM-side permission grant
+to the staging operator (or to any role) can ever fix this; only an
+explicit key-policy statement trusting `logs.us-east-1.amazonaws.com`
+does.
+
+**Fix**: `modules/kms` now explicitly manages `aws_kms_key.this`'s
+`policy` (previously left unset/default) via a new
+`data.aws_iam_policy_document.this`, with two statements:
+
+1. `Enable IAM User Permissions` — preserved byte-for-byte from the live
+   default (`Principal={AWS: "arn:aws:iam::<account>:root"}`,
+   `Action: "kms:*"`) — IAM-side permission delegation to specific roles
+   (see `modules/iam`) is completely unaffected.
+2. `AllowCloudWatchLogsEncryption` — new, conditional on a new
+   `cloudwatch_logs_log_group_arn_pattern` module variable (default
+   `null`, omitting this statement entirely for any caller that doesn't
+   supply it — a brand-new environment is unaffected). Grants
+   `logs.${var.aws_region}.amazonaws.com` exactly
+   `kms:Encrypt`/`kms:Decrypt`/`kms:ReEncrypt*`/`kms:GenerateDataKey*`/
+   `kms:Describe*` (the five actions AWS's own CloudWatch-Logs-KMS
+   documentation lists as required — never `kms:*`), restricted via an
+   `ArnLike` condition on `kms:EncryptionContext:aws:logs:arn` — the
+   encryption-context key CloudWatch Logs itself supplies on every
+   cryptographic call — to only this environment's workload log-group
+   namespace. The staging root supplies
+   `arn:aws:logs:${var.aws_region}:${var.aws_account_id}:log-group:/ecs/${var.name_prefix}/*`,
+   matching the one and only `aws_cloudwatch_log_group.app` resource's
+   (`for_each` over all 7 roles) naming pattern exactly — no other log
+   group, region, account, or principal is granted access.
+
+Verified via a real, unmocked, isolated `terraform plan` (fresh scratch
+copy, local backend, no AWS credentials required since
+`aws_iam_policy_document` is pure computation and this was a plan, not an
+apply) that the resulting policy JSON contains exactly these two
+statements and nothing else. `terraform test`'s `mock_provider` cannot
+exercise this data source directly (see `tests/Feature/Ecs/StagingKmsKeyPolicyTest.php`'s
+docblock for why — it mocks every `aws`-provider data source's computed
+output uniformly, including pure, non-API-calling computations); coverage
+here is a source-text PHP test instead, plus `override_data` blocks added
+to the four pre-existing staging-root `.tftest.hcl` files (needed only to
+stop the newly-added data source's mocked output from producing invalid
+JSON during those files' unrelated plans — they do not touch this fix's
+own assertions).
+
+**This correction changes Terraform configuration, test, and
+documentation only.** No `apply` was run, no AWS resource, IAM identity,
+or Terraform state was touched — the KMS key's live policy is unchanged
+until a human explicitly applies this. The `iam:CreateRole` gap and the
+complete temporary operator execution-permission manifest for finishing
+the maintenance canary are addressed separately (see the mission's own
+final report, not duplicated here).
+
 ## 10. Validation performed (local/static only)
 
 | Check | Result |

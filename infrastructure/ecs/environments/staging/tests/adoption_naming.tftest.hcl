@@ -21,6 +21,13 @@ override_module {
   target = module.networking
 }
 
+override_data {
+  target = module.kms.data.aws_iam_policy_document.this
+  values = {
+    json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+  }
+}
+
 override_module {
   target = module.iam
   outputs = {

@@ -31,8 +31,18 @@ module "networking" {
 }
 
 module "kms" {
-  source      = "../../modules/kms"
-  name_prefix = var.name_prefix
+  source         = "../../modules/kms"
+  name_prefix    = var.name_prefix
+  aws_account_id = var.aws_account_id
+  aws_region     = var.aws_region
+
+  # Every one of this environment's 7 workload log groups
+  # (aws_cloudwatch_log_group.app, for_each over local.roles) is wired to
+  # this key via kms_key_id and shares the "/ecs/${var.name_prefix}/"
+  # name prefix — see docs/ecs/state-adoption-plan.md for the real
+  # incident this fixes (CloudWatch Logs' AccessDeniedException against
+  # AWS's own default, root-only key policy).
+  cloudwatch_logs_log_group_arn_pattern = "arn:aws:logs:${var.aws_region}:${var.aws_account_id}:log-group:/ecs/${var.name_prefix}/*"
 }
 
 module "ecr" {
