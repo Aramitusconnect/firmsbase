@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Firm\Pages\Auth\ResetPassword;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
 use App\Http\Middleware\EstablishFirmTenantContext;
 use Filament\Http\Middleware\Authenticate;
@@ -60,7 +61,14 @@ class FirmPanelProvider extends PanelProvider
             ->id('firm')
             ->path('firm')
             ->login()
-            ->passwordReset()
+            // resetAction overridden with App\Filament\Firm\Pages\Auth\ResetPassword —
+            // Filament's own stock page refuses to complete a reset unless
+            // canAccessPanel() already returns true, which can never be
+            // true yet for a brand-new invited owner (no ACTIVE FirmUser
+            // membership exists until THIS completion creates one — see
+            // that class's own docblock for the full deadlock this
+            // resolves).
+            ->passwordReset(resetAction: ResetPassword::class)
             ->colors([
                 'primary' => Color::Blue,
             ])
