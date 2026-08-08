@@ -10,6 +10,7 @@ use App\Enums\FirmOrganizationProvisioningMode;
 use App\Enums\FirmProvisioningStatus;
 use App\Exceptions\ExistingUserReviewRequiredException;
 use App\Exceptions\FirmProvisioningRequestChangedException;
+use App\Exceptions\InvalidPurchasedSeatsException;
 use App\Exceptions\PlatformAdminIdentityCollisionException;
 use App\Models\PlatformAdmin;
 use App\Services\FirmProvisioningService;
@@ -51,6 +52,7 @@ class ProvisionFirmCommand extends Command
         {--deployment-mode= : One of: '.self::DEPLOYMENT_MODE_LIST.'}
         {--organization-id= : Attach to this existing organization id (omit for a standalone firm)}
         {--plan-id= : Assign this plan id (omit to provision without a plan)}
+        {--purchased-seats= : Purchased seat quantity (required when --plan-id is given; every FirmUser, any role, consumes one seat)}
         {--reuse-existing-user : Explicitly authorize reusing an existing user account with the given owner email}
         {--confirm-staging : Required to run this command outside a local/testing environment}';
 
@@ -119,10 +121,20 @@ class ProvisionFirmCommand extends Command
         $organizationId = $this->option('organization-id');
         $planId = $this->option('plan-id');
 
+        $purchasedSeats = $this->option('purchased-seats');
+
+        if (filled($planId) && ! filled($purchasedSeats)) {
+            $purchasedSeats = $this->ask('Purchased seats (every FirmUser, any role, consumes one seat)');
+        }
+
         $this->components->twoColumnDetail('Firm', (string) $firmName);
         $this->components->twoColumnDetail('Owner', $ownerName.' <'.$ownerEmail.'>');
         $this->components->twoColumnDetail('Customer type', (string) $customerType);
         $this->components->twoColumnDetail('Deployment mode', (string) $deploymentMode);
+
+        if (filled($planId)) {
+            $this->components->twoColumnDetail('Purchased seats', filled($purchasedSeats) ? (string) $purchasedSeats : '—');
+        }
 
         if (! $this->confirm('Provision this firm now?', false)) {
             $this->components->warn('Cancelled — nothing was created.');
@@ -145,10 +157,15 @@ class ProvisionFirmCommand extends Command
             planId: filled($planId) ? (int) $planId : null,
             trialDaysOverride: null,
             note: 'Provisioned via firms:provision console command.',
+            purchasedSeats: filled($purchasedSeats) ? (int) $purchasedSeats : null,
         );
 
         try {
             $result = $provisioningService->provision($input, $actor);
+        } catch (InvalidPurchasedSeatsException $e) {
+            $this->components->error($e->getMessage());
+
+            return self::FAILURE;
         } catch (PlatformAdminIdentityCollisionException|ExistingUserReviewRequiredException|FirmProvisioningRequestChangedException $e) {
             $this->components->error($e->getMessage());
 

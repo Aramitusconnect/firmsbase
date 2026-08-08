@@ -6,15 +6,14 @@ namespace Tests\Feature\FirmTeam;
 
 use App\Enums\FirmUserRole;
 use App\Enums\FirmUserStatus;
-use App\Enums\SeatClass;
 use App\Exceptions\FirmSeatLimitExceededException;
 use App\Exceptions\LastFirmOwnerRemovalException;
 use App\Models\Firm;
+use App\Models\FirmLicense;
 use App\Models\FirmUser;
 use App\Models\User;
 use App\Notifications\FirmOwnerInvitationNotification;
 use App\Services\FirmUserInvitationService;
-use App\Services\SeatAllocationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
 use RuntimeException;
@@ -27,6 +26,15 @@ use Tests\TestCase;
  * real invitation was sent (Notification::fake() + assertSentTo,
  * reading the token back off the faked notification rather than a
  * second real sendResetLink() call).
+ *
+ * SEAT MODEL — updated to the flat per-firm licensing model (Firm
+ * Feature Manifest §12): a firm's capacity is
+ * `FirmLicense.purchased_seats`, a single flat number, not a
+ * per-`SeatClass` allocation. `grantSeats()` below sets that column
+ * directly (replacing the original per-class
+ * `SeatAllocationService::allocateDirect()` helper this test used
+ * before the redesign) — every FirmUser (any role, including the
+ * owner) consumes exactly one seat regardless of class.
  */
 final class FirmUserInvitationServiceTest extends TestCase
 {
@@ -45,9 +53,23 @@ final class FirmUserInvitationServiceTest extends TestCase
         );
     }
 
-    private function grantSeats(Firm $firm, SeatClass $seatClass, int $seats): void
+    /**
+     * Grants the firm a flat purchased-seat quantity — creates a
+     * FirmLicense row if none exists yet, or updates the existing one.
+     */
+    private function grantSeats(Firm $firm, int $seats): void
     {
-        $this->runWithFirmContext($firm, fn () => app(SeatAllocationService::class)->allocateDirect($firm, $seatClass, $seats));
+        $this->runWithFirmContext($firm, function () use ($firm, $seats): void {
+            $license = FirmLicense::query()->where('firm_id', $firm->id)->first();
+
+            if ($license === null) {
+                FirmLicense::factory()->forFirm($firm)->create(['purchased_seats' => $seats]);
+
+                return;
+            }
+
+            $license->update(['purchased_seats' => $seats]);
+        });
     }
 
     // ------------------------------------------------------------
@@ -58,9 +80,9 @@ final class FirmUserInvitationServiceTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $owner = $this->ownerFirmUser($firm);
-        // FirmOwner already consumes 1 attorney seat with 0 allocated —
+        // FirmOwner already consumes 1 seat with 0 purchased —
         // grant capacity for the owner PLUS the new invitee.
-        $this->grantSeats($firm, SeatClass::Attorney, 2);
+        $this->grantSeats($firm, 2);
 
         Notification::fake();
 
@@ -84,7 +106,7 @@ final class FirmUserInvitationServiceTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $owner = $this->ownerFirmUser($firm);
-        $this->grantSeats($firm, SeatClass::Staff, 1);
+        $this->grantSeats($firm, 2);
 
         $existingUser = User::factory()->create(['email' => 'existing-'.uniqid().'@example.test']);
 
@@ -100,35 +122,51 @@ final class FirmUserInvitationServiceTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $owner = $this->ownerFirmUser($firm);
-        $this->grantSeats($firm, SeatClass::Attorney, 5);
+        $this->grantSeats($firm, 5);
 
         $this->expectException(RuntimeException::class);
 
         $this->service()->invite($firm, $owner->user->email, 'Owner Again', FirmUserRole::Attorney, $owner->user);
     }
 
-    public function test_invite_fails_cleanly_when_the_firm_has_no_remaining_seats(): void
+    public function test_invite_fails_cleanly_when_the_firm_has_no_license_at_all(): void
     {
         $firm = Firm::factory()->create();
         $owner = $this->ownerFirmUser($firm);
-        // Deliberately NO SeatAllocationService::allocateDirect() call —
-        // proves the documented, pre-existing gap: a freshly provisioned
-        // firm has zero allocated seats, so canInvite() must refuse.
+        // Deliberately NO FirmLicense row at all — proves a
+        // freshly-provisioned, plan-less firm has no purchased-seat
+        // quantity, so canInvite() must refuse.
 
         $this->expectException(FirmSeatLimitExceededException::class);
 
         $this->service()->invite($firm, 'blocked-'.uniqid().'@example.test', 'Blocked Invitee', FirmUserRole::Attorney, $owner->user);
     }
 
+    public function test_invite_fails_cleanly_with_a_flat_message_when_the_firm_is_at_capacity(): void
+    {
+        $firm = Firm::factory()->create();
+        $owner = $this->ownerFirmUser($firm);
+        $this->grantSeats($firm, 1); // exactly enough for the owner, none spare
+
+        try {
+            $this->service()->invite($firm, 'no-room-'.uniqid().'@example.test', 'No Room', FirmUserRole::Attorney, $owner->user);
+            $this->fail('Expected FirmSeatLimitExceededException when no seats remain.');
+        } catch (FirmSeatLimitExceededException $e) {
+            $this->assertStringContainsString('used all 1 licensed user seats', $e->getMessage());
+            $this->assertStringNotContainsString('attorney', $e->getMessage(), 'The message must be flat — no per-class language.');
+            $this->assertStringNotContainsString('staff', $e->getMessage());
+        }
+    }
+
     public function test_invite_is_blocked_when_exactly_at_capacity_then_succeeds_once_a_seat_is_freed(): void
     {
         $firm = Firm::factory()->create();
         $owner = $this->ownerFirmUser($firm);
-        $this->grantSeats($firm, SeatClass::Attorney, 1); // exactly enough for the owner, none spare
+        $this->grantSeats($firm, 1); // exactly enough for the owner, none spare
 
         try {
             $this->service()->invite($firm, 'no-room-'.uniqid().'@example.test', 'No Room', FirmUserRole::Attorney, $owner->user);
-            $this->fail('Expected FirmSeatLimitExceededException when no attorney seats remain.');
+            $this->fail('Expected FirmSeatLimitExceededException when no seats remain.');
         } catch (FirmSeatLimitExceededException) {
             // expected
         }
@@ -139,8 +177,20 @@ final class FirmUserInvitationServiceTest extends TestCase
             $firm,
             fn () => FirmUser::factory()->forFirm($firm)->forUser(User::factory()->create())->role(FirmUserRole::FirmOwner)->create(),
         );
-        $this->grantSeats($firm, SeatClass::Attorney, 1); // ownerB now also needs a seat: 2 allocated, 2 used (owner + ownerB)
-        $this->service()->suspend($owner); // frees owner's seat: 2 allocated, 1 used (ownerB)
+        $this->grantSeats($firm, 2); // ownerB now also needs a seat: 2 purchased, 2 used (owner + ownerB)
+        $this->service()->suspend($owner); // suspend still consumes a seat: 2 purchased, 2 used (owner suspended + ownerB active) — still at capacity
+
+        // Suspended still reserves the seat (documented judgment call —
+        // see FirmSeatCapacityService's own docblock), so this must
+        // STILL be blocked until the suspended owner is actually removed.
+        try {
+            $this->service()->invite($firm, 'still-no-room-'.uniqid().'@example.test', 'Still No Room', FirmUserRole::Attorney, $ownerB->user);
+            $this->fail('Expected FirmSeatLimitExceededException — a Suspended row must still consume a seat.');
+        } catch (FirmSeatLimitExceededException) {
+            // expected
+        }
+
+        $this->service()->remove($owner); // Removed frees the seat: 2 purchased, 1 used (ownerB)
 
         Notification::fake();
 

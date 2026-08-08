@@ -219,6 +219,24 @@ class Firm extends Model
         return $this->hasMany(FirmLicense::class);
     }
 
+    /**
+     * The firm's single current commercial license — matches
+     * `ProviderRateCardResolver::resolveFirmPlanId()`'s own already-
+     * established "most recently created firm_licenses row" convention
+     * (that resolver has its own private lookup rather than reusing this
+     * accessor, since it predates this one and reads only `plan_id` via
+     * a raw query builder call under tenant context). Added for
+     * `FirmSeatCapacityService::purchasedSeats()` — a firm today has at
+     * most one FirmLicense row in practice (`FirmLicenseCommercialService`
+     * only ever mutates an existing row; no production writer creates a
+     * second one), but this still resolves the newest by id rather than
+     * assuming exactly one row exists.
+     */
+    public function license(): HasOne
+    {
+        return $this->hasOne(FirmLicense::class)->latestOfMany();
+    }
+
     public function entitlements(): HasMany
     {
         return $this->hasMany(FirmEntitlement::class);

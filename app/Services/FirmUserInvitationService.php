@@ -67,21 +67,21 @@ use Throwable;
  *    this authenticated, firm-owner-facing call site is free to inspect
  *    the real send outcome (unlike the public "forgot password" flow).
  *
- * SEAT ENFORCEMENT — Firm Feature Manifest §12 point (4): `invite()`
- * checks `SeatEnforcementService::canInvite()` for the invited role's
- * `effectiveSeatClass()` BEFORE creating any row, and fails cleanly with
- * `FirmSeatLimitExceededException` if no seat remains — seat limits are
- * never silently ignored. KNOWN, PRE-EXISTING GAP (confirmed by direct
- * source read, not introduced by this service): no production caller in
- * this codebase creates a `seat_allocations` row for a firm today —
- * `FirmProvisioningService::provisionLocalRecords()` creates the firm's
- * OWN owner `FirmUser` without ever calling `SeatAllocationService`. A
- * freshly-provisioned firm therefore has ZERO allocated seats in every
- * `SeatClass`, so `canInvite()` will legitimately return `false` for
- * every firm until a (separately tracked, not-yet-built) seat
- * provisioning step calls `SeatAllocationService::allocateDirect()`/
- * `allocateFromPool()` for it. This is flagged here, not silently
- * routed around — see this feature's own final report.
+ * SEAT ENFORCEMENT — Firm Feature Manifest §12's flat per-firm seat
+ * model (superseding this service's ORIGINAL per-`SeatClass` design):
+ * `invite()` checks `FirmSeatCapacityService::canInvite()` BEFORE
+ * creating any row, and fails cleanly with
+ * `FirmSeatLimitExceededException` if the firm has no remaining
+ * licensed seat — seat limits are never silently ignored. Every
+ * `FirmUser` (any of the 6 roles, including `FirmOwner`) consumes
+ * exactly one seat against `FirmLicense.purchased_seats`, a single flat
+ * number set at provisioning time (`FirmProvisioningService`) or via
+ * the seat-backfill console command for pre-existing commercial firms
+ * — no longer the per-class `SeatEnforcementService`/`SeatAllocation`
+ * check this service originally used (that per-class architecture is
+ * preserved, untouched, for possible future authorization/accounting
+ * use, but is no longer this service's enforcement path — see
+ * `FirmSeatCapacityService`'s own docblock for the full reasoning).
  *
  * LAST-OWNER GUARD — `suspend()`/`remove()` both call
  * `assertNotLastActiveOwner()` BEFORE writing, a hard service-level
@@ -101,28 +101,21 @@ use Throwable;
 class FirmUserInvitationService
 {
     public function __construct(
-        private readonly SeatEnforcementService $seatEnforcement,
+        private readonly FirmSeatCapacityService $seatCapacity,
         private readonly CorrelatedPasswordResetSenderService $correlatedSender,
     ) {}
 
     /**
-     * @throws FirmSeatLimitExceededException if the firm has no
-     *                                        remaining seat for the invited role's seat class.
+     * @throws FirmSeatLimitExceededException if the firm has no remaining licensed seat.
      * @throws RuntimeException if the email already belongs to a member of this firm.
      */
     public function invite(Firm $firm, string $email, string $name, FirmUserRole $role, User $invitedBy): FirmUser
     {
-        // effectiveSeatClass() is the single authoritative place this
-        // default-derivation table is implemented (see FirmUser's own
-        // docblock) — an unsaved, transient FirmUser instance is enough
-        // to compute it, since it only reads $this->role/$this->seat_class.
-        $seatClass = (new FirmUser(['role' => $role]))->effectiveSeatClass();
-
         $firmUser = (new TenantContextService)->runWithFirmContext(
             $firm,
-            function () use ($firm, $email, $name, $role, $invitedBy, $seatClass): FirmUser {
-                if (! $this->seatEnforcement->canInvite($firm, $seatClass)) {
-                    throw new FirmSeatLimitExceededException($seatClass);
+            function () use ($firm, $email, $name, $role, $invitedBy): FirmUser {
+                if (! $this->seatCapacity->canInvite($firm)) {
+                    throw new FirmSeatLimitExceededException($this->seatCapacity->purchasedSeats($firm));
                 }
 
                 $existingUser = User::query()->where('email', $email)->first();

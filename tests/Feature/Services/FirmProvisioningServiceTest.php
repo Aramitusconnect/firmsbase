@@ -77,6 +77,7 @@ final class FirmProvisioningServiceTest extends TestCase
             'planId' => null,
             'trialDaysOverride' => null,
             'note' => null,
+            'purchasedSeats' => null,
         ];
 
         $merged = array_merge($defaults, $overrides);
@@ -192,13 +193,14 @@ final class FirmProvisioningServiceTest extends TestCase
     {
         $plan = Plan::factory()->create(['trial_days' => 21]);
 
-        $result = $this->service()->provision($this->input(['planId' => $plan->id]), $this->actor());
+        $result = $this->service()->provision($this->input(['planId' => $plan->id, 'purchasedSeats' => 10]), $this->actor());
 
         $license = $this->runWithFirmContext($result->firm, fn () => $result->firm->licenses()->first());
 
         $this->assertNotNull($license);
         $this->assertSame(LicenseStatus::Trial, $license->license_status);
         $this->assertSame($plan->id, $license->plan_id);
+        $this->assertSame(10, $license->purchased_seats);
         $this->assertNotNull($license->expires_at);
         $this->assertEqualsWithDelta(21, now()->diffInDays($license->expires_at), 1);
     }
@@ -207,7 +209,7 @@ final class FirmProvisioningServiceTest extends TestCase
     {
         $plan = Plan::factory()->create();
 
-        $result = $this->service()->provision($this->input(['planId' => $plan->id]), $this->actor());
+        $result = $this->service()->provision($this->input(['planId' => $plan->id, 'purchasedSeats' => 5]), $this->actor());
 
         $settings = $this->runWithFirmContext($result->firm, fn () => $result->firm->firmSettings()->first());
         $this->assertNotNull($settings, 'firm_settings row must exist for a newly provisioned firm.');
@@ -620,8 +622,8 @@ final class FirmProvisioningServiceTest extends TestCase
         $plan = Plan::factory()->create();
         $actor = $this->actor();
 
-        $resultA = $this->service()->provision($this->input(['planId' => $plan->id]), $actor);
-        $resultB = $this->service()->provision($this->input(['planId' => $plan->id]), $actor);
+        $resultA = $this->service()->provision($this->input(['planId' => $plan->id, 'purchasedSeats' => 5]), $actor);
+        $resultB = $this->service()->provision($this->input(['planId' => $plan->id, 'purchasedSeats' => 5]), $actor);
 
         $licensesA = $this->runWithFirmContext($resultA->firm, fn () => $resultA->firm->licenses()->count());
         $licensesB = $this->runWithFirmContext($resultB->firm, fn () => $resultB->firm->licenses()->count());

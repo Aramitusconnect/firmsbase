@@ -15,6 +15,7 @@ use App\Models\Client;
 use App\Models\ClientPortalUser;
 use App\Models\Firm;
 use App\Models\FirmUser;
+use App\Models\Plan;
 use App\Models\PlatformAdmin;
 use App\Models\User;
 use App\Services\PlatformRoleService;
@@ -174,6 +175,49 @@ final class ProvisionFirmActionTest extends TestCase
         ])->assertExitCode(1);
 
         $this->assertSame(0, Firm::query()->where('name', 'Direct Invocation Should Fail')->count());
+    }
+
+    // ------------------------------------------------------------
+    // Flat per-firm seat model (Firm Feature Manifest §12) — the
+    // wizard's purchased_seats field
+    // ------------------------------------------------------------
+
+    public function test_the_wizard_sets_purchased_seats_on_the_new_license_when_a_plan_is_selected(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+        $plan = Plan::factory()->create();
+
+        Livewire::test(ListFirms::class)
+            ->callAction(ProvisionFirmAction::getDefaultName(), data: $this->wizardData([
+                'firm_name' => 'Seats Wizard Firm',
+                'owner_email' => 'seats-wizard-owner@example.test',
+                'plan_id' => $plan->id,
+                'purchased_seats' => 17,
+            ]));
+
+        $firm = Firm::query()->where('name', 'Seats Wizard Firm')->firstOrFail();
+        $license = $this->runWithFirmContext($firm, fn () => $firm->licenses()->first());
+
+        $this->assertNotNull($license);
+        $this->assertSame(17, $license->purchased_seats);
+    }
+
+    public function test_the_wizard_rejects_a_plan_selection_with_no_purchased_seats(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+        $plan = Plan::factory()->create();
+
+        Livewire::test(ListFirms::class)
+            ->callAction(ProvisionFirmAction::getDefaultName(), data: $this->wizardData([
+                'firm_name' => 'Rejected Seats Firm',
+                'owner_email' => 'rejected-seats-owner@example.test',
+                'plan_id' => $plan->id,
+                'purchased_seats' => null,
+            ]));
+
+        $this->assertSame(0, Firm::query()->where('name', 'Rejected Seats Firm')->count(), 'No Firm may be created when a plan is selected with no purchased seat quantity.');
     }
 
     // ------------------------------------------------------------

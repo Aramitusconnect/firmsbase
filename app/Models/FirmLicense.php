@@ -23,13 +23,14 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  */
 class FirmLicense extends Model
 {
-    use HasFactory, HasPublicUuid, BelongsToTenant;
+    use BelongsToTenant, HasFactory, HasPublicUuid;
 
     protected $fillable = [
         'firm_id',
         'billing_account_id',
         'org_license_id',
         'plan_id',
+        'purchased_seats',
         'license_key',
         'license_status',
         'deployment_mode',
@@ -50,6 +51,7 @@ class FirmLicense extends Model
             'deployment_mode' => DeploymentMode::class,
             'customer_type' => CustomerType::class,
             'billing_mode' => BillingMode::class,
+            'purchased_seats' => 'integer',
             'starts_at' => 'datetime',
             'renews_at' => 'datetime',
             'expires_at' => 'datetime',

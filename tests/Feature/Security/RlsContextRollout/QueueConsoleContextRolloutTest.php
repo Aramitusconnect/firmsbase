@@ -140,6 +140,18 @@ class QueueConsoleContextRolloutTest extends TestCase
         // firm — no raw SQL, no BYPASSRLS, no superuser role, no
         // set_config manipulation of any RLS-relevant session variable
         // outside that one reviewed wrap.
+        // Firm Workspace master mission (seat-provisioning fix) added
+        // ReportMissingPurchasedSeatsCommand (firms:report-missing-purchased-seats)
+        // — reviewed and safe: default/report mode's per-firm loop
+        // wraps every FirmLicense/FirmUser read inside
+        // TenantContextService::runWithFirmContext() for that one firm
+        // (the identical pattern PlatformFirmUserDirectoryService::
+        // listAll() already establishes), never an unscoped cross-firm
+        // query. --apply mode writes purchased_seats for exactly ONE
+        // explicitly-named firm (--firm=<id>) inside its own
+        // runWithFirmContext() wrap — no raw SQL, no BYPASSRLS, no
+        // superuser role, no set_config manipulation of any
+        // RLS-relevant session variable anywhere in this command.
         // Any OTHER command appearing here has not been reviewed for
         // the silent-bypass risk this test exists to catch.
         $allowlist = [
@@ -157,6 +169,7 @@ class QueueConsoleContextRolloutTest extends TestCase
             'ProvisionFirmCommand.php',
             'BootstrapStagingSandboxPlanCommand.php',
             'ConsumeSesEventsCommand.php',
+            'ReportMissingPurchasedSeatsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

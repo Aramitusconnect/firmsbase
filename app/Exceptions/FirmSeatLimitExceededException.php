@@ -4,25 +4,35 @@ declare(strict_types=1);
 
 namespace App\Exceptions;
 
-use App\Enums\SeatClass;
 use RuntimeException;
 
 /**
  * FirmSeatLimitExceededException — thrown by
  * `FirmUserInvitationService::invite()` when
- * `SeatEnforcementService::canInvite()` reports no remaining seats for
- * the invited role's `SeatClass`. Mirrors `SeatAllocationService::
- * allocateFromPool()`'s own "block the invite with a clear
- * pool-exhausted message" ruling (Firm Feature Manifest §12 / seat
- * enforcement's own docblock) — the invite is refused cleanly, never
- * silently ignored or allowed to over-allocate.
+ * `FirmSeatCapacityService::canInvite()` reports the firm has no
+ * remaining licensed seats. Firm Feature Manifest §12's flat per-firm
+ * seat model REPLACED the original per-`SeatClass` (Attorney/Staff/
+ * ReadOnly) seat-exhaustion message this class used to carry — the
+ * message below is deliberately flat and end-user-appropriate (no
+ * per-class language, no raw exception internals), matching the
+ * business model: every role consumes one identical seat, so there is
+ * nothing class-specific left to say. The class NAME is kept unchanged
+ * for call-site/catch-clause compatibility (`InviteFirmUserAction`,
+ * this service's own tests) even though its shape changed from a
+ * `SeatClass`-keyed constructor to a flat purchased/no-license
+ * distinction.
  */
 class FirmSeatLimitExceededException extends RuntimeException
 {
-    public function __construct(SeatClass $seatClass)
+    /**
+     * @param  int|null  $purchasedSeats  the firm's purchased seat
+     *                                    quantity, or null if the firm has no purchased-seat quantity
+     *                                    configured at all (no license, or a license with no seats set).
+     */
+    public function __construct(?int $purchasedSeats)
     {
-        parent::__construct(
-            "This firm has no remaining '{$seatClass->value}' seats available. Free up a seat or increase the firm's seat allocation before inviting another team member."
-        );
+        parent::__construct($purchasedSeats === null
+            ? 'This firm has no licensed user seats configured. Contact your administrator to set up seat licensing before inviting team members.'
+            : "Your firm has used all {$purchasedSeats} licensed user seats. Contact your administrator to add more seats.");
     }
 }

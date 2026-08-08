@@ -167,6 +167,17 @@ class SecretPatternScanTest extends TestCase
         // bounce/complaint via the existing SuppressionService or
         // leaves the message unacknowledged — no demo/placeholder/
         // synthetic data of any kind is ever created.
+        // Firm Workspace master mission (seat-provisioning fix) added
+        // ReportMissingPurchasedSeatsCommand
+        // (firms:report-missing-purchased-seats) — reviewed and safe:
+        // default/report mode never writes anything. --apply mode
+        // writes a single existing column (purchased_seats) on a
+        // single existing FirmLicense row for a real, explicitly-named
+        // firm (--firm=<id> --seats=<n>, both required) — it never
+        // creates a Firm, FirmLicense, FirmUser, or any other row, and
+        // never invents a seat quantity itself (the operator supplies
+        // it). No demo/placeholder/synthetic data of any kind is ever
+        // created.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
@@ -182,6 +193,7 @@ class SecretPatternScanTest extends TestCase
             'ProvisionFirmCommand.php',
             'BootstrapStagingSandboxPlanCommand.php',
             'ConsumeSesEventsCommand.php',
+            'ReportMissingPurchasedSeatsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

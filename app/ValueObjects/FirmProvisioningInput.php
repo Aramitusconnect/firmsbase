@@ -36,6 +36,13 @@ final readonly class FirmProvisioningInput
         public ?int $planId,
         public ?int $trialDaysOverride,
         public ?string $note,
+        // Required/validated by FirmProvisioningService whenever planId
+        // is not null (a plan-less firm has no FirmLicense at all, so
+        // there is no seat concept to validate). See Firm Feature
+        // Manifest §12's flat per-firm seat model —
+        // InvalidPurchasedSeatsException is thrown when planId is set
+        // but this is null or not a positive integer.
+        public ?int $purchasedSeats = null,
     ) {}
 
     /**
@@ -60,6 +67,7 @@ final readonly class FirmProvisioningInput
             $this->planId,
             $this->trialDaysOverride,
             $this->note,
+            $this->purchasedSeats,
         ], JSON_THROW_ON_ERROR));
     }
 }

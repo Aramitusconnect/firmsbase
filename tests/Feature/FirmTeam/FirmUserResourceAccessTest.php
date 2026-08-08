@@ -6,7 +6,6 @@ namespace Tests\Feature\FirmTeam;
 
 use App\Enums\FirmUserRole;
 use App\Enums\FirmUserStatus;
-use App\Enums\SeatClass;
 use App\Filament\Firm\Resources\FirmUserResource;
 use App\Filament\Firm\Resources\FirmUserResource\Actions\InviteFirmUserAction;
 use App\Filament\Firm\Resources\FirmUserResource\Actions\ReactivateFirmUserAction;
@@ -14,10 +13,10 @@ use App\Filament\Firm\Resources\FirmUserResource\Actions\RemoveFirmUserAction;
 use App\Filament\Firm\Resources\FirmUserResource\Actions\SuspendFirmUserAction;
 use App\Filament\Firm\Resources\FirmUserResource\Pages\ListFirmUsers;
 use App\Models\Firm;
+use App\Models\FirmLicense;
 use App\Models\FirmUser;
 use App\Models\User;
 use App\Services\FirmUserInvitationService;
-use App\Services\SeatAllocationService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
@@ -130,7 +129,7 @@ final class FirmUserResourceAccessTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $this->actingAsRole($firm, FirmUserRole::FirmOwner);
-        $this->runWithFirmContext($firm, fn () => app(SeatAllocationService::class)->allocateDirect($firm, SeatClass::Attorney, 3));
+        $this->grantSeats($firm, 3);
 
         Notification::fake();
 
@@ -310,8 +309,7 @@ final class FirmUserResourceAccessTest extends TestCase
         $firmA = Firm::factory()->create();
         $firmB = Firm::factory()->create();
         $owner = $this->actingAsRole($firmA, FirmUserRole::FirmOwner);
-        $this->runWithFirmContext($firmA, fn () => app(SeatAllocationService::class)->allocateDirect($firmA, SeatClass::Attorney, 3));
-        $this->runWithFirmContext($firmA, fn () => app(SeatAllocationService::class)->allocateDirect($firmA, SeatClass::Staff, 3));
+        $this->grantSeats($firmA, 3);
 
         $userInFirmB = $this->runWithFirmContext(
             $firmB,
@@ -348,5 +346,27 @@ final class FirmUserResourceAccessTest extends TestCase
         $this->actingAs($firmUser->user);
 
         return $firmUser;
+    }
+
+    /**
+     * Grants the firm a flat purchased-seat quantity (Firm Feature
+     * Manifest §12) — creates a FirmLicense row if none exists yet, or
+     * updates the existing one. Replaces the original per-`SeatClass`
+     * `SeatAllocationService::allocateDirect()` helper this test used
+     * before the flat-seat-model redesign.
+     */
+    private function grantSeats(Firm $firm, int $seats): void
+    {
+        $this->runWithFirmContext($firm, function () use ($firm, $seats): void {
+            $license = FirmLicense::query()->where('firm_id', $firm->id)->first();
+
+            if ($license === null) {
+                FirmLicense::factory()->forFirm($firm)->create(['purchased_seats' => $seats]);
+
+                return;
+            }
+
+            $license->update(['purchased_seats' => $seats]);
+        });
     }
 }

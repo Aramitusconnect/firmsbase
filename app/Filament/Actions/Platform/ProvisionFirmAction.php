@@ -11,6 +11,7 @@ use App\Enums\FirmProvisioningStatus;
 use App\Enums\PlanStatus;
 use App\Exceptions\ExistingUserReviewRequiredException;
 use App\Exceptions\FirmProvisioningRequestChangedException;
+use App\Exceptions\InvalidPurchasedSeatsException;
 use App\Exceptions\PlatformAdminIdentityCollisionException;
 use App\Models\Organization;
 use App\Models\Plan;
@@ -221,6 +222,21 @@ class ProvisionFirmAction extends Action
                             : 'Select a plan first.')
                         ->visible(fn (Get $get): bool => filled($get('plan_id'))),
 
+                    // Firm Feature Manifest §12 — flat per-firm seat
+                    // licensing: the plan controls FEATURES, this field
+                    // controls the firm's own purchased seat QUANTITY (a
+                    // single flat number, never a per-role/per-class
+                    // quota). Required only when a plan is selected — a
+                    // plan-less firm gets no FirmLicense at all, so there
+                    // is nothing to size a seat count for yet.
+                    TextInput::make('purchased_seats')
+                        ->label('Purchased seats')
+                        ->numeric()
+                        ->minValue(1)
+                        ->required(fn (Get $get): bool => filled($get('plan_id')))
+                        ->helperText('Every FirmUser (any role, including the owner) consumes exactly one seat.')
+                        ->visible(fn (Get $get): bool => filled($get('plan_id'))),
+
                     Textarea::make('note')
                         ->label('Internal provisioning note (optional)')
                         ->maxLength(1000)
@@ -253,6 +269,10 @@ class ProvisionFirmAction extends Action
                             $lines[] = filled($get('plan_id'))
                                 ? 'Plan: '.(Plan::query()->find($get('plan_id'))?->name ?? '—')
                                 : 'Plan: none selected';
+
+                            if (filled($get('plan_id'))) {
+                                $lines[] = 'Purchased seats: '.(filled($get('purchased_seats')) ? (string) $get('purchased_seats') : '—');
+                            }
 
                             $lines[] = 'The firm will start in Onboarding — not Activated.';
                             $lines[] = 'No password will be shown here — the owner receives a one-time setup link by email once this is submitted.';
@@ -310,10 +330,15 @@ class ProvisionFirmAction extends Action
                 planId: filled($data['plan_id'] ?? null) ? (int) $data['plan_id'] : null,
                 trialDaysOverride: filled($data['trial_days_override'] ?? null) ? (int) $data['trial_days_override'] : null,
                 note: filled($data['note'] ?? null) ? (string) $data['note'] : null,
+                purchasedSeats: filled($data['purchased_seats'] ?? null) ? (int) $data['purchased_seats'] : null,
             );
 
             try {
                 $result = app(FirmProvisioningService::class)->provision($input, $admin);
+            } catch (InvalidPurchasedSeatsException $e) {
+                Notification::make()->title('Could not provision firm')->body($e->getMessage())->danger()->send();
+
+                return;
             } catch (PlatformAdminIdentityCollisionException|ExistingUserReviewRequiredException|FirmProvisioningRequestChangedException $e) {
                 Notification::make()->title('Could not provision firm')->body($e->getMessage())->danger()->send();
 

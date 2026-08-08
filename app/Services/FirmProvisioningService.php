@@ -16,6 +16,7 @@ use App\Enums\RecordStatus;
 use App\Exceptions\ExistingUserReviewRequiredException;
 use App\Exceptions\FirmProvisioningRequestChangedException;
 use App\Exceptions\InactivePlanSelectedException;
+use App\Exceptions\InvalidPurchasedSeatsException;
 use App\Exceptions\PlatformAdminIdentityCollisionException;
 use App\Models\Firm;
 use App\Models\FirmLicense;
@@ -312,6 +313,19 @@ final class FirmProvisioningService
                         throw new InactivePlanSelectedException($plan->name, $plan->status->value);
                     }
 
+                    // Firm Feature Manifest §12 flat per-firm seat model:
+                    // a purchased seat quantity is required whenever a
+                    // plan is assigned — a plan-less firm never reaches
+                    // this branch at all (no FirmLicense, no seat
+                    // concept). Re-validated here, at the moment the
+                    // transaction actually runs, mirroring
+                    // InactivePlanSelectedException's own discipline —
+                    // never trust the wizard's client-side ->required()
+                    // alone.
+                    if ($input->purchasedSeats === null || $input->purchasedSeats < 1) {
+                        throw new InvalidPurchasedSeatsException;
+                    }
+
                     $trialDays = $input->trialDaysOverride ?? $plan->trial_days;
                     $startsAt = now();
 
@@ -325,6 +339,7 @@ final class FirmProvisioningService
                     FirmLicense::create([
                         'firm_id' => $firm->id,
                         'plan_id' => $plan->id,
+                        'purchased_seats' => $input->purchasedSeats,
                         'license_key' => (string) Str::uuid(),
                         'license_status' => LicenseStatus::Trial,
                         'deployment_mode' => $input->deploymentMode,
@@ -532,6 +547,7 @@ final class FirmProvisioningService
             $e instanceof QueryException => 'database_error',
             $e instanceof ModelNotFoundException => 'referenced_record_not_found',
             $e instanceof InactivePlanSelectedException => 'inactive_plan_selected',
+            $e instanceof InvalidPurchasedSeatsException => 'invalid_purchased_seats',
             default => 'unexpected_error',
         };
     }
