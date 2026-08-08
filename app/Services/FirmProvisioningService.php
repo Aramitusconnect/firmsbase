@@ -108,6 +108,7 @@ final class FirmProvisioningService
         private readonly ActivationChecklistService $activationChecklistService,
         private readonly EntitlementPlanSyncService $entitlementPlanSyncService,
         private readonly PlatformAdminAuditEventRecorder $auditRecorder,
+        private readonly FirmDefaultReferenceDataService $defaultReferenceDataService = new FirmDefaultReferenceDataService,
     ) {}
 
     public function provision(FirmProvisioningInput $input, PlatformAdmin $actor): FirmProvisioningResult
@@ -351,11 +352,19 @@ final class FirmProvisioningService
                     $this->entitlementPlanSyncService->syncPlanEntitlements($firm, $plan, null);
                 }
 
-                // Both of the following self-wrap their own body in a
+                // All three of the following self-wrap their own body in a
                 // SECOND runWithFirmContext() call — safe to nest, see this
                 // class's own docblock.
                 $this->encryptionKeyService->provision($firm);
                 $this->activationChecklistService->createChecklist($firm);
+
+                // FirmsVault staging follow-up addition ("Application
+                // Completion — Catalogs + Firm-Owned Reference Data").
+                // Runs unconditionally, not gated on $plan — see
+                // FirmDefaultReferenceDataService's own docblock for why
+                // a plan-less firm must still receive its starting
+                // reference data.
+                $this->defaultReferenceDataService->seedAllDefaults($firm);
 
                 $this->auditRecorder->record($firm, $actor, 'firm_provisioned', 'firm_provisioning', [
                     'idempotency_key' => $request->idempotency_key,

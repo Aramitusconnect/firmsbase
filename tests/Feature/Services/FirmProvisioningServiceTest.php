@@ -18,9 +18,11 @@ use App\Exceptions\ExistingUserReviewRequiredException;
 use App\Exceptions\FirmProvisioningRequestChangedException;
 use App\Exceptions\InactivePlanSelectedException;
 use App\Exceptions\PlatformAdminIdentityCollisionException;
+use App\Models\ExpenseCategory;
 use App\Models\Firm;
 use App\Models\FirmProvisioningRequest;
 use App\Models\FirmUser;
+use App\Models\LeadSource;
 use App\Models\Organization;
 use App\Models\Plan;
 use App\Models\PlatformAdmin;
@@ -220,6 +222,33 @@ final class FirmProvisioningServiceTest extends TestCase
         // least queryable under the correct tenant context.
         $entitlementCount = $this->runWithFirmContext($result->firm, fn () => $result->firm->entitlements()->count());
         $this->assertIsInt($entitlementCount);
+    }
+
+    /**
+     * FirmsVault staging follow-up addition ("Application Completion —
+     * Catalogs + Firm-Owned Reference Data"). Every newly provisioned
+     * firm — even a plan-less one, per FirmDefaultReferenceDataService's
+     * own docblock — receives its default Expense Categories/Lead
+     * Sources automatically, without a separate repair-command step.
+     */
+    public function test_default_expense_categories_and_lead_sources_are_seeded_for_a_new_firm(): void
+    {
+        $result = $this->service()->provision($this->input(), $this->actor());
+
+        $categoryCount = $this->runWithFirmContext($result->firm, fn () => ExpenseCategory::query()->where('firm_id', $result->firm->id)->count());
+        $sourceCount = $this->runWithFirmContext($result->firm, fn () => LeadSource::query()->where('firm_id', $result->firm->id)->count());
+
+        $this->assertSame(15, $categoryCount);
+        $this->assertSame(12, $sourceCount);
+    }
+
+    public function test_default_reference_data_is_seeded_even_when_no_plan_is_selected(): void
+    {
+        $result = $this->service()->provision($this->input(['planId' => null]), $this->actor());
+
+        $categoryCount = $this->runWithFirmContext($result->firm, fn () => ExpenseCategory::query()->where('firm_id', $result->firm->id)->count());
+
+        $this->assertSame(15, $categoryCount);
     }
 
     public function test_encryption_and_activation_checklist_provisioning_is_completed(): void

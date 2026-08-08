@@ -154,6 +154,22 @@ class QueueConsoleContextRolloutTest extends TestCase
         // RLS-relevant session variable anywhere in this command.
         // Any OTHER command appearing here has not been reviewed for
         // the silent-bypass risk this test exists to catch.
+        // FirmsVault staging follow-up ("Application Completion —
+        // Catalogs + Firm-Owned Reference Data") added
+        // InitializeDefaultFirmReferenceDataCommand
+        // (firms:initialize-default-reference-data) — reviewed and
+        // safe: default/report mode's per-firm loop wraps every
+        // ExpenseCategory/LeadSource count query inside
+        // TenantContextService::runWithFirmContext() for that one firm
+        // (same pattern ReportMissingPurchasedSeatsCommand's own report()
+        // already establishes), never an unscoped cross-firm query.
+        // --apply mode writes default rows for exactly ONE explicitly-
+        // named firm (--firm=<id>), entirely via
+        // FirmDefaultReferenceDataService::seedAllDefaults(), which
+        // itself wraps every write in its own runWithFirmContext() call
+        // — no raw SQL, no BYPASSRLS, no superuser role, no set_config
+        // manipulation of any RLS-relevant session variable anywhere in
+        // this command.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
@@ -170,6 +186,7 @@ class QueueConsoleContextRolloutTest extends TestCase
             'BootstrapStagingSandboxPlanCommand.php',
             'ConsumeSesEventsCommand.php',
             'ReportMissingPurchasedSeatsCommand.php',
+            'InitializeDefaultFirmReferenceDataCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

@@ -173,6 +173,16 @@ class QueueConsoleTenantContextTest extends TestCase
             // superuser role, no set_config manipulation of any
             // RLS-relevant session variable anywhere in this command.
             'ReportMissingPurchasedSeatsCommand.php',
+            // FirmsVault staging follow-up ("Application Completion —
+            // Catalogs + Firm-Owned Reference Data") added
+            // InitializeDefaultFirmReferenceDataCommand
+            // (firms:initialize-default-reference-data) — reviewed and
+            // safe: see QueueConsoleContextRolloutTest's own identical
+            // review note. No raw SQL, no BYPASSRLS, no superuser role,
+            // no set_config manipulation — every write routes through
+            // FirmDefaultReferenceDataService, which wraps itself in
+            // TenantContextService::runWithFirmContext() per firm.
+            'InitializeDefaultFirmReferenceDataCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

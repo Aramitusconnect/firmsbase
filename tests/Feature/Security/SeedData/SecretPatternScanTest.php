@@ -178,6 +178,21 @@ class SecretPatternScanTest extends TestCase
         // never invents a seat quantity itself (the operator supplies
         // it). No demo/placeholder/synthetic data of any kind is ever
         // created.
+        // FirmsVault staging follow-up ("Application Completion —
+        // Catalogs + Firm-Owned Reference Data") added
+        // InitializeDefaultFirmReferenceDataCommand
+        // (firms:initialize-default-reference-data) — reviewed and
+        // safe: default/report mode never writes anything. --apply
+        // mode writes ONLY the fixed, operator-approved default
+        // Expense Category/Lead Source names (e.g. "Filing Fees",
+        // "Court Costs", "Website", "Referral - Client" — the exact
+        // lists this mission's own spec names) for a single, real,
+        // explicitly-named existing firm (--firm=<id>, required) — it
+        // never creates a Firm, never invents a category/source name,
+        // and never overwrites a firm's own pre-existing custom rows
+        // (FirmDefaultReferenceDataService skips any name/code that
+        // already exists). No demo/placeholder/synthetic customer-
+        // facing data of any kind is ever created.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
@@ -194,6 +209,7 @@ class SecretPatternScanTest extends TestCase
             'BootstrapStagingSandboxPlanCommand.php',
             'ConsumeSesEventsCommand.php',
             'ReportMissingPurchasedSeatsCommand.php',
+            'InitializeDefaultFirmReferenceDataCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);
