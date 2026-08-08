@@ -436,6 +436,26 @@ class PlatformStaffAccessPolicyService
         PlatformRoleCode::PlatformAdmin,
     ];
 
+    /**
+     * FirmsVault staging follow-up addition ("Application Completion —
+     * Catalogs + Firm-Owned Reference Data"). Gates every mutating
+     * action over the global PracticeArea/MatterType catalog (create,
+     * edit, activate, deactivate — both resources share one gate since
+     * MatterType is always managed nested under its parent PracticeArea,
+     * never as an independent top-level surface). Mirrors every other
+     * "manage" gate in this file: narrowed to the same unconditionally-
+     * trusted SuperAdmin/PlatformAdmin ceiling (see
+     * PLATFORM_BILLING_MANAGEMENT_ROLES' own docblock for the
+     * established reasoning this repeats) — practice areas/matter types
+     * are platform-wide reference data every firm's Matter creation
+     * depends on, materially more consequential to get wrong than an
+     * ordinary read-only oversight view.
+     */
+    private const PRACTICE_AREA_CATALOG_MANAGEMENT_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+    ];
+
     public function __construct(
         private readonly PlatformRoleService $platformRoleService,
     ) {}
@@ -704,6 +724,21 @@ class PlatformStaffAccessPolicyService
     public function canManageNotificationTemplates(PlatformAdmin $admin): PlatformStaffAccessDecision
     {
         return $this->decideAgainst($admin, self::NOTIFICATION_TEMPLATE_MANAGEMENT_ROLES, 'notification template management');
+    }
+
+    /**
+     * FirmsVault staging follow-up addition. See
+     * PRACTICE_AREA_CATALOG_MANAGEMENT_ROLES' own docblock. Also used to
+     * gate viewing the resource (canViewAny) — this is a single small
+     * catalog with no separate read/write role split, matching
+     * FIRM_MANAGEMENT_ROLES' shape (not PLATFORM_BILLING_ROLES', which
+     * does split read from manage) since there is no legitimate
+     * read-only platform-staff audience for this data the way billing
+     * has BillingAdmin.
+     */
+    public function canManagePracticeAreaCatalog(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::PRACTICE_AREA_CATALOG_MANAGEMENT_ROLES, 'practice area catalog management');
     }
 
     /**

@@ -27,12 +27,19 @@ class FirmPracticeAreaTest extends TestCase
 
     public function test_a_firm_can_enable_multiple_practice_areas(): void
     {
+        // FirmsVault staging follow-up ("Application Completion — Catalogs
+        // + Firm-Owned Reference Data") added a real, seeded
+        // practice_areas catalog (immigration_law/family_law/etc. among
+        // its real codes) — these fixture codes are deliberately
+        // synthetic ("fixture_*") so this test's own throwaway rows can
+        // never collide with that authoritative seed data, now or as the
+        // catalog grows.
         $firm = Firm::factory()->create();
-        $immigration = PracticeArea::factory()->create(['code' => 'immigration']);
-        $familyLaw = PracticeArea::factory()->create(['code' => 'family_law']);
+        $areaOne = PracticeArea::factory()->create(['code' => 'fixture_practice_area_one']);
+        $areaTwo = PracticeArea::factory()->create(['code' => 'fixture_practice_area_two']);
 
-        FirmPracticeArea::factory()->forFirm($firm)->forPracticeArea($immigration)->create();
-        FirmPracticeArea::factory()->forFirm($firm)->forPracticeArea($familyLaw)->create();
+        FirmPracticeArea::factory()->forFirm($firm)->forPracticeArea($areaOne)->create();
+        FirmPracticeArea::factory()->forFirm($firm)->forPracticeArea($areaTwo)->create();
 
         $this->assertSame(2, FirmPracticeArea::where('firm_id', $firm->id)->count());
     }

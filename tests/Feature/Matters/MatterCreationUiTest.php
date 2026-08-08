@@ -212,6 +212,32 @@ final class MatterCreationUiTest extends TestCase
         });
     }
 
+    /**
+     * FirmsVault staging follow-up addition ("Application Completion —
+     * Catalogs + Firm-Owned Reference Data"). AddMatterAction's own
+     * Practice Area/Matter Type Select options already filter
+     * ->where('is_active', true) (see that Action's own source) — this
+     * proves a deactivated catalog entry (e.g. via
+     * DeactivatePracticeAreaAction/DeactivateMatterTypeAction) is
+     * excluded from the same query shape those options are built from,
+     * while an active sibling remains offered.
+     */
+    public function test_inactive_practice_area_and_matter_type_are_excluded_from_add_matter_options(): void
+    {
+        $activePracticeArea = PracticeArea::factory()->create(['is_active' => true]);
+        $inactivePracticeArea = PracticeArea::factory()->create(['is_active' => false]);
+        $activeMatterType = MatterType::factory()->forPracticeArea($activePracticeArea)->create(['is_active' => true]);
+        $inactiveMatterType = MatterType::factory()->forPracticeArea($activePracticeArea)->create(['is_active' => false]);
+
+        $practiceAreaOptions = PracticeArea::query()->where('is_active', true)->pluck('id')->all();
+        $matterTypeOptions = MatterType::query()->where('practice_area_id', $activePracticeArea->id)->where('is_active', true)->pluck('id')->all();
+
+        $this->assertContains($activePracticeArea->id, $practiceAreaOptions);
+        $this->assertNotContains($inactivePracticeArea->id, $practiceAreaOptions);
+        $this->assertContains($activeMatterType->id, $matterTypeOptions);
+        $this->assertNotContains($inactiveMatterType->id, $matterTypeOptions);
+    }
+
     // ------------------------------------------------------------
     // 4. "Open Matter" — gated on conflict-check clearance
     // ------------------------------------------------------------

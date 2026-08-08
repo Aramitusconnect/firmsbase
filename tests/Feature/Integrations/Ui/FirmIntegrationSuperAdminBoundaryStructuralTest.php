@@ -691,7 +691,29 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ResendFirmOwnerInvitationAction.php',
         ];
 
-        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles);
+        // FirmsVault staging follow-up ("Application Completion —
+        // Catalogs + Firm-Owned Reference Data") — PracticeAreaResource
+        // (Platform Admin CRUD over the GLOBAL practice_areas/matter_types
+        // catalog, "Practice Area → Matter Types" — see PracticeAreaResource's
+        // own docblock). Does not reference the Integration domain, so
+        // no entry is needed in the Integration-domain sweeps above —
+        // only here, since it does not live under app/Filament/Firm.
+        $practiceAreaCatalogAllowedRelativeFiles = [
+            'Resources'.DIRECTORY_SEPARATOR.'PracticeAreaResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PracticeAreaResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListPracticeAreas.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PracticeAreaResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewPracticeArea.php',
+            'Resources'.DIRECTORY_SEPARATOR.'PracticeAreaResource'.DIRECTORY_SEPARATOR.'RelationManagers'.DIRECTORY_SEPARATOR.'MatterTypesRelationManager.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'CreatePracticeAreaAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'EditPracticeAreaAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ActivatePracticeAreaAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'DeactivatePracticeAreaAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'CreateMatterTypeAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'EditMatterTypeAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ActivateMatterTypeAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'DeactivateMatterTypeAction.php',
+        ];
+
+        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles);
 
         $unauthorizedNonFirmFilamentFiles = [];
 
