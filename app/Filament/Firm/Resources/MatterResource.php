@@ -8,8 +8,17 @@ use App\Enums\FirmUserRole;
 use App\Filament\Firm\Resources\MatterResource\Pages\ListMatters;
 use App\Filament\Firm\Resources\MatterResource\Pages\ViewMatter;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\ActivityRelationManager;
+use App\Filament\Firm\Resources\MatterResource\RelationManagers\ConflictCheckResultsRelationManager;
+use App\Filament\Firm\Resources\MatterResource\RelationManagers\ConflictChecksRelationManager;
+use App\Filament\Firm\Resources\MatterResource\RelationManagers\ContactsRelationManager;
+use App\Filament\Firm\Resources\MatterResource\RelationManagers\DeadlinesRelationManager;
+use App\Filament\Firm\Resources\MatterResource\RelationManagers\DocumentRequestsRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\DocumentsRelationManager;
+use App\Filament\Firm\Resources\MatterResource\RelationManagers\ExpensesRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\FinancialEvidenceRelationManager;
+use App\Filament\Firm\Resources\MatterResource\RelationManagers\PaymentsRelationManager;
+use App\Filament\Firm\Resources\MatterResource\RelationManagers\TasksRelationManager;
+use App\Filament\Firm\Resources\MatterResource\RelationManagers\TimeEntriesRelationManager;
 use App\Models\Matter;
 use BackedEnum;
 use Filament\Resources\Resource;
@@ -23,13 +32,27 @@ use Illuminate\Support\Facades\Auth;
  * MatterResource — Checkpoint 4 ("Plaid financial evidence add-on"),
  * Matter resource track (checkpoint4-combined-design.md §4;
  * checkpoint4-design-matter-and-client-portal.md §1). List+View only —
- * deliberately NO Create/Edit page, matching `FirmIntegrationResource`'s
- * own "no ad-hoc Create/Edit form" discipline, here for a different
- * reason: matter opening/status transitions are already the exclusive
- * responsibility of `MatterOpeningService`/`MatterReadinessService`
- * (`Matter`'s own docblock: "status transitions to Open are gated by
+ * deliberately NO Filament-generic Create/Edit page, matching
+ * `FirmIntegrationResource`'s own "no ad-hoc Create/Edit form"
+ * discipline, here for a different reason: matter opening/status
+ * transitions are already the exclusive responsibility of
+ * `MatterOpeningService`/`MatterReadinessService` (`Matter`'s own
+ * docblock: "status transitions to Open are gated by
  * MatterOpeningService... never set directly") — this resource must not
  * bypass that with a generic Filament form.
+ *
+ * Tier 3 addition (Firm Feature Manifest §2's confirmed
+ * "no general create-a-matter service" gap): matter CREATION is now
+ * possible via the "+ Add Matter" header Action on `ListMatters`
+ * (`MatterResource\Actions\AddMatterAction`, wired to the new
+ * `MatterCreationService::create()` — never a raw `Matter::create()`
+ * and never a `CreateRecord` page), always leaving the record in
+ * `MatterStatus::Draft`. Matter OPENING remains a fully separate
+ * concern, unchanged: "Open Matter"
+ * (`MatterResource\Actions\OpenMatterAction` on `ViewMatter`) calls the
+ * pre-existing `MatterOpeningService::openMatter()` directly — this
+ * resource still has no `form()`, and no Action here ever sets
+ * `status`/`opened_at` itself.
  *
  * Authorization: the real per-record boundary is
  * `MatterAccessPolicyService::canAccessMatter()` (pre-existing, built
@@ -50,6 +73,16 @@ class MatterResource extends Resource
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBriefcase;
 
     protected static ?string $navigationLabel = 'Matters';
+
+    /**
+     * Client/CRM cluster addition: groups Matters alongside Clients/
+     * Contacts/Leads in the Firm panel nav (Firm Feature Manifest §1's
+     * navigation instruction). Purely cosmetic — no change to this
+     * resource's own access/query logic below.
+     */
+    protected static string|\UnitEnum|null $navigationGroup = 'Clients & Matters';
+
+    protected static ?int $navigationSort = 10;
 
     /**
      * Matter has no single human-readable name column ('stage' is a
@@ -129,9 +162,18 @@ class MatterResource extends Resource
     public static function getRelations(): array
     {
         return [
+            ContactsRelationManager::class,
+            TasksRelationManager::class,
+            DeadlinesRelationManager::class,
+            TimeEntriesRelationManager::class,
+            ExpensesRelationManager::class,
+            PaymentsRelationManager::class,
             DocumentsRelationManager::class,
+            DocumentRequestsRelationManager::class,
             FinancialEvidenceRelationManager::class,
             ActivityRelationManager::class,
+            ConflictChecksRelationManager::class,
+            ConflictCheckResultsRelationManager::class,
         ];
     }
 

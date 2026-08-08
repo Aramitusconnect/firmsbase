@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Filament\Firm\Resources\MatterResource\Pages;
 
+use App\Filament\Firm\Resources\ClientResource;
 use App\Filament\Firm\Resources\MatterResource;
+use App\Filament\Firm\Resources\MatterResource\Actions\OpenMatterAction;
 use App\Models\Matter;
 use App\Services\MatterAccessPolicyService;
 use Filament\Infolists\Components\TextEntry;
@@ -21,13 +23,23 @@ use Illuminate\Support\Facades\Auth;
  * non-boundary/boundary split FirmIntegrationResource's own docblock
  * draws between entitlement and its real policy-service boundary).
  *
- * No header actions — matter mutation stays exclusively in its existing
- * services (MatterOpeningService, MatterReadinessService, etc.), never
- * a generic Filament form/action here.
+ * Tier 3 addition: hosts the "Open Matter" header action
+ * (OpenMatterAction, wired to the pre-existing MatterOpeningService::
+ * openMatter() — never a status field on a form). Matter mutation
+ * otherwise stays exclusively in its existing services
+ * (MatterOpeningService, MatterReadinessService, etc.); this page still
+ * has no `form()`/editable fields of its own.
  */
 class ViewMatter extends ViewRecord
 {
     protected static string $resource = MatterResource::class;
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            OpenMatterAction::make(),
+        ];
+    }
 
     protected function resolveRecord(int|string $key): Model
     {
@@ -67,7 +79,19 @@ class ViewMatter extends ViewRecord
             Section::make('Client')
                 ->columns(2)
                 ->schema([
-                    TextEntry::make('client.display_name')->label('Name')->placeholder('—'),
+                    // Tier1-G: a Matter belongs to exactly one Client, so
+                    // this stays a simple info panel + link-out (not a
+                    // RelationManager, which would be the wrong shape for
+                    // a single BelongsTo record) — links to
+                    // ClientResource's own ViewClient page, which itself
+                    // now hosts this same client's full Matters/Time
+                    // Entries/Expenses/Payments/Activity tabs.
+                    TextEntry::make('client.display_name')
+                        ->label('Name')
+                        ->placeholder('—')
+                        ->url(fn (Matter $record): ?string => $record->client === null
+                            ? null
+                            : ClientResource::getUrl('view', ['record' => $record->client])),
                     TextEntry::make('client.email')->label('Email')->placeholder('—'),
                     TextEntry::make('client.phone')->label('Phone')->placeholder('—'),
                 ]),
