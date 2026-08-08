@@ -150,6 +150,16 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * platform-level (data_processing_records.firm_id is nullable but not
  * exclusively firm-owned) and deliberately have no Firm relation. No
  * new fillable column was added to firms itself in Phase 17 either.
+ *
+ * Firm Feature Manifest §13 (Tier 3-C, Firm Settings) addition: five
+ * nullable address/phone columns (address_line1, address_line2, city,
+ * postal_code, phone_number) — closing the "no address, phone, logo,
+ * or business-hours field anywhere in the schema today" gap the
+ * manifest identified for this table, address/phone only. No logo
+ * column was added (no real file storage pipeline exists anywhere in
+ * this codebase). Edited exclusively through the firm-panel
+ * FirmSettingsPage (FirmOwner-only), never through a generic Resource
+ * form.
  */
 class Firm extends Model
 {
@@ -168,6 +178,11 @@ class Firm extends Model
         'default_currency',
         'data_region',
         'activation_status',
+        'address_line1',
+        'address_line2',
+        'city',
+        'postal_code',
+        'phone_number',
     ];
 
     protected function casts(): array
