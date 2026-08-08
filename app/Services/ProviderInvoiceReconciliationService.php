@@ -64,7 +64,15 @@ class ProviderInvoiceReconciliationService
 
         Firm::query()->select('id')->orderBy('id')->chunkById(200, function ($firms) use (&$systemTotal, $providerKey, $periodStart, $periodEnd) {
             foreach ($firms as $firm) {
-                $systemTotal += (int) $this->tenantContext->runWithFirmContext($firm, function () use ($firm, $providerKey, $periodStart, $periodEnd) {
+                // $firm->id, not $firm -- this model was loaded with
+                // ->select('id') only, which omits deployment_mode/
+                // organization_id that TenantContextResolver::resolveForFirm()
+                // needs. Passing the partial model directly throws; passing
+                // the id makes runWithFirmContext() re-fetch the full row.
+                // Mirrors the established, working precedent in
+                // DetectProviderUsageAnomaliesJob and
+                // ExpireStaleProviderReservationsJob.
+                $systemTotal += (int) $this->tenantContext->runWithFirmContext($firm->id, function () use ($firm, $providerKey, $periodStart, $periodEnd) {
                     return (int) ProviderBillableCallReservation::query()
                         ->where('firm_id', $firm->id)
                         ->where('provider_key', $providerKey)

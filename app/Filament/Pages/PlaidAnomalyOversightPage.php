@@ -91,7 +91,16 @@ class PlaidAnomalyOversightPage extends Page implements HasTable
                     ->limit(self::MAX_FIRMS_SCANNED)
                     ->get(['id', 'uuid', 'name'])
                     ->each(function (Firm $firm) use (&$rows, $tenantContext) {
-                        $events = $tenantContext->runWithFirmContext($firm, fn () => TimelineEvent::query()
+                        // $firm->id, not $firm -- this model was loaded with a
+                        // restricted column list (see ->get() above), which
+                        // omits deployment_mode/organization_id that
+                        // TenantContextResolver::resolveForFirm() needs.
+                        // Passing the partial model directly throws; passing
+                        // the id makes runWithFirmContext() re-fetch the full
+                        // row. Mirrors the established, working precedent in
+                        // DetectProviderUsageAnomaliesJob and
+                        // ExpireStaleProviderReservationsJob.
+                        $events = $tenantContext->runWithFirmContext($firm->id, fn () => TimelineEvent::query()
                             ->where('firm_id', $firm->id)
                             ->where('event_type', 'provider_billing.anomaly_detected')
                             ->orderByDesc('occurred_at')

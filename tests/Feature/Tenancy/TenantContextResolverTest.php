@@ -18,7 +18,7 @@ class TenantContextResolverTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->resolver = new TenantContextResolver();
+        $this->resolver = new TenantContextResolver;
     }
 
     protected function tearDown(): void
@@ -92,5 +92,38 @@ class TenantContextResolverTest extends TestCase
         $second = $this->resolver->resolveForFirm($firm->fresh());
 
         $this->assertTrue($first->equals($second));
+    }
+
+    /**
+     * Regression test for the Plaid Anomaly Oversight 500 (Admin
+     * acceptance audit): a Firm loaded with a restricted column list
+     * that omits deployment_mode must fail loudly and clearly here,
+     * never with a bare TypeError several frames away from the real
+     * cause. firms.deployment_mode is NOT NULL DEFAULT 'saas' at the
+     * schema level, so a fully-loaded, persisted Firm can never
+     * legitimately reach this branch — null here only ever means the
+     * caller's query omitted the column.
+     */
+    public function test_resolve_for_firm_throws_a_clear_error_when_deployment_mode_was_not_selected(): void
+    {
+        $firm = Firm::factory()->create(['deployment_mode' => DeploymentMode::Dedicated]);
+
+        $partiallyLoadedFirm = Firm::query()->find($firm->id, ['id', 'uuid', 'name']);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage("Cannot resolve TenantContext for firm #{$firm->id}: deployment_mode was not loaded");
+
+        $this->resolver->resolveForFirm($partiallyLoadedFirm);
+    }
+
+    public function test_resolve_for_firm_succeeds_for_every_normal_deployment_mode(): void
+    {
+        foreach (DeploymentMode::cases() as $mode) {
+            $firm = Firm::factory()->create(['deployment_mode' => $mode]);
+
+            $context = $this->resolver->resolveForFirm($firm);
+
+            $this->assertSame($mode, $context->deploymentMode);
+        }
     }
 }
