@@ -2,8 +2,10 @@
 
 namespace Tests\Feature\Security\FirmUser2fa;
 
+use App\Enums\TwoFactorMode;
 use App\Services\ComplianceGapRegistryService;
 use Illuminate\Support\Facades\Schema;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -15,6 +17,8 @@ use Tests\TestCase;
  */
 class FirmUser2faFirewallTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
+
     /**
      * FIRMSVAULT — STAGING ADMIN STABILIZATION (a later, independently
      * reviewed mission) legitimately touches files under this
@@ -88,7 +92,7 @@ class FirmUser2faFirewallTest extends TestCase
 
     public function test_two_factor_mode_enum_was_not_modified(): void
     {
-        $cases = array_map(fn ($case) => $case->value, \App\Enums\TwoFactorMode::cases());
+        $cases = array_map(fn ($case) => $case->value, TwoFactorMode::cases());
 
         $this->assertSame(['optional', 'required', 'disabled'], $cases);
     }
@@ -178,7 +182,7 @@ class FirmUser2faFirewallTest extends TestCase
 
     public function test_gap_registry_still_tracks_the_firm_user_2fa_gap_and_count_remains_twenty_one(): void
     {
-        $registry = new ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
 
         $this->assertTrue($registry->isTracked('firm_user_2fa_missing'));
         $this->assertCount(21, $registry->all());
@@ -201,9 +205,7 @@ class FirmUser2faFirewallTest extends TestCase
      */
     private function changedOrUntrackedPaths(string $scope): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw($scope);
 
         if ($changed === '') {
             return [];

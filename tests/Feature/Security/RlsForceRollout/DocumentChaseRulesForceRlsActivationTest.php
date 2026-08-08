@@ -10,6 +10,7 @@ use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -33,6 +34,7 @@ use Tests\TestCase;
  */
 class DocumentChaseRulesForceRlsActivationTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
     use RefreshDatabase;
 
     public function test_all_thirteen_previously_forced_tables_remain_force_row_level_security_enabled(): void
@@ -82,7 +84,7 @@ class DocumentChaseRulesForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         DocumentChaseRule::factory()->forFirm($firm)->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(0, DocumentChaseRule::withoutGlobalScopes()->count());
     }
@@ -91,7 +93,7 @@ class DocumentChaseRulesForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
 
@@ -298,7 +300,7 @@ class DocumentChaseRulesForceRlsActivationTest extends TestCase
 
     public function test_uncovered_tenant_tables_were_not_modified(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         foreach ($coverage->missingPreparedTables() as $table) {
             $row = DB::selectOne('select relrowsecurity from pg_class where relname = ?', [$table]);
@@ -337,7 +339,7 @@ class DocumentChaseRulesForceRlsActivationTest extends TestCase
 
     public function test_rls_prepared_not_enforced_remains_tracked(): void
     {
-        $registry = new ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
 
         $this->assertTrue($registry->isTracked('rls_prepared_not_enforced'));
         $this->assertCount(21, $registry->all());
@@ -520,9 +522,7 @@ class DocumentChaseRulesForceRlsActivationTest extends TestCase
 
     private function changedOrUntrackedPaths(string $scope): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw($scope);
 
         if ($changed === '') {
             return [];

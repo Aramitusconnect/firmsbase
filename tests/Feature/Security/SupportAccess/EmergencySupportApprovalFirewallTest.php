@@ -3,6 +3,7 @@
 namespace Tests\Feature\Security\SupportAccess;
 
 use App\Enums\HighRiskChangeType;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -15,6 +16,8 @@ use Tests\TestCase;
  */
 class EmergencySupportApprovalFirewallTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
+
     /**
      * Files this section is allowed to have modified.
      */
@@ -252,9 +255,7 @@ class EmergencySupportApprovalFirewallTest extends TestCase
      */
     private function changedOrUntrackedPaths(string $scope): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw($scope);
 
         if ($changed === '') {
             return [];

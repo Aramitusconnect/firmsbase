@@ -3,6 +3,7 @@
 namespace Tests\Feature\Security\SeedData;
 
 use App\Services\ComplianceGapRegistryService;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -29,6 +30,8 @@ use Tests\TestCase;
  */
 class SeedDataAuditFirewallTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
+
     private const NEW_SERVICE_FILES = [
         'SeedDataSecurityAuditService.php',
     ];
@@ -750,9 +753,7 @@ class SeedDataAuditFirewallTest extends TestCase
      */
     private function changedOrUntrackedPaths(string $scope): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw($scope);
 
         if ($changed === '') {
             return [];

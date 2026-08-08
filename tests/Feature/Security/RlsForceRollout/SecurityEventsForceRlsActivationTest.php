@@ -31,6 +31,7 @@ use Illuminate\Database\Eloquent\Factories\Sequence;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -233,6 +234,8 @@ class SecurityEventsForceRlsActivationTest extends TestCase
         // changed file requiring the same allowlist entry here.
         'tests/Feature/Governance/DeploymentEnvironment/DeploymentEnvironmentFirewallTest.php',
     ];
+
+    use EvaluatesHistoricalCheckpointScope;
 
     // Narrowly updated by Section 39A-5 Wave 11 (webhooks domain, the final wave of the 60-table rollout, covering webhook_deliveries, webhook_delivery_attempts, webhook_events, webhook_secrets, webhook_subscriptions) for the same reason — additive only, no existing assertion removed or weakened. Total prepared/forced count is now 113.
     // Narrowly updated by Stage B Checkpoint 3 of the FirmsBase
@@ -1138,9 +1141,7 @@ class SecurityEventsForceRlsActivationTest extends TestCase
 
     public function test_compliance_gap_registry_service_was_not_modified(): void
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg('app/Services/ComplianceGapRegistryService.php')
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw('app/Services/ComplianceGapRegistryService.php');
 
         $this->assertSame('', $changed, 'ComplianceGapRegistryService.php must remain untouched by this checkpoint.');
     }
@@ -1154,9 +1155,7 @@ class SecurityEventsForceRlsActivationTest extends TestCase
     public function test_no_ui_routes_or_controllers_were_introduced_by_this_checkpoint(): void
     {
         foreach (['routes', 'app/Http/Controllers', 'app/Filament', 'resources/views', 'app/Livewire', 'app/Services/Payments', 'app/Services/Storage', 'app/Services/Ai', 'app/Http/Controllers/ClientPortal', 'app/Services/Marketplace'] as $relativeDir) {
-            $changed = trim((string) shell_exec(
-                'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($relativeDir)
-            ));
+            $changed = $this->changedOrUntrackedPathsRaw($relativeDir);
 
             $changed = implode("\n", array_filter(
                 $changed === '' ? [] : (preg_split('/\\R/', $changed) ?: []),

@@ -6,6 +6,7 @@ use App\Services\ComplianceGapRegistryService;
 use App\Services\RowLevelSecurityCoverageMappingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -283,6 +284,7 @@ class RlsContextRolloutFirewallTest extends TestCase
         'tests/Feature/Security/SupportAccess/EmergencySupportApprovalFirewallTest.php',
     ];
 
+    use EvaluatesHistoricalCheckpointScope;
     use RefreshDatabase;
 
     public function test_no_permanent_force_row_level_security_is_enabled_on_any_prepared_table(): void
@@ -877,9 +879,7 @@ class RlsContextRolloutFirewallTest extends TestCase
      */
     private function changedOrUntrackedPaths(string $scope): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw($scope);
 
         if ($changed === '') {
             return [];

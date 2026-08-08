@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Governance\CrossCutting;
 
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -13,6 +14,8 @@ use Tests\TestCase;
  */
 class CrossCuttingFirewallTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
+
     private const NEW_SERVICE_FILES = [
         'SecurityBaselineMappingService.php',
         'ComplianceReviewGateMappingService.php',
@@ -123,9 +126,7 @@ class CrossCuttingFirewallTest extends TestCase
      */
     private function changedOrUntrackedMigrationPaths(): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- database/migrations'
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw('database/migrations');
 
         if ($changed === '') {
             return [];

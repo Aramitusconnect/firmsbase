@@ -15,6 +15,7 @@ use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -42,6 +43,7 @@ use Tests\TestCase;
  */
 class CalendarEventsForceRlsActivationTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
     use RefreshDatabase;
 
     public function test_all_thirteen_previously_forced_tables_remain_force_row_level_security_enabled(): void
@@ -93,7 +95,7 @@ class CalendarEventsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         CalendarEvent::factory()->create(['firm_id' => $firm->id]);
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(0, CalendarEvent::withoutGlobalScopes()->count());
     }
@@ -102,7 +104,7 @@ class CalendarEventsForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
 
@@ -335,7 +337,7 @@ class CalendarEventsForceRlsActivationTest extends TestCase
         $this->expectExceptionMessageMatches('/matter belongs to firm/');
 
         $this->runWithFirmContext($firmA, function () use ($firmA, $deadlineA, $matterB) {
-            (new CalendarEventService())->createFor(
+            (new CalendarEventService)->createFor(
                 $firmA,
                 $deadlineA,
                 CalendarEventType::Deadline,
@@ -361,7 +363,7 @@ class CalendarEventsForceRlsActivationTest extends TestCase
         $this->expectExceptionMessageMatches('/subject belongs to firm/');
 
         $this->runWithFirmContext($firmA, function () use ($firmA, $deadlineB) {
-            (new CalendarEventService())->createFor(
+            (new CalendarEventService)->createFor(
                 $firmA,
                 $deadlineB,
                 CalendarEventType::Deadline,
@@ -386,7 +388,7 @@ class CalendarEventsForceRlsActivationTest extends TestCase
         $this->expectExceptionMessageMatches('/matter belongs to firm/');
 
         $this->runWithFirmContext($firmA, function () use ($firmA, $matterB) {
-            (new CalendarEventService())->createStandalone(
+            (new CalendarEventService)->createStandalone(
                 $firmA,
                 'Mismatched matter, standalone',
                 now()->addDay(),
@@ -407,7 +409,7 @@ class CalendarEventsForceRlsActivationTest extends TestCase
         $deadline = $this->runWithFirmContext($firm, fn () => Deadline::factory()->create(['firm_id' => $firm->id]));
 
         $event = $this->runWithFirmContext($firm, function () use ($firm, $deadline, $matter) {
-            return (new CalendarEventService())->createFor(
+            return (new CalendarEventService)->createFor(
                 $firm,
                 $deadline,
                 CalendarEventType::Deadline,
@@ -434,7 +436,7 @@ class CalendarEventsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
 
-        $deadline = (new DeadlineService(new CalendarEventService()))->create(
+        $deadline = (new DeadlineService(new CalendarEventService))->create(
             $firm,
             'Response deadline',
             'response_deadline',
@@ -480,7 +482,7 @@ class CalendarEventsForceRlsActivationTest extends TestCase
 
     public function test_uncovered_tenant_tables_were_not_modified(): void
     {
-        $coverage = new RowLevelSecurityCoverageMappingService();
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         foreach ($coverage->missingPreparedTables() as $table) {
             $row = DB::selectOne('select relrowsecurity from pg_class where relname = ?', [$table]);
@@ -519,7 +521,7 @@ class CalendarEventsForceRlsActivationTest extends TestCase
 
     public function test_rls_prepared_not_enforced_remains_tracked(): void
     {
-        $registry = new ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
 
         $this->assertTrue($registry->isTracked('rls_prepared_not_enforced'));
         $this->assertCount(21, $registry->all());
@@ -690,9 +692,7 @@ class CalendarEventsForceRlsActivationTest extends TestCase
 
     private function changedOrUntrackedPaths(string $scope): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw($scope);
 
         if ($changed === '') {
             return [];

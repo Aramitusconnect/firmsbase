@@ -10,6 +10,7 @@ use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -59,6 +60,7 @@ use Tests\TestCase;
  */
 class EmailVisibilityRulesForceRlsActivationTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
     use RefreshDatabase;
 
     public function test_all_previously_prepared_tables_remain_force_row_level_security_enabled(): void
@@ -920,9 +922,7 @@ class EmailVisibilityRulesForceRlsActivationTest extends TestCase
 
     private function changedOrUntrackedPaths(string $scope): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw($scope);
 
         if ($changed === '') {
             return [];

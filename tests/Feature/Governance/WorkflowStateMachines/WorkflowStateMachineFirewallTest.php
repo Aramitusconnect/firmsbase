@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Governance\WorkflowStateMachines;
 
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -14,6 +15,8 @@ use Tests\TestCase;
  */
 class WorkflowStateMachineFirewallTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
+
     private const NEW_SERVICE_FILES = [
         'WorkflowStateCatalogMappingService.php',
         'WorkflowTransitionRuleMappingService.php',
@@ -431,9 +434,7 @@ class WorkflowStateMachineFirewallTest extends TestCase
      */
     private function changedOrUntrackedPaths(string $scope): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw($scope);
 
         if ($changed === '') {
             return [];

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Governance\EdgeCaseRiskHandling;
 
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -15,6 +16,8 @@ use Tests\TestCase;
  */
 class EdgeCaseRiskFirewallTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
+
     private const NEW_SERVICE_FILES = [
         'EdgeCaseRiskCatalogMappingService.php',
     ];
@@ -434,9 +437,7 @@ class EdgeCaseRiskFirewallTest extends TestCase
      */
     private function changedOrUntrackedPaths(string $scope): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw($scope);
 
         if ($changed === '') {
             return [];

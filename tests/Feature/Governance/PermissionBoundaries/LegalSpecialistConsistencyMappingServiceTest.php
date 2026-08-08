@@ -3,11 +3,15 @@
 namespace Tests\Feature\Governance\PermissionBoundaries;
 
 use App\Enums\GovernanceMappingStatus;
+use App\Services\LegalSpecialistBoundaryPolicyService;
 use App\Services\LegalSpecialistConsistencyMappingService;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 class LegalSpecialistConsistencyMappingServiceTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
+
     private const REQUIRED_SURFACES = [
         'dashboards',
         'portal',
@@ -22,7 +26,7 @@ class LegalSpecialistConsistencyMappingServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new LegalSpecialistConsistencyMappingService();
+        $this->service = new LegalSpecialistConsistencyMappingService;
     }
 
     public function test_declares_all_six_surfaces_explicitly(): void
@@ -41,7 +45,7 @@ class LegalSpecialistConsistencyMappingServiceTest extends TestCase
     public function test_every_surface_uses_legal_specialist_boundary_policy_service_as_owning_class(): void
     {
         foreach ($this->service->all() as $item) {
-            $this->assertSame(\App\Services\LegalSpecialistBoundaryPolicyService::class, $item->owning_class);
+            $this->assertSame(LegalSpecialistBoundaryPolicyService::class, $item->owning_class);
         }
     }
 
@@ -83,9 +87,7 @@ class LegalSpecialistConsistencyMappingServiceTest extends TestCase
     {
         // The service under test must not modify LegalSpecialistBoundaryPolicyService
         // or introduce a parallel forbidden-terms denylist of its own.
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- app/Services/LegalSpecialistBoundaryPolicyService.php'
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw('app/Services/LegalSpecialistBoundaryPolicyService.php');
         $this->assertSame('', $changed);
 
         $source = file_get_contents(app_path('Services/LegalSpecialistConsistencyMappingService.php'));

@@ -4,6 +4,7 @@ namespace Tests\Feature\Governance\PrePilotRemediationBacklog;
 
 use App\Services\ComplianceGapRegistryService;
 use App\Services\PrePilotRemediationBacklogService;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -14,6 +15,8 @@ use Tests\TestCase;
  */
 class PrePilotGapRegistryIntegrityTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
+
     private ComplianceGapRegistryService $registry;
 
     private PrePilotRemediationBacklogService $service;
@@ -21,8 +24,8 @@ class PrePilotGapRegistryIntegrityTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->registry = new ComplianceGapRegistryService();
-        $this->service = new PrePilotRemediationBacklogService();
+        $this->registry = new ComplianceGapRegistryService;
+        $this->service = new PrePilotRemediationBacklogService;
     }
 
     public function test_gap_count_remains_twenty_one(): void
@@ -70,9 +73,7 @@ class PrePilotGapRegistryIntegrityTest extends TestCase
      */
     private function changedOrUntrackedPaths(string $scope): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw($scope);
 
         if ($changed === '') {
             return [];

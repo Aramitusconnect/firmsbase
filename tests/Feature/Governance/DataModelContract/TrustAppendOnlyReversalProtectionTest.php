@@ -3,7 +3,9 @@
 namespace Tests\Feature\Governance\DataModelContract;
 
 use App\Models\TrustLedgerEntry;
+use App\Services\TrustLedgerEntryReversalService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -13,6 +15,7 @@ use Tests\TestCase;
  */
 class TrustAppendOnlyReversalProtectionTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
     use RefreshDatabase;
 
     public function test_trust_ledger_entry_still_blocks_update(): void
@@ -33,7 +36,7 @@ class TrustAppendOnlyReversalProtectionTest extends TestCase
 
     public function test_trust_ledger_entry_reversal_service_class_still_exists(): void
     {
-        $this->assertTrue(class_exists(\App\Services\TrustLedgerEntryReversalService::class));
+        $this->assertTrue(class_exists(TrustLedgerEntryReversalService::class));
     }
 
     /**
@@ -52,9 +55,7 @@ class TrustAppendOnlyReversalProtectionTest extends TestCase
      */
     public function test_trust_ledger_entry_reversal_service_file_was_not_modified_by_section_26(): void
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- app/Services/TrustLedgerEntryReversalService.php'
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw('app/Services/TrustLedgerEntryReversalService.php');
 
         $this->assertContains(
             $changed,
@@ -66,9 +67,7 @@ class TrustAppendOnlyReversalProtectionTest extends TestCase
 
     public function test_trust_ledger_entry_model_file_was_not_modified_by_section_26(): void
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- app/Models/TrustLedgerEntry.php'
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw('app/Models/TrustLedgerEntry.php');
 
         $this->assertSame('', $changed);
     }

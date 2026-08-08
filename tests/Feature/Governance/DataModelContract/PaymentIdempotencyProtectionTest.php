@@ -3,6 +3,7 @@
 namespace Tests\Feature\Governance\DataModelContract;
 
 use App\Models\Payment;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -11,9 +12,11 @@ use Tests\TestCase;
  */
 class PaymentIdempotencyProtectionTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
+
     public function test_payment_model_still_has_idempotency_key_fillable(): void
     {
-        $payment = new Payment();
+        $payment = new Payment;
 
         $this->assertContains('idempotency_key', $payment->getFillable());
     }
@@ -41,18 +44,14 @@ class PaymentIdempotencyProtectionTest extends TestCase
 
     public function test_payment_migration_file_was_not_modified_by_section_26(): void
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- database/migrations/2026_07_06_700009_create_payments_table.php'
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw('database/migrations/2026_07_06_700009_create_payments_table.php');
 
         $this->assertSame('', $changed);
     }
 
     public function test_payment_model_file_was_not_modified_by_section_26(): void
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- app/Models/Payment.php'
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw('app/Models/Payment.php');
 
         $this->assertSame('', $changed);
     }

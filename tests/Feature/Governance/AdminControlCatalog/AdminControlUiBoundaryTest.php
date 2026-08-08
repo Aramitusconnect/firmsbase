@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Governance\AdminControlCatalog;
 
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -14,6 +15,8 @@ use Tests\TestCase;
  */
 class AdminControlUiBoundaryTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
+
     public function test_no_routes_controllers_filament_blade_or_livewire_files_were_added_or_modified(): void
     {
         foreach (['routes', 'app/Http/Controllers', 'app/Filament', 'resources/views', 'app/Livewire'] as $relativeDir) {
@@ -522,9 +525,7 @@ class AdminControlUiBoundaryTest extends TestCase
      */
     private function changedOrUntrackedPaths(string $scope): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw($scope);
 
         if ($changed === '') {
             return [];

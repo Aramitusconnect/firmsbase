@@ -3,6 +3,7 @@
 namespace Tests\Feature\Governance\PermissionBoundaries;
 
 use Illuminate\Support\Facades\Schema;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -13,6 +14,8 @@ use Tests\TestCase;
  */
 class PermissionBoundaryFirewallTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
+
     private const NEW_SERVICE_FILES = [
         'PermissionMatrixMappingService.php',
         'EmergencyAccessGovernanceGapService.php',
@@ -144,9 +147,7 @@ class PermissionBoundaryFirewallTest extends TestCase
      */
     private function changedOrUntrackedPaths(string $scope): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw($scope);
 
         if ($changed === '') {
             return [];

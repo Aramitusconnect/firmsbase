@@ -7,6 +7,7 @@ use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\Section40LimitedPilotSafetyGateService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -63,6 +64,7 @@ class Section40LimitedPilotSafetyGateTest extends TestCase
         'tests/Feature/Security/SupportAccess/EmergencySupportApprovalFirewallTest.php',
     ];
 
+    use EvaluatesHistoricalCheckpointScope;
     use RefreshDatabase;
 
     public function test_gate_fails_pilot_critical_rls_status_if_a_pilot_critical_table_is_not_forced(): void
@@ -291,9 +293,7 @@ class Section40LimitedPilotSafetyGateTest extends TestCase
      */
     private function changedOrUntrackedPaths(string $scope): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw($scope);
 
         if ($changed === '') {
             return [];

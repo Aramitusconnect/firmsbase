@@ -4,6 +4,7 @@ namespace Tests\Feature\Security\RlsEnforcement;
 
 use App\Enums\GovernanceGapSeverity;
 use App\Services\ComplianceGapRegistryService;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\TestCase;
 
 /**
@@ -18,6 +19,8 @@ use Tests\TestCase;
  */
 class RlsEnforcementFirewallTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
+
     /**
      * FIRMSVAULT — STAGING ADMIN STABILIZATION (a later, independently
      * reviewed mission) legitimately touches files under this
@@ -852,9 +855,7 @@ class RlsEnforcementFirewallTest extends TestCase
      */
     private function changedOrUntrackedPaths(string $scope): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw($scope);
 
         if ($changed === '') {
             return [];

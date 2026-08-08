@@ -17,6 +17,7 @@ use App\ValueObjects\AiProviderResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\EvaluatesHistoricalCheckpointScope;
 use Tests\Feature\Ai\Concerns\SetsUpAiEntitledFirm;
 use Tests\TestCase;
 
@@ -86,6 +87,7 @@ use Tests\TestCase;
  */
 class AiToolActionsForceRlsActivationTest extends TestCase
 {
+    use EvaluatesHistoricalCheckpointScope;
     use RefreshDatabase, SetsUpAiEntitledFirm;
 
     // ---------------------------------------------------------------
@@ -1156,9 +1158,7 @@ class AiToolActionsForceRlsActivationTest extends TestCase
 
     private function changedOrUntrackedPaths(string $scope): array
     {
-        $changed = trim((string) shell_exec(
-            'git -C '.escapeshellarg(base_path()).' ls-files --modified --others --exclude-standard -- '.escapeshellarg($scope)
-        ));
+        $changed = $this->changedOrUntrackedPathsRaw($scope);
 
         if ($changed === '') {
             return [];
