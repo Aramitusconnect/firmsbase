@@ -14,6 +14,7 @@ use App\Models\Client;
 use App\Models\Firm;
 use App\Models\FirmLead;
 use App\Models\FirmUser;
+use App\Models\LeadSource;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -87,6 +88,50 @@ final class FirmLeadResourceAccessTest extends TestCase
         $lead = $this->runWithFirmContext($firm, fn () => FirmLead::query()->where('name', 'New Intake Caller')->first());
         $this->assertNotNull($lead);
         $this->assertSame(FirmLeadStatus::New, $lead->status);
+    }
+
+    /**
+     * FirmsVault staging follow-up addition ("Application Completion —
+     * Catalogs + Firm-Owned Reference Data"). Lead Source is optional
+     * (see FirmLeadResource's own `->nullable()` on lead_source_id) —
+     * proves a lead can be created WITH a real, firm-owned LeadSource
+     * selected, and that a foreign firm's LeadSource is never among the
+     * options the Select's query would offer.
+     */
+    public function test_add_lead_accepts_an_optional_lead_source_scoped_to_the_acting_firm(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::Receptionist);
+        $leadSource = $this->runWithFirmContext($firm, fn () => LeadSource::factory()->forFirm($firm)->create(['name' => 'Website']));
+
+        $this->runWithFirmContext($firm, function () use ($leadSource): void {
+            $test = Livewire::test(CreateFirmLead::class);
+            $test->fillForm([
+                'name' => 'Web Lead',
+                'email' => 'web@example.com',
+                'lead_source_id' => $leadSource->id,
+            ]);
+            $test->call('create');
+            $test->assertHasNoFormErrors();
+        });
+
+        $lead = $this->runWithFirmContext($firm, fn () => FirmLead::query()->where('name', 'Web Lead')->first());
+        $this->assertSame($leadSource->id, $lead->lead_source_id);
+    }
+
+    public function test_lead_source_options_never_include_a_foreign_firms_lead_source(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $sourceA = $this->runWithFirmContext($firmA, fn () => LeadSource::factory()->forFirm($firmA)->create());
+        $sourceB = $this->runWithFirmContext($firmB, fn () => LeadSource::factory()->forFirm($firmB)->create());
+
+        $this->runWithFirmContext($firmA, function () use ($sourceA, $sourceB): void {
+            $visibleIds = LeadSource::query()->where('is_active', true)->pluck('id')->all();
+
+            $this->assertContains($sourceA->id, $visibleIds);
+            $this->assertNotContains($sourceB->id, $visibleIds, "Firm A's Add Lead source options must never include Firm B's lead source.");
+        });
     }
 
     public function test_firm_lead_resource_form_schema_never_declares_a_status_field(): void

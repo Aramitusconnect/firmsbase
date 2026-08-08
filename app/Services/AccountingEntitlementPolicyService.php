@@ -29,9 +29,7 @@ class AccountingEntitlementPolicyService
         FirmUserRole::BillingStaff,
     ];
 
-    public function __construct(private readonly EntitlementService $entitlementService)
-    {
-    }
+    public function __construct(private readonly EntitlementService $entitlementService) {}
 
     public function isExpensesEnabledForFirm(Firm $firm): bool
     {
@@ -61,6 +59,20 @@ class AccountingEntitlementPolicyService
         if (! $this->canApprove($firmUser->role)) {
             throw new \RuntimeException('Only FirmOwner or BillingStaff may approve expenses.');
         }
+    }
+
+    /**
+     * FirmsVault staging follow-up addition ("Application Completion —
+     * Catalogs + Firm-Owned Reference Data"). Gates the new Firm
+     * Management "Expense Categories" page (create/edit/activate/
+     * deactivate). Reuses APPROVER_ROLES unchanged — whoever is
+     * authorized to approve an expense against a category is the same
+     * "appropriately authorized billing role" this mission's own spec
+     * names for managing the category list itself.
+     */
+    public function canManageExpenseCategories(FirmUserRole $role): bool
+    {
+        return in_array($role, self::APPROVER_ROLES, true);
     }
 
     /**

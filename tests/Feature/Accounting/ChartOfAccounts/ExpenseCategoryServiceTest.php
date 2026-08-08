@@ -4,14 +4,16 @@ namespace Tests\Feature\Accounting\ChartOfAccounts;
 
 use App\Enums\ChartOfAccountType;
 use App\Enums\EntitlementSource;
-use App\Models\ChartOfAccount;
 use App\Models\Firm;
 use App\Services\AccountingEntitlementPolicyService;
 use App\Services\ChartOfAccountsService;
 use App\Services\EntitlementService;
 use App\Services\ExpenseCategoryService;
 use App\Services\TenantSafeAccountingPolicyService;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class ExpenseCategoryServiceTest extends TestCase
@@ -19,7 +21,9 @@ class ExpenseCategoryServiceTest extends TestCase
     use RefreshDatabase;
 
     private ExpenseCategoryService $service;
+
     private ChartOfAccountsService $coaService;
+
     private EntitlementService $entitlements;
 
     protected function setUp(): void
@@ -28,7 +32,7 @@ class ExpenseCategoryServiceTest extends TestCase
         $this->entitlements = app(EntitlementService::class);
         $this->service = new ExpenseCategoryService(
             new AccountingEntitlementPolicyService($this->entitlements),
-            new TenantSafeAccountingPolicyService(),
+            new TenantSafeAccountingPolicyService,
         );
         $this->coaService = new ChartOfAccountsService(new AccountingEntitlementPolicyService($this->entitlements));
     }
@@ -55,10 +59,10 @@ class ExpenseCategoryServiceTest extends TestCase
      */
     public function test_expense_categories_firm_id_column_is_non_nullable(): void
     {
-        $this->expectException(\Illuminate\Database\QueryException::class);
+        $this->expectException(QueryException::class);
 
-        \Illuminate\Support\Facades\DB::table('expense_categories')->insert([
-            'uuid' => (string) \Illuminate\Support\Str::uuid7(),
+        DB::table('expense_categories')->insert([
+            'uuid' => (string) Str::uuid7(),
             'firm_id' => null,
             'name' => 'Should Fail',
             'is_active' => true,
@@ -85,5 +89,44 @@ class ExpenseCategoryServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->service->create($firm, 'Office Supplies');
+    }
+
+    /**
+     * FirmsVault staging follow-up addition ("Application Completion —
+     * Catalogs + Firm-Owned Reference Data") — update()/reactivate().
+     */
+    public function test_update_renames_a_category(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->enableExpenses($firm);
+        $category = $this->service->create($firm, 'Old Name');
+
+        $updated = $this->service->update($firm, $category, 'New Name');
+
+        $this->assertSame('New Name', $updated->name);
+    }
+
+    public function test_update_rejects_a_duplicate_name_within_the_same_firm(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->enableExpenses($firm);
+        $this->service->create($firm, 'Filing Fees');
+        $category = $this->service->create($firm, 'Court Costs');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->service->update($firm, $category, 'Filing Fees');
+    }
+
+    public function test_deactivate_then_reactivate_round_trips_is_active(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->enableExpenses($firm);
+        $category = $this->service->create($firm, 'Travel');
+
+        $deactivated = $this->service->deactivate($firm, $category);
+        $this->assertFalse($deactivated->is_active);
+
+        $reactivated = $this->service->reactivate($firm, $category);
+        $this->assertTrue($reactivated->is_active);
     }
 }

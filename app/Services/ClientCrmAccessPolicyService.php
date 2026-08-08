@@ -108,6 +108,20 @@ class ClientCrmAccessPolicyService
         return in_array($role, self::INTAKE_ROLES, true);
     }
 
+    /**
+     * FirmsVault staging follow-up addition ("Application Completion —
+     * Catalogs + Firm-Owned Reference Data"). Gates the new Firm
+     * Management "Lead Sources" page (create/edit/activate/deactivate).
+     * Reuses INTAKE_ROLES unchanged — the same front-desk-through-legal-
+     * staff ceiling MANAGE_LEAD already uses, since deciding what
+     * intake-source options exist is the same class of routine intake-
+     * configuration work as logging a lead itself.
+     */
+    public function canManageLeadSourceCatalog(FirmUserRole $role): bool
+    {
+        return in_array($role, self::INTAKE_ROLES, true);
+    }
+
     public function canEditClient(FirmUserRole $role): bool
     {
         return in_array($role, self::CLIENT_MANAGEMENT_ROLES, true);
