@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
 /**
  * Client — created ONLY by LeadConversionService (never any other
@@ -26,7 +27,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class Client extends Model
 {
-    use HasFactory, HasPublicUuid, BelongsToTenant;
+    use BelongsToTenant, HasFactory, HasPublicUuid;
 
     protected $fillable = [
         'firm_id',
@@ -117,5 +118,38 @@ class Client extends Model
     public function pilotFeedbackItems(): HasMany
     {
         return $this->hasMany(PilotFeedbackItem::class);
+    }
+
+    /**
+     * Tier1-G (Firm Feature Manifest "Relationships" wiring) additions
+     * below. TimeEntry and Payment both carry a direct `client_id`
+     * column of their own (nullable, but a real FK — see each table's
+     * own migration) — so these are plain, direct HasMany relations,
+     * exactly the same shape as contacts()/matters()/documentRequests()
+     * above, not a new query pattern.
+     */
+    public function timeEntries(): HasMany
+    {
+        return $this->hasMany(TimeEntry::class);
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+    /**
+     * Expense has no `client_id` column of its own (only `matter_id` —
+     * see Expense's own migration doc comment: "matter linkage/
+     * attribution... lives in matter_expenses, not here"), so a
+     * client's expenses only exist transitively through its matters.
+     * This is a genuine chain HasManyThrough (Client hasMany Matter,
+     * Matter hasMany Expense) — the same shape as Matter::
+     * conflictCheckResults()'s own precedent for "flatten across an
+     * intermediate hasMany", not a new aggregation pattern.
+     */
+    public function expenses(): HasManyThrough
+    {
+        return $this->hasManyThrough(Expense::class, Matter::class, 'client_id', 'matter_id');
     }
 }

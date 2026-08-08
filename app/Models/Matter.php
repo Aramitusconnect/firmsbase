@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
@@ -24,7 +25,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  */
 class Matter extends Model
 {
-    use HasFactory, HasPublicUuid, BelongsToTenant;
+    use BelongsToTenant, HasFactory, HasPublicUuid;
 
     protected $fillable = [
         'firm_id',
@@ -93,6 +94,28 @@ class Matter extends Model
         return $this->hasMany(ConflictCheckRun::class);
     }
 
+    /**
+     * Firm/CRM cluster addition: flattens every ConflictCheckResult
+     * across all of this matter's ConflictCheckRuns into one list, for
+     * a single "Conflict Check Results" tab rather than nesting a
+     * second table inside each run row. `conflict_check_results` has no
+     * `firm_id`/RLS of its own (isolation is transitive through
+     * `conflict_check_run_id` -> `conflict_check_runs.firm_id`, see that
+     * model's own docblock) — the actual tenant boundary for this
+     * relation is `conflict_check_runs`' own FORCE ROW LEVEL SECURITY,
+     * which the join below still passes through at the database level
+     * regardless of how Eloquent constructs the join.
+     */
+    public function conflictCheckResults(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            ConflictCheckResult::class,
+            ConflictCheckRun::class,
+            'matter_id',
+            'conflict_check_run_id',
+        );
+    }
+
     public function intakeSubmissions(): HasMany
     {
         return $this->hasMany(IntakeSubmission::class);
@@ -159,5 +182,46 @@ class Matter extends Model
     public function pilotFeedbackItems(): HasMany
     {
         return $this->hasMany(PilotFeedbackItem::class);
+    }
+
+    /**
+     * Tier1-G (Firm Feature Manifest "Relationships" wiring) additions
+     * below. TimeEntry, Expense, and Payment all carry a direct
+     * `matter_id` column of their own — plain, direct HasMany relations,
+     * the same shape as documentRequests()/documents()/tasks()/
+     * deadlines() above.
+     */
+    public function timeEntries(): HasMany
+    {
+        return $this->hasMany(TimeEntry::class);
+    }
+
+    public function expenses(): HasMany
+    {
+        return $this->hasMany(Expense::class);
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+    /**
+     * Contacts sharing this matter's client. Contact has no `matter_id`
+     * column of its own (Contact belongs to Client only) — and this is
+     * deliberately NOT expressed as a HasManyThrough: that relation
+     * shape requires the local model to `hasMany` the "through" model
+     * (e.g. Client hasMany Matter above), but here Matter `belongsTo`
+     * Client, the reverse direction. A plain HasMany with a shared
+     * foreign/local key (`contacts.client_id` = `matters.client_id`,
+     * evaluated off this Matter's own client_id attribute) is the
+     * correct, simple Eloquent primitive for this "same-parent"
+     * scoping — matching this mission's own guidance to prefer a plain
+     * relation/scoped query over forcing a fragile HasManyThrough where
+     * the FK structure doesn't actually support one.
+     */
+    public function contacts(): HasMany
+    {
+        return $this->hasMany(Contact::class, 'client_id', 'client_id');
     }
 }
