@@ -12,6 +12,8 @@ use App\Services\FirmUser2faPolicyService;
 use App\Services\LoginPolicyService;
 use App\Services\TenantContextService;
 use Database\Factories\UserFactory;
+use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthentication;
+use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthenticationRecovery;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -21,10 +23,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use SensitiveParameter;
 
 #[Fillable(['name', 'email', 'password'])]
 #[Hidden(['password', 'remember_token'])]
-class User extends Authenticatable implements FilamentUser
+class User extends Authenticatable implements FilamentUser, HasAppAuthentication, HasAppAuthenticationRecovery
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, HasPublicUuid, Notifiable;
@@ -189,5 +192,69 @@ class User extends Authenticatable implements FilamentUser
         }
 
         return true;
+    }
+
+    /**
+     * Firm Feature Manifest §11/§39B — Filament\Auth\MultiFactor\App\
+     * Contracts\HasAppAuthentication. Mirrors PlatformAdmin's own
+     * identical implementation exactly (same contract, same shape) —
+     * reuses the two_factor_secret/two_factor_recovery_codes/
+     * two_factor_confirmed_at columns that already exist on `users`
+     * (added in 2026_07_04_200001_add_identity_fields_to_users_table,
+     * already cast on this model above) and that
+     * FirmUser2faPolicyService::isCompliant() already reads as its sole
+     * source of "has confirmed 2FA" truth. No new column, no new
+     * migration — this is wiring an existing, already-relied-upon data
+     * shape onto Filament's own MFA provider contract for the first
+     * time, not introducing new state.
+     *
+     * Required for FirmPanelProvider's self-service 2FA enrollment
+     * (Filament\Auth\MultiFactor\App\AppAuthentication) to function at
+     * all: AppAuthentication::isEnabled() unconditionally throws a
+     * LogicException if the acting user does not implement this
+     * interface, and Filament's own Login page calls isEnabled() for
+     * EVERY login attempt against a panel with any multi-factor
+     * provider configured — regardless of that panel's isRequired
+     * setting. Implementing this interface is therefore a
+     * precondition for ANY firm user (enrolled or not) to be able to
+     * log in at all once FirmPanelProvider registers a provider, not
+     * merely a precondition for the enrollment feature itself.
+     */
+    public function getAppAuthenticationSecret(): ?string
+    {
+        return $this->two_factor_secret;
+    }
+
+    public function saveAppAuthenticationSecret(#[SensitiveParameter] ?string $secret): void
+    {
+        $this->forceFill([
+            'two_factor_secret' => $secret,
+            'two_factor_confirmed_at' => filled($secret) ? now() : null,
+        ])->save();
+    }
+
+    public function getAppAuthenticationHolderName(): string
+    {
+        return $this->email;
+    }
+
+    /**
+     * Filament\Auth\MultiFactor\App\Contracts\HasAppAuthenticationRecovery
+     * — see getAppAuthenticationSecret()'s docblock above for the full
+     * reasoning; identical mirror of PlatformAdmin's own implementation.
+     *
+     * @return ?array<string>
+     */
+    public function getAppAuthenticationRecoveryCodes(): ?array
+    {
+        return $this->two_factor_recovery_codes;
+    }
+
+    /**
+     * @param  ?array<string>  $codes
+     */
+    public function saveAppAuthenticationRecoveryCodes(#[SensitiveParameter] ?array $codes): void
+    {
+        $this->forceFill(['two_factor_recovery_codes' => $codes])->save();
     }
 }
