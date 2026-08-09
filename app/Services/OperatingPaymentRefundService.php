@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\AccountingJournalSourceType;
+use App\Enums\ChartOfAccountPurpose;
 use App\Enums\PaymentReversalType;
 use App\Enums\PaymentStatus;
 use App\Models\Firm;
@@ -65,6 +66,20 @@ class OperatingPaymentRefundService
                 throw new \RuntimeException('This payment was split-allocated across multiple targets; refunding a split payment is not supported.');
             }
 
+            // recordCashOut() posts a single-leg reversal to Legal Fee
+            // Revenue only. That is exactly correct for a fee-only
+            // payment (the overwhelming common case) but would silently
+            // misstate accounts for a payment whose recognized revenue
+            // includes a cost-reimbursement bucket, or a partial refund
+            // whose fee-vs-cost split is not otherwise determinable — the
+            // same class of ambiguity the Mixed-Invoice Revenue
+            // Allocation pass refuses to guess at going forward, applied
+            // here to the reversal direction. Refused with a clear error
+            // rather than guessed at; out of scope for this pass.
+            if ($this->hasNonFeeOnlyRevenueAllocation($payment)) {
+                throw new \RuntimeException('This payment recognized cost-reimbursement revenue; refunding it requires an explicit fee/cost split, which is not yet supported.');
+            }
+
             $alreadyRefunded = (int) PaymentReversal::query()
                 ->where('payment_id', $payment->id)
                 ->where('reversal_type', PaymentReversalType::Refund->value)
@@ -120,6 +135,24 @@ class OperatingPaymentRefundService
 
     private function isSplitAllocated(Payment $payment): bool
     {
-        return PaymentAllocation::query()->where('payment_id', $payment->id)->exists();
+        // revenue_purpose IS NULL is the Phase F multi-target split
+        // marker (applySplit()); a revenue_purpose-tagged row is the
+        // Mixed-Invoice Revenue Allocation pass's own bucket tracking
+        // for a SINGLE target and does not indicate a split payment.
+        return PaymentAllocation::query()->where('payment_id', $payment->id)->whereNull('revenue_purpose')->exists();
+    }
+
+    private function hasNonFeeOnlyRevenueAllocation(Payment $payment): bool
+    {
+        $purposes = PaymentAllocation::query()
+            ->where('payment_id', $payment->id)
+            ->whereNotNull('revenue_purpose')
+            ->distinct()
+            ->pluck('revenue_purpose');
+
+        return $purposes->isNotEmpty() && (
+            $purposes->count() > 1
+            || $purposes->first() !== ChartOfAccountPurpose::LegalFeeRevenue
+        );
     }
 }

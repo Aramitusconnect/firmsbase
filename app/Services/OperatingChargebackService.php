@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\AccountingJournalSourceType;
+use App\Enums\ChartOfAccountPurpose;
 use App\Enums\PaymentReversalType;
 use App\Enums\PaymentStatus;
 use App\Models\Firm;
@@ -51,8 +52,21 @@ class OperatingChargebackService
         // so both checks below are only correct INSIDE the firm context
         // wrap, not before it.
         return (new TenantContextService)->runWithFirmContext($firm, fn () => DB::transaction(function () use ($firm, $payment, $amountCents, $reason, $reportedBy) {
-            if (PaymentAllocation::query()->where('payment_id', $payment->id)->exists()) {
+            // revenue_purpose IS NULL is the Phase F multi-target split
+            // marker (applySplit()); a revenue_purpose-tagged row is the
+            // Mixed-Invoice Revenue Allocation pass's own bucket tracking
+            // for a SINGLE target and does not indicate a split payment.
+            if (PaymentAllocation::query()->where('payment_id', $payment->id)->whereNull('revenue_purpose')->exists()) {
                 throw new \RuntimeException('This payment was split-allocated across multiple targets; charging back a split payment is not supported.');
+            }
+
+            // See OperatingPaymentRefundService's matching guard: recordCashOut()
+            // posts a single-leg reversal to Legal Fee Revenue only, which is
+            // correct for a fee-only payment but would misstate accounts for
+            // one that recognized cost-reimbursement revenue. Refused rather
+            // than guessed at; out of scope for this pass.
+            if ($this->hasNonFeeOnlyRevenueAllocation($payment)) {
+                throw new \RuntimeException('This payment recognized cost-reimbursement revenue; charging it back requires an explicit fee/cost split, which is not yet supported.');
             }
 
             $alreadyReversed = (int) PaymentReversal::query()
@@ -102,5 +116,19 @@ class OperatingChargebackService
             // own nested runWithFirmContext() call.
             return $payment;
         }));
+    }
+
+    private function hasNonFeeOnlyRevenueAllocation(Payment $payment): bool
+    {
+        $purposes = PaymentAllocation::query()
+            ->where('payment_id', $payment->id)
+            ->whereNotNull('revenue_purpose')
+            ->distinct()
+            ->pluck('revenue_purpose');
+
+        return $purposes->isNotEmpty() && (
+            $purposes->count() > 1
+            || $purposes->first() !== ChartOfAccountPurpose::LegalFeeRevenue
+        );
     }
 }
