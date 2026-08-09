@@ -33,6 +33,34 @@ use Illuminate\Support\Str;
  *      own cache, able to catch a matter-level cache drift leg 2 alone
  *      cannot see.
  *
+ * ============================================================
+ * ACCOUNTING INTEGRITY HARDENING PASS, item 5 — leg 3 independence,
+ * re-audited. Since every TrustLedger belongs to exactly ONE client
+ * (TrustLedger.client_id), the only OTHER "client liability" aggregate
+ * this codebase has — TrustBalanceService::clientBalanceCents() — reads
+ * the exact SAME trust_balances cache leg 2 already sums; using it here
+ * would make leg 3 tautologically equal to leg 2, exactly the
+ * "mechanically derived, meaningless reconciliation" failure mode this
+ * hardening item warns against. matter_trust_balances is genuinely
+ * different: a SEPARATE table, recomputed by a SEPARATE call
+ * (TrustBalanceService::recomputeForMatter(), invoked at a different
+ * point in each money-moving service than recomputeForLedger() updates
+ * trust_balances) — so it CAN diverge from leg 2 due to a real
+ * maintenance-order bug, and a validated test in
+ * TrustReconciliationServiceTest proves exactly that scenario is
+ * caught. What was still missing, and is now closed below: the
+ * per-ledger AGGREGATE from verifyMatterLiabilitiesReconcileToLedger()
+ * trusted matter_trust_balances rows as given, without first confirming
+ * each one is individually fresh against its own live
+ * trust_ledger_entries — two individually-stale matter caches whose
+ * errors happen to cancel out in the sum would have passed silently.
+ * Leg 2 already guards itself this way (reconcileCacheAgainstLedger()
+ * throws on any mismatch before $systemBalanceCents ever sums a
+ * cache); the loop below now gives leg 3 the identical guarantee, one
+ * matter at a time, via TrustBalanceService::
+ * reconcileMatterCacheAgainstLedger() — before its aggregate is ever
+ * trusted.
+ *
  * A Discrepancy in EITHER comparison (bank vs. system, or system vs.
  * client-liability) is recorded as-is and NEVER auto-corrected by this
  * or any other service (project rule) — resolving a discrepancy
@@ -92,6 +120,20 @@ class TrustReconciliationService
 
                 $systemBalanceCents += $cacheCheck->cachedBalanceCents;
 
+                // Deliberately does NOT also throw on individual matter
+                // cache staleness the way the ledger-level cache check
+                // above does: unlike leg 2 (whose own cache directly
+                // becomes $systemBalanceCents, so a stale ledger cache
+                // would poison the entire reconciliation's core
+                // comparison), a stale MATTER cache is exactly the kind
+                // of drift this leg exists to CATCH AND RECORD as a
+                // reportable Discrepancy — see
+                // test_reconciliation_reports_discrepancy_when_matter_
+                // liability_cache_has_drifted_from_the_ledger, Phase H's
+                // own validated proof that this leg surfaces real drift
+                // leg 2 alone cannot see. Refusing to record a
+                // reconciliation at all in that case would destroy the
+                // very evidence a firm needs to go fix the drift.
                 $matterLiabilityCheck = $this->balanceService->verifyMatterLiabilitiesReconcileToLedger($ledger);
                 $clientLiabilityCents += $matterLiabilityCheck->computedBalanceCents;
             }

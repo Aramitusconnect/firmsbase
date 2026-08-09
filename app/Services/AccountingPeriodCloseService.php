@@ -2,12 +2,13 @@
 
 namespace App\Services;
 
+use App\Enums\AccountingPeriodEventType;
 use App\Enums\AccountingPeriodStatus;
-use App\Enums\ChartOfAccountType;
+use App\Enums\ChartOfAccountPurpose;
 use App\Models\AccountingPeriod;
+use App\Models\AccountingPeriodEvent;
 use App\Models\Firm;
 use App\Models\FirmUser;
-use App\Models\TrustBalance;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -22,6 +23,17 @@ use Illuminate\Support\Facades\DB;
  * TrustBalanceService for every figure it snapshots — this service
  * computes nothing new itself, it only decides WHEN to snapshot and
  * persists the result.
+ *
+ * Accounting Integrity Hardening Pass, item 7: close()/reopen() now
+ * assert AccountingEntitlementPolicyService::assertCanApprove()
+ * THEMSELVES rather than relying solely on the Filament
+ * ClosePeriodAction's own UI-layer visibility check — a service that
+ * can be called from anywhere (a future console command, this
+ * hardening pass's own AH8 opening-balance service, a later API) must
+ * enforce its own authorization, not depend on every caller having
+ * already checked. Every transition also writes an immutable
+ * AccountingPeriodEvent row (see that model's own docblock) in the
+ * SAME transaction as the accounting_periods write.
  */
 class AccountingPeriodCloseService
 {
@@ -30,6 +42,7 @@ class AccountingPeriodCloseService
         private readonly AccountingReportingService $reporting,
         private readonly ChartOfAccountsService $chartOfAccounts,
         private readonly TrustBalanceService $trustBalance,
+        private readonly AccountingEntitlementPolicyService $entitlementPolicy,
     ) {}
 
     public function close(Firm $firm, \DateTimeInterface $periodStart, \DateTimeInterface $periodEnd, FirmUser $closedBy): AccountingPeriod
@@ -37,6 +50,8 @@ class AccountingPeriodCloseService
         if ((int) $closedBy->firm_id !== (int) $firm->id) {
             throw new \RuntimeException('The closing user does not belong to this firm.');
         }
+
+        $this->entitlementPolicy->assertCanApprove($closedBy);
 
         $alreadyClosed = (new TenantContextService)->runWithFirmContext($firm, fn () => AccountingPeriod::query()
             ->where('firm_id', $firm->id)
@@ -49,7 +64,7 @@ class AccountingPeriodCloseService
             throw new \RuntimeException('This exact period has already been closed.');
         }
 
-        $cashAccount = $this->chartOfAccounts->resolveActiveAccountByType($firm, ChartOfAccountType::Asset);
+        $cashAccount = $this->chartOfAccounts->resolveByPurpose($firm, ChartOfAccountPurpose::OperatingCash);
 
         $openingBalanceCents = $cashAccount === null ? null : $this->accountingBalance->accountBalanceAsOf($firm, $cashAccount, $periodStart);
         $closingBalanceCents = $cashAccount === null ? null : $this->accountingBalance->accountBalanceAsOf($firm, $cashAccount, $periodEnd);
@@ -62,14 +77,16 @@ class AccountingPeriodCloseService
                 'bucket' => $row['bucket'],
             ])->values()->all();
 
-        // Trust liability is a CURRENT balance, not a point-in-time
-        // recomputation (TrustBalanceService, deliberately unmodified
-        // per the extend-never-parallel mandate, has no historical/
-        // as-of query) — this snapshot is explicitly labeled as such
-        // rather than presented as a true as-of-periodEnd figure.
-        $trustLiabilityCents = (new TenantContextService)->runWithFirmContext($firm, fn () => TrustBalance::query()
-            ->where('firm_id', $firm->id)
-            ->sum('balance_cents'));
+        // Accounting Integrity Hardening Pass, item 6: a true
+        // as-of-periodEnd figure, computed by TrustBalanceService::
+        // firmTrustLiabilityAsOf() straight from immutable
+        // trust_ledger_entries filtered by posted_at — no longer the
+        // CURRENT trust_balances cache. A deposit/withdrawal posted
+        // after $periodEnd is excluded by construction and can never
+        // retroactively change this closed period's own snapshot, even
+        // though the live cache used for reporting "today" has since
+        // moved on.
+        $trustLiabilityCents = $this->trustBalance->firmTrustLiabilityAsOf($firm, $periodEnd);
 
         $unresolvedExceptions = $this->reporting->reconciliationExceptions($firm)->data
             ->map(fn ($reconciliation) => [
@@ -79,22 +96,36 @@ class AccountingPeriodCloseService
                 'client_liability_discrepancy_cents' => $reconciliation->client_liability_discrepancy_cents,
             ])->values()->all();
 
-        return DB::transaction(fn () => (new TenantContextService)->runWithFirmContext($firm, fn () => AccountingPeriod::create([
-            'firm_id' => $firm->id,
-            'period_start' => $periodStart,
-            'period_end' => $periodEnd,
-            'status' => AccountingPeriodStatus::Closed,
-            'opening_balance_cents' => $openingBalanceCents,
-            'closing_balance_cents' => $closingBalanceCents,
-            'ar_snapshot_json' => $arSnapshot,
-            'trust_liability_snapshot_json' => [
-                'note' => 'Current trust balance at close time, not a true as-of-period-end historical figure.',
-                'total_cents' => $trustLiabilityCents,
-            ],
-            'unresolved_exceptions_json' => $unresolvedExceptions,
-            'closed_by_firm_user_id' => $closedBy->id,
-            'closed_at' => now(),
-        ])));
+        return DB::transaction(fn () => (new TenantContextService)->runWithFirmContext($firm, function () use (
+            $firm, $periodStart, $periodEnd, $openingBalanceCents, $closingBalanceCents, $arSnapshot, $trustLiabilityCents, $unresolvedExceptions, $closedBy
+        ) {
+            $period = AccountingPeriod::create([
+                'firm_id' => $firm->id,
+                'period_start' => $periodStart,
+                'period_end' => $periodEnd,
+                'status' => AccountingPeriodStatus::Closed,
+                'opening_balance_cents' => $openingBalanceCents,
+                'closing_balance_cents' => $closingBalanceCents,
+                'ar_snapshot_json' => $arSnapshot,
+                'trust_liability_snapshot_json' => [
+                    'note' => 'True as-of-period-end figure, computed from immutable trust_ledger_entries filtered by posted_at <= period_end.',
+                    'total_cents' => $trustLiabilityCents,
+                ],
+                'unresolved_exceptions_json' => $unresolvedExceptions,
+                'closed_by_firm_user_id' => $closedBy->id,
+                'closed_at' => now(),
+            ]);
+
+            AccountingPeriodEvent::create([
+                'firm_id' => $firm->id,
+                'accounting_period_id' => $period->id,
+                'event_type' => AccountingPeriodEventType::Closed,
+                'actor_firm_user_id' => $closedBy->id,
+                'reason' => null,
+            ]);
+
+            return $period;
+        }));
     }
 
     /**
@@ -115,7 +146,17 @@ class AccountingPeriodCloseService
             throw new \RuntimeException('Only a closed period can be reopened.');
         }
 
-        return (new TenantContextService)->runWithFirmContext($firm, function () use ($period, $reopenedBy, $reason) {
+        if (trim($reason) === '') {
+            throw new \RuntimeException('A reason is required to reopen a closed accounting period.');
+        }
+
+        $this->entitlementPolicy->assertCanApprove($reopenedBy);
+
+        return DB::transaction(fn () => (new TenantContextService)->runWithFirmContext($firm, function () use ($period, $reopenedBy, $reason) {
+            // closed_by_firm_user_id/closed_at are deliberately left
+            // untouched — the fact this period was previously closed
+            // must never be erased by reopening it (Accounting
+            // Integrity Hardening Pass, item 7).
             $period->update([
                 'status' => AccountingPeriodStatus::Reopened,
                 'reopened_by_firm_user_id' => $reopenedBy->id,
@@ -123,7 +164,15 @@ class AccountingPeriodCloseService
                 'reopen_reason' => $reason,
             ]);
 
+            AccountingPeriodEvent::create([
+                'firm_id' => $period->firm_id,
+                'accounting_period_id' => $period->id,
+                'event_type' => AccountingPeriodEventType::Reopened,
+                'actor_firm_user_id' => $reopenedBy->id,
+                'reason' => $reason,
+            ]);
+
             return $period->fresh();
-        });
+        }));
     }
 }

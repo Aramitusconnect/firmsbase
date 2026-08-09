@@ -204,6 +204,75 @@ class TrustReconciliationServiceTest extends TestCase
         $this->assertSame(6000, $reconciliation->client_liability_discrepancy_cents);
     }
 
+    /**
+     * Accounting Integrity Hardening Pass, item 5 — the fourth
+     * combination the three-way check must reject: bank agrees with
+     * the (drifted) client-liability leg but NOT with the ledger leg.
+     * Both discrepancy_cents and client_liability_discrepancy_cents
+     * must be nonzero, and status must be Discrepancy — a reconciliation
+     * is never "half-balanced."
+     */
+    public function test_reconciliation_reports_discrepancy_when_bank_agrees_with_client_liabilities_but_not_the_ledger(): void
+    {
+        $firm = $this->makeTrustEligibleFirm();
+        $account = app(TrustAccountService::class)->open($firm, 'Firm IOLTA Trust Account');
+        $client = Client::factory()->forFirm($firm)->create();
+        $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
+        $matter = Matter::factory()->forClient($client)->create();
+        $user = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $depositApprover = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+
+        $deposits = app(TrustDepositService::class);
+        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 10000, $matter), $depositApprover);
+        $deposits->post($firm, $ledger, $approved, $matter);
+
+        MatterTrustBalance::query()
+            ->where('trust_ledger_id', $ledger->id)
+            ->where('matter_id', $matter->id)
+            ->first()
+            ->update(['balance_cents' => 4000]);
+
+        $reconciliation = $this->service->run($firm, $account, $user, now()->subMonth(), now(), assertedBankBalanceCents: 4000);
+
+        $this->assertSame(TrustReconciliationStatus::Discrepancy, $reconciliation->status);
+        $this->assertSame(10000, $reconciliation->system_balance_cents);
+        $this->assertSame(4000, $reconciliation->asserted_bank_balance_cents);
+        $this->assertSame(4000, $reconciliation->client_liability_cents);
+        $this->assertSame(6000, $reconciliation->discrepancy_cents, 'Bank matches the drifted client-liability leg, not the real ledger balance.');
+        $this->assertSame(6000, $reconciliation->client_liability_discrepancy_cents);
+    }
+
+    /**
+     * Accounting Integrity Hardening Pass, item 5 — the "ledger agrees
+     * with client liabilities but not the bank" combination, made
+     * explicit with a matter-attributed deposit (the plain
+     * unattributed-deposit discrepancy test above already exercises
+     * this combination implicitly; this test names it directly per the
+     * hardening pass's own required combination list).
+     */
+    public function test_reconciliation_reports_discrepancy_when_ledger_agrees_with_client_liabilities_but_not_the_bank(): void
+    {
+        $firm = $this->makeTrustEligibleFirm();
+        $account = app(TrustAccountService::class)->open($firm, 'Firm IOLTA Trust Account');
+        $client = Client::factory()->forFirm($firm)->create();
+        $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
+        $matter = Matter::factory()->forClient($client)->create();
+        $user = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $depositApprover = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+
+        $deposits = app(TrustDepositService::class);
+        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 7500, $matter), $depositApprover);
+        $deposits->post($firm, $ledger, $approved, $matter);
+
+        $reconciliation = $this->service->run($firm, $account, $user, now()->subMonth(), now(), assertedBankBalanceCents: 7000);
+
+        $this->assertSame(TrustReconciliationStatus::Discrepancy, $reconciliation->status);
+        $this->assertSame(7500, $reconciliation->system_balance_cents);
+        $this->assertSame(7500, $reconciliation->client_liability_cents, 'No matter-cache drift here — client liabilities correctly agree with the ledger.');
+        $this->assertSame(0, $reconciliation->client_liability_discrepancy_cents);
+        $this->assertSame(500, $reconciliation->discrepancy_cents, 'Only the bank leg disagrees.');
+    }
+
     public function test_reconciliation_is_balanced_when_all_three_legs_agree_with_a_matter_attributed_deposit(): void
     {
         $firm = $this->makeTrustEligibleFirm();

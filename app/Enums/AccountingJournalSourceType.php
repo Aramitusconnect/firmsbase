@@ -21,4 +21,13 @@ enum AccountingJournalSourceType: string
     case WriteOff = 'write_off';
     case Adjustment = 'adjustment';
     case Chargeback = 'chargeback';
+
+    /**
+     * Accounting Integrity Hardening Pass, item 8 — the one-time
+     * cutover entry AccountingOpeningBalanceService posts when a firm
+     * adopts native accounting mid-flight. Never posted by any other
+     * service; never posted more than once per firm (enforced by that
+     * service, both a pre-check and an idempotency key).
+     */
+    case OpeningBalanceCutover = 'opening_balance_cutover';
 }

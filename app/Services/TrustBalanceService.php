@@ -209,4 +209,52 @@ class TrustBalanceService
             differenceCents: $ledgerCached->balance_cents - $computed,
         );
     }
+
+    /**
+     * Accounting Integrity Hardening Pass, item 6 — the historical
+     * counterpart to clientBalanceCents()/matterBalanceCentsAggregate()/
+     * recomputeForLedger(): every trust_balances/matter_trust_balances
+     * cache row represents the balance RIGHT NOW, with no history at
+     * all (an ordinary Eloquent UPDATE overwrites the prior value), so
+     * "the trust liability as of a past closed period's end date" can
+     * only be answered by summing the immutable trust_ledger_entries
+     * themselves up to that date — never by reading a cache. This is
+     * the SAME live table every cache is itself derived from
+     * (recomputeForLedger()/recomputeForMatter() both already sum
+     * trust_ledger_entries.amount_cents), just filtered by
+     * TrustLedgerEntry.posted_at instead of taken as of "now" —
+     * deliberately not a second ledger or cache. posted_at is set once
+     * at creation and the model's own booted() hook forbids ever
+     * updating or deleting a row (see TrustLedgerEntry's own
+     * docblock), so a transaction posted AFTER $asOf can never retroactively
+     * change a balance computed as of a date before it.
+     */
+    public function firmTrustLiabilityAsOf(Firm $firm, \DateTimeInterface $asOf): int
+    {
+        return (int) (new TenantContextService)->runWithFirmContext($firm, fn () => TrustLedgerEntry::query()
+            ->where('firm_id', $firm->id)
+            ->where('posted_at', '<=', $asOf)
+            ->sum('amount_cents'));
+    }
+
+    public function clientBalanceCentsAsOf(Firm $firm, Client $client, \DateTimeInterface $asOf): int
+    {
+        return (int) (new TenantContextService)->runWithFirmContext($firm, fn () => TrustLedgerEntry::query()
+            ->where('firm_id', $firm->id)
+            ->where('posted_at', '<=', $asOf)
+            ->whereIn('trust_ledger_id', TrustLedger::query()
+                ->where('firm_id', $firm->id)
+                ->where('client_id', $client->id)
+                ->pluck('id'))
+            ->sum('amount_cents'));
+    }
+
+    public function matterBalanceCentsAsOf(Firm $firm, Matter $matter, \DateTimeInterface $asOf): int
+    {
+        return (int) (new TenantContextService)->runWithFirmContext($firm, fn () => TrustLedgerEntry::query()
+            ->where('firm_id', $firm->id)
+            ->where('matter_id', $matter->id)
+            ->where('posted_at', '<=', $asOf)
+            ->sum('amount_cents'));
+    }
 }
