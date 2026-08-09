@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ChartOfAccountPurpose;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -11,6 +12,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * AccountingJournalEntry/TrustLedgerEntry exactly: a row is created
  * once and never mutated or deleted. $timestamps = false; only
  * created_at exists.
+ *
+ * Mixed-Invoice Revenue Allocation pass, item 4 — revenue_purpose
+ * (nullable) additionally lets a row represent WHICH accounting bucket
+ * (legal_fee_revenue / cost_reimbursement_revenue) its own amount_cents
+ * was recognized against, via PaymentApplicationService::
+ * recordRevenueAllocation(). NULL for the original multi-target-split
+ * use case (applySplit()) — see that column's own migration docblock.
  */
 class PaymentAllocation extends Model
 {
@@ -24,6 +32,7 @@ class PaymentAllocation extends Model
         'invoice_id',
         'payment_plan_installment_id',
         'amount_cents',
+        'revenue_purpose',
         'created_at',
     ];
 
@@ -31,6 +40,7 @@ class PaymentAllocation extends Model
     {
         return [
             'amount_cents' => 'integer',
+            'revenue_purpose' => ChartOfAccountPurpose::class,
             'created_at' => 'datetime',
         ];
     }
