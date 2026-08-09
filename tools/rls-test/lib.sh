@@ -16,6 +16,7 @@ RLS_TEMPLATE_PATTERN='^firmsbase_test_39a3l_template_[a-f0-9]{7,40}$'
 RLS_WORKTREE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RLS_SECRET_FILE="${RLS_WORKTREE_ROOT}/.rls-test-secrets/rls_test_runner_39a3l.pgpass"
 RLS_LOCK_FILE="/home/ubuntu/firmsbase/rls-checkpoints/.rls-test-db.lock"
+RLS_TEST_RUN_LOCK_DIR="/home/ubuntu/firmsbase/rls-checkpoints/.rls-test-run-locks"
 
 RLS_BLOCKLIST=(
   "firmsbase"
@@ -161,4 +162,37 @@ rls_acquire_lock() {
     rls_fail "could not acquire the database-operation lock within 60s — another create/destroy operation is in progress"
   fi
   rls_log "acquired database-operation lock"
+}
+
+# Pending-Cash Accounting pass, item 10 root-cause fix — a PER-DATABASE
+# lock (distinct from the mission-wide create/destroy lock above) that
+# serializes `php artisan ...` invocations targeting the SAME disposable
+# database. Proven necessary empirically: running a `test` invocation
+# against a database while ANOTHER `test` invocation is still executing
+# against the exact same database produces genuine, silent Postgres-level
+# corruption — one process's schema-mutating DDL (a DatabaseMigrations-
+# based test's migrate:fresh/migrate:rollback cycle, or this script's own
+# post-test self-heal `migrate --force`) is visible mid-flight to the
+# OTHER process's concurrent queries, which is exactly what produced the
+# scattered "relation X does not exist" / "CHECK constraint must exist"
+# failures observed only in large combined runs and never when the same
+# files were re-run in isolation. This is NOT a race the application code
+# or the tests themselves can defend against — Postgres schema DDL is
+# visible across connections/processes as soon as it commits, regardless
+# of each individual test's own transaction/RefreshDatabase isolation.
+#
+# Blocking (waits, does not fail fast): a second invocation against the
+# same database is expected to eventually run, just strictly AFTER the
+# first one finishes — not concurrently. A 20-minute wait comfortably
+# covers this repository's slowest observed full-suite run.
+rls_acquire_test_run_lock() {
+  local db_name="${1:?rls_acquire_test_run_lock requires a database name}"
+  mkdir -p "$RLS_TEST_RUN_LOCK_DIR"
+  local lock_file="${RLS_TEST_RUN_LOCK_DIR}/${db_name}.lock"
+  exec {RLS_TEST_RUN_LOCK_FD}>"$lock_file"
+  rls_log "waiting for exclusive test-run lock on '${db_name}' (another php artisan invocation against this database, if any, must finish first)"
+  if ! flock -w 1200 "$RLS_TEST_RUN_LOCK_FD"; then
+    rls_fail "could not acquire the per-database test-run lock for '${db_name}' within 1200s — another php artisan invocation against this exact database is still running. Never run two php artisan invocations concurrently against the same disposable database; wait for the first to finish, or use a different disposable database."
+  fi
+  rls_log "acquired exclusive test-run lock on '${db_name}'"
 }

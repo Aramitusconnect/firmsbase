@@ -30,6 +30,13 @@ rls_reject_if_blocklisted "$db_name"
 rls_require_disposable_pattern "$db_name"
 rls_verify_sentinel "$db_name"
 
+# Item 10 root-cause fix — held for this entire script's execution (both
+# the artisan invocation below AND the post-test self-heal), so a second
+# concurrent invocation against the SAME database waits rather than
+# racing it. See rls_acquire_test_run_lock()'s own docblock in lib.sh for
+# the exact corruption this prevents.
+rls_acquire_test_run_lock "$db_name"
+
 rls_log "running: php artisan $* (database=${db_name}, role=${RLS_TEST_ROLE})"
 
 cd "$RLS_WORKTREE_ROOT"
