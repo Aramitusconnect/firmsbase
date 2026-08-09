@@ -49,6 +49,7 @@ class AccountingJournalReversalService
                     'invoice_id' => $original->invoice_id,
                     'expense_id' => $original->expense_id,
                     'trust_transfer_request_id' => $original->trust_transfer_request_id,
+                    'pending_payment_allocation_id' => $original->pending_payment_allocation_id,
                     'created_at' => now(),
                 ]);
 

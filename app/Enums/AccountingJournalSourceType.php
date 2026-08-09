@@ -30,4 +30,26 @@ enum AccountingJournalSourceType: string
      * service, both a pre-check and an idempotency key).
      */
     case OpeningBalanceCutover = 'opening_balance_cutover';
+
+    /**
+     * Pending-Cash Accounting pass. Posted by
+     * OperatingJournalRecorderService::recordUnappliedFundsReceived()
+     * the moment a confirmed operating payment's fee/cost revenue
+     * allocation is ambiguous: Dr Operating Cash / Cr
+     * UnappliedOperatingFundsLiability, for the full payment amount.
+     * The cash is real and recorded immediately; no revenue is
+     * recognized yet.
+     */
+    case UnappliedFundsReceived = 'unapplied_funds_received';
+
+    /**
+     * Pending-Cash Accounting pass. Posted by
+     * OperatingJournalRecorderService::recordUnappliedFundsResolved()
+     * when an authorized user resolves a PendingPaymentAllocation: Dr
+     * UnappliedOperatingFundsLiability / Cr LegalFeeRevenue and/or Cr
+     * CostReimbursementRevenue, for the exact resolved split. Never
+     * debits Operating Cash again — that leg was already posted by
+     * UnappliedFundsReceived.
+     */
+    case UnappliedFundsResolved = 'unapplied_funds_resolved';
 }

@@ -16,7 +16,8 @@ namespace App\Enums;
  * and the row is active enforces "at most one active account per
  * purpose per firm" at the database level, not merely by convention.
  *
- * Only OperatingCash, LegalFeeRevenue, and GeneralOperatingExpense are
+ * OperatingCash, LegalFeeRevenue, GeneralOperatingExpense,
+ * CostReimbursementRevenue, and UnappliedOperatingFundsLiability are
  * currently READ by any real posting code path
  * (OperatingJournalRecorderService, AccountingEarnedFeeService,
  * AccountingPeriodCloseService) — see each case's own docblock for
@@ -113,24 +114,21 @@ enum ChartOfAccountPurpose: string
     case GeneralOperatingExpense = 'general_operating_expense';
 
     /**
-     * Payment-Channel Safety Hardening pass, item 4/5 — now read by
-     * OperatingJournalRecorderService::recordFeeEarnedWithCostSplit(),
-     * required whenever a mixed invoice (both ordinary fee lines AND
-     * InvoiceLineType::ReimbursableExpense lines) is paid off in full
-     * by its own first and only payment — the one case
-     * resolveFeeCostSplitForFullyPaidInvoice() can split without
-     * inventing an allocation policy. A firm with reimbursable-expense
+     * Mixed-Invoice Revenue Allocation pass — read by
+     * OperatingJournalRecorderService::recordFeeEarned() whenever
+     * PaymentApplicationService::resolveInvoiceRevenueAllocation() has
+     * resolved a non-zero cost-reimbursement portion for a mixed
+     * invoice (both ordinary fee lines AND
+     * InvoiceLineType::ReimbursableExpense lines) — full payment,
+     * purpose-constrained partial payment, or a resolved
+     * PendingPaymentAllocation. A firm with reimbursable-expense
      * invoice lines but no chart_of_accounts row of this purpose will
      * have such a payment blocked atomically (AccountingSetupIncompleteException,
      * same post-or-block policy as every other required purpose) rather
-     * than silently misposted as LegalFeeRevenue.
-     *
-     * A mixed invoice funded by more than one payment (this payment
-     * has predecessors, or leaves a remainder) still posts entirely to
-     * LegalFeeRevenue — that allocation policy (pro-rata vs cost-first
-     * vs fee-first) remains genuinely undefined by this codebase; see
-     * recordInvoicePaymentApplied()'s own docblock and the phase's
-     * final report.
+     * than silently misposted as LegalFeeRevenue. A genuinely ambiguous
+     * partial payment never reaches this account at all — see
+     * PendingPaymentAllocation and UnappliedOperatingFundsLiability's
+     * own docblocks for what happens to it instead.
      */
     case CostReimbursementRevenue = 'cost_reimbursement_revenue';
 
@@ -156,4 +154,29 @@ enum ChartOfAccountPurpose: string
      * an arbitrary existing account.
      */
     case OpeningBalanceEquity = 'opening_balance_equity';
+
+    /**
+     * Pending-Cash Accounting pass. A Liability-type account: cash the
+     * firm has genuinely received on its OPERATING books but cannot
+     * yet recognize as revenue because the fee-vs-cost split is
+     * ambiguous (PaymentApplicationService::resolveInvoiceRevenueAllocation()
+     * returned an ambiguous decision, so ManualPaymentService deferred
+     * the payment to a PendingPaymentAllocation instead of guessing).
+     * Named "Operating", not "Client", to keep this unmistakably
+     * distinct from Trust/IOLTA client funds — this account never
+     * represents money held in trust; TrustLedgerEntry/TrustBalance
+     * remain the sole source of truth for that, completely unaffected
+     * by this pass (see this class's own OperatingCash/LegalFeeRevenue
+     * docblocks for the established "Operating" naming precedent).
+     *
+     * Posted to by OperatingJournalRecorderService::recordUnappliedFundsReceived()
+     * (Dr Operating Cash / Cr this account, at the moment an ambiguous
+     * payment is received — the cash itself is never left off the
+     * books while allocation is pending) and reversed to zero by
+     * OperatingJournalRecorderService::recordUnappliedFundsResolved()
+     * (Dr this account / Cr LegalFeeRevenue and/or CostReimbursementRevenue,
+     * for the exact resolved split — never a second cash debit, since
+     * the cash was already recorded at receipt).
+     */
+    case UnappliedOperatingFundsLiability = 'unapplied_operating_funds_liability';
 }

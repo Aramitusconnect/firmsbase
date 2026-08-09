@@ -37,6 +37,7 @@ class AccountingJournalEntry extends Model
         'invoice_id',
         'expense_id',
         'trust_transfer_request_id',
+        'pending_payment_allocation_id',
         'created_at',
     ];
 
@@ -107,5 +108,10 @@ class AccountingJournalEntry extends Model
     public function trustTransferRequest(): BelongsTo
     {
         return $this->belongsTo(TrustTransferRequest::class);
+    }
+
+    public function pendingPaymentAllocation(): BelongsTo
+    {
+        return $this->belongsTo(PendingPaymentAllocation::class);
     }
 }

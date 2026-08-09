@@ -31,7 +31,7 @@ class AccountingJournalPostingService
 {
     /**
      * @param  array<int, array{chart_of_account_id:int, debit_cents:int, credit_cents:int, client_id?:int|null, matter_id?:int|null, memo?:string|null}>  $postings
-     * @param  array{payment_id?:int|null, invoice_id?:int|null, expense_id?:int|null, trust_transfer_request_id?:int|null}  $sourceRefs
+     * @param  array{payment_id?:int|null, invoice_id?:int|null, expense_id?:int|null, trust_transfer_request_id?:int|null, pending_payment_allocation_id?:int|null}  $sourceRefs
      *
      * $idempotencyKey (project rule, Phase D): when supplied, a retry
      * with the SAME (firm_id, idempotency_key) returns the original
@@ -140,6 +140,7 @@ class AccountingJournalPostingService
                     'invoice_id' => $sourceRefs['invoice_id'] ?? null,
                     'expense_id' => $sourceRefs['expense_id'] ?? null,
                     'trust_transfer_request_id' => $sourceRefs['trust_transfer_request_id'] ?? null,
+                    'pending_payment_allocation_id' => $sourceRefs['pending_payment_allocation_id'] ?? null,
                     'created_at' => now(),
                 ]);
 
