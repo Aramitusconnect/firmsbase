@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\TimeExpenses;
 
+use App\Enums\ChartOfAccountPurpose;
+use App\Enums\ChartOfAccountType;
 use App\Enums\EntitlementSource;
 use App\Enums\ExpenseStatus;
 use App\Enums\FirmUserRole;
@@ -15,6 +17,7 @@ use App\Filament\Firm\Resources\ExpenseResource\Actions\VoidExpenseAction;
 use App\Filament\Firm\Resources\ExpenseResource\Pages\CreateExpense;
 use App\Filament\Firm\Resources\ExpenseResource\Pages\EditExpense;
 use App\Filament\Firm\Resources\ExpenseResource\Pages\ListExpenses;
+use App\Models\ChartOfAccount;
 use App\Models\Expense;
 use App\Models\ExpenseCategory;
 use App\Models\Firm;
@@ -213,6 +216,13 @@ final class ExpenseResourceAccessTest extends TestCase
     {
         $firm = $this->expenseEntitledFirm();
         $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        // Accounting Integrity Hardening Pass, item 1: approval is now a
+        // real money-changing event requiring a complete Chart of
+        // Accounts (see OperatingJournalRecorderService's own docblock).
+        $this->runWithFirmContext($firm, fn () => [
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Asset)->purpose(ChartOfAccountPurpose::OperatingCash)->create(),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Expense)->purpose(ChartOfAccountPurpose::GeneralOperatingExpense)->create(),
+        ]);
         $expense = $this->runWithFirmContext($firm, fn () => Expense::factory()->forFirm($firm)->create(['status' => ExpenseStatus::Submitted]));
 
         $this->runWithFirmContext($firm, function () use ($expense): void {

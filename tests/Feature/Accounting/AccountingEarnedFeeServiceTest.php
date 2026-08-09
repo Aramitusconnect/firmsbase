@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\Accounting;
 
+use App\Enums\ChartOfAccountPurpose;
 use App\Enums\ChartOfAccountType;
+use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
 use App\Enums\InvoiceStatus;
 use App\Models\ChartOfAccount;
@@ -12,6 +14,7 @@ use App\Models\FirmUser;
 use App\Models\Invoice;
 use App\Models\Matter;
 use App\Services\AccountingEarnedFeeService;
+use App\Services\EntitlementService;
 use App\Services\TrustAccountService;
 use App\Services\TrustDepositService;
 use App\Services\TrustLedgerService;
@@ -36,9 +39,10 @@ class AccountingEarnedFeeServiceTest extends TestCase
     public function test_a_trust_deposit_alone_is_unearned_and_posts_nothing_to_the_operating_books(): void
     {
         $firm = $this->makeTrustEligibleFirm();
+        app(EntitlementService::class)->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, true);
         $this->runWithFirmContext($firm, fn () => [
-            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Asset)->create(),
-            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Revenue)->create(),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Asset)->purpose(ChartOfAccountPurpose::OperatingCash)->create(),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Revenue)->purpose(ChartOfAccountPurpose::LegalFeeRevenue)->create(),
         ]);
 
         $account = app(TrustAccountService::class)->open($firm, 'Firm IOLTA Trust Account');
@@ -64,9 +68,10 @@ class AccountingEarnedFeeServiceTest extends TestCase
     public function test_a_partial_transfer_moves_exactly_the_transferred_amount_from_unearned_to_earned(): void
     {
         $firm = $this->makeTrustEligibleFirm();
+        app(EntitlementService::class)->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, true);
         $this->runWithFirmContext($firm, fn () => [
-            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Asset)->create(),
-            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Revenue)->create(),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Asset)->purpose(ChartOfAccountPurpose::OperatingCash)->create(),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Revenue)->purpose(ChartOfAccountPurpose::LegalFeeRevenue)->create(),
         ]);
 
         $account = app(TrustAccountService::class)->open($firm, 'Firm IOLTA Trust Account');

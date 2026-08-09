@@ -2,10 +2,13 @@
 
 namespace Tests\Feature\Security\RlsForceRollout;
 
+use App\Enums\ChartOfAccountPurpose;
+use App\Enums\ChartOfAccountType;
 use App\Enums\EntitlementSource;
 use App\Enums\ExpenseApprovalStatus;
 use App\Enums\ExpenseStatus;
 use App\Enums\FirmUserRole;
+use App\Models\ChartOfAccount;
 use App\Models\Expense;
 use App\Models\ExpenseApproval;
 use App\Models\Firm;
@@ -401,6 +404,15 @@ class ExpenseApprovalsForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $this->enableExpenses($firm);
+        // Accounting Integrity Hardening Pass, item 1: approval is now a
+        // real money-changing event that requires a complete Chart of
+        // Accounts (OperatingJournalRecorderService::recordExpensePaid()
+        // now hard-fails, not silently skips, when accounting is
+        // enabled but the firm hasn't configured one).
+        $this->runWithFirmContext($firm, fn () => [
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Asset)->purpose(ChartOfAccountPurpose::OperatingCash)->create(),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Expense)->purpose(ChartOfAccountPurpose::GeneralOperatingExpense)->create(),
+        ]);
         $expense = Expense::factory()->forFirm($firm)->status(ExpenseStatus::Submitted)->create();
         $approver = FirmUser::factory()->role(FirmUserRole::FirmOwner)->forFirm($firm)->create();
 

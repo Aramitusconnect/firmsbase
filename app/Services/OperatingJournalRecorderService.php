@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use App\Enums\AccountingJournalSourceType;
-use App\Enums\ChartOfAccountType;
+use App\Enums\ChartOfAccountPurpose;
 use App\Models\AccountingJournalEntry;
 use App\Models\Expense;
 use App\Models\Firm;
@@ -22,8 +22,8 @@ use App\Models\TrustTransferRequest;
  * this is the one place that DOES know how those domain events map to
  * debit/credit lines, so that mapping doesn't get duplicated at every
  * call site (ManualPaymentService, TrustTransferRequestService,
- * ExpenseApprovalService, and the new refund/write-off/chargeback
- * services from Phase G).
+ * ExpenseApprovalService, and the refund/write-off/chargeback services
+ * from Phase G).
  *
  * Revenue-recognition model (an explicit, documented design choice —
  * not an oversight): fees are recognized as earned Revenue at the
@@ -41,23 +41,56 @@ use App\Models\TrustTransferRequest;
  * Payment against an approved invoice. A direct (non-trust) invoice
  * payment recognizes revenue the same way, at the same moment.
  *
- * Every method here is deliberately BEST-EFFORT / OPT-IN, never a hard
- * requirement: if the firm has not yet built out an active Chart of
- * Accounts covering the account types a posting needs (ChartOfAccountsService
- * seeds nothing by default — every firm starts with zero rows), the
- * method returns null and the underlying business operation (payment
- * application, expense approval, trust transfer) still succeeds
- * unaffected. Forcing a hard dependency here would mean a firm that
- * has not opted into double-entry bookkeeping could no longer record
- * payments or approve expenses at all, which is not what "the journal
- * represents their accounting consequence" (never replaces or gates
- * the underlying business record) is asking for.
+ * ============================================================
+ * ACCOUNTING INTEGRITY HARDENING PASS, item 1 — atomic post-or-block
+ * policy (replaces the earlier "best-effort / opt-in, silently return
+ * null" posture this class used to document here).
+ * ============================================================
+ *
+ * Every method below now does exactly one of two things — never a
+ * silent third:
+ *
+ *   1. NOT APPLICABLE — the firm has never enabled the accounting
+ *      module at all (AccountingEntitlementPolicyService::
+ *      isExpensesEnabledForFirm() === false, the same entitlement
+ *      ChartOfAccountsService::create() already requires). No
+ *      accounting consequence is expected for such a firm — this is
+ *      the SAME entitlement gate every other Phase-12 service already
+ *      obeys, not a new concept — so returning null here is a
+ *      documented "out of scope," never a silently-dropped event.
+ *      AccountingIntegrityService (the read-only consistency checker)
+ *      skips these firms entirely for the same reason.
+ *
+ *   2. ATOMIC SUCCESS OR ATOMIC FAILURE — the firm HAS enabled
+ *      accounting, so a posting is genuinely expected. Every call site
+ *      below now resolves its required chart_of_accounts purpose via
+ *      ChartOfAccountsService::requireByPurpose(), which THROWS
+ *      AccountingSetupIncompleteException instead of returning null
+ *      when the required account is missing. Every real caller of
+ *      these methods (ManualPaymentService::submit(),
+ *      TrustTransferRequestService::apply(),
+ *      ExpenseApprovalService::recordDecision(),
+ *      OperatingPaymentRefundService::refund(),
+ *      OperatingChargebackService::report()) already performs its
+ *      entire business mutation AND its journal-recording call inside
+ *      ONE shared TenantContextService::runWithFirmContext() closure,
+ *      which itself wraps in a real DB::transaction() — audited call
+ *      site by call site as part of this hardening pass, not assumed.
+ *      Throwing here therefore rolls back the WHOLE business
+ *      transaction (the Payment row, the ExpenseApproval, the
+ *      TrustLedgerEntry withdrawal, everything) exactly as cleanly as
+ *      if the business mutation itself had failed. There is never a
+ *      state where the business event committed but no accounting
+ *      consequence exists for it — the two either land together or
+ *      neither lands at all. See AccountingSetupIncompleteException's
+ *      own docblock.
  */
 class OperatingJournalRecorderService
 {
     public function __construct(
         private readonly ChartOfAccountsService $chartOfAccounts,
         private readonly AccountingJournalPostingService $posting,
+        private readonly AccountingEntitlementPolicyService $entitlementPolicy,
     ) {}
 
     public function recordInvoicePaymentApplied(Firm $firm, Payment $payment, Invoice $invoice): ?AccountingJournalEntry
@@ -101,13 +134,13 @@ class OperatingJournalRecorderService
 
     public function recordExpensePaid(Firm $firm, Expense $expense): ?AccountingJournalEntry
     {
-        $cash = $this->chartOfAccounts->resolveActiveAccountByType($firm, ChartOfAccountType::Asset);
-        $expenseAccount = $expense->category?->chartOfAccount
-            ?? $this->chartOfAccounts->resolveActiveAccountByType($firm, ChartOfAccountType::Expense);
-
-        if ($cash === null || $expenseAccount === null) {
+        if (! $this->isAccountingApplicable($firm)) {
             return null;
         }
+
+        $cash = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::OperatingCash);
+        $expenseAccount = $expense->category?->chartOfAccount
+            ?? $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::GeneralOperatingExpense);
 
         return $this->posting->post(
             $firm,
@@ -143,12 +176,12 @@ class OperatingJournalRecorderService
             throw new \InvalidArgumentException('recordCashOut() only supports Refund and Chargeback source types.');
         }
 
-        $cash = $this->chartOfAccounts->resolveActiveAccountByType($firm, ChartOfAccountType::Asset);
-        $revenue = $this->chartOfAccounts->resolveActiveAccountByType($firm, ChartOfAccountType::Revenue);
-
-        if ($cash === null || $revenue === null) {
+        if (! $this->isAccountingApplicable($firm)) {
             return null;
         }
+
+        $cash = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::OperatingCash);
+        $revenue = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::LegalFeeRevenue);
 
         return $this->posting->post(
             $firm,
@@ -173,12 +206,12 @@ class OperatingJournalRecorderService
         ?int $invoiceId = null,
         ?int $trustTransferRequestId = null,
     ): ?AccountingJournalEntry {
-        $cash = $this->chartOfAccounts->resolveActiveAccountByType($firm, ChartOfAccountType::Asset);
-        $revenue = $this->chartOfAccounts->resolveActiveAccountByType($firm, ChartOfAccountType::Revenue);
-
-        if ($cash === null || $revenue === null) {
+        if (! $this->isAccountingApplicable($firm)) {
             return null;
         }
+
+        $cash = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::OperatingCash);
+        $revenue = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::LegalFeeRevenue);
 
         return $this->posting->post(
             $firm,
@@ -192,5 +225,17 @@ class OperatingJournalRecorderService
             ['payment_id' => $payment->id, 'invoice_id' => $invoiceId, 'trust_transfer_request_id' => $trustTransferRequestId],
             idempotencyKey: $idempotencyKey,
         );
+    }
+
+    /**
+     * The ONLY place "does accounting apply to this firm at all" is
+     * decided — every public method above calls this before resolving
+     * any purpose, so a firm that has never enabled the accounting
+     * module keeps recording payments/expenses/transfers exactly as it
+     * always could, with no accounting consequence expected or missed.
+     */
+    private function isAccountingApplicable(Firm $firm): bool
+    {
+        return $this->entitlementPolicy->isExpensesEnabledForFirm($firm);
     }
 }

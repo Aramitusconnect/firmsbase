@@ -89,11 +89,25 @@ class ExpenseApprovalService
             ]);
 
             if ($decision->status === ExpenseApprovalStatus::Approved) {
-                // ExpenseStatus has no separate "paid"/reimbursed state
-                // (confirmed — no such transition exists anywhere in
-                // this codebase); Approved is the terminal
-                // money-relevant state, so it is treated as the
-                // "expense paid" trigger point for journal purposes.
+                // Accounting Integrity Hardening Pass, item 3 — re-audited,
+                // not merely re-asserted. ExpenseStatus's four cases
+                // (Draft/Submitted/Approved/Rejected/Voided) contain no
+                // Paid/Reimbursed state, Expense has no paid_at column,
+                // and "reimbursable" (see Expense::isReimbursableAndApproved())
+                // means "billable through to the CLIENT on an invoice"
+                // (ReimbursableExpenseInvoiceEligibilityService), never
+                // "owed BY the firm TO the employee who incurred it" — this
+                // codebase has no employee-reimbursement-disbursement
+                // concept at all, confirmed by repository-wide search.
+                // vendor_name (not e.g. payee_name/claimant) and the
+                // create-migration's own docblock both describe an
+                // expense record as money the firm has already spent to a
+                // vendor, not a future AP bill awaiting disbursement. Given
+                // no separate "the cash actually left" event exists
+                // anywhere in the domain, Approved genuinely IS the
+                // terminal money-relevant state — this is the sole
+                // trigger point for the accounting consequence, not a
+                // premature one.
                 $this->journal->recordExpensePaid($firm, $expense->fresh());
             }
 

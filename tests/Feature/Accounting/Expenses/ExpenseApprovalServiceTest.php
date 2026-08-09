@@ -2,9 +2,13 @@
 
 namespace Tests\Feature\Accounting\Expenses;
 
+use App\Enums\ChartOfAccountPurpose;
+use App\Enums\ChartOfAccountType;
 use App\Enums\EntitlementSource;
 use App\Enums\ExpenseStatus;
 use App\Enums\FirmUserRole;
+use App\Exceptions\AccountingSetupIncompleteException;
+use App\Models\ChartOfAccount;
 use App\Models\Expense;
 use App\Models\Firm;
 use App\Models\FirmUser;
@@ -40,11 +44,28 @@ class ExpenseApprovalServiceTest extends TestCase
         $this->entitlements->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, true);
     }
 
+    /**
+     * Accounting Integrity Hardening Pass, item 1: a firm with
+     * accounting ENABLED must have a complete Chart of Accounts before
+     * a money-changing expense approval can succeed — see
+     * test_approval_is_blocked_atomically_when_chart_of_accounts_is_incomplete()
+     * below for the deliberate negative case this setup exists to make
+     * possible.
+     */
+    private function configureChartOfAccounts(Firm $firm): void
+    {
+        $this->runWithFirmContext($firm, fn () => [
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Asset)->purpose(ChartOfAccountPurpose::OperatingCash)->create(),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Expense)->purpose(ChartOfAccountPurpose::GeneralOperatingExpense)->create(),
+        ]);
+    }
+
     /** Required: expenses can be approved. */
     public function test_expense_can_be_approved(): void
     {
         $firm = Firm::factory()->create();
         $this->enableExpenses($firm);
+        $this->configureChartOfAccounts($firm);
         $expense = Expense::factory()->forFirm($firm)->status(ExpenseStatus::Submitted)->create();
         $approver = FirmUser::factory()->role(FirmUserRole::FirmOwner)->create(['firm_id' => $firm->id]);
 
@@ -67,6 +88,12 @@ class ExpenseApprovalServiceTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $this->enableExpenses($firm);
+        // Deliberately NOT calling configureChartOfAccounts(): a
+        // rejection never reaches OperatingJournalRecorderService at
+        // all (see ExpenseApprovalService::recordDecision() — the
+        // journal call is gated on ExpenseApprovalStatus::Approved
+        // only), so an incomplete Chart of Accounts must never block a
+        // rejection.
         $expense = Expense::factory()->forFirm($firm)->status(ExpenseStatus::Submitted)->create();
         $approver = FirmUser::factory()->role(FirmUserRole::BillingStaff)->create(['firm_id' => $firm->id]);
 
@@ -108,5 +135,37 @@ class ExpenseApprovalServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->service->approve($firm, $expense, $approver);
+    }
+
+    /**
+     * Accounting Integrity Hardening Pass, item 1 — the atomic-failure
+     * proof for ExpenseApprovalService specifically: a firm that HAS
+     * enabled accounting but has NOT configured its Chart of Accounts
+     * must have the entire approval blocked, not silently approved
+     * with a missing accounting consequence. Proves BOTH halves of "no
+     * partial state": the exception is the right type, AND nothing
+     * committed — the expense stays Submitted and no ExpenseApproval
+     * row exists.
+     */
+    public function test_approval_is_blocked_atomically_when_chart_of_accounts_is_incomplete(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->enableExpenses($firm);
+        // No configureChartOfAccounts() call — accounting is enabled
+        // for this firm, but no chart_of_accounts rows exist at all.
+        $expense = Expense::factory()->forFirm($firm)->status(ExpenseStatus::Submitted)->create();
+        $approver = FirmUser::factory()->role(FirmUserRole::FirmOwner)->create(['firm_id' => $firm->id]);
+
+        try {
+            $this->service->approve($firm, $expense, $approver);
+            $this->fail('Expected AccountingSetupIncompleteException.');
+        } catch (AccountingSetupIncompleteException $e) {
+            $this->assertSame(ChartOfAccountPurpose::OperatingCash, $e->purpose);
+        }
+
+        $this->runWithFirmContext($firm, function () use ($expense) {
+            $this->assertSame(ExpenseStatus::Submitted, $expense->fresh()->status, 'The approval must not have partially committed.');
+            $this->assertDatabaseCount('expense_approvals', 0);
+        });
     }
 }

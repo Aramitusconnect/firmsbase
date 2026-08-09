@@ -144,8 +144,23 @@ class PaymentApplicationService
             }
         }
 
-        if ($totalAllocated > $payment->amount_cents) {
-            throw new \RuntimeException('Total allocations cannot exceed the payment amount; a payment cannot be over-applied.');
+        // Accounting Integrity Hardening Pass, item 9: full allocation
+        // is REQUIRED, not merely capped. An earlier draft allowed
+        // sum(allocations) <= payment amount, leaving an under-allocated
+        // remainder with no defined destination — it could not become an
+        // unapplied client credit (no such liability concept exists
+        // anywhere in this codebase — confirmed by repository search)
+        // and silently classifying it as revenue would be exactly the
+        // kind of invented, undisclosed policy this hardening pass
+        // forbids. Requiring an exact match eliminates the residual
+        // entirely rather than guessing at its treatment; a caller with
+        // genuinely leftover money must either adjust its allocation
+        // list to sum exactly, or apply/refund the remainder through an
+        // existing, already-audited path (a smaller single-target
+        // applyToInvoice()/applyToInstallment(), or
+        // OperatingPaymentRefundService).
+        if ($totalAllocated !== $payment->amount_cents) {
+            throw new \RuntimeException('Total allocations must exactly equal the payment amount; a split payment cannot leave any amount unapplied or exceed the payment.');
         }
 
         // Deliberately NOT self-wrapped in runWithFirmContext(), for the

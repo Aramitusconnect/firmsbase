@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ChartOfAccountPurpose;
 use App\Enums\ChartOfAccountType;
 use App\Models\Concerns\BelongsToTenant;
 use App\Models\Concerns\HasPublicUuid;
@@ -18,7 +19,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class ChartOfAccount extends Model
 {
-    use HasFactory, HasPublicUuid, BelongsToTenant;
+    use BelongsToTenant, HasFactory, HasPublicUuid;
 
     protected $table = 'chart_of_accounts';
 
@@ -27,6 +28,7 @@ class ChartOfAccount extends Model
         'account_code',
         'account_name',
         'account_type',
+        'purpose',
         'is_active',
     ];
 
@@ -34,6 +36,7 @@ class ChartOfAccount extends Model
     {
         return [
             'account_type' => ChartOfAccountType::class,
+            'purpose' => ChartOfAccountPurpose::class,
             'is_active' => 'boolean',
         ];
     }

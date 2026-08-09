@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Accounting;
 
+use App\Enums\ChartOfAccountPurpose;
 use App\Enums\ChartOfAccountType;
 use App\Enums\EntitlementSource;
 use App\Enums\ExpenseStatus;
@@ -9,6 +10,7 @@ use App\Enums\FirmUserRole;
 use App\Enums\InvoiceStatus;
 use App\Enums\ManualPaymentMethod;
 use App\Enums\PaymentClassification;
+use App\Exceptions\AccountingSetupIncompleteException;
 use App\Models\AccountingJournalEntry;
 use App\Models\ChartOfAccount;
 use App\Models\Client;
@@ -18,6 +20,7 @@ use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\Invoice;
 use App\Models\Matter;
+use App\Models\Payment;
 use App\Services\AccountingBalanceService;
 use App\Services\EntitlementService;
 use App\Services\ExpenseApprovalService;
@@ -34,22 +37,32 @@ use Tests\TestCase;
 /**
  * Phase D — proves real business events (direct invoice payment, a
  * trust-funded transfer, an approved expense) post real double-entry
- * journal entries, that a retry never double-posts (idempotency), and
- * that a firm with no chart of accounts set up is simply skipped
- * (never blocked) rather than erroring.
+ * journal entries, and that a retry never double-posts (idempotency).
+ *
+ * Accounting Integrity Hardening Pass, item 1 — re-audited: a firm
+ * that has never enabled accounting at all is gracefully skipped
+ * (accounting genuinely does not apply); a firm that HAS enabled it but
+ * has an incomplete Chart of Accounts is now atomically BLOCKED, never
+ * silently skipped — see the dedicated blocked-atomically tests below.
  */
 class OperatingJournalRecorderServiceTest extends TestCase
 {
     use RefreshDatabase, SetsUpTrustEligibleFirm;
 
+    private function enableAccounting(Firm $firm): void
+    {
+        app(EntitlementService::class)->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, true);
+    }
+
     private function makeFirmWithAccounts(): array
     {
         $firm = Firm::factory()->create();
+        $this->enableAccounting($firm);
 
         [$cash, $revenue, $expenseAccount] = $this->runWithFirmContext($firm, fn () => [
-            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Asset)->create(['account_code' => '1000', 'account_name' => 'Operating Cash']),
-            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Revenue)->create(['account_code' => '4000', 'account_name' => 'Legal Fee Revenue']),
-            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Expense)->create(['account_code' => '5000', 'account_name' => 'Office Expense']),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Asset)->purpose(ChartOfAccountPurpose::OperatingCash)->create(['account_code' => '1000', 'account_name' => 'Operating Cash']),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Revenue)->purpose(ChartOfAccountPurpose::LegalFeeRevenue)->create(['account_code' => '4000', 'account_name' => 'Legal Fee Revenue']),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Expense)->purpose(ChartOfAccountPurpose::GeneralOperatingExpense)->create(['account_code' => '5000', 'account_name' => 'Office Expense']),
         ]);
 
         return [$firm, $cash, $revenue, $expenseAccount];
@@ -75,7 +88,18 @@ class OperatingJournalRecorderServiceTest extends TestCase
         $this->assertSame(50000, $entry->postings->where('chart_of_account_id', $revenue->id)->sum('credit_cents'));
     }
 
-    public function test_a_firm_with_no_chart_of_accounts_is_gracefully_skipped(): void
+    /**
+     * Accounting Integrity Hardening Pass, item 1: renamed from "a firm
+     * with no chart of accounts is gracefully skipped" — that framing
+     * described exactly the silent-null-journal failure mode this
+     * hardening pass eliminates. The genuinely graceful "not
+     * applicable" case is narrower: a firm that has never enabled
+     * accounting at all. See
+     * test_a_firm_with_accounting_enabled_but_no_chart_of_accounts_blocks_the_payment_atomically()
+     * below for the (now very different) behavior when accounting IS
+     * enabled but incompletely configured.
+     */
+    public function test_a_firm_that_has_never_enabled_accounting_is_gracefully_skipped(): void
     {
         $firm = Firm::factory()->create();
         $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
@@ -93,12 +117,49 @@ class OperatingJournalRecorderServiceTest extends TestCase
         $this->assertSame(0, $entryCount);
     }
 
+    /**
+     * Accounting Integrity Hardening Pass, item 1 — the core atomic-
+     * failure proof: a firm that HAS enabled accounting but has NOT
+     * configured a Chart of Accounts must have the ENTIRE payment
+     * blocked, not silently accepted with no accounting consequence.
+     * Proves both halves of "no partial state": the right exception
+     * type, AND that nothing committed at all — no Payment row exists
+     * for this idempotency key.
+     */
+    public function test_a_firm_with_accounting_enabled_but_no_chart_of_accounts_blocks_the_payment_atomically(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->enableAccounting($firm);
+        // Deliberately no chart_of_accounts rows at all.
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forClient($client)->status(InvoiceStatus::Sent)->create([
+            'subtotal_cents' => 10000, 'total_cents' => 10000,
+        ]));
+        $idempotencyKey = (string) Str::uuid();
+
+        try {
+            app(ManualPaymentService::class)->submit(
+                $firm, $client, 10000, ManualPaymentMethod::Check, PaymentClassification::OperatingPayment,
+                $idempotencyKey, invoice: $invoice,
+            );
+            $this->fail('Expected AccountingSetupIncompleteException.');
+        } catch (AccountingSetupIncompleteException $e) {
+            $this->assertSame(ChartOfAccountPurpose::OperatingCash, $e->purpose);
+        }
+
+        $this->runWithFirmContext($firm, function () use ($firm, $idempotencyKey) {
+            $this->assertNull(Payment::query()->where('firm_id', $firm->id)->where('idempotency_key', $idempotencyKey)->first(), 'No Payment row may exist — the entire transaction must have rolled back.');
+            $this->assertSame(0, AccountingJournalEntry::count());
+        });
+    }
+
     public function test_trust_to_operating_transfer_posts_fees_earned(): void
     {
         $firm = $this->makeTrustEligibleFirm();
+        $this->enableAccounting($firm);
         [$cash, $revenue] = $this->runWithFirmContext($firm, fn () => [
-            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Asset)->create(['account_code' => '1000', 'account_name' => 'Operating Cash']),
-            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Revenue)->create(['account_code' => '4000', 'account_name' => 'Legal Fee Revenue']),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Asset)->purpose(ChartOfAccountPurpose::OperatingCash)->create(['account_code' => '1000', 'account_name' => 'Operating Cash']),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Revenue)->purpose(ChartOfAccountPurpose::LegalFeeRevenue)->create(['account_code' => '4000', 'account_name' => 'Legal Fee Revenue']),
         ]);
         $account = app(TrustAccountService::class)->open($firm, 'Firm IOLTA Trust Account');
         $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());

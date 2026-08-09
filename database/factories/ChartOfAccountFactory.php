@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\ChartOfAccountPurpose;
 use App\Enums\ChartOfAccountType;
 use App\Models\ChartOfAccount;
 use App\Models\Firm;
@@ -35,7 +36,7 @@ class ChartOfAccountFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -66,5 +67,10 @@ class ChartOfAccountFactory extends Factory
     public function type(ChartOfAccountType $type): static
     {
         return $this->state(fn () => ['account_type' => $type]);
+    }
+
+    public function purpose(ChartOfAccountPurpose $purpose): static
+    {
+        return $this->state(fn () => ['purpose' => $purpose]);
     }
 }

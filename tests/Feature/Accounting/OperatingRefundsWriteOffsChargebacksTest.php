@@ -2,17 +2,21 @@
 
 namespace Tests\Feature\Accounting;
 
+use App\Enums\ChartOfAccountPurpose;
 use App\Enums\ChartOfAccountType;
+use App\Enums\EntitlementSource;
 use App\Enums\InvoiceStatus;
 use App\Enums\ManualPaymentMethod;
 use App\Enums\PaymentClassification;
 use App\Enums\PaymentStatus;
+use App\Exceptions\AccountingSetupIncompleteException;
 use App\Models\AccountingJournalEntry;
 use App\Models\ChartOfAccount;
 use App\Models\Client;
 use App\Models\Firm;
 use App\Models\Invoice;
 use App\Models\InvoiceWriteOff;
+use App\Services\EntitlementService;
 use App\Services\InvoiceWriteOffService;
 use App\Services\ManualPaymentService;
 use App\Services\OperatingChargebackService;
@@ -32,10 +36,11 @@ class OperatingRefundsWriteOffsChargebacksTest extends TestCase
     private function makeFirmWithAccounts(): array
     {
         $firm = Firm::factory()->create();
+        app(EntitlementService::class)->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, true);
 
         [$cash, $revenue] = $this->runWithFirmContext($firm, fn () => [
-            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Asset)->create(),
-            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Revenue)->create(),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Asset)->purpose(ChartOfAccountPurpose::OperatingCash)->create(),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Revenue)->purpose(ChartOfAccountPurpose::LegalFeeRevenue)->create(),
         ]);
 
         return [$firm, $cash, $revenue];
@@ -129,6 +134,36 @@ class OperatingRefundsWriteOffsChargebacksTest extends TestCase
         $this->assertNotNull($entry);
         $this->assertSame(50000, $entry->postings->where('chart_of_account_id', $cash->id)->sum('credit_cents'));
         $this->assertSame(50000, $entry->postings->where('chart_of_account_id', $revenue->id)->sum('debit_cents'));
+    }
+
+    /**
+     * Accounting Integrity Hardening Pass, item 1 — the atomic-failure
+     * proof for OperatingPaymentRefundService: if the firm's Legal Fee
+     * Revenue account is deactivated between the original payment and
+     * the refund attempt (a realistic reorganization scenario), the
+     * ENTIRE refund must be blocked, not partially applied. Proves the
+     * PaymentReversal row, the payment's status flip, and the invoice
+     * reversal all rolled back together.
+     */
+    public function test_a_refund_is_blocked_atomically_when_the_revenue_account_becomes_unavailable(): void
+    {
+        [$firm, , $revenue] = $this->makeFirmWithAccounts();
+        [, $invoice, $payment] = $this->makePaidInvoice($firm, 50000);
+
+        $this->runWithFirmContext($firm, fn () => $revenue->update(['is_active' => false]));
+
+        try {
+            app(OperatingPaymentRefundService::class)->refund($firm, $payment, 50000, 'Client dissatisfied');
+            $this->fail('Expected AccountingSetupIncompleteException.');
+        } catch (AccountingSetupIncompleteException $e) {
+            $this->assertSame(ChartOfAccountPurpose::LegalFeeRevenue, $e->purpose);
+        }
+
+        $this->runWithFirmContext($firm, function () use ($payment, $invoice) {
+            $this->assertSame(PaymentStatus::Succeeded, $payment->fresh()->status, 'Payment status must not have flipped to (Partially)Refunded.');
+            $this->assertSame(50000, $invoice->fresh()->amount_paid_cents, 'The invoice reversal must not have applied.');
+            $this->assertDatabaseCount('payment_reversals', 0);
+        });
     }
 
     public function test_writing_off_an_invoice_records_the_remaining_unpaid_balance_and_posts_no_journal_entry(): void

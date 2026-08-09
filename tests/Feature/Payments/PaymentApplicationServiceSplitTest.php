@@ -71,6 +71,28 @@ class PaymentApplicationServiceSplitTest extends TestCase
         ]));
     }
 
+    /**
+     * Accounting Integrity Hardening Pass, item 9: an under-allocated
+     * split (sum(allocations) < payment amount) used to be silently
+     * accepted, leaving the remainder with no defined destination.
+     * Full allocation is now required — there is no such thing as a
+     * partially-applied split payment.
+     */
+    public function test_allocations_must_exactly_equal_the_payment_amount_leaving_no_unapplied_residual(): void
+    {
+        $firm = Firm::factory()->create();
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
+        $invoiceA = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forClient($client)->status(InvoiceStatus::Sent)->create(['total_cents' => 10000]));
+        $payment = $this->runWithFirmContext($firm, fn () => Payment::factory()->forClient($client)->create(['amount_cents' => 10000]));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/exactly equal|unapplied/');
+
+        $this->runWithFirmContext($firm, fn () => $this->service->applySplit($payment, [
+            ['invoice' => $invoiceA, 'amount_cents' => 6000],
+        ]));
+    }
+
     public function test_a_payment_cannot_be_split_allocated_twice(): void
     {
         $firm = Firm::factory()->create();
