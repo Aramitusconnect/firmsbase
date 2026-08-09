@@ -63,4 +63,16 @@ return [
         ],
     ],
 
+    // Payment-Channel Safety Hardening pass, item 1. Read only by
+    // App\Services\Stripe\PaymentGatewaySimulationPolicyService — this
+    // flag can NEVER enable simulation by itself; it only takes effect
+    // when app()->environment('local') is also true (see that service's
+    // own docblock). In `testing`, simulation is always on regardless
+    // of this value; in `staging`/`production`, it is always off
+    // regardless of this value — there is no way to set this env var
+    // to make a staging/production box silently accept a fake payment.
+    'stripe' => [
+        'gateway_simulation_enabled' => (bool) env('PAYMENT_GATEWAY_SIMULATION_ENABLED', false),
+    ],
+
 ];

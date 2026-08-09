@@ -8,7 +8,9 @@ use App\Models\PlatformAdmin;
 use App\Models\SecurityEvent;
 use App\Models\User;
 use App\Services\Stripe\FakeStripeGateway;
+use App\Services\Stripe\PaymentGatewaySimulationPolicyService;
 use App\Services\Stripe\StripeGateway;
+use App\Services\Stripe\UnavailablePaymentGateway;
 use App\Services\TenantContextService;
 use Aws\Sqs\SqsClient;
 use Illuminate\Auth\Events\Failed;
@@ -92,13 +94,27 @@ class AppServiceProvider extends ServiceProvider
         // StripeGateway from the container (a public HTTP request has
         // no place to hand-construct one), so this binding is the
         // minimal missing piece, not a new abstraction — reuses the
-        // interface exactly as designed. FakeStripeGateway remains the
-        // only implementation: per that interface's own documented
-        // project rule, no implementation may call a real Stripe SDK/API
-        // in this phase. A real connector is an explicit, disclosed
-        // BLOCKED_PROVIDER_CONNECTION limitation (see the final report),
-        // not something this binding fakes into looking live.
-        $this->app->bind(StripeGateway::class, FakeStripeGateway::class);
+        // interface exactly as designed.
+        //
+        // Payment-Channel Safety Hardening pass, item 1 — this binding
+        // is now a fail-closed factory, not an unconditional bind to
+        // FakeStripeGateway. FakeStripeGateway must NEVER make staging
+        // or production appear to have received real money:
+        // PaymentGatewaySimulationPolicyService::isSimulationEnabled()
+        // is the single source of truth (testing: always simulated;
+        // local: only when explicitly opted in; everything else:
+        // never). Outside simulation, this resolves to
+        // UnavailablePaymentGateway, which throws
+        // PaymentProviderUnavailableException on every call rather
+        // than silently falling back to a fake success. A real
+        // connector is an explicit, disclosed BLOCKED_PROVIDER_CONNECTION
+        // limitation (see the final report), not something this
+        // binding fakes into looking live.
+        $this->app->bind(StripeGateway::class, function () {
+            return $this->app->make(PaymentGatewaySimulationPolicyService::class)->isSimulationEnabled()
+                ? new FakeStripeGateway
+                : new UnavailablePaymentGateway;
+        });
     }
 
     /**
