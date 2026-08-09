@@ -538,6 +538,12 @@ class RowLevelSecurityCoverageMappingService
         // 2026_10_30_100002_prepare_row_level_security_and_force_rls_on_accounting_periods_table.php.
         // Never in MISSING_PREPARED_TABLES.
         'accounting_periods',
+        // accounting_period_events (Accounting Integrity Hardening
+        // Pass, item 7 — immutable close/reopen audit trail) —
+        // prepared and forced together:
+        // 2026_10_31_100003_prepare_row_level_security_and_force_rls_on_accounting_period_events_table.php.
+        // Never in MISSING_PREPARED_TABLES.
+        'accounting_period_events',
     ];
 
     /**

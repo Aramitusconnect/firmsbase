@@ -210,6 +210,13 @@ class SecretPatternScanTest extends TestCase
             'ConsumeSesEventsCommand.php',
             'ReportMissingPurchasedSeatsCommand.php',
             'InitializeDefaultFirmReferenceDataCommand.php',
+            // AccountingIntegrityCheckCommand (accounting:integrity-check,
+            // Accounting Integrity Hardening Pass, item 10) — reviewed
+            // and safe: strictly read-only, never seeds, writes, or
+            // fixes anything — it only reports
+            // AccountingIntegrityService findings for a human to
+            // investigate through the normal service layer.
+            'AccountingIntegrityCheckCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

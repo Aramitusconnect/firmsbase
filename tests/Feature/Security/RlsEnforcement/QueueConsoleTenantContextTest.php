@@ -183,6 +183,13 @@ class QueueConsoleTenantContextTest extends TestCase
             // FirmDefaultReferenceDataService, which wraps itself in
             // TenantContextService::runWithFirmContext() per firm.
             'InitializeDefaultFirmReferenceDataCommand.php',
+            // AccountingIntegrityCheckCommand (accounting:integrity-check,
+            // Accounting Integrity Hardening Pass, item 10) — reviewed
+            // and safe: see QueueConsoleContextRolloutTest's own
+            // identical review note. Strictly read-only; every check
+            // runs inside AccountingIntegrityService::checkFirm()'s own
+            // TenantContextService::runWithFirmContext() wrap.
+            'AccountingIntegrityCheckCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

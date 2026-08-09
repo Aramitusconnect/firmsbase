@@ -295,7 +295,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // tables (accounting_journal_entries, accounting_postings) — 147 -> 149.
         // Payment allocation splitting (Phase F) added one more DirectTenant
         // table (payment_allocations) — 149 -> 150.
-        $this->assertCount(153, $this->service->preparedTables());
+        $this->assertCount(154, $this->service->preparedTables());
         $this->assertCount(0, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
@@ -388,7 +388,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // tables (accounting_journal_entries, accounting_postings) — 147 -> 149.
         // Payment allocation splitting (Phase F) added one more DirectTenant
         // table (payment_allocations) — 149 -> 150.
-        $this->assertCount(153, $this->service->tenantOwnedTables());
+        $this->assertCount(154, $this->service->tenantOwnedTables());
         $forceMigrationFiles = glob(
             database_path('migrations/*_force_rls_on_*_table.php')
         ) ?: [];
@@ -736,7 +736,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // tables (accounting_journal_entries, accounting_postings) — 147 -> 149.
         // Payment allocation splitting (Phase F) added one more DirectTenant
         // table (payment_allocations) — 149 -> 150.
-        $this->assertSame(153, $summary[TenantOwnershipClassification::DirectTenant->value]);
+        $this->assertSame(154, $summary[TenantOwnershipClassification::DirectTenant->value]);
         $this->assertSame(24, $summary[TenantOwnershipClassification::InheritedTenant->value]);
         $this->assertSame(3, $summary[TenantOwnershipClassification::Pivot->value]);
         $this->assertSame(10, $summary[TenantOwnershipClassification::Hybrid->value]);
@@ -897,9 +897,14 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // accounting journal (Phase A) added two more DirectTenant
         // tables (accounting_journal_entries, accounting_postings):
         // 263 -> 265. Payment allocation splitting (Phase F) added one
-        // more DirectTenant table (payment_allocations): 265 -> 266. No
-        // other bucket affected.
-        $this->assertSame(269, array_sum($summary));
+        // more DirectTenant table (payment_allocations): 265 -> 266.
+        // Phases G through L of the legal-accounting foundation
+        // (payment_reversals, invoice_write_offs, accounting_periods)
+        // brought the total to 269. The Accounting Integrity Hardening
+        // Pass added one more DirectTenant table
+        // (accounting_period_events): 269 -> 270. No other bucket
+        // affected.
+        $this->assertSame(270, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

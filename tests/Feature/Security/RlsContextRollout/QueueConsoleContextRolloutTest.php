@@ -170,6 +170,17 @@ class QueueConsoleContextRolloutTest extends TestCase
         // — no raw SQL, no BYPASSRLS, no superuser role, no set_config
         // manipulation of any RLS-relevant session variable anywhere in
         // this command.
+        // AccountingIntegrityCheckCommand (accounting:integrity-check,
+        // Accounting Integrity Hardening Pass, item 10) — reviewed and
+        // safe: strictly read-only (never writes anything, to any
+        // table), and every check runs entirely inside
+        // AccountingIntegrityService::checkFirm(), which wraps its
+        // ENTIRE body in TenantContextService::runWithFirmContext($firm,
+        // ...) — the same one-firm-at-a-time context establishment
+        // every other safe command in this allowlist uses. checkAllFirms()
+        // does nothing but loop over Firm::query()->cursor() calling
+        // checkFirm() once per firm; there is no unscoped cross-firm
+        // query anywhere in this command or the service it calls.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
@@ -187,6 +198,7 @@ class QueueConsoleContextRolloutTest extends TestCase
             'ConsumeSesEventsCommand.php',
             'ReportMissingPurchasedSeatsCommand.php',
             'InitializeDefaultFirmReferenceDataCommand.php',
+            'AccountingIntegrityCheckCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);
