@@ -13,8 +13,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * item 3. See the create-table migration's own docblock for the full
  * "why this exists, never a second Payment system" rationale.
  * PaymentApplicationService is the only writer of a Pending row;
- * PaymentAllocationResolutionService is the only writer of the one
- * legitimate Pending -> Resolved transition.
+ * PaymentAllocationResolutionService is the only writer of the
+ * Pending -> Resolved transition; OperatingPaymentRefundService/
+ * OperatingChargebackService (Pending-Cash Accounting pass) are the
+ * only writers of the Pending -> Cancelled transition, when the
+ * underlying payment is refunded/charged back in full before its
+ * allocation is ever resolved.
  */
 class PendingPaymentAllocation extends Model
 {
@@ -35,6 +39,7 @@ class PendingPaymentAllocation extends Model
         'resolved_fee_cents',
         'resolved_cost_cents',
         'resolution_notes',
+        'cancelled_at',
     ];
 
     protected function casts(): array
@@ -45,6 +50,7 @@ class PendingPaymentAllocation extends Model
             'resolved_fee_cents' => 'integer',
             'resolved_cost_cents' => 'integer',
             'resolved_at' => 'datetime',
+            'cancelled_at' => 'datetime',
         ];
     }
 
@@ -76,5 +82,10 @@ class PendingPaymentAllocation extends Model
     public function isPending(): bool
     {
         return $this->status === PendingPaymentAllocationStatus::Pending;
+    }
+
+    public function isCancelled(): bool
+    {
+        return $this->status === PendingPaymentAllocationStatus::Cancelled;
     }
 }
