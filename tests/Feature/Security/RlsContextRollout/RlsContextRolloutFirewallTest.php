@@ -454,7 +454,7 @@ class RlsContextRolloutFirewallTest extends TestCase
             // of the legal-accounting foundation) -- two new tables,
             // prepared and FORCE-activated in the same migration --
             // additive only, no existing assertion removed or weakened.
-            'accounting_journal_entries', 'accounting_postings',
+            'accounting_journal_entries', 'accounting_postings', 'payment_allocations', 'payment_reversals', 'invoice_write_offs', 'accounting_periods',
         ];
 
         // security_events is the final checkpoint in this arc: every

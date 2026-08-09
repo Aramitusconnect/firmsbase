@@ -39,8 +39,7 @@ class ExpenseApprovalService
         private readonly AccountingEntitlementPolicyService $entitlementPolicy,
         private readonly TenantSafeAccountingPolicyService $tenantSafePolicy,
         private readonly OperatingJournalRecorderService $journal,
-    ) {
-    }
+    ) {}
 
     public function decide(Expense $expense, bool $approve, ?string $reason = null): ExpenseApprovalDecision
     {
@@ -73,7 +72,7 @@ class ExpenseApprovalService
             throw new \RuntimeException($decision->reason ?? 'Expense approval decision was not accepted.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $expense, $approver, $decision) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $expense, $approver, $decision) {
             $approval = ExpenseApproval::create([
                 'firm_id' => $firm->id,
                 'expense_id' => $expense->id,

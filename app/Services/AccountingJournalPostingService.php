@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Enums\AccountingJournalSourceType;
+use App\Enums\AccountingPeriodStatus;
 use App\Models\AccountingJournalEntry;
+use App\Models\AccountingPeriod;
 use App\Models\ChartOfAccount;
 use App\Models\Firm;
 use App\Models\FirmUser;
@@ -96,6 +98,24 @@ class AccountingJournalPostingService
                     if ($existing !== null) {
                         return $existing->fresh('postings');
                     }
+                }
+
+                // Phase K — a closed accounting period blocks ordinary
+                // back-dated postings. Corrections require an explicit
+                // reopen (AccountingPeriodCloseService::reopen()) first;
+                // this check itself never auto-corrects or reopens
+                // anything.
+                $closedPeriod = AccountingPeriod::query()
+                    ->where('firm_id', $firm->id)
+                    ->where('status', AccountingPeriodStatus::Closed)
+                    ->where('period_start', '<=', $entryDate)
+                    ->where('period_end', '>=', $entryDate)
+                    ->exists();
+
+                if ($closedPeriod) {
+                    throw new \RuntimeException(
+                        "Cannot post a journal entry dated {$entryDate->format('Y-m-d')}: this date falls within a closed accounting period. Reopen the period first if a correction is genuinely required."
+                    );
                 }
 
                 $accountIds = array_unique(array_column($postings, 'chart_of_account_id'));

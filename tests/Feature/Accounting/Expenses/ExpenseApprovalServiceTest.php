@@ -11,6 +11,7 @@ use App\Models\FirmUser;
 use App\Services\AccountingEntitlementPolicyService;
 use App\Services\EntitlementService;
 use App\Services\ExpenseApprovalService;
+use App\Services\OperatingJournalRecorderService;
 use App\Services\TenantSafeAccountingPolicyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -20,6 +21,7 @@ class ExpenseApprovalServiceTest extends TestCase
     use RefreshDatabase;
 
     private ExpenseApprovalService $service;
+
     private EntitlementService $entitlements;
 
     protected function setUp(): void
@@ -28,8 +30,8 @@ class ExpenseApprovalServiceTest extends TestCase
         $this->entitlements = app(EntitlementService::class);
         $this->service = new ExpenseApprovalService(
             new AccountingEntitlementPolicyService($this->entitlements),
-            new TenantSafeAccountingPolicyService(),
-            app(\App\Services\OperatingJournalRecorderService::class),
+            new TenantSafeAccountingPolicyService,
+            app(OperatingJournalRecorderService::class),
         );
     }
 

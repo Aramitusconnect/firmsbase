@@ -6,6 +6,8 @@ use App\Enums\FirmUserRole;
 use App\Enums\TrustReconciliationStatus;
 use App\Models\Client;
 use App\Models\FirmUser;
+use App\Models\Matter;
+use App\Models\MatterTrustBalance;
 use App\Services\TenantContextService;
 use App\Services\TrustAccountService;
 use App\Services\TrustDepositService;
@@ -159,5 +161,68 @@ class TrustReconciliationServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->service->run($firm, $account, $user, now()->subMonth(), now(), 999);
+    }
+
+    /**
+     * Phase H — the third independent leg. A matter-attributed deposit
+     * whose matter_trust_balances cache is deliberately left stale
+     * (simulating a bug that recomputes the ledger-level cache but
+     * forgets to recompute the affected matter's own cache) must be
+     * caught by the client-liability leg even though bank vs. system
+     * still agrees perfectly — this is exactly the class of drift the
+     * pre-existing two-way check could never see.
+     */
+    public function test_reconciliation_reports_discrepancy_when_matter_liability_cache_has_drifted_from_the_ledger(): void
+    {
+        $firm = $this->makeTrustEligibleFirm();
+        $account = app(TrustAccountService::class)->open($firm, 'Firm IOLTA Trust Account');
+        $client = Client::factory()->forFirm($firm)->create();
+        $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
+        $matter = Matter::factory()->forClient($client)->create();
+        $user = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $depositApprover = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+
+        $deposits = app(TrustDepositService::class);
+        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 10000, $matter), $depositApprover);
+        $deposits->post($firm, $ledger, $approved, $matter);
+
+        // Simulate the matter cache silently falling out of sync with
+        // the ledger cache — trust_ledger_entries themselves are
+        // untouched, so the ledger-level cache remains fully correct.
+        MatterTrustBalance::query()
+            ->where('trust_ledger_id', $ledger->id)
+            ->where('matter_id', $matter->id)
+            ->first()
+            ->update(['balance_cents' => 4000]);
+
+        $reconciliation = $this->service->run($firm, $account, $user, now()->subMonth(), now(), 10000);
+
+        $this->assertSame(TrustReconciliationStatus::Discrepancy, $reconciliation->status);
+        $this->assertSame(0, $reconciliation->discrepancy_cents, 'Bank vs. system must still agree — this drift is invisible to the old two-way check.');
+        $this->assertSame(10000, $reconciliation->system_balance_cents);
+        $this->assertSame(4000, $reconciliation->client_liability_cents);
+        $this->assertSame(6000, $reconciliation->client_liability_discrepancy_cents);
+    }
+
+    public function test_reconciliation_is_balanced_when_all_three_legs_agree_with_a_matter_attributed_deposit(): void
+    {
+        $firm = $this->makeTrustEligibleFirm();
+        $account = app(TrustAccountService::class)->open($firm, 'Firm IOLTA Trust Account');
+        $client = Client::factory()->forFirm($firm)->create();
+        $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
+        $matter = Matter::factory()->forClient($client)->create();
+        $user = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $depositApprover = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+
+        $deposits = app(TrustDepositService::class);
+        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 7500, $matter), $depositApprover);
+        $deposits->post($firm, $ledger, $approved, $matter);
+
+        $reconciliation = $this->service->run($firm, $account, $user, now()->subMonth(), now(), 7500);
+
+        $this->assertSame(TrustReconciliationStatus::Balanced, $reconciliation->status);
+        $this->assertSame(0, $reconciliation->discrepancy_cents);
+        $this->assertSame(0, $reconciliation->client_liability_discrepancy_cents);
+        $this->assertSame(7500, $reconciliation->client_liability_cents);
     }
 }

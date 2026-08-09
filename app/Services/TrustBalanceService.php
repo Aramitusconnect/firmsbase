@@ -150,7 +150,7 @@ class TrustBalanceService
      */
     public function clientBalanceCents(Firm $firm, Client $client): int
     {
-        return (int) (new TenantContextService())->runWithFirmContext($firm, fn () => TrustBalance::query()
+        return (int) (new TenantContextService)->runWithFirmContext($firm, fn () => TrustBalance::query()
             ->whereIn('trust_ledger_id', TrustLedger::query()
                 ->where('firm_id', $firm->id)
                 ->where('client_id', $client->id)
@@ -166,9 +166,47 @@ class TrustBalanceService
      */
     public function matterBalanceCentsAggregate(Firm $firm, Matter $matter): int
     {
-        return (int) (new TenantContextService())->runWithFirmContext($firm, fn () => MatterTrustBalance::query()
+        return (int) (new TenantContextService)->runWithFirmContext($firm, fn () => MatterTrustBalance::query()
             ->where('firm_id', $firm->id)
             ->where('matter_id', $matter->id)
             ->sum('balance_cents'));
+    }
+
+    /**
+     * Phase H — the third leg of true three-way trust reconciliation:
+     * "sum of individual client/matter trust liabilities" as a value
+     * GENUINELY independent of system_balance_cents. matter_trust_balances
+     * is a separate cache table, recomputed by a SEPARATE call
+     * (recomputeForMatter(), at a different call site/time than
+     * recomputeForLedger() updates trust_balances) — the two caches CAN
+     * legitimately drift apart even when neither is individually stale
+     * relative to trust_ledger_entries, e.g. a bug that posts an entry
+     * and recomputes the ledger cache but forgets to recompute the
+     * affected matter's cache. Money not attributed to any matter
+     * (matter_id IS NULL) is summed directly from the live, immutable
+     * trust_ledger_entries rows themselves (there is no "unattributed
+     * balance" cache table to read instead).
+     */
+    public function verifyMatterLiabilitiesReconcileToLedger(TrustLedger $ledger): TrustBalanceReconciliationResult
+    {
+        $ledgerCached = TrustBalance::query()->where('trust_ledger_id', $ledger->id)->firstOrFail();
+
+        $matterAttributedCents = (int) MatterTrustBalance::query()
+            ->where('trust_ledger_id', $ledger->id)
+            ->sum('balance_cents');
+
+        $unattributedCents = (int) TrustLedgerEntry::query()
+            ->where('trust_ledger_id', $ledger->id)
+            ->whereNull('matter_id')
+            ->sum('amount_cents');
+
+        $computed = $matterAttributedCents + $unattributedCents;
+
+        return new TrustBalanceReconciliationResult(
+            matches: $ledgerCached->balance_cents === $computed,
+            cachedBalanceCents: $ledgerCached->balance_cents,
+            computedBalanceCents: $computed,
+            differenceCents: $ledgerCached->balance_cents - $computed,
+        );
     }
 }

@@ -7,6 +7,7 @@ use App\Enums\FirmUserRole;
 use App\Enums\InvoiceStatus;
 use App\Models\ChartOfAccount;
 use App\Models\Client;
+use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\Invoice;
 use App\Models\Matter;
@@ -98,7 +99,7 @@ class AccountingEarnedFeeServiceTest extends TestCase
 
     public function test_earned_and_unearned_are_zero_with_no_chart_of_accounts_or_trust_activity(): void
     {
-        $firm = \App\Models\Firm::factory()->create();
+        $firm = Firm::factory()->create();
         $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
         $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forClient($client)->create());
 

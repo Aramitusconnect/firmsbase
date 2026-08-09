@@ -3,11 +3,13 @@
 namespace Tests\Feature\Accounting;
 
 use App\Enums\ChartOfAccountType;
-use App\Enums\ExpenseApprovalStatus;
+use App\Enums\EntitlementSource;
+use App\Enums\ExpenseStatus;
 use App\Enums\FirmUserRole;
 use App\Enums\InvoiceStatus;
 use App\Enums\ManualPaymentMethod;
 use App\Enums\PaymentClassification;
+use App\Models\AccountingJournalEntry;
 use App\Models\ChartOfAccount;
 use App\Models\Client;
 use App\Models\Expense;
@@ -17,6 +19,7 @@ use App\Models\FirmUser;
 use App\Models\Invoice;
 use App\Models\Matter;
 use App\Services\AccountingBalanceService;
+use App\Services\EntitlementService;
 use App\Services\ExpenseApprovalService;
 use App\Services\ManualPaymentService;
 use App\Services\TrustAccountService;
@@ -65,7 +68,7 @@ class OperatingJournalRecorderServiceTest extends TestCase
             (string) Str::uuid(), invoice: $invoice,
         );
 
-        $entry = $this->runWithFirmContext($firm, fn () => \App\Models\AccountingJournalEntry::with('postings')->where('invoice_id', $invoice->id)->first());
+        $entry = $this->runWithFirmContext($firm, fn () => AccountingJournalEntry::with('postings')->where('invoice_id', $invoice->id)->first());
 
         $this->assertNotNull($entry);
         $this->assertSame(50000, $entry->postings->where('chart_of_account_id', $cash->id)->sum('debit_cents'));
@@ -86,7 +89,7 @@ class OperatingJournalRecorderServiceTest extends TestCase
         );
 
         $this->assertTrue($payment->isAcceptedOperatingPayment());
-        $entryCount = $this->runWithFirmContext($firm, fn () => \App\Models\AccountingJournalEntry::count());
+        $entryCount = $this->runWithFirmContext($firm, fn () => AccountingJournalEntry::count());
         $this->assertSame(0, $entryCount);
     }
 
@@ -117,7 +120,7 @@ class OperatingJournalRecorderServiceTest extends TestCase
         $transferService->approveTransfer($firm, $request, $approver);
         $transferService->apply($firm, $request->fresh(), $approver);
 
-        $entry = $this->runWithFirmContext($firm, fn () => \App\Models\AccountingJournalEntry::with('postings')->where('trust_transfer_request_id', $request->id)->first());
+        $entry = $this->runWithFirmContext($firm, fn () => AccountingJournalEntry::with('postings')->where('trust_transfer_request_id', $request->id)->first());
 
         $this->assertNotNull($entry);
         $this->assertSame(15000, $entry->postings->where('chart_of_account_id', $cash->id)->sum('debit_cents'));
@@ -133,7 +136,7 @@ class OperatingJournalRecorderServiceTest extends TestCase
     public function test_expense_approval_posts_expense_paid(): void
     {
         [$firm, , , $expenseAccount] = $this->makeFirmWithAccounts();
-        app(\App\Services\EntitlementService::class)->setForSource($firm, 'expenses', \App\Enums\EntitlementSource::AdminOverride, true);
+        app(EntitlementService::class)->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, true);
         $category = $this->runWithFirmContext($firm, fn () => ExpenseCategory::factory()->forFirm($firm)->create());
         $creator = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::Attorney]);
         $approver = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
@@ -141,13 +144,13 @@ class OperatingJournalRecorderServiceTest extends TestCase
         $expense = $this->runWithFirmContext($firm, fn () => Expense::factory()->forFirm($firm)->create([
             'expense_category_id' => $category->id,
             'amount_cents' => 7500,
-            'status' => \App\Enums\ExpenseStatus::Submitted,
+            'status' => ExpenseStatus::Submitted,
             'created_by_firm_user_id' => $creator->id,
         ]));
 
         app(ExpenseApprovalService::class)->approve($firm, $expense, $approver);
 
-        $entry = $this->runWithFirmContext($firm, fn () => \App\Models\AccountingJournalEntry::with('postings')->where('expense_id', $expense->id)->first());
+        $entry = $this->runWithFirmContext($firm, fn () => AccountingJournalEntry::with('postings')->where('expense_id', $expense->id)->first());
 
         $this->assertNotNull($entry);
         $this->assertSame(7500, $entry->postings->sum('debit_cents'));
@@ -170,7 +173,7 @@ class OperatingJournalRecorderServiceTest extends TestCase
 
         $this->assertSame($first->id, $second->id);
 
-        $count = $this->runWithFirmContext($firm, fn () => \App\Models\AccountingJournalEntry::where('invoice_id', $invoice->id)->count());
+        $count = $this->runWithFirmContext($firm, fn () => AccountingJournalEntry::where('invoice_id', $invoice->id)->count());
         $this->assertSame(1, $count);
     }
 }

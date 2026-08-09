@@ -5,13 +5,13 @@ namespace Tests\Feature\PilotWorkflow;
 use App\Enums\ConflictCheckRunStatus;
 use App\Enums\DocumentScanStatus;
 use App\Enums\DocumentStatus;
-use App\Enums\FirmUserStatus;
 use App\Enums\IntakeSubmissionStatus;
 use App\Enums\InvoiceStatus;
 use App\Enums\MatterStatus;
 use App\Enums\PaymentPlanStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\ReadinessComponentStatus;
+use App\Models\CalendarEvent;
 use App\Models\Firm;
 use App\Models\FirmLead;
 use App\Models\FirmSettings;
@@ -19,21 +19,25 @@ use App\Models\IntakeTemplate;
 use App\Models\MatterType;
 use App\Models\PracticeArea;
 use App\Models\ReadinessScorecardComponent;
+use App\Services\CalendarEventService;
 use App\Services\ConflictCheckService;
 use App\Services\DeadlineService;
 use App\Services\DocumentRequestService;
 use App\Services\DocumentSecurityService;
 use App\Services\DocumentUploadPolicyService;
+use App\Services\EmployeeRateService;
 use App\Services\InvoiceDraftingService;
 use App\Services\LeadConversionService;
 use App\Services\ManualPaymentService;
 use App\Services\MatterOpeningService;
 use App\Services\MatterReadinessService;
+use App\Services\OperatingJournalRecorderService;
 use App\Services\PaymentApplicationService;
 use App\Services\PaymentClassificationService;
 use App\Services\PaymentPlanService;
 use App\Services\ProductionPilotWorkflowService;
 use App\Services\ReadinessScorecardRegistry;
+use App\Services\TimeEntryApprovalService;
 use App\Services\TimelineEventRecorder;
 use App\Services\VirusScan\FakeVirusScanner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -53,33 +57,34 @@ class ProductionPilotWorkflowServiceTest extends TestCase
     use RefreshDatabase;
 
     private ProductionPilotWorkflowService $pilot;
+
     private InvoiceDraftingService $invoices;
 
     protected function setUp(): void
     {
         parent::setUp();
 
-        $timeline = new TimelineEventRecorder();
+        $timeline = new TimelineEventRecorder;
 
         $paymentPlanService = new PaymentPlanService($timeline);
-        $this->invoices = new InvoiceDraftingService(new \App\Services\TimeEntryApprovalService(new \App\Services\EmployeeRateService()), $timeline);
+        $this->invoices = new InvoiceDraftingService(new TimeEntryApprovalService(new EmployeeRateService), $timeline);
 
         $this->pilot = new ProductionPilotWorkflowService(
             new LeadConversionService($timeline),
             new MatterOpeningService(new ConflictCheckService($timeline), $timeline),
-            new DocumentRequestService(),
-            new DocumentSecurityService(new DocumentUploadPolicyService()),
-            new FakeVirusScanner(),
-            new DeadlineService(new \App\Services\CalendarEventService()),
+            new DocumentRequestService,
+            new DocumentSecurityService(new DocumentUploadPolicyService),
+            new FakeVirusScanner,
+            new DeadlineService(new CalendarEventService),
             $this->invoices,
             $paymentPlanService,
             new ManualPaymentService(
-                new PaymentClassificationService(),
+                new PaymentClassificationService,
                 new PaymentApplicationService($paymentPlanService, $timeline),
                 $timeline,
-                app(\App\Services\OperatingJournalRecorderService::class),
+                app(OperatingJournalRecorderService::class),
             ),
-            new MatterReadinessService(new ReadinessScorecardRegistry()),
+            new MatterReadinessService(new ReadinessScorecardRegistry),
         );
     }
 
@@ -181,7 +186,7 @@ class ProductionPilotWorkflowServiceTest extends TestCase
         // zero rows.
         $this->assertSame(
             1,
-            $this->runWithFirmContext($firm, fn () => \App\Models\CalendarEvent::withoutGlobalScopes()->where('matter_id', $matter->id)->count()),
+            $this->runWithFirmContext($firm, fn () => CalendarEvent::withoutGlobalScopes()->where('matter_id', $matter->id)->count()),
         );
 
         // Step 9: invoice draft

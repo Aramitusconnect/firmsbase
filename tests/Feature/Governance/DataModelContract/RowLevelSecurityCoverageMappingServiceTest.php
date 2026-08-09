@@ -293,7 +293,9 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // 147, not 148, confirming no double-count/omission here.)
         // Native accounting journal (Phase A) added two more DirectTenant
         // tables (accounting_journal_entries, accounting_postings) — 147 -> 149.
-        $this->assertCount(149, $this->service->preparedTables());
+        // Payment allocation splitting (Phase F) added one more DirectTenant
+        // table (payment_allocations) — 149 -> 150.
+        $this->assertCount(153, $this->service->preparedTables());
         $this->assertCount(0, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
@@ -384,7 +386,9 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertCount(40, $this->service->exemptTables());
         // Native accounting journal (Phase A) added two more DirectTenant
         // tables (accounting_journal_entries, accounting_postings) — 147 -> 149.
-        $this->assertCount(149, $this->service->tenantOwnedTables());
+        // Payment allocation splitting (Phase F) added one more DirectTenant
+        // table (payment_allocations) — 149 -> 150.
+        $this->assertCount(153, $this->service->tenantOwnedTables());
         $forceMigrationFiles = glob(
             database_path('migrations/*_force_rls_on_*_table.php')
         ) ?: [];
@@ -730,7 +734,9 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // is included in this figure already, see that comment's own note.)
         // Native accounting journal (Phase A) added two more DirectTenant
         // tables (accounting_journal_entries, accounting_postings) — 147 -> 149.
-        $this->assertSame(149, $summary[TenantOwnershipClassification::DirectTenant->value]);
+        // Payment allocation splitting (Phase F) added one more DirectTenant
+        // table (payment_allocations) — 149 -> 150.
+        $this->assertSame(153, $summary[TenantOwnershipClassification::DirectTenant->value]);
         $this->assertSame(24, $summary[TenantOwnershipClassification::InheritedTenant->value]);
         $this->assertSame(3, $summary[TenantOwnershipClassification::Pivot->value]);
         $this->assertSame(10, $summary[TenantOwnershipClassification::Hybrid->value]);
@@ -890,9 +896,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // platform_notification_suppressions): 261 -> 263. Native
         // accounting journal (Phase A) added two more DirectTenant
         // tables (accounting_journal_entries, accounting_postings):
-        // 263 -> 265. No other
-        // bucket affected.
-        $this->assertSame(265, array_sum($summary));
+        // 263 -> 265. Payment allocation splitting (Phase F) added one
+        // more DirectTenant table (payment_allocations): 265 -> 266. No
+        // other bucket affected.
+        $this->assertSame(269, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

@@ -13,6 +13,7 @@ use App\Models\FirmUser;
 use App\Services\AccountingEntitlementPolicyService;
 use App\Services\EntitlementService;
 use App\Services\ExpenseApprovalService;
+use App\Services\OperatingJournalRecorderService;
 use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use App\Services\TenantSafeAccountingPolicyService;
@@ -67,7 +68,7 @@ class ExpenseApprovalsForceRlsActivationTest extends TestCase
         $this->service = new ExpenseApprovalService(
             new AccountingEntitlementPolicyService($this->entitlements),
             new TenantSafeAccountingPolicyService,
-            app(\App\Services\OperatingJournalRecorderService::class),
+            app(OperatingJournalRecorderService::class),
         );
     }
 

@@ -58,8 +58,7 @@ class OperatingJournalRecorderService
     public function __construct(
         private readonly ChartOfAccountsService $chartOfAccounts,
         private readonly AccountingJournalPostingService $posting,
-    ) {
-    }
+    ) {}
 
     public function recordInvoicePaymentApplied(Firm $firm, Payment $payment, Invoice $invoice): ?AccountingJournalEntry
     {

@@ -5,9 +5,11 @@ namespace Tests\Feature\Webhooks\Wiring;
 use App\Enums\ManualPaymentMethod;
 use App\Enums\PaymentClassification;
 use App\Enums\WebhookEventType;
+use App\Exceptions\PaymentBlockedException;
 use App\Models\Client;
 use App\Models\Payment;
 use App\Services\ManualPaymentService;
+use App\Services\OperatingJournalRecorderService;
 use App\Services\PaymentApplicationService;
 use App\Services\PaymentClassificationService;
 use App\Services\PaymentPlanService;
@@ -31,13 +33,13 @@ class PaymentRecordedWiringTest extends TestCase
 
     private function makeService(): ManualPaymentService
     {
-        $timeline = new TimelineEventRecorder();
+        $timeline = new TimelineEventRecorder;
 
         return new ManualPaymentService(
-            new PaymentClassificationService(),
+            new PaymentClassificationService,
             new PaymentApplicationService(new PaymentPlanService($timeline), $timeline),
             $timeline,
-            app(\App\Services\OperatingJournalRecorderService::class),
+            app(OperatingJournalRecorderService::class),
         );
     }
 
@@ -80,7 +82,7 @@ class PaymentRecordedWiringTest extends TestCase
                 idempotencyKey: (string) Str::uuid(),
             );
             $this->fail('Expected a PaymentBlockedException for a trust/IOLTA classification.');
-        } catch (\App\Exceptions\PaymentBlockedException) {
+        } catch (PaymentBlockedException) {
             // expected — trust/IOLTA deposits remain blocked (project rule)
         }
 

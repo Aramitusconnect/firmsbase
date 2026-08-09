@@ -11,14 +11,17 @@ use App\Exceptions\PaymentBlockedException;
 use App\Models\Client;
 use App\Models\Firm;
 use App\Models\FirmSettings;
+use App\Models\ManualPaymentRecord;
 use App\Models\Payment;
 use App\Models\PaymentPlan;
 use App\Models\PaymentPlanInstallment;
 use App\Services\ManualPaymentService;
+use App\Services\OperatingJournalRecorderService;
 use App\Services\PaymentApplicationService;
 use App\Services\PaymentClassificationService;
 use App\Services\PaymentPlanService;
 use App\Services\TimelineEventRecorder;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -33,12 +36,12 @@ class ManualPaymentServiceTest extends TestCase
     {
         parent::setUp();
 
-        $timeline = new TimelineEventRecorder();
+        $timeline = new TimelineEventRecorder;
         $this->service = new ManualPaymentService(
-            new PaymentClassificationService(),
+            new PaymentClassificationService,
             new PaymentApplicationService(new PaymentPlanService($timeline), $timeline),
             $timeline,
-            app(\App\Services\OperatingJournalRecorderService::class),
+            app(OperatingJournalRecorderService::class),
         );
     }
 
@@ -172,7 +175,7 @@ class ManualPaymentServiceTest extends TestCase
         $this->assertSame($first->id, $second->id);
         $this->runWithFirmContext($firm, function () use ($firm, $key) {
             $this->assertSame(1, Payment::where('firm_id', $firm->id)->where('idempotency_key', $key)->count());
-            $this->assertSame(1, \App\Models\ManualPaymentRecord::whereHas('payment', fn ($q) => $q->where('idempotency_key', $key))->count());
+            $this->assertSame(1, ManualPaymentRecord::whereHas('payment', fn ($q) => $q->where('idempotency_key', $key))->count());
         });
     }
 
@@ -211,7 +214,7 @@ class ManualPaymentServiceTest extends TestCase
         $key = (string) Str::uuid();
         Payment::factory()->forFirm($firm)->idempotencyKey($key)->create();
 
-        $this->expectException(\Illuminate\Database\QueryException::class);
+        $this->expectException(QueryException::class);
 
         Payment::factory()->forFirm($firm)->idempotencyKey($key)->create();
     }

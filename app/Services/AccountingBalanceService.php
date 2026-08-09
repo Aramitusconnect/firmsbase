@@ -48,6 +48,33 @@ class AccountingBalanceService
         });
     }
 
+    /**
+     * Phase K — point-in-time balance as of a given date (inclusive),
+     * needed for month-end open/closing balances. Same computation as
+     * accountBalanceCents() with an added entry_date filter, joined
+     * through accounting_journal_entries since accounting_postings
+     * itself carries no date column.
+     */
+    public function accountBalanceAsOf(Firm $firm, ChartOfAccount $account, \DateTimeInterface $asOf): int
+    {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $account, $asOf) {
+            $sums = DB::table('accounting_postings')
+                ->join('accounting_journal_entries', 'accounting_journal_entries.id', '=', 'accounting_postings.accounting_journal_entry_id')
+                ->where('accounting_postings.firm_id', $firm->id)
+                ->where('accounting_postings.chart_of_account_id', $account->id)
+                ->where('accounting_journal_entries.entry_date', '<=', $asOf)
+                ->selectRaw('COALESCE(SUM(accounting_postings.debit_cents), 0) as total_debit, COALESCE(SUM(accounting_postings.credit_cents), 0) as total_credit')
+                ->first();
+
+            $totalDebit = (int) $sums->total_debit;
+            $totalCredit = (int) $sums->total_credit;
+
+            return $this->isDebitNormal($account->account_type)
+                ? $totalDebit - $totalCredit
+                : $totalCredit - $totalDebit;
+        });
+    }
+
     public function clientBalanceCents(Firm $firm, ChartOfAccount $account, Client $client): int
     {
         return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $account, $client) {

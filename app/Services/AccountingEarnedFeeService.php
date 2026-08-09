@@ -43,8 +43,7 @@ class AccountingEarnedFeeService
         private readonly TrustBalanceService $trustBalance,
         private readonly AccountingBalanceService $accountingBalance,
         private readonly ChartOfAccountsService $chartOfAccounts,
-    ) {
-    }
+    ) {}
 
     /**
      * The client's currently-unearned retainer balance — funds the

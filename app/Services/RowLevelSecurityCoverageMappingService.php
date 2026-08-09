@@ -520,6 +520,24 @@ class RowLevelSecurityCoverageMappingService
         // Neither was ever in MISSING_PREPARED_TABLES — both added
         // directly here since prepare and force happened together.
         'accounting_journal_entries', 'accounting_postings',
+        // payment_allocations (Phase F of the legal-accounting
+        // foundation) — prepared and forced together in one release:
+        // 2026_10_27_100002_prepare_row_level_security_and_force_rls_on_payment_allocations_table.php.
+        // Never in MISSING_PREPARED_TABLES — added directly here since
+        // prepare and force happened together.
+        'payment_allocations',
+        // payment_reversals, invoice_write_offs (Phase G of the
+        // legal-accounting foundation) — each prepared and forced
+        // together with its own table-creation migration:
+        // 2026_10_28_100002_prepare_row_level_security_and_force_rls_on_payment_reversals_table.php,
+        // 2026_10_28_100004_prepare_row_level_security_and_force_rls_on_invoice_write_offs_table.php.
+        // Neither was ever in MISSING_PREPARED_TABLES.
+        'payment_reversals', 'invoice_write_offs',
+        // accounting_periods (Phase K of the legal-accounting
+        // foundation, month-end close) — prepared and forced together:
+        // 2026_10_30_100002_prepare_row_level_security_and_force_rls_on_accounting_periods_table.php.
+        // Never in MISSING_PREPARED_TABLES.
+        'accounting_periods',
     ];
 
     /**

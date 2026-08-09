@@ -46,8 +46,7 @@ class ManualPaymentService
         private PaymentApplicationService $application,
         private TimelineEventRecorder $timeline,
         private OperatingJournalRecorderService $journal,
-    ) {
-    }
+    ) {}
 
     public function submit(
         Firm $firm,
@@ -64,7 +63,7 @@ class ManualPaymentService
         ?string $methodReference = null,
         ?string $notes = null,
     ): Payment {
-        $payment = (new TenantContextService())->runWithFirmContext($firm, function () use (
+        $payment = (new TenantContextService)->runWithFirmContext($firm, function () use (
             $firm, $client, $matter, $invoice, $installment, $amountCents, $method,
             $requestedClassification, $idempotencyKey, $recordedBy, $externalReference,
             $methodReference, $notes,

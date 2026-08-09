@@ -13,19 +13,32 @@ use App\Models\TrustReconciliation;
 use Illuminate\Support\Str;
 
 /**
- * TrustReconciliationService — a periodic, firm-initiated, manually
- * asserted reconciliation of the system's cached trust balances against
- * the firm's real bank statement balance for a TrustAccount. Every
- * ledger under the account is first reconciled cache-vs-ledger via
- * TrustBalanceService::reconcileCacheAgainstLedger() (defense in depth
- * against a stale cache), then the SUM of those (now-verified) cached
- * balances is compared to the manually-asserted bank balance.
+ * TrustReconciliationService — Phase H: a TRUE three-way reconciliation
+ * of a TrustAccount, requiring all three independent legs to agree:
+ *   1. Bank/evidence balance — asserted_bank_balance_cents (manually
+ *      typed today; the parameter boundary is unchanged so a future
+ *      phase can supply a real Plaid-evidence-derived figure here
+ *      instead without touching this service's signature or logic).
+ *   2. Trust book/ledger balance — system_balance_cents, the SUM of
+ *      every ledger's cached trust_balances.balance_cents, each first
+ *      independently re-verified against its own live
+ *      trust_ledger_entries via TrustBalanceService::
+ *      reconcileCacheAgainstLedger() (defense in depth against a stale
+ *      cache).
+ *   3. Sum of individual client/matter trust liabilities —
+ *      client_liability_cents, computed per-ledger via
+ *      TrustBalanceService::verifyMatterLiabilitiesReconcileToLedger()
+ *      (matter_trust_balances + any non-matter-attributed entries),
+ *      a table and recompute path genuinely independent of leg 2's
+ *      own cache, able to catch a matter-level cache drift leg 2 alone
+ *      cannot see.
  *
- * A Discrepancy is recorded as-is and NEVER auto-corrected by this or
- * any other service (project rule) — resolving a discrepancy requires
- * a human-reviewed TrustHighRiskAdjustmentService adjustment afterward,
- * a deliberate separate action, never an automatic side effect of
- * running a reconciliation.
+ * A Discrepancy in EITHER comparison (bank vs. system, or system vs.
+ * client-liability) is recorded as-is and NEVER auto-corrected by this
+ * or any other service (project rule) — resolving a discrepancy
+ * requires a human-reviewed TrustHighRiskAdjustmentService adjustment
+ * afterward, a deliberate separate action, never an automatic side
+ * effect of running a reconciliation.
  */
 class TrustReconciliationService
 {
@@ -64,6 +77,7 @@ class TrustReconciliationService
             $firm, $account, $performedBy, $periodStart, $periodEnd, $assertedBankBalanceCents
         ) {
             $systemBalanceCents = 0;
+            $clientLiabilityCents = 0;
             $ledgersSeen = 0;
 
             foreach ($account->ledgers as $ledger) {
@@ -78,6 +92,9 @@ class TrustReconciliationService
                 }
 
                 $systemBalanceCents += $cacheCheck->cachedBalanceCents;
+
+                $matterLiabilityCheck = $this->balanceService->verifyMatterLiabilitiesReconcileToLedger($ledger);
+                $clientLiabilityCents += $matterLiabilityCheck->computedBalanceCents;
             }
 
             // Defensive check, independent of the wrap above: a genuinely
@@ -95,7 +112,13 @@ class TrustReconciliationService
             }
 
             $discrepancyCents = $systemBalanceCents - $assertedBankBalanceCents;
-            $status = $discrepancyCents === 0 ? TrustReconciliationStatus::Balanced : TrustReconciliationStatus::Discrepancy;
+            $clientLiabilityDiscrepancyCents = $systemBalanceCents - $clientLiabilityCents;
+
+            // All three legs must agree — a mismatch in EITHER
+            // comparison makes the whole reconciliation a Discrepancy.
+            $status = ($discrepancyCents === 0 && $clientLiabilityDiscrepancyCents === 0)
+                ? TrustReconciliationStatus::Balanced
+                : TrustReconciliationStatus::Discrepancy;
 
             $reconciliation = TrustReconciliation::create([
                 'firm_id' => $firm->id,
@@ -104,7 +127,9 @@ class TrustReconciliationService
                 'period_end' => $periodEnd,
                 'system_balance_cents' => $systemBalanceCents,
                 'asserted_bank_balance_cents' => $assertedBankBalanceCents,
+                'client_liability_cents' => $clientLiabilityCents,
                 'discrepancy_cents' => $discrepancyCents,
+                'client_liability_discrepancy_cents' => $clientLiabilityDiscrepancyCents,
                 'status' => $status,
                 'performed_by_firm_user_id' => $performedBy->id,
                 'completed_at' => now(),

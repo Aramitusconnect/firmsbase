@@ -2,6 +2,9 @@
 
 namespace Tests\Feature\Accounting\Entitlement;
 
+use App\Enums\AccountingExportBatchStatus;
+use App\Enums\ChartOfAccountType;
+use App\Enums\EntitlementSource;
 use App\Enums\ExpenseStatus;
 use App\Enums\FirmUserRole;
 use App\Models\Expense;
@@ -20,6 +23,7 @@ use App\Services\ExpenseReceiptService;
 use App\Services\ExpenseReportingService;
 use App\Services\ExpenseService;
 use App\Services\MatterExpenseService;
+use App\Services\OperatingJournalRecorderService;
 use App\Services\ReimbursableExpenseInvoiceEligibilityService;
 use App\Services\ReimbursableExpenseInvoiceLineService;
 use App\Services\TenantSafeAccountingPolicyService;
@@ -39,6 +43,7 @@ class ExpensesDisabledBlocksAllServicesTest extends TestCase
     use RefreshDatabase;
 
     private EntitlementService $entitlements;
+
     private AccountingEntitlementPolicyService $policy;
 
     protected function setUp(): void
@@ -53,7 +58,7 @@ class ExpensesDisabledBlocksAllServicesTest extends TestCase
         $firm = Firm::factory()->create();
         $category = ExpenseCategory::factory()->forFirm($firm)->create();
         $creator = FirmUser::factory()->create(['firm_id' => $firm->id]);
-        $service = new ExpenseService($this->policy, new TenantSafeAccountingPolicyService());
+        $service = new ExpenseService($this->policy, new TenantSafeAccountingPolicyService);
 
         $this->expectException(\RuntimeException::class);
         $service->create($firm, $category, $creator, 'Vendor', 1000, now());
@@ -65,13 +70,13 @@ class ExpensesDisabledBlocksAllServicesTest extends TestCase
         $service = new ChartOfAccountsService($this->policy);
 
         $this->expectException(\RuntimeException::class);
-        $service->create($firm, '6000', 'Office Supplies', \App\Enums\ChartOfAccountType::Expense);
+        $service->create($firm, '6000', 'Office Supplies', ChartOfAccountType::Expense);
     }
 
     public function test_expense_category_creation_is_blocked(): void
     {
         $firm = Firm::factory()->create();
-        $service = new ExpenseCategoryService($this->policy, new TenantSafeAccountingPolicyService());
+        $service = new ExpenseCategoryService($this->policy, new TenantSafeAccountingPolicyService);
 
         $this->expectException(\RuntimeException::class);
         $service->create($firm, 'Travel');
@@ -80,11 +85,11 @@ class ExpensesDisabledBlocksAllServicesTest extends TestCase
     public function test_receipt_upload_is_blocked(): void
     {
         $firm = Firm::factory()->create();
-        $this->entitlements->setForSource($firm, 'expenses', \App\Enums\EntitlementSource::AdminOverride, true);
+        $this->entitlements->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, true);
         $expense = Expense::factory()->forFirm($firm)->create();
         // Now disable again to isolate this call.
-        $this->entitlements->setForSource($firm, 'expenses', \App\Enums\EntitlementSource::AdminOverride, false);
-        $service = new ExpenseReceiptService($this->policy, new TenantSafeAccountingPolicyService());
+        $this->entitlements->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, false);
+        $service = new ExpenseReceiptService($this->policy, new TenantSafeAccountingPolicyService);
 
         $this->expectException(\RuntimeException::class);
         $service->upload($firm, $expense, 'a.pdf', 'application/pdf', 10, 'local', 'a.pdf', hash('sha256', 'a'));
@@ -93,11 +98,11 @@ class ExpensesDisabledBlocksAllServicesTest extends TestCase
     public function test_approval_is_blocked(): void
     {
         $firm = Firm::factory()->create();
-        $this->entitlements->setForSource($firm, 'expenses', \App\Enums\EntitlementSource::AdminOverride, true);
+        $this->entitlements->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, true);
         $expense = Expense::factory()->forFirm($firm)->status(ExpenseStatus::Submitted)->create();
-        $this->entitlements->setForSource($firm, 'expenses', \App\Enums\EntitlementSource::AdminOverride, false);
+        $this->entitlements->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, false);
         $approver = FirmUser::factory()->role(FirmUserRole::FirmOwner)->create(['firm_id' => $firm->id]);
-        $service = new ExpenseApprovalService($this->policy, new TenantSafeAccountingPolicyService(), app(\App\Services\OperatingJournalRecorderService::class));
+        $service = new ExpenseApprovalService($this->policy, new TenantSafeAccountingPolicyService, app(OperatingJournalRecorderService::class));
 
         $this->expectException(\RuntimeException::class);
         $service->approve($firm, $expense, $approver);
@@ -106,11 +111,11 @@ class ExpensesDisabledBlocksAllServicesTest extends TestCase
     public function test_matter_expense_linking_is_blocked(): void
     {
         $firm = Firm::factory()->create();
-        $this->entitlements->setForSource($firm, 'expenses', \App\Enums\EntitlementSource::AdminOverride, true);
+        $this->entitlements->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, true);
         $matter = Matter::factory()->forFirm($firm)->create();
         $expense = Expense::factory()->forFirm($firm)->create();
-        $this->entitlements->setForSource($firm, 'expenses', \App\Enums\EntitlementSource::AdminOverride, false);
-        $service = new MatterExpenseService($this->policy, new TenantSafeAccountingPolicyService());
+        $this->entitlements->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, false);
+        $service = new MatterExpenseService($this->policy, new TenantSafeAccountingPolicyService);
 
         $this->expectException(\RuntimeException::class);
         $service->link($firm, $matter, $expense);
@@ -133,7 +138,7 @@ class ExpensesDisabledBlocksAllServicesTest extends TestCase
 
         $batch = $service->request($firm, $requester, now()->subDays(10), now());
 
-        $this->assertSame(\App\Enums\AccountingExportBatchStatus::Blocked, $batch->status);
+        $this->assertSame(AccountingExportBatchStatus::Blocked, $batch->status);
     }
 
     public function test_invoice_reimbursement_eligibility_is_blocked(): void
@@ -154,7 +159,7 @@ class ExpensesDisabledBlocksAllServicesTest extends TestCase
         $invoice = Invoice::factory()->forFirm($firm)->create();
         $service = new ReimbursableExpenseInvoiceLineService(
             new ReimbursableExpenseInvoiceEligibilityService($this->policy),
-            new TenantSafeAccountingPolicyService(),
+            new TenantSafeAccountingPolicyService,
         );
 
         $this->expectException(\RuntimeException::class);

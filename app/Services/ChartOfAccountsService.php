@@ -21,15 +21,13 @@ use App\Models\Firm;
  */
 class ChartOfAccountsService
 {
-    public function __construct(private readonly AccountingEntitlementPolicyService $entitlementPolicy)
-    {
-    }
+    public function __construct(private readonly AccountingEntitlementPolicyService $entitlementPolicy) {}
 
     public function create(Firm $firm, string $accountCode, string $accountName, ChartOfAccountType $accountType): ChartOfAccount
     {
         $this->entitlementPolicy->assertExpensesEnabled($firm);
 
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => ChartOfAccount::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => ChartOfAccount::create([
             'firm_id' => $firm->id,
             'account_code' => $accountCode,
             'account_name' => $accountName,
@@ -42,7 +40,7 @@ class ChartOfAccountsService
     {
         $this->entitlementPolicy->assertExpensesEnabled($firm);
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($account) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($account) {
             $account->update(['is_active' => false]);
 
             return $account->fresh();
@@ -62,7 +60,7 @@ class ChartOfAccountsService
      */
     public function resolveActiveAccountByType(Firm $firm, ChartOfAccountType $type): ?ChartOfAccount
     {
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => ChartOfAccount::query()
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => ChartOfAccount::query()
             ->where('firm_id', $firm->id)
             ->where('account_type', $type)
             ->where('is_active', true)
