@@ -2,12 +2,18 @@
 
 namespace App\Services;
 
+use App\Enums\ChartOfAccountPurpose;
+use App\Enums\InvoiceLineType;
 use App\Enums\InvoiceStatus;
 use App\Enums\PaymentPlanInstallmentStatus;
+use App\Enums\PaymentRequestPurpose;
+use App\Exceptions\InvoiceRevenueAllocationExceedsRemainingBalanceException;
+use App\Models\Firm;
 use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\PaymentAllocation;
 use App\Models\PaymentPlanInstallment;
+use App\ValueObjects\InvoiceRevenueAllocationDecision;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -296,5 +302,185 @@ class PaymentApplicationService
             'payment_id' => $payment->id,
             'amount_cents' => $amountCents,
         ]);
+    }
+
+    /**
+     * Mixed-Invoice Revenue Allocation pass, item 1/2/5/6 — the single
+     * decision point for how much of a given payment amount (about to
+     * be applied to $invoice) belongs to LegalFeeRevenue vs.
+     * CostReimbursementRevenue. A PURE computation: never writes
+     * anything, never applies the payment, never posts a journal entry
+     * — callers (ManualPaymentService::submit()) act on the returned
+     * decision.
+     *
+     * Exactly three safe (non-ambiguous) cases, checked in order:
+     *
+     *   1. The invoice has no ReimbursableExpense lines at all (a
+     *      fee-only invoice — the overwhelming common case) —
+     *      everything is fee. Symmetric for a cost-only invoice.
+     *   2. This amount, combined with everything already recognized
+     *      for this invoice (derived from existing revenue_purpose-
+     *      tagged PaymentAllocation rows — never re-derived from raw
+     *      journal postings, which are a downstream consequence, not
+     *      the source of truth for "how much has been allocated"),
+     *      exactly finishes BOTH remaining buckets. There is no
+     *      allocation policy to choose here: whatever is left, by
+     *      definition, is what this payment funds.
+     *   3. $purposeHint explicitly constrains this payment to ONE
+     *      bucket (PaymentRequestPurpose::EarnedFee -> fee only,
+     *      FilingCostReimbursement -> cost only) and the amount fits
+     *      within that bucket's own remaining balance. Exceeding it
+     *      throws InvoiceRevenueAllocationExceedsRemainingBalanceException
+     *      — never silently reclassified into the other bucket.
+     *
+     * Every other case (no purpose hint, or
+     * PaymentRequestPurpose::PaymentPlanInstallment with no defined
+     * fee/cost mapping, on a mixed invoice, for an amount that doesn't
+     * finish both buckets) is genuinely ambiguous — this codebase has
+     * never defined a pro-rata/FIFO/fee-first/cost-first policy, and
+     * per this phase's own master prompt, none may be invented here.
+     * Returns InvoiceRevenueAllocationDecision::ambiguous() — the
+     * caller must defer to a PendingPaymentAllocation instead of
+     * posting anything.
+     */
+    public function resolveInvoiceRevenueAllocation(Invoice $invoice, int $amountCents, ?PaymentRequestPurpose $purposeHint): InvoiceRevenueAllocationDecision
+    {
+        $totals = $this->invoiceLineTotals($invoice);
+
+        if ($totals['cost_lines_total_cents'] <= 0) {
+            return InvoiceRevenueAllocationDecision::resolved($amountCents, 0);
+        }
+
+        if ($totals['fee_lines_total_cents'] <= 0) {
+            return InvoiceRevenueAllocationDecision::resolved(0, $amountCents);
+        }
+
+        $remaining = $this->invoiceRevenueRemaining($invoice);
+        $feeRemaining = $remaining['fee_remaining_cents'];
+        $costRemaining = $remaining['cost_remaining_cents'];
+
+        if ($amountCents === $feeRemaining + $costRemaining) {
+            return InvoiceRevenueAllocationDecision::resolved($feeRemaining, $costRemaining);
+        }
+
+        if ($purposeHint === PaymentRequestPurpose::EarnedFee) {
+            if ($amountCents > $feeRemaining) {
+                throw new InvoiceRevenueAllocationExceedsRemainingBalanceException(
+                    "Amount {$amountCents} exceeds the remaining legal-fee balance ({$feeRemaining}) on invoice #{$invoice->id}."
+                );
+            }
+
+            return InvoiceRevenueAllocationDecision::resolved($amountCents, 0);
+        }
+
+        if ($purposeHint === PaymentRequestPurpose::FilingCostReimbursement) {
+            if ($amountCents > $costRemaining) {
+                throw new InvoiceRevenueAllocationExceedsRemainingBalanceException(
+                    "Amount {$amountCents} exceeds the remaining cost-reimbursement balance ({$costRemaining}) on invoice #{$invoice->id}."
+                );
+            }
+
+            return InvoiceRevenueAllocationDecision::resolved(0, $amountCents);
+        }
+
+        return InvoiceRevenueAllocationDecision::ambiguous(
+            'A partial payment on a mixed invoice (legal-fee lines + reimbursable-expense lines) has no allocation instruction — this codebase defines no automatic fee-first/cost-first/pro-rata policy, so this payment awaits an authorized human allocation decision.'
+        );
+    }
+
+    /**
+     * Mixed-Invoice Revenue Allocation pass, item 8 — exposed publicly
+     * so PaymentAllocationResolutionService can re-validate a proposed
+     * fee/cost split against CURRENT remaining balances at resolution
+     * time (other payments may have landed since the
+     * PendingPaymentAllocation row was created), without re-deriving
+     * this computation a second time.
+     *
+     * @return array{fee_lines_total_cents:int, cost_lines_total_cents:int, fee_remaining_cents:int, cost_remaining_cents:int}
+     */
+    public function invoiceRevenueRemaining(Invoice $invoice): array
+    {
+        $totals = $this->invoiceLineTotals($invoice);
+
+        $feeRecognized = $this->invoiceRevenueRecognizedCents($invoice, ChartOfAccountPurpose::LegalFeeRevenue);
+        $costRecognized = $this->invoiceRevenueRecognizedCents($invoice, ChartOfAccountPurpose::CostReimbursementRevenue);
+
+        return [
+            'fee_lines_total_cents' => $totals['fee_lines_total_cents'],
+            'cost_lines_total_cents' => $totals['cost_lines_total_cents'],
+            'fee_remaining_cents' => max(0, $totals['fee_lines_total_cents'] - $feeRecognized),
+            'cost_remaining_cents' => max(0, $totals['cost_lines_total_cents'] - $costRecognized),
+        ];
+    }
+
+    /**
+     * @return array{fee_lines_total_cents:int, cost_lines_total_cents:int}
+     */
+    private function invoiceLineTotals(Invoice $invoice): array
+    {
+        $lines = $invoice->lines;
+        $costLinesTotal = (int) $lines->where('line_type', InvoiceLineType::ReimbursableExpense)->sum('amount_cents');
+        $feeLinesTotal = (int) $lines->sum('amount_cents') - $costLinesTotal;
+
+        return ['fee_lines_total_cents' => $feeLinesTotal, 'cost_lines_total_cents' => $costLinesTotal];
+    }
+
+    /**
+     * @return int total cents already recognized against $invoice for
+     *             the given revenue purpose, derived exclusively from
+     *             revenue_purpose-tagged PaymentAllocation rows (never
+     *             from journal postings directly — see
+     *             resolveInvoiceRevenueAllocation()'s own docblock).
+     */
+    private function invoiceRevenueRecognizedCents(Invoice $invoice, ChartOfAccountPurpose $purpose): int
+    {
+        return (int) PaymentAllocation::query()
+            ->where('invoice_id', $invoice->id)
+            ->where('revenue_purpose', $purpose->value)
+            ->sum('amount_cents');
+    }
+
+    /**
+     * Mixed-Invoice Revenue Allocation pass, item 4 — the ONLY writer
+     * of revenue_purpose-tagged PaymentAllocation rows. Called
+     * immediately after a resolved (non-ambiguous)
+     * InvoiceRevenueAllocationDecision has already been applied
+     * (applyToInvoice()/applyToInstallment()) and posted
+     * (OperatingJournalRecorderService) — never before, and never for
+     * an ambiguous decision. One row per non-zero bucket, so a $500
+     * payment split $300 fee / $200 cost produces two rows, both
+     * referencing the same payment_id/invoice_id.
+     */
+    public function recordRevenueAllocation(
+        Firm $firm,
+        Payment $payment,
+        Invoice $invoice,
+        int $feeCents,
+        int $costCents,
+        ?PaymentPlanInstallment $installment = null,
+    ): void {
+        if ($feeCents > 0) {
+            PaymentAllocation::create([
+                'firm_id' => $firm->id,
+                'payment_id' => $payment->id,
+                'invoice_id' => $invoice->id,
+                'payment_plan_installment_id' => $installment?->id,
+                'amount_cents' => $feeCents,
+                'revenue_purpose' => ChartOfAccountPurpose::LegalFeeRevenue->value,
+                'created_at' => now(),
+            ]);
+        }
+
+        if ($costCents > 0) {
+            PaymentAllocation::create([
+                'firm_id' => $firm->id,
+                'payment_id' => $payment->id,
+                'invoice_id' => $invoice->id,
+                'payment_plan_installment_id' => $installment?->id,
+                'amount_cents' => $costCents,
+                'revenue_purpose' => ChartOfAccountPurpose::CostReimbursementRevenue->value,
+                'created_at' => now(),
+            ]);
+        }
     }
 }

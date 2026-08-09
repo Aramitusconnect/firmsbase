@@ -63,4 +63,18 @@ class PaymentAccessPolicyService
     {
         return in_array($role, self::RECORD_PAYMENT_ROLES, true);
     }
+
+    /**
+     * Mixed-Invoice Revenue Allocation pass, item 8 — resolving a
+     * PendingPaymentAllocation (deciding how much of an already-
+     * received payment is legal-fee vs. reimbursable-cost revenue) is
+     * the same class of billing-office, point-of-no-return decision as
+     * recording a payment received outside this system — reuses
+     * RECORD_PAYMENT_ROLES exactly rather than defining a new ceiling
+     * ("do not invent new role architecture").
+     */
+    public function canResolvePaymentAllocation(FirmUserRole $role): bool
+    {
+        return in_array($role, self::RECORD_PAYMENT_ROLES, true);
+    }
 }

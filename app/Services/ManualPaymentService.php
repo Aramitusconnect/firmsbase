@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\ManualPaymentMethod;
 use App\Enums\PaymentClassification;
+use App\Enums\PaymentRequestPurpose;
 use App\Enums\PaymentStatus;
 use App\Enums\WebhookEventType;
 use App\Exceptions\PaymentBlockedException;
@@ -14,6 +15,7 @@ use App\Models\ManualPaymentRecord;
 use App\Models\Matter;
 use App\Models\Payment;
 use App\Models\PaymentPlanInstallment;
+use App\Models\PendingPaymentAllocation;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
@@ -38,6 +40,18 @@ use Illuminate\Support\Facades\DB;
  * before this branch is ever reached, so a repeated idempotency key
  * cannot double-fire), registered via DB::afterCommit() from inside
  * the existing DB::transaction().
+ *
+ * Mixed-Invoice Revenue Allocation pass — the optional $purposeHint
+ * (PaymentRequestPurpose::EarnedFee/FilingCostReimbursement/
+ * PaymentPlanInstallment — never TrustDeposit, which never reaches
+ * this service at all) constrains how an invoice/installment-targeted
+ * payment's revenue is split when the target is a mixed invoice (fee
+ * lines + reimbursable-expense lines). See applyOrDeferInvoice()/
+ * applyOrDeferInstallment()'s own docblocks: when the split cannot be
+ * determined safely, the Payment itself still succeeds (real money was
+ * received) but its application to the invoice/installment and its
+ * journal posting are BOTH deferred to a PendingPaymentAllocation for
+ * an authorized human to resolve — never guessed.
  */
 class ManualPaymentService
 {
@@ -62,11 +76,12 @@ class ManualPaymentService
         ?string $externalReference = null,
         ?string $methodReference = null,
         ?string $notes = null,
+        ?PaymentRequestPurpose $purposeHint = null,
     ): Payment {
         $payment = (new TenantContextService)->runWithFirmContext($firm, function () use (
             $firm, $client, $matter, $invoice, $installment, $amountCents, $method,
             $requestedClassification, $idempotencyKey, $recordedBy, $externalReference,
-            $methodReference, $notes,
+            $methodReference, $notes, $purposeHint,
         ) {
             $existing = Payment::query()
                 ->where('firm_id', $firm->id)
@@ -109,13 +124,11 @@ class ManualPaymentService
                 ]);
 
                 if ($installment) {
-                    $this->application->applyToInstallment($payment, $installment);
-                    $this->journal->recordInstallmentPaymentApplied($firm, $payment->fresh(), $installment->fresh());
+                    $this->applyOrDeferInstallment($firm, $payment, $installment, $purposeHint);
                 } elseif ($invoice) {
                     // Already inside this method's own runWithFirmContext
                     // wrap (see above), so a plain fresh() here is safe.
-                    $this->application->applyToInvoice($payment, $invoice->fresh());
-                    $this->journal->recordInvoicePaymentApplied($firm, $payment->fresh(), $invoice->fresh());
+                    $this->applyOrDeferInvoice($firm, $payment, $invoice->fresh(), $purposeHint);
                 }
 
                 $this->timeline->record($firm, 'payment_recorded', $payment, $recordedBy, [
@@ -147,5 +160,77 @@ class ManualPaymentService
         }
 
         return $payment;
+    }
+
+    /**
+     * Mixed-Invoice Revenue Allocation pass — resolves the fee/cost
+     * split for this invoice-targeted payment. When resolved, applies
+     * AND posts exactly as before this phase (zero behavior change for
+     * every fee-only invoice — the overwhelming common case). When
+     * ambiguous, defers BOTH the invoice application and the journal
+     * posting to a PendingPaymentAllocation: the Payment itself stays
+     * genuinely Succeeded (real money was received), but
+     * invoices.amount_paid_cents is deliberately left untouched and no
+     * journal entry exists until an authorized human resolves the
+     * split (PaymentAllocationResolutionService).
+     */
+    private function applyOrDeferInvoice(Firm $firm, Payment $payment, Invoice $invoice, ?PaymentRequestPurpose $purposeHint): void
+    {
+        $decision = $this->application->resolveInvoiceRevenueAllocation($invoice, $payment->amount_cents, $purposeHint);
+
+        if ($decision->isAmbiguous()) {
+            PendingPaymentAllocation::create([
+                'firm_id' => $firm->id,
+                'payment_id' => $payment->id,
+                'invoice_id' => $invoice->id,
+                'amount_cents' => $payment->amount_cents,
+                'reason' => $decision->reason,
+            ]);
+
+            return;
+        }
+
+        $this->application->applyToInvoice($payment, $invoice);
+        $this->journal->recordInvoicePaymentApplied($firm, $payment->fresh(), $invoice->fresh(), $decision->feeCents, $decision->costCents);
+        $this->application->recordRevenueAllocation($firm, $payment->fresh(), $invoice->fresh(), $decision->feeCents, $decision->costCents);
+    }
+
+    /**
+     * Same deferral principle as applyOrDeferInvoice(), scoped to an
+     * installment's own underlying invoice (installment.paymentPlan.invoice)
+     * when one exists. An installment with no underlying invoice (a
+     * standalone payment plan) has no lines/fee-cost concept at all —
+     * unchanged, always posts 100% to LegalFeeRevenue exactly as
+     * before this phase.
+     */
+    private function applyOrDeferInstallment(Firm $firm, Payment $payment, PaymentPlanInstallment $installment, ?PaymentRequestPurpose $purposeHint): void
+    {
+        $underlyingInvoice = $installment->paymentPlan?->invoice;
+
+        if ($underlyingInvoice === null) {
+            $this->application->applyToInstallment($payment, $installment);
+            $this->journal->recordInstallmentPaymentApplied($firm, $payment->fresh(), $installment->fresh(), $payment->amount_cents, 0);
+
+            return;
+        }
+
+        $decision = $this->application->resolveInvoiceRevenueAllocation($underlyingInvoice, $payment->amount_cents, $purposeHint);
+
+        if ($decision->isAmbiguous()) {
+            PendingPaymentAllocation::create([
+                'firm_id' => $firm->id,
+                'payment_id' => $payment->id,
+                'invoice_id' => $underlyingInvoice->id,
+                'payment_plan_installment_id' => $installment->id,
+                'amount_cents' => $payment->amount_cents,
+                'reason' => $decision->reason,
+            ]);
+
+            return;
+        }
+
+        $this->application->applyToInstallment($payment, $installment);
+        $this->journal->recordInstallmentPaymentApplied($firm, $payment->fresh(), $installment->fresh(), $decision->feeCents, $decision->costCents);
+        $this->application->recordRevenueAllocation($firm, $payment->fresh(), $underlyingInvoice, $decision->feeCents, $decision->costCents, installment: $installment->fresh());
     }
 }

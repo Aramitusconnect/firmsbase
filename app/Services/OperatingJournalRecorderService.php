@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Enums\AccountingJournalSourceType;
 use App\Enums\ChartOfAccountPurpose;
-use App\Enums\InvoiceLineType;
 use App\Models\AccountingJournalEntry;
 use App\Models\Expense;
 use App\Models\Firm;
@@ -95,58 +94,38 @@ class OperatingJournalRecorderService
     ) {}
 
     /**
-     * Payment-Channel Safety Hardening pass, item 4/5 — a mixed invoice
-     * (legal-fee lines + ReimbursableExpense lines) must not have its
-     * entire payment posted as undifferentiated LegalFeeRevenue.
-     *
-     * Splitting is only ever attempted in the ONE case that is
-     * genuinely unambiguous: this Payment is the invoice's first and
-     * only payment (amount_paid_cents was 0 before it — derivable as
-     * $invoice->amount_paid_cents - $payment->amount_cents, since
-     * PaymentApplicationService::applyToInvoice() always adds this
-     * payment's amount on top of whatever was there before), AND it
-     * pays the invoice off in full. In that exact case every line's
-     * full amount is necessarily funded by this one payment, so the
-     * fee/cost split is just the lines' own totals — no allocation
-     * policy is needed or invented.
-     *
-     * A mixed invoice funded by more than one payment (this payment
-     * has predecessors, or leaves a remainder) is a GENUINELY
-     * ambiguous case this codebase has never defined a policy for —
-     * pro-rata, cost-first, and fee-first are all defensible and none
-     * is chosen here; see resolveFeeCostSplitForFullyPaidInvoice()'s
-     * own docblock and the phase's own final report ("remaining
-     * blockers") for the exact decision still needed. That case falls
-     * back to today's single-leg LegalFeeRevenue posting unchanged —
-     * deliberately reported, not silently misclassified as "handled."
+     * Mixed-Invoice Revenue Allocation pass — the caller
+     * (ManualPaymentService::submit()) always supplies the exact
+     * feeCents/costCents split, already resolved (never ambiguous) via
+     * PaymentApplicationService::resolveInvoiceRevenueAllocation(). This
+     * method only posts what it's told; it never re-derives or
+     * second-guesses the split itself, keeping "what does this invoice
+     * event mean" (PaymentApplicationService) and "how is it posted"
+     * (this class) cleanly separated.
      */
-    public function recordInvoicePaymentApplied(Firm $firm, Payment $payment, Invoice $invoice): ?AccountingJournalEntry
+    public function recordInvoicePaymentApplied(Firm $firm, Payment $payment, Invoice $invoice, int $feeCents, int $costCents): ?AccountingJournalEntry
     {
-        $split = $this->resolveFeeCostSplitForFullyPaidInvoice($invoice, $payment);
-
-        if ($split !== null) {
-            return $this->recordFeeEarnedWithCostSplit(
-                $firm,
-                $payment,
-                AccountingJournalSourceType::InvoicePaymentApplied,
-                "invoice_payment_applied:payment:{$payment->id}",
-                "Fees earned — invoice #{$invoice->id} payment applied",
-                $split['fee_cents'],
-                $split['cost_cents'],
-                invoiceId: $invoice->id,
-            );
-        }
-
         return $this->recordFeeEarned(
             $firm,
             $payment,
             AccountingJournalSourceType::InvoicePaymentApplied,
             "invoice_payment_applied:payment:{$payment->id}",
             "Fees earned — invoice #{$invoice->id} payment applied",
+            $feeCents,
+            $costCents,
             invoiceId: $invoice->id,
         );
     }
 
+    /**
+     * A trust-funded transfer applied to an invoice is deliberately
+     * OUT OF SCOPE for the fee/cost split (a genuinely separate,
+     * pre-existing flow — TrustTransferRequestService::apply() — that
+     * this phase's own test matrix does not cover): always posts
+     * 100% to LegalFeeRevenue, unchanged from before this phase.
+     * Reported explicitly as an out-of-scope combination, not silently
+     * handled.
+     */
     public function recordTrustToOperatingTransfer(Firm $firm, Payment $payment, Invoice $invoice, TrustTransferRequest $request): ?AccountingJournalEntry
     {
         return $this->recordFeeEarned(
@@ -155,12 +134,14 @@ class OperatingJournalRecorderService
             AccountingJournalSourceType::TrustToOperatingTransfer,
             "trust_to_operating_transfer:{$request->id}",
             "Fees earned — trust transfer #{$request->id} applied to invoice #{$invoice->id}",
+            $payment->amount_cents,
+            0,
             invoiceId: $invoice->id,
             trustTransferRequestId: $request->id,
         );
     }
 
-    public function recordInstallmentPaymentApplied(Firm $firm, Payment $payment, PaymentPlanInstallment $installment): ?AccountingJournalEntry
+    public function recordInstallmentPaymentApplied(Firm $firm, Payment $payment, PaymentPlanInstallment $installment, int $feeCents, int $costCents): ?AccountingJournalEntry
     {
         $invoiceId = $installment->paymentPlan?->invoice_id;
 
@@ -170,6 +151,8 @@ class OperatingJournalRecorderService
             AccountingJournalSourceType::InvoicePaymentApplied,
             "invoice_payment_applied:payment:{$payment->id}",
             "Fees earned — payment plan installment #{$installment->id} applied",
+            $feeCents,
+            $costCents,
             invoiceId: $invoiceId,
         );
     }
@@ -239,89 +222,18 @@ class OperatingJournalRecorderService
         );
     }
 
+    /**
+     * The one place revenue is actually posted. feeCents/costCents are
+     * always supplied by the caller, already resolved — never
+     * re-derived here. When costCents is 0 (the overwhelming common
+     * case: a fee-only invoice, or any call site that predates the
+     * Mixed-Invoice Revenue Allocation pass), this posts EXACTLY the
+     * same two-line entry it always has (cash debit, single
+     * LegalFeeRevenue credit) — a CostReimbursementRevenue leg is only
+     * ever added when costCents > 0, so no behavior changes for any
+     * existing fee-only call site.
+     */
     private function recordFeeEarned(
-        Firm $firm,
-        Payment $payment,
-        AccountingJournalSourceType $sourceType,
-        string $idempotencyKey,
-        string $description,
-        ?int $invoiceId = null,
-        ?int $trustTransferRequestId = null,
-    ): ?AccountingJournalEntry {
-        if (! $this->isAccountingApplicable($firm)) {
-            return null;
-        }
-
-        $cash = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::OperatingCash);
-        $revenue = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::LegalFeeRevenue);
-
-        return $this->posting->post(
-            $firm,
-            $sourceType,
-            $description,
-            now(),
-            [
-                ['chart_of_account_id' => $cash->id, 'debit_cents' => $payment->amount_cents, 'credit_cents' => 0, 'client_id' => $payment->client_id, 'matter_id' => $payment->matter_id],
-                ['chart_of_account_id' => $revenue->id, 'debit_cents' => 0, 'credit_cents' => $payment->amount_cents, 'client_id' => $payment->client_id, 'matter_id' => $payment->matter_id],
-            ],
-            ['payment_id' => $payment->id, 'invoice_id' => $invoiceId, 'trust_transfer_request_id' => $trustTransferRequestId],
-            idempotencyKey: $idempotencyKey,
-        );
-    }
-
-    /**
-     * @return array{fee_cents:int, cost_cents:int}|null null when no
-     *                                                   split should be attempted (fee-only invoice, ambiguous
-     *                                                   partial-payment case, or a lines/total mismatch that would
-     *                                                   otherwise break the double-entry balance).
-     */
-    private function resolveFeeCostSplitForFullyPaidInvoice(Invoice $invoice, Payment $payment): ?array
-    {
-        $priorPaidCents = $invoice->amount_paid_cents - $payment->amount_cents;
-
-        if ($priorPaidCents !== 0) {
-            // This invoice already had a prior payment (or payments)
-            // applied — which category THIS payment's dollars fund is
-            // genuinely ambiguous. Not attempted; see this method's
-            // own docblock above.
-            return null;
-        }
-
-        if ($invoice->amount_paid_cents < $invoice->total_cents) {
-            // This single payment does not pay the invoice off in
-            // full — same ambiguity as above.
-            return null;
-        }
-
-        $lines = $invoice->lines;
-        $costCents = (int) $lines->where('line_type', InvoiceLineType::ReimbursableExpense)->sum('amount_cents');
-        $feeCents = (int) $lines->sum('amount_cents') - $costCents;
-
-        if ($costCents <= 0) {
-            // Fee-only invoice — the existing single-leg posting is
-            // already correct.
-            return null;
-        }
-
-        if ($feeCents < 0 || $feeCents + $costCents !== $payment->amount_cents) {
-            // Defensive: lines don't reconcile to the payment amount
-            // (e.g. an Adjustment line or another drift source) —
-            // never post a split that wouldn't balance. Falls back to
-            // the safe, existing single-leg posting.
-            return null;
-        }
-
-        return ['fee_cents' => $feeCents, 'cost_cents' => $costCents];
-    }
-
-    /**
-     * The split-posting sibling of recordFeeEarned() — same cash debit,
-     * but the revenue credit is divided across LegalFeeRevenue and
-     * CostReimbursementRevenue rather than posted as one undifferentiated
-     * line. Only ever called from the one unambiguous case
-     * resolveFeeCostSplitForFullyPaidInvoice() identifies.
-     */
-    private function recordFeeEarnedWithCostSplit(
         Firm $firm,
         Payment $payment,
         AccountingJournalSourceType $sourceType,
@@ -330,6 +242,7 @@ class OperatingJournalRecorderService
         int $feeCents,
         int $costCents,
         ?int $invoiceId = null,
+        ?int $trustTransferRequestId = null,
     ): ?AccountingJournalEntry {
         if (! $this->isAccountingApplicable($firm)) {
             return null;
@@ -357,7 +270,7 @@ class OperatingJournalRecorderService
             $description,
             now(),
             $postings,
-            ['payment_id' => $payment->id, 'invoice_id' => $invoiceId],
+            ['payment_id' => $payment->id, 'invoice_id' => $invoiceId, 'trust_transfer_request_id' => $trustTransferRequestId],
             idempotencyKey: $idempotencyKey,
         );
     }

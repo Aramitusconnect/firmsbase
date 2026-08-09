@@ -7,10 +7,12 @@ use App\Enums\PaymentClassification;
 use App\Enums\PaymentRequestEventType;
 use App\Enums\PaymentRequestPurpose;
 use App\Enums\PaymentRequestStatus;
+use App\Enums\PendingPaymentAllocationStatus;
 use App\Exceptions\PaymentBlockedException;
 use App\Models\Firm;
 use App\Models\PaymentRequest;
 use App\Models\PaymentRequestEvent;
+use App\Models\PendingPaymentAllocation;
 use App\Models\TrustLedger;
 use App\Services\Stripe\StripeGateway;
 use Illuminate\Support\Facades\DB;
@@ -168,18 +170,27 @@ class PaymentRequestCheckoutService
      * the request in PendingReview rather than a false "Paid").
      *
      * filing_cost_reimbursement changes the PAYER-FACING wording
-     * (PaymentRequestPurpose::payerFacingDescription()); the actual
-     * posted accounting entry depends on the target invoice's own
-     * line composition — see OperatingJournalRecorderService::
-     * recordInvoicePaymentApplied()/resolveFeeCostSplitForFullyPaidInvoice()'s
-     * own docblocks (Payment-Channel Safety Hardening pass, item 4/5).
-     * A mixed invoice (fee lines + ReimbursableExpense lines) paid off
-     * in full by its own first payment now correctly splits between
-     * LegalFeeRevenue and CostReimbursementRevenue — no longer silently
-     * misclassified as 100% fee revenue. A mixed invoice funded by more
-     * than one payment still posts entirely to LegalFeeRevenue — that
-     * allocation policy remains genuinely undefined by this codebase
-     * (documented, not silently guessed); see the phase's final report.
+     * (PaymentRequestPurpose::payerFacingDescription()) AND constrains
+     * ManualPaymentService::submit()'s own fee/cost allocation decision
+     * to the cost bucket ONLY on a mixed invoice — see
+     * PaymentApplicationService::resolveInvoiceRevenueAllocation()'s
+     * own docblock (Mixed-Invoice Revenue Allocation pass). Passing
+     * $paymentRequest->purpose through as $purposeHint is safe
+     * regardless of purpose: EarnedFee/FilingCostReimbursement
+     * constrain the split, PaymentPlanInstallment is treated as "no
+     * defined fee/cost mapping" (falls to the ambiguous/PendingPaymentAllocation
+     * path on a mixed invoice, per that method's own docblock), and
+     * TrustDeposit never reaches this method at all (routed via
+     * routeTrustDeposit() above).
+     *
+     * A payment whose invoice/installment application was deferred to
+     * a PendingPaymentAllocation (the split could not be determined
+     * safely) is real, confirmed money — Payment succeeded, payment_id
+     * is recorded — but the request's own status stays PendingReview,
+     * never Paid, until an authorized human resolves the allocation
+     * (PaymentAllocationResolutionService) and the invoice/journal
+     * consequence actually lands. See PaymentRequestStatus's own
+     * docblock for the exact semantics this preserves.
      */
     private function routeOperatingPayment(
         Firm $firm,
@@ -202,9 +213,31 @@ class PaymentRequestCheckoutService
             externalReference: "payment_request:{$paymentRequest->uuid}",
             methodReference: $providerTransactionId,
             notes: 'Collected via payment request link/QR code.',
+            purposeHint: $paymentRequest->purpose,
         );
 
         $this->recordEvent($firm, $paymentRequest, PaymentRequestEventType::ClassificationDecided, note: $payment->payment_classification->value);
+
+        $hasPendingAllocation = PendingPaymentAllocation::query()
+            ->where('payment_id', $payment->id)
+            ->where('status', PendingPaymentAllocationStatus::Pending)
+            ->exists();
+
+        if ($hasPendingAllocation) {
+            $this->recordEvent($firm, $paymentRequest, PaymentRequestEventType::Failed, note: 'Payment confirmed, but this invoice is mixed (legal-fee + reimbursable-cost lines) with no automatic allocation policy — awaiting an authorized firm user to allocate the fee/cost split.');
+
+            $paymentRequest->update([
+                'status' => PaymentRequestStatus::PendingReview,
+                'provider_transaction_id' => $providerTransactionId,
+                'paid_amount_cents' => $amountCents,
+                'paid_at' => now(),
+                'payment_id' => $payment->id,
+                'failure_reason' => 'Awaiting fee/cost allocation on a mixed invoice.',
+            ]);
+
+            return $paymentRequest->fresh();
+        }
+
         $this->recordEvent($firm, $paymentRequest, PaymentRequestEventType::PostedToAccounting);
 
         $paymentRequest->update([
