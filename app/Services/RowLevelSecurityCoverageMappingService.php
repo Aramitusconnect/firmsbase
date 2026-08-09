@@ -555,6 +555,11 @@ class RowLevelSecurityCoverageMappingService
         // — see TenantContextService::withPaymentRequestSelfLookupContext().
         // Neither was ever in MISSING_PREPARED_TABLES.
         'payment_requests', 'payment_request_events',
+        // payment_pending_allocations (Mixed-Invoice Revenue Allocation
+        // pass) — prepared and forced together:
+        // 2026_11_02_100003_prepare_row_level_security_and_force_rls_on_payment_pending_allocations_table.php.
+        // Never in MISSING_PREPARED_TABLES.
+        'payment_pending_allocations',
     ];
 
     /**

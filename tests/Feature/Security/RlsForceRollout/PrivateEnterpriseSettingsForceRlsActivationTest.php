@@ -90,7 +90,7 @@ class PrivateEnterpriseSettingsForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-5 Wave 10 (trust accounting domain, 10 tables) — additive only, no existing assertion removed or weakened.
         // Narrowly updated by Stage B Checkpoint 3 of the FirmsBase Integration Platform mission (firm_integrations, a brand-new genuine tenant-owned table, RLS prepared and FORCE-activated in the same migration, NOT part of the old 60-table rollout) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated AGAIN by Stage B Checkpoint 4 of the FirmsBase Integration Platform mission (integration_credentials, a new genuine tenant-owned table with RLS prepared and FORCE-activated in the same migration) for the same reason — additive only, no existing assertion removed or weakened.
-        $this->assertCount(156, $preparedTables, 'Section 39A-5 Wave 2 through Wave 10 integration must have moved private_enterprise_settings and every sibling table from all nine later waves into PREPARED_TABLES.');
+        $this->assertCount(157, $preparedTables, 'Section 39A-5 Wave 2 through Wave 10 integration must have moved private_enterprise_settings and every sibling table from all nine later waves into PREPARED_TABLES.');
 
         foreach ($preparedTables as $table) {
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);
@@ -122,7 +122,7 @@ class PrivateEnterpriseSettingsForceRlsActivationTest extends TestCase
         // Narrowly updated AGAIN by Section 39A-5 Wave 10 (trust accounting domain, 10 tables) — additive only, no existing assertion removed or weakened.
         // Narrowly updated by Stage B Checkpoint 3 of the FirmsBase Integration Platform mission (firm_integrations) for the same reason — additive only, no existing assertion removed or weakened.
         // Narrowly updated AGAIN by Stage B Checkpoint 4 of the FirmsBase Integration Platform mission (integration_credentials, a new genuine tenant-owned table with RLS prepared and FORCE-activated in the same migration) for the same reason — additive only, no existing assertion removed or weakened.
-        $this->assertCount(156, $forced, 'Exactly 108 tables must have a FORCE-activation migration after Section 39A-5 Wave 10 — no more, no less.');
+        $this->assertCount(157, $forced, 'Exactly 108 tables must have a FORCE-activation migration after Section 39A-5 Wave 10 — no more, no less.');
 
         foreach ($forced as $table) {
             $row = DB::selectOne('select relforcerowsecurity from pg_class where relname = ?', [$table]);
