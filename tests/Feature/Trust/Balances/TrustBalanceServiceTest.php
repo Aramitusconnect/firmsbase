@@ -99,4 +99,34 @@ class TrustBalanceServiceTest extends TestCase
         $this->assertFalse($result->matches);
         $this->assertSame(99999, $result->differenceCents);
     }
+
+    public function test_reconcile_matter_cache_against_ledger_detects_a_stale_matter_cache(): void
+    {
+        $firm = $this->makeTrustEligibleFirm();
+        $account = app(TrustAccountService::class)->open($firm, 'Firm IOLTA Trust Account');
+        $client = Client::factory()->forFirm($firm)->create();
+        $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
+        $matter = Matter::factory()->forClient($client)->create();
+        $requester = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $approver = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+
+        $deposits = app(TrustDepositService::class);
+        $forMatter = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $requester, 4000, $matter), $approver);
+        $deposits->post($firm, $ledger, $forMatter, $matter);
+
+        $matched = $this->service->reconcileMatterCacheAgainstLedger($ledger, $matter);
+        $this->assertTrue($matched->matches);
+        $this->assertSame(4000, $matched->cachedBalanceCents);
+
+        MatterTrustBalance::query()
+            ->where('trust_ledger_id', $ledger->id)
+            ->where('matter_id', $matter->id)
+            ->first()
+            ->update(['balance_cents' => 12345]);
+
+        $stale = $this->service->reconcileMatterCacheAgainstLedger($ledger, $matter);
+        $this->assertFalse($stale->matches);
+        $this->assertSame(4000, $stale->computedBalanceCents);
+        $this->assertSame(12345, $stale->cachedBalanceCents);
+    }
 }

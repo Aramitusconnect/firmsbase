@@ -67,6 +67,7 @@ class ExpenseApprovalsForceRlsActivationTest extends TestCase
         $this->service = new ExpenseApprovalService(
             new AccountingEntitlementPolicyService($this->entitlements),
             new TenantSafeAccountingPolicyService,
+            app(\App\Services\OperatingJournalRecorderService::class),
         );
     }
 

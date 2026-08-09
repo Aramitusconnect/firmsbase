@@ -700,6 +700,7 @@ class PaymentPlanEventsForceRlsActivationTest extends TestCase
             new PaymentClassificationService,
             new PaymentApplicationService($planService, $timeline),
             $timeline,
+            app(\App\Services\OperatingJournalRecorderService::class),
         );
 
         (new TenantContextService)->clearDatabaseTenantContext();

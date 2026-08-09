@@ -51,6 +51,7 @@ class TrustTransferRequestService
         private readonly TrustBalanceService $balanceService,
         private readonly PaymentClassificationService $classification,
         private readonly PaymentApplicationService $application,
+        private readonly OperatingJournalRecorderService $journal,
     ) {}
 
     public function requestTransfer(
@@ -245,8 +246,9 @@ class TrustTransferRequestService
 
                 // $entry is never updated or deleted from here on — it is
                 // handed back purely for the caller's/tests' inspection.
-                (new TenantContextService)->runWithFirmContext($firm, function () use ($payment, $invoice) {
+                (new TenantContextService)->runWithFirmContext($firm, function () use ($payment, $invoice, $firm, $request) {
                     $this->application->applyToInvoice($payment, $invoice->fresh());
+                    $this->journal->recordTrustToOperatingTransfer($firm, $payment->fresh(), $invoice->fresh(), $request);
                 });
 
                 $request->update([

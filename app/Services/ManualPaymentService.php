@@ -45,6 +45,7 @@ class ManualPaymentService
         private PaymentClassificationService $classification,
         private PaymentApplicationService $application,
         private TimelineEventRecorder $timeline,
+        private OperatingJournalRecorderService $journal,
     ) {
     }
 
@@ -110,10 +111,12 @@ class ManualPaymentService
 
                 if ($installment) {
                     $this->application->applyToInstallment($payment, $installment);
+                    $this->journal->recordInstallmentPaymentApplied($firm, $payment->fresh(), $installment->fresh());
                 } elseif ($invoice) {
                     // Already inside this method's own runWithFirmContext
                     // wrap (see above), so a plain fresh() here is safe.
                     $this->application->applyToInvoice($payment, $invoice->fresh());
+                    $this->journal->recordInvoicePaymentApplied($firm, $payment->fresh(), $invoice->fresh());
                 }
 
                 $this->timeline->record($firm, 'payment_recorded', $payment, $recordedBy, [

@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\Client;
+use App\Models\Firm;
 use App\Models\Matter;
 use App\Models\MatterTrustBalance;
 use App\Models\TrustBalance;
@@ -103,5 +105,70 @@ class TrustBalanceService
             computedBalanceCents: $computed,
             differenceCents: $cached->balance_cents - $computed,
         );
+    }
+
+    /**
+     * Matter-scoped sibling of reconcileCacheAgainstLedger() (Phase E
+     * — "audit MatterTrustBalance carefully... add consistency/
+     * rebuild verification where needed"). Same non-mutating
+     * cache-vs-live-sum comparison, additionally scoped by matter_id.
+     * Reuses the same TrustBalanceReconciliationResult value object —
+     * no new comparison result type.
+     */
+    public function reconcileMatterCacheAgainstLedger(TrustLedger $ledger, Matter $matter): TrustBalanceReconciliationResult
+    {
+        $cached = MatterTrustBalance::query()
+            ->where('trust_ledger_id', $ledger->id)
+            ->where('matter_id', $matter->id)
+            ->firstOrFail();
+
+        $computed = (int) TrustLedgerEntry::query()
+            ->where('trust_ledger_id', $ledger->id)
+            ->where('matter_id', $matter->id)
+            ->sum('amount_cents');
+
+        return new TrustBalanceReconciliationResult(
+            matches: $cached->balance_cents === $computed,
+            cachedBalanceCents: $cached->balance_cents,
+            computedBalanceCents: $computed,
+            differenceCents: $cached->balance_cents - $computed,
+        );
+    }
+
+    /**
+     * Client-level aggregate (Phase E — client/matter balance
+     * aggregation): sums the CACHED trust_balances.balance_cents
+     * across every TrustLedger owned by this client. A client
+     * ordinarily has exactly one ledger, but the schema does not
+     * enforce that, so this sums rather than assumes a single row.
+     * Read-only — never writes trust_balances; the canonical
+     * TrustLedgerEntry rows (via recomputeForLedger()) remain the only
+     * authoritative source the cache itself is derived from. This IS
+     * the "unearned retainer balance" for the client under Phase C's
+     * earned/unearned model: funds still sitting in trust are, by
+     * definition, not yet firm revenue.
+     */
+    public function clientBalanceCents(Firm $firm, Client $client): int
+    {
+        return (int) (new TenantContextService())->runWithFirmContext($firm, fn () => TrustBalance::query()
+            ->whereIn('trust_ledger_id', TrustLedger::query()
+                ->where('firm_id', $firm->id)
+                ->where('client_id', $client->id)
+                ->pluck('id'))
+            ->sum('balance_cents'));
+    }
+
+    /**
+     * Matter-level aggregate across every ledger the matter has a
+     * balance row in (recomputeForMatter() above is scoped to a single
+     * ledger; this sums across all of them, mirroring
+     * clientBalanceCents()'s aggregation shape). Read-only.
+     */
+    public function matterBalanceCentsAggregate(Firm $firm, Matter $matter): int
+    {
+        return (int) (new TenantContextService())->runWithFirmContext($firm, fn () => MatterTrustBalance::query()
+            ->where('firm_id', $firm->id)
+            ->where('matter_id', $matter->id)
+            ->sum('balance_cents'));
     }
 }

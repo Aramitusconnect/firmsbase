@@ -38,6 +38,7 @@ class ExpenseApprovalService
     public function __construct(
         private readonly AccountingEntitlementPolicyService $entitlementPolicy,
         private readonly TenantSafeAccountingPolicyService $tenantSafePolicy,
+        private readonly OperatingJournalRecorderService $journal,
     ) {
     }
 
@@ -87,6 +88,15 @@ class ExpenseApprovalService
                     ? ExpenseStatus::Approved
                     : ExpenseStatus::Rejected,
             ]);
+
+            if ($decision->status === ExpenseApprovalStatus::Approved) {
+                // ExpenseStatus has no separate "paid"/reimbursed state
+                // (confirmed — no such transition exists anywhere in
+                // this codebase); Approved is the terminal
+                // money-relevant state, so it is treated as the
+                // "expense paid" trigger point for journal purposes.
+                $this->journal->recordExpensePaid($firm, $expense->fresh());
+            }
 
             return $approval;
         });

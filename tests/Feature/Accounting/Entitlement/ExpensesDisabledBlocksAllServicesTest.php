@@ -97,7 +97,7 @@ class ExpensesDisabledBlocksAllServicesTest extends TestCase
         $expense = Expense::factory()->forFirm($firm)->status(ExpenseStatus::Submitted)->create();
         $this->entitlements->setForSource($firm, 'expenses', \App\Enums\EntitlementSource::AdminOverride, false);
         $approver = FirmUser::factory()->role(FirmUserRole::FirmOwner)->create(['firm_id' => $firm->id]);
-        $service = new ExpenseApprovalService($this->policy, new TenantSafeAccountingPolicyService());
+        $service = new ExpenseApprovalService($this->policy, new TenantSafeAccountingPolicyService(), app(\App\Services\OperatingJournalRecorderService::class));
 
         $this->expectException(\RuntimeException::class);
         $service->approve($firm, $expense, $approver);

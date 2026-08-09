@@ -20,4 +20,5 @@ enum AccountingJournalSourceType: string
     case Refund = 'refund';
     case WriteOff = 'write_off';
     case Adjustment = 'adjustment';
+    case Chargeback = 'chargeback';
 }

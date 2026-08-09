@@ -85,4 +85,57 @@ class AccountingBalanceService
                 : $totalCredit - $totalDebit;
         });
     }
+
+    /**
+     * Phase E — "useful client/matter accounting views derived from
+     * journal postings": a per-account breakdown across every account
+     * the client/matter has ANY postings against, rather than making
+     * every caller already know which single account to ask about.
+     * Still derived live from accounting_postings every call — no
+     * cache, nothing new to keep in sync.
+     *
+     * @return array<int, array{account: ChartOfAccount, balance_cents: int}>
+     */
+    public function accountBalancesForClient(Firm $firm, Client $client): array
+    {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $client) {
+            $accountIds = DB::table('accounting_postings')
+                ->where('firm_id', $firm->id)
+                ->where('client_id', $client->id)
+                ->distinct()
+                ->pluck('chart_of_account_id');
+
+            return ChartOfAccount::query()
+                ->whereIn('id', $accountIds)
+                ->get()
+                ->map(fn (ChartOfAccount $account) => [
+                    'account' => $account,
+                    'balance_cents' => $this->clientBalanceCents($firm, $account, $client),
+                ])
+                ->all();
+        });
+    }
+
+    /**
+     * @return array<int, array{account: ChartOfAccount, balance_cents: int}>
+     */
+    public function accountBalancesForMatter(Firm $firm, Matter $matter): array
+    {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $matter) {
+            $accountIds = DB::table('accounting_postings')
+                ->where('firm_id', $firm->id)
+                ->where('matter_id', $matter->id)
+                ->distinct()
+                ->pluck('chart_of_account_id');
+
+            return ChartOfAccount::query()
+                ->whereIn('id', $accountIds)
+                ->get()
+                ->map(fn (ChartOfAccount $account) => [
+                    'account' => $account,
+                    'balance_cents' => $this->matterBalanceCents($firm, $account, $matter),
+                ])
+                ->all();
+        });
+    }
 }

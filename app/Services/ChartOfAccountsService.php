@@ -48,4 +48,25 @@ class ChartOfAccountsService
             return $account->fresh();
         });
     }
+
+    /**
+     * Read-only resolution of "the" active account of a given type for
+     * a firm — the same one-active-account-per-type convention
+     * AccountingExportLineBuilderService::resolveActiveAccountByType()
+     * already established privately for QuickBooks export line
+     * mapping. Exposed here as the single canonical, public
+     * implementation so the new journal-wiring layer (Phase D) doesn't
+     * duplicate that query. Returns null (never throws) when the firm
+     * has not yet set up an active account of this type — callers
+     * decide whether that means "skip posting" or "hard error."
+     */
+    public function resolveActiveAccountByType(Firm $firm, ChartOfAccountType $type): ?ChartOfAccount
+    {
+        return (new TenantContextService())->runWithFirmContext($firm, fn () => ChartOfAccount::query()
+            ->where('firm_id', $firm->id)
+            ->where('account_type', $type)
+            ->where('is_active', true)
+            ->orderBy('id')
+            ->first());
+    }
 }

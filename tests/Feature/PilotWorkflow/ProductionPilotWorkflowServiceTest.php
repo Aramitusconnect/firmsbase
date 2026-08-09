@@ -77,6 +77,7 @@ class ProductionPilotWorkflowServiceTest extends TestCase
                 new PaymentClassificationService(),
                 new PaymentApplicationService($paymentPlanService, $timeline),
                 $timeline,
+                app(\App\Services\OperatingJournalRecorderService::class),
             ),
             new MatterReadinessService(new ReadinessScorecardRegistry()),
         );

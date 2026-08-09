@@ -30,6 +30,7 @@ class AccountingJournalEntry extends Model
         'entry_date',
         'description',
         'source_type',
+        'idempotency_key',
         'reverses_journal_entry_id',
         'posted_by_firm_user_id',
         'payment_id',

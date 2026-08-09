@@ -37,6 +37,7 @@ class PaymentRecordedWiringTest extends TestCase
             new PaymentClassificationService(),
             new PaymentApplicationService(new PaymentPlanService($timeline), $timeline),
             $timeline,
+            app(\App\Services\OperatingJournalRecorderService::class),
         );
     }
 

@@ -106,4 +106,28 @@ class AccountingBalanceServiceTest extends TestCase
         $this->assertSame(0, $this->balanceService->accountBalanceCents($firm, $cash));
         $this->assertSame(0, $this->balanceService->accountBalanceCents($firm, $revenue));
     }
+
+    public function test_account_balances_for_client_returns_only_accounts_with_real_postings(): void
+    {
+        $firm = Firm::factory()->create();
+        [$cash, $revenue, $unused] = $this->runWithFirmContext($firm, fn () => [
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Asset)->create(),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Revenue)->create(),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Expense)->create(),
+        ]);
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
+
+        $this->postingService->post($firm, AccountingJournalSourceType::InvoicePaymentApplied, 'Payment', now(), [
+            ['chart_of_account_id' => $cash->id, 'debit_cents' => 30000, 'credit_cents' => 0, 'client_id' => $client->id],
+            ['chart_of_account_id' => $revenue->id, 'debit_cents' => 0, 'credit_cents' => 30000, 'client_id' => $client->id],
+        ]);
+
+        $breakdown = $this->balanceService->accountBalancesForClient($firm, $client);
+
+        $this->assertCount(2, $breakdown);
+        $byAccountId = collect($breakdown)->keyBy(fn ($row) => $row['account']->id);
+        $this->assertSame(30000, $byAccountId[$cash->id]['balance_cents']);
+        $this->assertSame(30000, $byAccountId[$revenue->id]['balance_cents']);
+        $this->assertArrayNotHasKey($unused->id, $byAccountId->all());
+    }
 }
