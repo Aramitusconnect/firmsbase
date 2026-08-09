@@ -4,9 +4,11 @@ namespace App\Livewire\PaymentRequests;
 
 use App\Enums\PaymentRequestAmountRule;
 use App\Enums\PaymentRequestStatus;
+use App\Exceptions\PaymentProviderUnavailableException;
 use App\Models\PaymentRequest;
 use App\Services\PaymentRequestCheckoutService;
 use App\Services\PaymentRequestService;
+use App\Services\Stripe\PaymentGatewaySimulationPolicyService;
 use App\Services\TenantContextService;
 use Illuminate\Support\Facades\App;
 use Livewire\Component;
@@ -27,6 +29,8 @@ use Livewire\Component;
  */
 class PublicPaymentPage extends Component
 {
+    private const PROVIDER_UNAVAILABLE_MESSAGE = 'Online payment is not currently available for this payment request. Please contact the firm.';
+
     public string $uuid;
 
     public ?int $paymentRequestId = null;
@@ -34,6 +38,16 @@ class PublicPaymentPage extends Component
     public bool $found = false;
 
     public bool $payable = false;
+
+    /**
+     * Payment-Channel Safety Hardening pass, item 2. Whether a live
+     * (or, in testing/opted-in-local, simulated) payment provider is
+     * actually available right now — see
+     * PaymentGatewaySimulationPolicyService's own docblock. When false,
+     * the page must still show the request's own details but must
+     * never render a functioning "Pay now" action.
+     */
+    public bool $providerAvailable = false;
 
     public string $firmDisplayName = '';
 
@@ -73,6 +87,7 @@ class PublicPaymentPage extends Component
         $this->found = true;
         $this->paymentRequestId = $paymentRequest->id;
         $this->status = $paymentRequest->status->value;
+        $this->providerAvailable = App::make(PaymentGatewaySimulationPolicyService::class)->isSimulationEnabled();
 
         (new TenantContextService)->runWithFirmContext($paymentRequest->firm, function () use ($paymentRequest, $paymentRequestService) {
             $paymentRequestService->recordLinkAccessed($paymentRequest->firm, $paymentRequest, request()->ip());
@@ -111,6 +126,17 @@ class PublicPaymentPage extends Component
             return;
         }
 
+        // Payment-Channel Safety Hardening pass, item 2 — never trust
+        // that the "Pay now" button was actually hidden client-side; a
+        // forged/replayed POST must be rejected here too, before ever
+        // reaching the gateway.
+        if (! $this->providerAvailable) {
+            $this->resultSucceeded = false;
+            $this->resultMessage = self::PROVIDER_UNAVAILABLE_MESSAGE;
+
+            return;
+        }
+
         $this->submitting = true;
         $this->resultMessage = null;
 
@@ -133,6 +159,15 @@ class PublicPaymentPage extends Component
                 PaymentRequestStatus::Failed => 'Your payment could not be completed. '.($result->failure_reason ?? 'Please try again.'),
                 default => 'Your payment could not be completed. Please try again.',
             };
+        } catch (PaymentProviderUnavailableException) {
+            // Item 9 — never surface the exception class/message itself
+            // (it never contains anything sensitive today, but this
+            // stays true regardless of what a future implementation's
+            // message says). Same professional copy shown proactively
+            // when the button is hidden, for a payer who somehow still
+            // reached submit().
+            $this->resultSucceeded = false;
+            $this->resultMessage = self::PROVIDER_UNAVAILABLE_MESSAGE;
         } catch (\Throwable $e) {
             $this->resultSucceeded = false;
             $this->resultMessage = 'Your payment could not be completed. Please try again or contact the firm directly.';

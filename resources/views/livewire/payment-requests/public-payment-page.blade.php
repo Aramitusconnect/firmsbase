@@ -21,18 +21,22 @@
             <div class="amount-display">${{ number_format(($fixedAmountCents ?? 0) / 100, 2) }}</div>
         @else
             <label for="submittedAmountDollars">Amount to pay (USD)</label>
-            <input type="text" id="submittedAmountDollars" wire:model="submittedAmountDollars" inputmode="decimal" placeholder="0.00">
+            <input type="text" id="submittedAmountDollars" wire:model="submittedAmountDollars" inputmode="decimal" placeholder="0.00" @if(! $providerAvailable) disabled @endif>
             @if ($amountRule === 'up_to' && $remainingCents !== null)
                 <p class="muted">Up to ${{ number_format($remainingCents / 100, 2) }} remaining.</p>
             @endif
         @endif
 
-        <button type="button" wire:click="submit" wire:loading.attr="disabled" @if($submitting) disabled @endif>
-            {{ $submitting ? 'Processing…' : 'Pay now' }}
-        </button>
+        @if ($providerAvailable)
+            <button type="button" wire:click="submit" wire:loading.attr="disabled" @if($submitting) disabled @endif>
+                {{ $submitting ? 'Processing…' : 'Pay now' }}
+            </button>
 
-        <p class="muted" style="margin-top:16px;font-size:0.8rem;">
-            Payments are processed securely. This page never displays or stores your card details.
-        </p>
+            <p class="muted" style="margin-top:16px;font-size:0.8rem;">
+                Payments are processed securely. This page never displays or stores your card details.
+            </p>
+        @else
+            <div class="notice info">Online payment is not currently available for this payment request. Please contact the firm.</div>
+        @endif
     @endif
 </div>

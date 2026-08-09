@@ -167,18 +167,19 @@ class PaymentRequestCheckoutService
      * throws and is caught by routeConfirmedPayment() above, landing
      * the request in PendingReview rather than a false "Paid").
      *
-     * filing_cost_reimbursement is a KNOWN, DOCUMENTED, PRE-EXISTING
-     * limitation carried forward unchanged from the Accounting
-     * Integrity Hardening Pass: this codebase's payment-time revenue
-     * recognition model posts a single Revenue leg per payment
-     * (OperatingJournalRecorderService::recordFeeEarned()) without
-     * splitting fee revenue from cost-reimbursement revenue — see
-     * ChartOfAccountPurpose::CostReimbursementRevenue's own docblock.
-     * This purpose therefore only changes the PAYER-FACING wording
-     * (PaymentRequestPurpose::payerFacingDescription()); the posted
-     * accounting entry is unchanged Legal Fee Revenue, not silently
-     * mislabeled — it is the SAME entry a fee payment would produce,
-     * documented here rather than hidden.
+     * filing_cost_reimbursement changes the PAYER-FACING wording
+     * (PaymentRequestPurpose::payerFacingDescription()); the actual
+     * posted accounting entry depends on the target invoice's own
+     * line composition — see OperatingJournalRecorderService::
+     * recordInvoicePaymentApplied()/resolveFeeCostSplitForFullyPaidInvoice()'s
+     * own docblocks (Payment-Channel Safety Hardening pass, item 4/5).
+     * A mixed invoice (fee lines + ReimbursableExpense lines) paid off
+     * in full by its own first payment now correctly splits between
+     * LegalFeeRevenue and CostReimbursementRevenue — no longer silently
+     * misclassified as 100% fee revenue. A mixed invoice funded by more
+     * than one payment still posts entirely to LegalFeeRevenue — that
+     * allocation policy remains genuinely undefined by this codebase
+     * (documented, not silently guessed); see the phase's final report.
      */
     private function routeOperatingPayment(
         Firm $firm,
