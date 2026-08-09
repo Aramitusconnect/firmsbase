@@ -512,6 +512,14 @@ class RowLevelSecurityCoverageMappingService
         'financial_evidence_snapshots', 'financial_evidence_transaction_reviews',
         'financial_evidence_duplicate_transfer_flags', 'financial_evidence_large_deposit_flags',
         'financial_evidence_reconciliation_candidates', 'financial_account_reclassification_requests',
+        // Native accounting journal (Phase A of the legal-accounting
+        // foundation) — two tables, prepared and forced together in
+        // one release:
+        // 2026_10_25_100003_prepare_row_level_security_and_force_rls_on_accounting_journal_entries_table.php,
+        // 2026_10_25_100004_prepare_row_level_security_and_force_rls_on_accounting_postings_table.php.
+        // Neither was ever in MISSING_PREPARED_TABLES — both added
+        // directly here since prepare and force happened together.
+        'accounting_journal_entries', 'accounting_postings',
     ];
 
     /**
