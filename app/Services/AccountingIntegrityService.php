@@ -3,18 +3,23 @@
 namespace App\Services;
 
 use App\Enums\AccountingPeriodStatus;
+use App\Enums\ChartOfAccountPurpose;
+use App\Enums\InvoiceLineType;
 use App\Enums\PaymentRequestEventType;
 use App\Enums\PaymentRequestPurpose;
 use App\Enums\PaymentRequestStatus;
 use App\Enums\PaymentReversalType;
+use App\Enums\PendingPaymentAllocationStatus;
 use App\Enums\TrustTransferRequestStatus;
 use App\Models\AccountingJournalEntry;
 use App\Models\AccountingPeriod;
 use App\Models\Firm;
+use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\PaymentAllocation;
 use App\Models\PaymentRequest;
 use App\Models\PaymentReversal;
+use App\Models\PendingPaymentAllocation;
 use App\Models\TrustTransferRequest;
 use App\ValueObjects\AccountingIntegrityFinding;
 use App\ValueObjects\AccountingIntegrityReport;
@@ -65,7 +70,9 @@ class AccountingIntegrityService
                     ->merge($this->findPaymentsMissingJournalEntries($firm))
                     ->merge($this->findAppliedTransfersMissingJournalEntries($firm))
                     ->merge($this->findReversalsMissingCompensatingEntries($firm))
-                    ->merge($this->findPaymentRequestPaymentsMissingJournalEntries($firm));
+                    ->merge($this->findPaymentRequestPaymentsMissingJournalEntries($firm))
+                    ->merge($this->findMixedInvoicesFullyPaidWithNoCostAllocation($firm))
+                    ->merge($this->findPaymentAllocationTotalsNotMatchingJournalRevenuePostings($firm));
             }
 
             $findings = $findings
@@ -73,7 +80,8 @@ class AccountingIntegrityService
                 ->merge($this->findDuplicateProviderTransactionIds($firm))
                 ->merge($this->findPaymentRequestAmountMismatches($firm))
                 ->merge($this->findPaymentRequestTargetMismatches($firm))
-                ->merge($this->findUnpostedTrustDepositPaymentRequests($firm));
+                ->merge($this->findUnpostedTrustDepositPaymentRequests($firm))
+                ->merge($this->findUnresolvedPendingPaymentAllocations($firm));
 
             return new AccountingIntegrityReport($firm->id, $findings->values(), now());
         });
@@ -487,6 +495,116 @@ class AccountingIntegrityService
             "PaymentRequest #{$paymentRequest->id} is a confirmed Trust deposit whose money was never filed as a TrustDepositService deposit request.",
             'payment_request',
             (int) $paymentRequest->id,
+        ));
+    }
+
+    /**
+     * Mixed-Invoice Revenue Allocation pass, item 10 — a fully paid
+     * mixed invoice (has at least one ReimbursableExpense line, AND
+     * amount_paid_cents >= total_cents) must have SOME cost_reimbursement_
+     * revenue-tagged PaymentAllocation row on record. Its absence means
+     * either an AH1-era payment predating this pass's split logic, or a
+     * genuine drift where the cost portion was silently classified as
+     * legal-fee revenue — exactly the misclassification this whole
+     * phase exists to prevent.
+     */
+    private function findMixedInvoicesFullyPaidWithNoCostAllocation(Firm $firm): Collection
+    {
+        $invoiceIdsWithCostAllocation = PaymentAllocation::query()
+            ->where('firm_id', $firm->id)
+            ->where('revenue_purpose', ChartOfAccountPurpose::CostReimbursementRevenue->value)
+            ->whereNotNull('invoice_id')
+            ->pluck('invoice_id');
+
+        $invoiceIdsWithCostLines = DB::table('invoice_lines')
+            ->join('invoices', 'invoices.id', '=', 'invoice_lines.invoice_id')
+            ->where('invoices.firm_id', $firm->id)
+            ->where('invoice_lines.line_type', InvoiceLineType::ReimbursableExpense->value)
+            ->pluck('invoice_lines.invoice_id')
+            ->unique();
+
+        $rows = Invoice::query()
+            ->where('firm_id', $firm->id)
+            ->whereIn('id', $invoiceIdsWithCostLines)
+            ->whereColumn('amount_paid_cents', '>=', 'total_cents')
+            ->where('total_cents', '>', 0)
+            ->whereNotIn('id', $invoiceIdsWithCostAllocation)
+            ->get();
+
+        return $rows->map(fn (Invoice $invoice) => new AccountingIntegrityFinding(
+            'mixed_invoice_fully_paid_with_no_cost_allocation',
+            "Invoice #{$invoice->id} has reimbursable-expense lines and is fully paid, but no cost-reimbursement-revenue allocation is on record — its payment(s) may have been entirely misclassified as legal-fee revenue.",
+            'invoice',
+            (int) $invoice->id,
+        ));
+    }
+
+    /**
+     * Mixed-Invoice Revenue Allocation pass, item 10 — for every
+     * invoice with revenue_purpose-tagged PaymentAllocation rows, the
+     * sum per purpose must reconcile to the sum of that invoice's own
+     * journal postings credited to the matching chart-of-account
+     * purpose. A mismatch means either a fee allocation posted to the
+     * cost account, a cost allocation posted to the fee account, or a
+     * PaymentAllocation total that simply doesn't match what was
+     * actually posted.
+     */
+    private function findPaymentAllocationTotalsNotMatchingJournalRevenuePostings(Firm $firm): Collection
+    {
+        $allocationTotals = PaymentAllocation::query()
+            ->where('firm_id', $firm->id)
+            ->whereNotNull('invoice_id')
+            ->whereNotNull('revenue_purpose')
+            ->selectRaw('invoice_id, revenue_purpose, SUM(amount_cents) as total_cents')
+            ->groupBy('invoice_id', 'revenue_purpose')
+            ->get();
+
+        $findings = new Collection;
+
+        foreach ($allocationTotals as $row) {
+            $journalTotal = (int) DB::table('accounting_postings')
+                ->join('accounting_journal_entries', 'accounting_journal_entries.id', '=', 'accounting_postings.accounting_journal_entry_id')
+                ->join('chart_of_accounts', 'chart_of_accounts.id', '=', 'accounting_postings.chart_of_account_id')
+                ->where('accounting_journal_entries.firm_id', $firm->id)
+                ->where('accounting_journal_entries.invoice_id', $row->invoice_id)
+                ->where('chart_of_accounts.purpose', $row->revenue_purpose)
+                ->sum('accounting_postings.credit_cents');
+
+            if ($journalTotal !== (int) $row->total_cents) {
+                $findings->push(new AccountingIntegrityFinding(
+                    'payment_allocation_total_mismatches_journal_posting',
+                    "Invoice #{$row->invoice_id}'s {$row->revenue_purpose} PaymentAllocation total ({$row->total_cents}) does not match its journal postings to that account ({$journalTotal}).",
+                    'invoice',
+                    (int) $row->invoice_id,
+                ));
+            }
+        }
+
+        return $findings;
+    }
+
+    /**
+     * Mixed-Invoice Revenue Allocation pass, item 10 — surfaces every
+     * still-open PendingPaymentAllocation so it doesn't silently age
+     * out of view. Not itself a "wrong" state (an unresolved allocation
+     * is an expected, governed intermediate state — see
+     * PendingPaymentAllocation's own docblock), but explicitly listed
+     * per the master prompt's own item 11 ("finalized payment with
+     * unresolved allocation"): read-only visibility into the review
+     * backlog, never auto-resolved here.
+     */
+    private function findUnresolvedPendingPaymentAllocations(Firm $firm): Collection
+    {
+        $rows = PendingPaymentAllocation::query()
+            ->where('firm_id', $firm->id)
+            ->where('status', PendingPaymentAllocationStatus::Pending)
+            ->get();
+
+        return $rows->map(fn (PendingPaymentAllocation $pending) => new AccountingIntegrityFinding(
+            'payment_pending_allocation_unresolved',
+            "Payment #{$pending->payment_id} has {$pending->amount_cents} cents awaiting a fee/cost allocation decision on invoice #{$pending->invoice_id} ({$pending->reason}).",
+            'pending_payment_allocation',
+            (int) $pending->id,
         ));
     }
 }
