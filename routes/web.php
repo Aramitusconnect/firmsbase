@@ -4,11 +4,50 @@ use App\Http\Controllers\ClientPortal\PlaidExchangeController;
 use App\Http\Controllers\Integrations\OAuthConnectionController;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
 use App\Http\Middleware\EstablishClientPortalTenantContext;
+use App\Livewire\PaymentRequests\PublicPaymentPage;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
     return view('welcome');
 });
+
+/*
+|--------------------------------------------------------------------------
+| Public Payment Request page (Payment Link / QR Routing phase)
+|--------------------------------------------------------------------------
+|
+| The first genuinely public, unauthenticated PAGE this codebase has
+| ever had (routes/webhooks.php's inbound webhook route is API-only,
+| deliberately registered outside the `web` group; this route
+| deliberately IS inside the implicit `web` group — via being declared
+| in this file — because the payment form needs session/CSRF, unlike
+| that stateless intake endpoint).
+|
+| `signed` is Laravel's own ValidateSignature middleware — the exact
+| mechanism FirmOwnerInvitationNotification::resetUrl() already uses
+| for password-reset links (see that class's own docblock), reused
+| here rather than inventing a second signing scheme.
+| PaymentRequestService::signedUrl() always generates this URL via
+| URL::temporarySignedRoute(), so `expires`/`signature` are Laravel's
+| own query parameters, never anything this app hand-rolls; a modified
+| `{uuid}` or a signature past its own expiry both 403 here, before
+| PublicPaymentPage::mount() ever runs.
+|
+| `throttle:30,1` mirrors the IP-keyed convention routes/webhooks.php
+| already established for the only other public route in this app.
+|
+| `{uuid}` is a plain string, not an implicit Eloquent route-model
+| binding — PublicPaymentPage resolves it itself via
+| PaymentRequestService::resolveByUuid(), which runs inside the RLS
+| self-lookup bootstrap hop (TenantContextService::
+| withPaymentRequestSelfLookupContext()) — an implicit binding would
+| attempt the same query before any context exists and always see zero
+| rows under payment_requests' own FORCE ROW LEVEL SECURITY.
+*/
+Route::get('/pay/{uuid}', PublicPaymentPage::class)
+    ->where('uuid', '[0-9a-fA-F-]{36}')
+    ->middleware(['signed', 'throttle:30,1'])
+    ->name('public.payment-requests.show');
 
 /*
 |--------------------------------------------------------------------------
