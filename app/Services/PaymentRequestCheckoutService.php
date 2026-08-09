@@ -186,11 +186,15 @@ class PaymentRequestCheckoutService
      * A payment whose invoice/installment application was deferred to
      * a PendingPaymentAllocation (the split could not be determined
      * safely) is real, confirmed money — Payment succeeded, payment_id
-     * is recorded — but the request's own status stays PendingReview,
-     * never Paid, until an authorized human resolves the allocation
-     * (PaymentAllocationResolutionService) and the invoice/journal
-     * consequence actually lands. See PaymentRequestStatus's own
-     * docblock for the exact semantics this preserves.
+     * is recorded, and (Pending-Cash Accounting pass)
+     * ManualPaymentService already posted the cash-received entry
+     * (Dr Operating Cash / Cr UnappliedOperatingFundsLiability) — but
+     * the request's own status stays PendingReview, never Paid, until
+     * an authorized human resolves the allocation
+     * (PaymentAllocationResolutionService) and the invoice application
+     * plus the REVENUE consequence actually lands. See
+     * PaymentRequestStatus's own docblock for the exact semantics this
+     * preserves.
      */
     private function routeOperatingPayment(
         Firm $firm,

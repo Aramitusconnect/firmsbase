@@ -15,11 +15,15 @@ use Illuminate\Support\Facades\DB;
  * (PaymentAccessPolicyService::canResolvePaymentAllocation() — the
  * SAME ceiling as recording a payment, never a new role architecture)
  * supplies an explicit fee/cost split; this service validates it,
- * applies the payment to its target (PaymentApplicationService),
- * posts the journal entry (OperatingJournalRecorderService), records
- * the revenue-bucket PaymentAllocation rows, and marks the pending row
- * Resolved — all inside one transaction, so the resolution either
- * lands completely or not at all.
+ * applies the payment to its target (PaymentApplicationService), posts
+ * the RECLASSIFICATION journal entry
+ * (OperatingJournalRecorderService::recordUnappliedFundsResolved() —
+ * Dr UnappliedOperatingFundsLiability / Cr revenue bucket(s), never a
+ * second Operating Cash debit, since ManualPaymentService already
+ * posted the cash at receipt via recordUnappliedFundsReceived()),
+ * records the revenue-bucket PaymentAllocation rows, and marks the
+ * pending row Resolved — all inside one transaction, so the resolution
+ * either lands completely or not at all.
  *
  * Never re-opens or re-resolves an already-Resolved row (item 9 —
  * immutability/correction): once posted, a correction goes through the
@@ -93,11 +97,11 @@ class PaymentAllocationResolutionService
 
                 if ($installment !== null) {
                     $this->application->applyToInstallment($payment, $installment);
-                    $this->journal->recordInstallmentPaymentApplied($firm, $payment->fresh(), $installment->fresh(), $feeCents, $costCents);
+                    $this->journal->recordUnappliedFundsResolved($firm, $payment->fresh(), $locked, $feeCents, $costCents);
                     $this->application->recordRevenueAllocation($firm, $payment->fresh(), $invoice, $feeCents, $costCents, installment: $installment->fresh());
                 } else {
                     $this->application->applyToInvoice($payment, $invoice);
-                    $this->journal->recordInvoicePaymentApplied($firm, $payment->fresh(), $invoice->fresh(), $feeCents, $costCents);
+                    $this->journal->recordUnappliedFundsResolved($firm, $payment->fresh(), $locked, $feeCents, $costCents);
                     $this->application->recordRevenueAllocation($firm, $payment->fresh(), $invoice->fresh(), $feeCents, $costCents);
                 }
 

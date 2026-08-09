@@ -10,6 +10,7 @@ use App\Models\Firm;
 use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\PaymentPlanInstallment;
+use App\Models\PendingPaymentAllocation;
 use App\Models\TrustTransferRequest;
 
 /**
@@ -157,6 +158,101 @@ class OperatingJournalRecorderService
         );
     }
 
+    /**
+     * Pending-Cash Accounting pass — posted the moment
+     * ManualPaymentService::applyOrDeferInvoice()/applyOrDeferInstallment()
+     * defers an ambiguous payment to a PendingPaymentAllocation. The
+     * cash is genuinely received; only the fee/cost split is unknown.
+     * Dr Operating Cash / Cr UnappliedOperatingFundsLiability for the
+     * full payment amount — never a partial amount, since $pending's
+     * own amount_cents always equals payment.amount_cents by
+     * construction (a payment is deferred in full or not at all, this
+     * pass introduces no partial-deferral concept).
+     *
+     * Idempotent on the payment: a retried submit() (same idempotency
+     * key) never re-enters applyOrDeferInvoice()/applyOrDeferInstallment()
+     * at all (ManualPaymentService's own idempotent-replay early
+     * return), so this never double-posts in practice — the
+     * idempotency key here is nonetheless keyed to the payment, not a
+     * caller-supplied value, matching every other method in this
+     * class.
+     */
+    public function recordUnappliedFundsReceived(Firm $firm, Payment $payment, PendingPaymentAllocation $pending): ?AccountingJournalEntry
+    {
+        if (! $this->isAccountingApplicable($firm)) {
+            return null;
+        }
+
+        $cash = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::OperatingCash);
+        $liability = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::UnappliedOperatingFundsLiability);
+
+        return $this->posting->post(
+            $firm,
+            AccountingJournalSourceType::UnappliedFundsReceived,
+            "Cash received, allocation pending — payment #{$payment->id}",
+            now(),
+            [
+                ['chart_of_account_id' => $cash->id, 'debit_cents' => $payment->amount_cents, 'credit_cents' => 0, 'client_id' => $payment->client_id, 'matter_id' => $payment->matter_id],
+                ['chart_of_account_id' => $liability->id, 'debit_cents' => 0, 'credit_cents' => $payment->amount_cents, 'client_id' => $payment->client_id, 'matter_id' => $payment->matter_id],
+            ],
+            [
+                'payment_id' => $payment->id,
+                'invoice_id' => $pending->invoice_id,
+                'pending_payment_allocation_id' => $pending->id,
+            ],
+            idempotencyKey: "unapplied_funds_received:payment:{$payment->id}",
+        );
+    }
+
+    /**
+     * Pending-Cash Accounting pass — posted by
+     * PaymentAllocationResolutionService::resolve() once an authorized
+     * user has supplied the fee/cost split. Never debits Operating Cash
+     * again (that leg was already posted by
+     * recordUnappliedFundsReceived()); this entry only reclassifies the
+     * liability into the correct revenue bucket(s): Dr
+     * UnappliedOperatingFundsLiability for the full resolved amount,
+     * Cr LegalFeeRevenue if feeCents > 0, Cr CostReimbursementRevenue
+     * if costCents > 0 — mirroring recordFeeEarned()'s own
+     * feeCents/costCents pattern, just without the cash leg.
+     */
+    public function recordUnappliedFundsResolved(Firm $firm, Payment $payment, PendingPaymentAllocation $pending, int $feeCents, int $costCents): ?AccountingJournalEntry
+    {
+        if (! $this->isAccountingApplicable($firm)) {
+            return null;
+        }
+
+        $liability = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::UnappliedOperatingFundsLiability);
+
+        $postings = [
+            ['chart_of_account_id' => $liability->id, 'debit_cents' => $feeCents + $costCents, 'credit_cents' => 0, 'client_id' => $payment->client_id, 'matter_id' => $payment->matter_id],
+        ];
+
+        if ($feeCents > 0) {
+            $feeRevenue = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::LegalFeeRevenue);
+            $postings[] = ['chart_of_account_id' => $feeRevenue->id, 'debit_cents' => 0, 'credit_cents' => $feeCents, 'client_id' => $payment->client_id, 'matter_id' => $payment->matter_id];
+        }
+
+        if ($costCents > 0) {
+            $costRevenue = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::CostReimbursementRevenue);
+            $postings[] = ['chart_of_account_id' => $costRevenue->id, 'debit_cents' => 0, 'credit_cents' => $costCents, 'client_id' => $payment->client_id, 'matter_id' => $payment->matter_id];
+        }
+
+        return $this->posting->post(
+            $firm,
+            AccountingJournalSourceType::UnappliedFundsResolved,
+            "Allocation resolved — payment #{$payment->id}",
+            now(),
+            $postings,
+            [
+                'payment_id' => $payment->id,
+                'invoice_id' => $pending->invoice_id,
+                'pending_payment_allocation_id' => $pending->id,
+            ],
+            idempotencyKey: "unapplied_funds_resolved:payment:{$payment->id}",
+        );
+    }
+
     public function recordExpensePaid(Firm $firm, Expense $expense): ?AccountingJournalEntry
     {
         if (! $this->isAccountingApplicable($firm)) {
@@ -187,6 +283,20 @@ class OperatingJournalRecorderService
      * chargeback) — the only two source types allowed here. Called by
      * Phase G's OperatingPaymentRefundService / OperatingChargebackService,
      * never directly.
+     *
+     * Pending-Cash Accounting pass, section 6 — $feeCents/$costCents are
+     * optional. When both null (the overwhelming common case: every
+     * call site that predates this pass, and every fee-only payment),
+     * this posts EXACTLY the same two-line entry it always has (cash
+     * credit, single LegalFeeRevenue debit for the full $amountCents) —
+     * no behavior change for any existing call site. When supplied
+     * (feeCents + costCents === amountCents, always resolved by the
+     * caller from the payment's own recognized PaymentAllocation
+     * composition — never guessed here), reverses each recognized
+     * bucket separately: Dr LegalFeeRevenue for feeCents, Dr
+     * CostReimbursementRevenue for costCents, Cr Cash for the total.
+     * Mirrors recordFeeEarned()'s own feeCents/costCents pattern in the
+     * opposite direction.
      */
     public function recordCashOut(
         Firm $firm,
@@ -196,9 +306,19 @@ class OperatingJournalRecorderService
         string $idempotencyKey,
         ?int $paymentId = null,
         ?int $invoiceId = null,
+        ?int $feeCents = null,
+        ?int $costCents = null,
     ): ?AccountingJournalEntry {
         if (! in_array($sourceType, [AccountingJournalSourceType::Refund, AccountingJournalSourceType::Chargeback], true)) {
             throw new \InvalidArgumentException('recordCashOut() only supports Refund and Chargeback source types.');
+        }
+
+        if (($feeCents === null) !== ($costCents === null)) {
+            throw new \InvalidArgumentException('feeCents and costCents must be supplied together or not at all.');
+        }
+
+        if ($feeCents !== null && $costCents !== null && $feeCents + $costCents !== $amountCents) {
+            throw new \InvalidArgumentException("feeCents ({$feeCents}) plus costCents ({$costCents}) must equal amountCents ({$amountCents}).");
         }
 
         if (! $this->isAccountingApplicable($firm)) {
@@ -206,17 +326,32 @@ class OperatingJournalRecorderService
         }
 
         $cash = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::OperatingCash);
-        $revenue = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::LegalFeeRevenue);
+
+        $postings = [
+            ['chart_of_account_id' => $cash->id, 'debit_cents' => 0, 'credit_cents' => $amountCents],
+        ];
+
+        if ($feeCents === null) {
+            $revenue = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::LegalFeeRevenue);
+            $postings[] = ['chart_of_account_id' => $revenue->id, 'debit_cents' => $amountCents, 'credit_cents' => 0];
+        } else {
+            if ($feeCents > 0) {
+                $revenue = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::LegalFeeRevenue);
+                $postings[] = ['chart_of_account_id' => $revenue->id, 'debit_cents' => $feeCents, 'credit_cents' => 0];
+            }
+
+            if ($costCents > 0) {
+                $costRevenue = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::CostReimbursementRevenue);
+                $postings[] = ['chart_of_account_id' => $costRevenue->id, 'debit_cents' => $costCents, 'credit_cents' => 0];
+            }
+        }
 
         return $this->posting->post(
             $firm,
             $sourceType,
             $description,
             now(),
-            [
-                ['chart_of_account_id' => $revenue->id, 'debit_cents' => $amountCents, 'credit_cents' => 0],
-                ['chart_of_account_id' => $cash->id, 'debit_cents' => 0, 'credit_cents' => $amountCents],
-            ],
+            $postings,
             ['payment_id' => $paymentId, 'invoice_id' => $invoiceId],
             idempotencyKey: $idempotencyKey,
         );

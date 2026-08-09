@@ -39,7 +39,21 @@ use Illuminate\Support\Facades\DB;
  * on the idempotent-replay early return above — that return happens
  * before this branch is ever reached, so a repeated idempotency key
  * cannot double-fire), registered via DB::afterCommit() from inside
- * the existing DB::transaction().
+ * the DB::transaction() below.
+ *
+ * Pending-Cash Accounting pass — submit()'s body is now wrapped in a
+ * real DB::transaction() (previously only runWithFirmContext(), which
+ * sets the RLS session variable but does not itself open a
+ * transaction). Without it, a downstream posting failure
+ * (AccountingSetupIncompleteException from
+ * OperatingJournalRecorderService::recordUnappliedFundsReceived(), most
+ * critically) would leave an already-committed Payment/
+ * ManualPaymentRecord/PendingPaymentAllocation row with no
+ * corresponding accounting entry — exactly the "received cash with no
+ * accounting representation" state this pass exists to make
+ * impossible. This closes that gap for every caller, including
+ * RecordsManualPayment (the Filament "record a manual payment" action),
+ * which calls submit() directly with no transaction of its own.
  *
  * Mixed-Invoice Revenue Allocation pass — the optional $purposeHint
  * (PaymentRequestPurpose::EarnedFee/FilingCostReimbursement/
@@ -49,9 +63,11 @@ use Illuminate\Support\Facades\DB;
  * lines + reimbursable-expense lines). See applyOrDeferInvoice()/
  * applyOrDeferInstallment()'s own docblocks: when the split cannot be
  * determined safely, the Payment itself still succeeds (real money was
- * received) but its application to the invoice/installment and its
- * journal posting are BOTH deferred to a PendingPaymentAllocation for
- * an authorized human to resolve — never guessed.
+ * received) and — Pending-Cash Accounting pass — that cash is posted
+ * immediately (recordUnappliedFundsReceived()); only its application to
+ * the invoice/installment and the REVENUE journal posting are deferred
+ * to a PendingPaymentAllocation for an authorized human to resolve —
+ * never guessed.
  */
 class ManualPaymentService
 {
@@ -83,76 +99,82 @@ class ManualPaymentService
             $requestedClassification, $idempotencyKey, $recordedBy, $externalReference,
             $methodReference, $notes, $purposeHint,
         ) {
-            $existing = Payment::query()
-                ->where('firm_id', $firm->id)
-                ->where('idempotency_key', $idempotencyKey)
-                ->first();
+            return DB::transaction(function () use (
+                $firm, $client, $matter, $invoice, $installment, $amountCents, $method,
+                $requestedClassification, $idempotencyKey, $recordedBy, $externalReference,
+                $methodReference, $notes, $purposeHint,
+            ) {
+                $existing = Payment::query()
+                    ->where('firm_id', $firm->id)
+                    ->where('idempotency_key', $idempotencyKey)
+                    ->first();
 
-            if ($existing) {
-                // Idempotent replay: same key always returns the
-                // original outcome, never a second row, and never
-                // fires a second payment.recorded webhook event.
-                return $existing;
-            }
-
-            $payment = Payment::create([
-                'firm_id' => $firm->id,
-                'client_id' => $client->id,
-                'matter_id' => $matter?->id,
-                'invoice_id' => $invoice?->id,
-                'payment_plan_installment_id' => $installment?->id,
-                'amount_cents' => $amountCents,
-                'payment_method' => $method,
-                'payment_classification' => $requestedClassification,
-                'status' => PaymentStatus::Initiated,
-                'external_reference' => $externalReference,
-                'idempotency_key' => $idempotencyKey,
-                'recorded_by' => $recordedBy?->id,
-            ]);
-
-            $result = $this->classification->classify($firm, $requestedClassification);
-            $this->classification->recordDecision($payment, $requestedClassification, $result, $recordedBy);
-            $payment = $payment->fresh();
-
-            if ($result->accepted) {
-                ManualPaymentRecord::create([
-                    'payment_id' => $payment->id,
-                    'received_by' => $recordedBy?->id,
-                    'received_at' => now(),
-                    'method_reference' => $methodReference,
-                    'notes' => $notes,
-                ]);
-
-                if ($installment) {
-                    $this->applyOrDeferInstallment($firm, $payment, $installment, $purposeHint);
-                } elseif ($invoice) {
-                    // Already inside this method's own runWithFirmContext
-                    // wrap (see above), so a plain fresh() here is safe.
-                    $this->applyOrDeferInvoice($firm, $payment, $invoice->fresh(), $purposeHint);
+                if ($existing) {
+                    // Idempotent replay: same key always returns the
+                    // original outcome, never a second row, and never
+                    // fires a second payment.recorded webhook event.
+                    return $existing;
                 }
 
-                $this->timeline->record($firm, 'payment_recorded', $payment, $recordedBy, [
-                    'payment_id' => $payment->id,
+                $payment = Payment::create([
+                    'firm_id' => $firm->id,
+                    'client_id' => $client->id,
+                    'matter_id' => $matter?->id,
+                    'invoice_id' => $invoice?->id,
+                    'payment_plan_installment_id' => $installment?->id,
                     'amount_cents' => $amountCents,
+                    'payment_method' => $method,
+                    'payment_classification' => $requestedClassification,
+                    'status' => PaymentStatus::Initiated,
+                    'external_reference' => $externalReference,
+                    'idempotency_key' => $idempotencyKey,
+                    'recorded_by' => $recordedBy?->id,
                 ]);
 
+                $result = $this->classification->classify($firm, $requestedClassification);
+                $this->classification->recordDecision($payment, $requestedClassification, $result, $recordedBy);
                 $payment = $payment->fresh();
 
-                DB::afterCommit(function () use ($firm, $payment) {
-                    try {
-                        app(WebhookEventRecorderService::class)->record($firm, WebhookEventType::PaymentRecorded, $payment);
-                    } catch (\Throwable $e) {
-                        report($e);
-                    }
-                });
-            } else {
-                $this->timeline->record($firm, 'payment_blocked', $payment, $recordedBy, [
-                    'payment_id' => $payment->id,
-                    'reason' => $result->rejectionReason,
-                ]);
-            }
+                if ($result->accepted) {
+                    ManualPaymentRecord::create([
+                        'payment_id' => $payment->id,
+                        'received_by' => $recordedBy?->id,
+                        'received_at' => now(),
+                        'method_reference' => $methodReference,
+                        'notes' => $notes,
+                    ]);
 
-            return $payment->fresh();
+                    if ($installment) {
+                        $this->applyOrDeferInstallment($firm, $payment, $installment, $purposeHint);
+                    } elseif ($invoice) {
+                        // Already inside this method's own runWithFirmContext
+                        // wrap (see above), so a plain fresh() here is safe.
+                        $this->applyOrDeferInvoice($firm, $payment, $invoice->fresh(), $purposeHint);
+                    }
+
+                    $this->timeline->record($firm, 'payment_recorded', $payment, $recordedBy, [
+                        'payment_id' => $payment->id,
+                        'amount_cents' => $amountCents,
+                    ]);
+
+                    $payment = $payment->fresh();
+
+                    DB::afterCommit(function () use ($firm, $payment) {
+                        try {
+                            app(WebhookEventRecorderService::class)->record($firm, WebhookEventType::PaymentRecorded, $payment);
+                        } catch (\Throwable $e) {
+                            report($e);
+                        }
+                    });
+                } else {
+                    $this->timeline->record($firm, 'payment_blocked', $payment, $recordedBy, [
+                        'payment_id' => $payment->id,
+                        'reason' => $result->rejectionReason,
+                    ]);
+                }
+
+                return $payment->fresh();
+            });
         });
 
         if (! $payment->isAcceptedOperatingPayment()) {
@@ -167,25 +189,37 @@ class ManualPaymentService
      * split for this invoice-targeted payment. When resolved, applies
      * AND posts exactly as before this phase (zero behavior change for
      * every fee-only invoice — the overwhelming common case). When
-     * ambiguous, defers BOTH the invoice application and the journal
+     * ambiguous, defers BOTH the invoice application and the revenue
      * posting to a PendingPaymentAllocation: the Payment itself stays
-     * genuinely Succeeded (real money was received), but
-     * invoices.amount_paid_cents is deliberately left untouched and no
-     * journal entry exists until an authorized human resolves the
-     * split (PaymentAllocationResolutionService).
+     * genuinely Succeeded (real money was received), and
+     * invoices.amount_paid_cents is deliberately left untouched until an
+     * authorized human resolves the split
+     * (PaymentAllocationResolutionService).
+     *
+     * Pending-Cash Accounting pass — the cash itself is never left off
+     * the books while ambiguous: recordUnappliedFundsReceived() posts
+     * Dr Operating Cash / Cr UnappliedOperatingFundsLiability in the
+     * SAME transaction as the PendingPaymentAllocation row (submit()'s
+     * own DB::transaction()), so a firm missing that chart-of-accounts
+     * purpose gets the SAME atomic post-or-block behavior as every
+     * other required account — the Payment and PendingPaymentAllocation
+     * roll back together with it, never left stranded with no
+     * accounting representation.
      */
     private function applyOrDeferInvoice(Firm $firm, Payment $payment, Invoice $invoice, ?PaymentRequestPurpose $purposeHint): void
     {
         $decision = $this->application->resolveInvoiceRevenueAllocation($invoice, $payment->amount_cents, $purposeHint);
 
         if ($decision->isAmbiguous()) {
-            PendingPaymentAllocation::create([
+            $pending = PendingPaymentAllocation::create([
                 'firm_id' => $firm->id,
                 'payment_id' => $payment->id,
                 'invoice_id' => $invoice->id,
                 'amount_cents' => $payment->amount_cents,
                 'reason' => $decision->reason,
             ]);
+
+            $this->journal->recordUnappliedFundsReceived($firm, $payment->fresh(), $pending);
 
             return;
         }
@@ -196,12 +230,13 @@ class ManualPaymentService
     }
 
     /**
-     * Same deferral principle as applyOrDeferInvoice(), scoped to an
-     * installment's own underlying invoice (installment.paymentPlan.invoice)
-     * when one exists. An installment with no underlying invoice (a
-     * standalone payment plan) has no lines/fee-cost concept at all —
-     * unchanged, always posts 100% to LegalFeeRevenue exactly as
-     * before this phase.
+     * Same deferral principle as applyOrDeferInvoice() — including the
+     * same recordUnappliedFundsReceived() cash posting when ambiguous —
+     * scoped to an installment's own underlying invoice
+     * (installment.paymentPlan.invoice) when one exists. An installment
+     * with no underlying invoice (a standalone payment plan) has no
+     * lines/fee-cost concept at all — unchanged, always posts 100% to
+     * LegalFeeRevenue exactly as before this phase.
      */
     private function applyOrDeferInstallment(Firm $firm, Payment $payment, PaymentPlanInstallment $installment, ?PaymentRequestPurpose $purposeHint): void
     {
@@ -217,7 +252,7 @@ class ManualPaymentService
         $decision = $this->application->resolveInvoiceRevenueAllocation($underlyingInvoice, $payment->amount_cents, $purposeHint);
 
         if ($decision->isAmbiguous()) {
-            PendingPaymentAllocation::create([
+            $pending = PendingPaymentAllocation::create([
                 'firm_id' => $firm->id,
                 'payment_id' => $payment->id,
                 'invoice_id' => $underlyingInvoice->id,
@@ -225,6 +260,8 @@ class ManualPaymentService
                 'amount_cents' => $payment->amount_cents,
                 'reason' => $decision->reason,
             ]);
+
+            $this->journal->recordUnappliedFundsReceived($firm, $payment->fresh(), $pending);
 
             return;
         }
