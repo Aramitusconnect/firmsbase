@@ -163,20 +163,24 @@ class OperatingJournalRecorderServiceTest extends TestCase
      * this hardening pass — never a guessed split.
      */
     /**
-     * Superseded by the Mixed-Invoice Revenue Allocation pass: an
-     * ambiguous multi-payment mixed invoice no longer guesses a
-     * fee-first/100%-fee fallback. Both payments here are individually
-     * ambiguous (neither is fee-only/cost-only, neither exactly
-     * finishes both remaining buckets, and neither carries a purpose
-     * hint), so both are deferred to a governed PendingPaymentAllocation
-     * — no journal entry is posted, and the invoice's amount_paid_cents
-     * stays untouched, until an authorized human resolves each one. See
+     * Superseded by the Mixed-Invoice Revenue Allocation pass, and
+     * further updated by the Pending-Cash Accounting pass: an ambiguous
+     * multi-payment mixed invoice no longer guesses a fee-first/100%-fee
+     * fallback. Both payments here are individually ambiguous (neither
+     * is fee-only/cost-only, neither exactly finishes both remaining
+     * buckets, and neither carries a purpose hint), so both are
+     * deferred to a governed PendingPaymentAllocation — but the cash
+     * itself is still posted immediately (Dr Operating Cash / Cr
+     * UnappliedOperatingFundsLiability), never left off the books; only
+     * revenue recognition and the invoice's amount_paid_cents stay
+     * untouched until an authorized human resolves each one. See
      * tests/Feature/Accounting/MixedInvoiceRevenueAllocationTest.php for
      * the full resolution-policy test matrix.
      */
     public function test_a_mixed_invoice_paid_by_more_than_one_ambiguous_payment_defers_both_to_pending_allocation(): void
     {
-        [$firm, , $feeRevenue] = $this->makeFirmWithAccounts();
+        [$firm, $cash, $feeRevenue] = $this->makeFirmWithAccounts();
+        $liability = $this->runWithFirmContext($firm, fn () => ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Liability)->purpose(ChartOfAccountPurpose::UnappliedOperatingFundsLiability)->create(['account_code' => '2100', 'account_name' => 'Unapplied Operating Funds']));
         $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
         $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forClient($client)->status(InvoiceStatus::Sent)->create([
             'subtotal_cents' => 80000, 'total_cents' => 80000,
@@ -197,13 +201,18 @@ class OperatingJournalRecorderServiceTest extends TestCase
         );
 
         $entries = $this->runWithFirmContext($firm, fn () => AccountingJournalEntry::with('postings')->where('invoice_id', $invoice->id)->get());
-        $this->assertCount(0, $entries, 'An ambiguous mixed-invoice payment is deferred, not guessed at — no journal entry until resolved.');
+        $this->assertCount(2, $entries, 'Cash receipt is posted for each ambiguous payment even though revenue is not.');
 
         $totalFeeRevenueCredited = $entries->flatMap->postings->where('chart_of_account_id', $feeRevenue->id)->sum('credit_cents');
-        $this->assertSame(0, $totalFeeRevenueCredited);
+        $this->assertSame(0, $totalFeeRevenueCredited, 'No revenue is guessed for either payment.');
+
+        $totalCashDebited = $entries->flatMap->postings->where('chart_of_account_id', $cash->id)->sum('debit_cents');
+        $totalLiabilityCredited = $entries->flatMap->postings->where('chart_of_account_id', $liability->id)->sum('credit_cents');
+        $this->assertSame(80000, $totalCashDebited);
+        $this->assertSame(80000, $totalLiabilityCredited);
 
         $refreshedInvoice = $this->runWithFirmContext($firm, fn () => $invoice->fresh());
-        $this->assertSame(0, $refreshedInvoice->amount_paid_cents, 'Application to the invoice is deferred along with the journal posting.');
+        $this->assertSame(0, $refreshedInvoice->amount_paid_cents, 'Application to the invoice is deferred along with revenue recognition.');
 
         $pending = $this->runWithFirmContext($firm, fn () => PendingPaymentAllocation::query()->where('invoice_id', $invoice->id)->orderBy('amount_cents')->get());
         $this->assertCount(2, $pending);

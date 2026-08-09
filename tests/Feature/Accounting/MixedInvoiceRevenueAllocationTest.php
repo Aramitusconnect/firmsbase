@@ -60,13 +60,14 @@ class MixedInvoiceRevenueAllocationTest extends TestCase
         $firm = Firm::factory()->create();
         app(EntitlementService::class)->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, true);
 
-        [$cash, $feeRevenue, $costRevenue] = $this->runWithFirmContext($firm, fn () => [
+        [$cash, $feeRevenue, $costRevenue, $liability] = $this->runWithFirmContext($firm, fn () => [
             ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Asset)->purpose(ChartOfAccountPurpose::OperatingCash)->create(),
             ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Revenue)->purpose(ChartOfAccountPurpose::LegalFeeRevenue)->create(),
             ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Revenue)->purpose(ChartOfAccountPurpose::CostReimbursementRevenue)->create(),
+            ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Liability)->purpose(ChartOfAccountPurpose::UnappliedOperatingFundsLiability)->create(),
         ]);
 
-        return [$firm, $cash, $feeRevenue, $costRevenue];
+        return [$firm, $cash, $feeRevenue, $costRevenue, $liability];
     }
 
     /**
