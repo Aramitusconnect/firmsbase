@@ -23,6 +23,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\Matter;
 use App\Models\Payment;
+use App\Models\PendingPaymentAllocation;
 use App\Services\AccountingBalanceService;
 use App\Services\EntitlementService;
 use App\Services\ExpenseApprovalService;
@@ -161,9 +162,21 @@ class OperatingJournalRecorderServiceTest extends TestCase
      * single undifferentiated LegalFeeRevenue leg, exactly as before
      * this hardening pass — never a guessed split.
      */
-    public function test_a_mixed_invoice_paid_by_more_than_one_payment_does_not_attempt_a_split(): void
+    /**
+     * Superseded by the Mixed-Invoice Revenue Allocation pass: an
+     * ambiguous multi-payment mixed invoice no longer guesses a
+     * fee-first/100%-fee fallback. Both payments here are individually
+     * ambiguous (neither is fee-only/cost-only, neither exactly
+     * finishes both remaining buckets, and neither carries a purpose
+     * hint), so both are deferred to a governed PendingPaymentAllocation
+     * — no journal entry is posted, and the invoice's amount_paid_cents
+     * stays untouched, until an authorized human resolves each one. See
+     * tests/Feature/Accounting/MixedInvoiceRevenueAllocationTest.php for
+     * the full resolution-policy test matrix.
+     */
+    public function test_a_mixed_invoice_paid_by_more_than_one_ambiguous_payment_defers_both_to_pending_allocation(): void
     {
-        [$firm, $cash, $feeRevenue] = $this->makeFirmWithAccounts();
+        [$firm, , $feeRevenue] = $this->makeFirmWithAccounts();
         $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
         $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forClient($client)->status(InvoiceStatus::Sent)->create([
             'subtotal_cents' => 80000, 'total_cents' => 80000,
@@ -173,24 +186,30 @@ class OperatingJournalRecorderServiceTest extends TestCase
             InvoiceLine::factory()->forInvoice($invoice)->create(['line_type' => InvoiceLineType::ReimbursableExpense, 'description' => 'Reimbursable filing cost', 'amount_cents' => 30000]),
         ]);
 
-        app(ManualPaymentService::class)->submit(
+        $firstPayment = app(ManualPaymentService::class)->submit(
             $firm, $client, 20000, ManualPaymentMethod::Check, PaymentClassification::OperatingPayment,
             (string) Str::uuid(), invoice: $invoice,
         );
         $invoiceAfterFirstPayment = $this->runWithFirmContext($firm, fn () => $invoice->fresh());
-        app(ManualPaymentService::class)->submit(
+        $secondPayment = app(ManualPaymentService::class)->submit(
             $firm, $client, 60000, ManualPaymentMethod::Check, PaymentClassification::OperatingPayment,
             (string) Str::uuid(), invoice: $invoiceAfterFirstPayment,
         );
 
         $entries = $this->runWithFirmContext($firm, fn () => AccountingJournalEntry::with('postings')->where('invoice_id', $invoice->id)->get());
+        $this->assertCount(0, $entries, 'An ambiguous mixed-invoice payment is deferred, not guessed at — no journal entry until resolved.');
 
-        $this->assertCount(2, $entries);
-        foreach ($entries as $entry) {
-            $this->assertCount(2, $entry->postings, 'A non-split posting always has exactly two lines: cash debit, single revenue credit.');
-        }
         $totalFeeRevenueCredited = $entries->flatMap->postings->where('chart_of_account_id', $feeRevenue->id)->sum('credit_cents');
-        $this->assertSame(80000, $totalFeeRevenueCredited, 'Without a defined allocation policy, a multi-payment mixed invoice still posts entirely to LegalFeeRevenue — documented, not silently guessed differently.');
+        $this->assertSame(0, $totalFeeRevenueCredited);
+
+        $refreshedInvoice = $this->runWithFirmContext($firm, fn () => $invoice->fresh());
+        $this->assertSame(0, $refreshedInvoice->amount_paid_cents, 'Application to the invoice is deferred along with the journal posting.');
+
+        $pending = $this->runWithFirmContext($firm, fn () => PendingPaymentAllocation::query()->where('invoice_id', $invoice->id)->orderBy('amount_cents')->get());
+        $this->assertCount(2, $pending);
+        $this->assertSame([20000, 60000], $pending->pluck('amount_cents')->all());
+        $this->assertTrue($pending->every(fn ($row) => $row->isPending()));
+        $this->assertSame([$firstPayment->id, $secondPayment->id], $pending->pluck('payment_id')->sort()->values()->all());
     }
 
     /**
