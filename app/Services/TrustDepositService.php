@@ -33,8 +33,7 @@ class TrustDepositService
         private readonly TenantSafeTrustPolicyService $tenantSafePolicy,
         private readonly TrustConcurrencyLockService $lockService,
         private readonly TrustBalanceService $balanceService,
-    ) {
-    }
+    ) {}
 
     public function requestDeposit(
         Firm $firm,
@@ -51,7 +50,7 @@ class TrustDepositService
             throw new \RuntimeException('Deposit amount must be positive.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
             'firm_id' => $firm->id,
             'event_type' => TrustApprovalEventType::DepositRequested,
             'actor_firm_user_id' => $requestedBy->id,
@@ -68,12 +67,13 @@ class TrustDepositService
         $this->eligibility->assertEligible($firm);
         $this->tenantSafePolicy->assertTrustApprovalEventBelongsToFirm($requestedEvent, $firm);
         $this->accessPolicy->assertCanApprove($approvedBy);
+        $this->accessPolicy->assertApproverIsNotRequester($approvedBy, $requestedEvent->actor_firm_user_id);
 
         if ($requestedEvent->event_type !== TrustApprovalEventType::DepositRequested) {
             throw new \RuntimeException('This event is not a pending deposit request.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
             'firm_id' => $firm->id,
             'event_type' => TrustApprovalEventType::DepositApproved,
             'actor_firm_user_id' => $approvedBy->id,
@@ -91,7 +91,7 @@ class TrustDepositService
         $this->tenantSafePolicy->assertTrustApprovalEventBelongsToFirm($requestedEvent, $firm);
         $this->accessPolicy->assertCanApprove($deniedBy);
 
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
             'firm_id' => $firm->id,
             'event_type' => TrustApprovalEventType::DepositDenied,
             'actor_firm_user_id' => $deniedBy->id,
@@ -134,7 +134,7 @@ class TrustDepositService
         // would otherwise silently fail closed under FORCE RLS, masking
         // a real already-posted deposit as "never posted") through the
         // entire lockService->withLockedBalances() closure below.
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $ledger, $matter, $depositApprovedEvent) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $ledger, $matter, $depositApprovedEvent) {
             if (TrustLedgerEntry::query()->where('trust_approval_event_id', $depositApprovedEvent->id)->exists()) {
                 throw new \RuntimeException('This deposit approval has already been posted.');
             }

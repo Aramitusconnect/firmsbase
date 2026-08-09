@@ -66,4 +66,20 @@ class TrustAccessPolicyService
             throw new \RuntimeException('The second approver must be a different firm user than the first approver.');
         }
     }
+
+    /**
+     * Ordinary trust deposit/transfer/refund approvals also require
+     * maker/checker separation, not just role eligibility: without
+     * this, a single FirmOwner or Attorney could both request and
+     * approve their own trust action unilaterally, while the same
+     * principle was already enforced for high-risk adjustments via
+     * assertDistinctApprovers(). This closes that gap for the ordinary
+     * request/approve flows.
+     */
+    public function assertApproverIsNotRequester(FirmUser $approver, int $requestedByFirmUserId): void
+    {
+        if ($approver->id === $requestedByFirmUserId) {
+            throw new \RuntimeException('The approver must be a different firm user than whoever requested this trust action.');
+        }
+    }
 }

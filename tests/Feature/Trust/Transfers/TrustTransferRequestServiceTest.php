@@ -50,21 +50,22 @@ class TrustTransferRequestServiceTest extends TestCase
         ]);
 
         $requester = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $approver = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
         $deposits = app(TrustDepositService::class);
         $depositRequest = $deposits->requestDeposit($firm, $ledger, $requester, $depositAmount, $matter);
-        $approved = $deposits->approveDeposit($firm, $depositRequest, $requester);
+        $approved = $deposits->approveDeposit($firm, $depositRequest, $approver);
         $deposits->post($firm, $ledger, $approved, $matter);
 
-        return [$firm, $ledger, $matter, $invoice, $requester];
+        return [$firm, $ledger, $matter, $invoice, $requester, $approver];
     }
 
     public function test_full_transfer_lifecycle_applies_a_payment_to_the_invoice(): void
     {
-        [$firm, $ledger, $matter, $invoice, $user] = $this->setupFundedLedgerAndInvoice(20000);
+        [$firm, $ledger, $matter, $invoice, $requester, $approver] = $this->setupFundedLedgerAndInvoice(20000);
 
-        $request = $this->service->requestTransfer($firm, $ledger, $matter, $invoice, $user, 15000);
-        $this->service->approveTransfer($firm, $request, $user);
-        $payment = $this->service->apply($firm, $request->fresh(), $user);
+        $request = $this->service->requestTransfer($firm, $ledger, $matter, $invoice, $requester, 15000);
+        $this->service->approveTransfer($firm, $request, $approver);
+        $payment = $this->service->apply($firm, $request->fresh(), $approver);
 
         $this->assertSame(PaymentClassification::OperatingPayment, $payment->payment_classification);
         $this->assertSame(TrustTransferRequestStatus::Applied, $request->fresh()->status);
@@ -81,13 +82,13 @@ class TrustTransferRequestServiceTest extends TestCase
 
     public function test_transfer_cannot_apply_more_than_the_available_ledger_balance(): void
     {
-        [$firm, $ledger, $matter, $invoice, $user] = $this->setupFundedLedgerAndInvoice(5000);
+        [$firm, $ledger, $matter, $invoice, $requester, $approver] = $this->setupFundedLedgerAndInvoice(5000);
 
-        $request = $this->service->requestTransfer($firm, $ledger, $matter, $invoice, $user, 15000);
-        $this->service->approveTransfer($firm, $request, $user);
+        $request = $this->service->requestTransfer($firm, $ledger, $matter, $invoice, $requester, 15000);
+        $this->service->approveTransfer($firm, $request, $approver);
 
         $this->expectException(\RuntimeException::class);
-        $this->service->apply($firm, $request->fresh(), $user);
+        $this->service->apply($firm, $request->fresh(), $approver);
     }
 
     public function test_transfer_cannot_apply_to_an_invoice_that_is_still_a_draft(): void
@@ -102,17 +103,18 @@ class TrustTransferRequestServiceTest extends TestCase
             'subtotal_cents' => 10000,
             'total_cents' => 10000,
         ]);
-        $user = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $requester = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $approver = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
         $deposits = app(TrustDepositService::class);
-        $depositRequest = $deposits->requestDeposit($firm, $ledger, $user, 20000, $matter);
-        $approved = $deposits->approveDeposit($firm, $depositRequest, $user);
+        $depositRequest = $deposits->requestDeposit($firm, $ledger, $requester, 20000, $matter);
+        $approved = $deposits->approveDeposit($firm, $depositRequest, $approver);
         $deposits->post($firm, $ledger, $approved, $matter);
 
-        $request = $this->service->requestTransfer($firm, $ledger, $matter, $invoice, $user, 10000);
-        $this->service->approveTransfer($firm, $request, $user);
+        $request = $this->service->requestTransfer($firm, $ledger, $matter, $invoice, $requester, 10000);
+        $this->service->approveTransfer($firm, $request, $approver);
 
         $this->expectException(\RuntimeException::class);
-        $this->service->apply($firm, $request->fresh(), $user);
+        $this->service->apply($firm, $request->fresh(), $approver);
     }
 
     public function test_transfer_request_cannot_be_created_for_a_matter_of_a_different_client(): void
@@ -134,5 +136,15 @@ class TrustTransferRequestServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->service->approveTransfer($firm, $request, $billingStaff);
+    }
+
+    public function test_a_firm_owner_cannot_approve_their_own_transfer_request(): void
+    {
+        [$firm, $ledger, $matter, $invoice, $requester] = $this->setupFundedLedgerAndInvoice(20000);
+
+        $request = $this->service->requestTransfer($firm, $ledger, $matter, $invoice, $requester, 5000);
+
+        $this->expectException(\RuntimeException::class);
+        $this->service->approveTransfer($firm, $request, $requester);
     }
 }

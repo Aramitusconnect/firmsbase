@@ -14,6 +14,8 @@ use App\Services\ImportAuditService;
 use App\Services\ImportBatchService;
 use App\Services\ImportDocumentSafetyService;
 use App\Services\ImportRollbackService;
+use App\Services\InvoiceDraftingService;
+use App\Services\PaymentPlanService;
 use App\Services\VirusScan\FakeVirusScanner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -23,16 +25,18 @@ class ImportRollbackServiceTest extends TestCase
     use RefreshDatabase;
 
     private ImportApplyService $applyService;
+
     private ImportBatchService $batchService;
+
     private ImportRollbackService $rollbackService;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $auditService = new ImportAuditService();
+        $auditService = new ImportAuditService;
         $this->batchService = new ImportBatchService($auditService);
-        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService(), new FakeVirusScanner());
-        $this->applyService = new ImportApplyService($documentSafetyService, $auditService);
+        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService, new FakeVirusScanner);
+        $this->applyService = new ImportApplyService($documentSafetyService, $auditService, app(InvoiceDraftingService::class), app(PaymentPlanService::class));
         $this->rollbackService = new ImportRollbackService($auditService);
     }
 

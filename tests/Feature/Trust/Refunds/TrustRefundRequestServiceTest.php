@@ -8,6 +8,7 @@ use App\Enums\TrustRefundRequestStatus;
 use App\Models\Client;
 use App\Models\FirmUser;
 use App\Models\Matter;
+use App\Models\MatterTrustBalance;
 use App\Services\TrustAccountService;
 use App\Services\TrustDepositService;
 use App\Services\TrustLedgerService;
@@ -34,22 +35,23 @@ class TrustRefundRequestServiceTest extends TestCase
         $account = app(TrustAccountService::class)->open($firm, 'Firm IOLTA Trust Account');
         $client = Client::factory()->forFirm($firm)->create();
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
-        $user = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $requester = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $approver = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
 
         $deposits = app(TrustDepositService::class);
-        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, $depositAmount), $user);
+        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $requester, $depositAmount), $approver);
         $deposits->post($firm, $ledger, $approved);
 
-        return [$firm, $ledger, $user];
+        return [$firm, $ledger, $requester, $approver];
     }
 
     public function test_full_refund_lifecycle_posts_a_refund_entry(): void
     {
-        [$firm, $ledger, $user] = $this->setupFundedLedger(10000);
+        [$firm, $ledger, $requester, $approver] = $this->setupFundedLedger(10000);
 
-        $request = $this->service->requestRefund($firm, $ledger, $user, 4000);
-        $this->service->approveRefund($firm, $request, $user);
-        $entry = $this->service->complete($firm, $request->fresh(), $user);
+        $request = $this->service->requestRefund($firm, $ledger, $requester, 4000);
+        $this->service->approveRefund($firm, $request, $approver);
+        $entry = $this->service->complete($firm, $request->fresh(), $approver);
 
         $this->assertSame(TrustLedgerEntryType::Refund, $entry->entry_type);
         $this->assertSame(-4000, $entry->amount_cents);
@@ -59,23 +61,33 @@ class TrustRefundRequestServiceTest extends TestCase
 
     public function test_refund_cannot_exceed_the_available_balance(): void
     {
-        [$firm, $ledger, $user] = $this->setupFundedLedger(1000);
+        [$firm, $ledger, $requester, $approver] = $this->setupFundedLedger(1000);
 
-        $request = $this->service->requestRefund($firm, $ledger, $user, 5000);
-        $this->service->approveRefund($firm, $request, $user);
+        $request = $this->service->requestRefund($firm, $ledger, $requester, 5000);
+        $this->service->approveRefund($firm, $request, $approver);
 
         $this->expectException(\RuntimeException::class);
-        $this->service->complete($firm, $request->fresh(), $user);
+        $this->service->complete($firm, $request->fresh(), $approver);
     }
 
     public function test_refund_cannot_be_completed_before_approval(): void
     {
-        [$firm, $ledger, $user] = $this->setupFundedLedger(10000);
+        [$firm, $ledger, $requester, $approver] = $this->setupFundedLedger(10000);
 
-        $request = $this->service->requestRefund($firm, $ledger, $user, 4000);
+        $request = $this->service->requestRefund($firm, $ledger, $requester, 4000);
 
         $this->expectException(\RuntimeException::class);
-        $this->service->complete($firm, $request, $user);
+        $this->service->complete($firm, $request, $approver);
+    }
+
+    public function test_a_firm_owner_cannot_approve_their_own_refund_request(): void
+    {
+        [$firm, $ledger, $requester] = $this->setupFundedLedger(10000);
+
+        $request = $this->service->requestRefund($firm, $ledger, $requester, 4000);
+
+        $this->expectException(\RuntimeException::class);
+        $this->service->approveRefund($firm, $request, $requester);
     }
 
     /**
@@ -99,19 +111,20 @@ class TrustRefundRequestServiceTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
         $matter = Matter::factory()->forClient($client)->create();
-        $user = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $requester = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $approver = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
 
         $deposits = app(TrustDepositService::class);
 
         // Unattributed deposit: inflates the LEDGER total (13000) far
         // beyond the refund amount, without touching the matter's own
         // attributed balance.
-        $unattributed = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 10000), $user);
+        $unattributed = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $requester, 10000), $approver);
         $deposits->post($firm, $ledger, $unattributed);
 
         // Matter-attributed deposit: only 3000 is attributed to this
         // specific matter.
-        $attributed = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 3000, $matter), $user);
+        $attributed = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $requester, 3000, $matter), $approver);
         $deposits->post($firm, $ledger, $attributed, $matter);
 
         $this->assertSame(13000, $ledger->balance->fresh()->balance_cents);
@@ -120,11 +133,11 @@ class TrustRefundRequestServiceTest extends TestCase
         // (13000 - 5000 = 8000) is still comfortably positive, but the
         // matter's own attributed balance (3000 - 5000 = -2000) would
         // go negative. This MUST be rejected.
-        $request = $this->service->requestRefund($firm, $ledger, $user, 5000, $matter);
-        $this->service->approveRefund($firm, $request, $user);
+        $request = $this->service->requestRefund($firm, $ledger, $requester, 5000, $matter);
+        $this->service->approveRefund($firm, $request, $approver);
 
         try {
-            $this->service->complete($firm, $request->fresh(), $user);
+            $this->service->complete($firm, $request->fresh(), $approver);
             $this->fail('Expected a RuntimeException because the refund would draw the matter attributed balance below zero.');
         } catch (\RuntimeException $e) {
             $this->assertSame(
@@ -154,22 +167,23 @@ class TrustRefundRequestServiceTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
         $matter = Matter::factory()->forClient($client)->create();
-        $user = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $requester = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $approver = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
 
         $deposits = app(TrustDepositService::class);
-        $attributed = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 3000, $matter), $user);
+        $attributed = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $requester, 3000, $matter), $approver);
         $deposits->post($firm, $ledger, $attributed, $matter);
 
-        $request = $this->service->requestRefund($firm, $ledger, $user, 2000, $matter);
-        $this->service->approveRefund($firm, $request, $user);
-        $entry = $this->service->complete($firm, $request->fresh(), $user);
+        $request = $this->service->requestRefund($firm, $ledger, $requester, 2000, $matter);
+        $this->service->approveRefund($firm, $request, $approver);
+        $entry = $this->service->complete($firm, $request->fresh(), $approver);
 
         $this->assertSame($matter->id, $entry->matter_id);
         $this->assertSame(TrustLedgerEntryType::Refund, $entry->entry_type);
         $this->assertSame(-2000, $entry->amount_cents);
         $this->assertSame(1000, $ledger->balance->fresh()->balance_cents);
 
-        $matterBalance = $this->runWithFirmContext($firm, fn () => \App\Models\MatterTrustBalance::query()
+        $matterBalance = $this->runWithFirmContext($firm, fn () => MatterTrustBalance::query()
             ->where('trust_ledger_id', $ledger->id)
             ->where('matter_id', $matter->id)
             ->firstOrFail());

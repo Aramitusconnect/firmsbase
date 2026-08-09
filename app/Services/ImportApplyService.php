@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ImportAuditEventType;
 use App\Enums\ImportBatchStatus;
 use App\Enums\ImportEntityType;
+use App\Enums\ImportErrorSeverity;
 use App\Enums\ImportRowStatus;
 use App\Enums\RollbackRecordStatus;
 use App\Enums\WebhookEventType;
@@ -67,12 +68,13 @@ class ImportApplyService
     public function __construct(
         private readonly ImportDocumentSafetyService $documentSafetyService,
         private readonly ImportAuditService $auditService,
-    ) {
-    }
+        private readonly InvoiceDraftingService $invoiceDrafting,
+        private readonly PaymentPlanService $paymentPlanService,
+    ) {}
 
     public function confirmBatch(ImportBatch $batch): ImportBatch
     {
-        return (new TenantContextService())->runWithFirmContext($batch->firm_id, function () use ($batch) {
+        return (new TenantContextService)->runWithFirmContext($batch->firm_id, function () use ($batch) {
             $batch->rows()->where('status', ImportRowStatus::Validated->value)->update(['status' => ImportRowStatus::Confirmed->value]);
 
             $batch->update(['status' => ImportBatchStatus::Confirmed, 'confirmed_at' => now()]);
@@ -87,7 +89,7 @@ class ImportApplyService
     {
         $firm = $batch->firm;
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $batch) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $batch) {
             $batch->update(['status' => ImportBatchStatus::Applying]);
 
             foreach ($batch->rows()->where('status', ImportRowStatus::Confirmed->value)->get() as $row) {
@@ -137,7 +139,7 @@ class ImportApplyService
             } catch (\Throwable $e) {
                 $row->update(['status' => ImportRowStatus::Failed]);
                 $row->errors()->create([
-                    'severity' => \App\Enums\ImportErrorSeverity::Blocking,
+                    'severity' => ImportErrorSeverity::Blocking,
                     'message' => 'Apply failed: '.$e->getMessage(),
                 ]);
             }
@@ -161,7 +163,10 @@ class ImportApplyService
             ImportEntityType::Client => WebhookEventType::ClientCreated,
             ImportEntityType::Matter => WebhookEventType::MatterCreated,
             ImportEntityType::Document => WebhookEventType::DocumentUploaded,
-            ImportEntityType::Invoice => WebhookEventType::InvoiceCreated,
+            // ImportEntityType::Invoice is deliberately absent: applyInvoice()
+            // routes through InvoiceDraftingService::createFlatFee(), which
+            // already fires WebhookEventType::InvoiceCreated itself -- firing
+            // it here too would duplicate the event.
             default => null,
         };
 
@@ -181,35 +186,35 @@ class ImportApplyService
     private function createRecordFor(Firm $firm, ImportEntityType $entityType, array $data, ImportRow $row): object
     {
         return match ($entityType) {
-            ImportEntityType::FirmLead => (new TenantContextService())->runWithFirmContext($firm, fn () => FirmLead::create([
+            ImportEntityType::FirmLead => (new TenantContextService)->runWithFirmContext($firm, fn () => FirmLead::create([
                 'firm_id' => $firm->id,
                 'name' => $data['name'] ?? throw new \InvalidArgumentException('name is required'),
                 'email' => $data['email'] ?? null,
                 'phone' => $data['phone'] ?? null,
                 'status' => 'new',
             ])),
-            ImportEntityType::Client => (new TenantContextService())->runWithFirmContext($firm, fn () => Client::create([
+            ImportEntityType::Client => (new TenantContextService)->runWithFirmContext($firm, fn () => Client::create([
                 'firm_id' => $firm->id,
                 'display_name' => $data['display_name'] ?? $data['name'] ?? throw new \InvalidArgumentException('display_name is required'),
                 'legal_name' => $data['legal_name'] ?? null,
                 'email' => $data['email'] ?? null,
                 'phone' => $data['phone'] ?? null,
             ])),
-            ImportEntityType::Contact => (new TenantContextService())->runWithFirmContext($firm, fn () => Contact::create([
+            ImportEntityType::Contact => (new TenantContextService)->runWithFirmContext($firm, fn () => Contact::create([
                 'firm_id' => $firm->id,
                 'client_id' => $data['client_id'] ?? null,
                 'name' => $data['name'] ?? throw new \InvalidArgumentException('name is required'),
                 'email' => $data['email'] ?? null,
                 'phone' => $data['phone'] ?? null,
             ])),
-            ImportEntityType::Matter => (new TenantContextService())->runWithFirmContext($firm, fn () => Matter::create([
+            ImportEntityType::Matter => (new TenantContextService)->runWithFirmContext($firm, fn () => Matter::create([
                 'firm_id' => $firm->id,
                 'client_id' => $data['client_id'] ?? throw new \InvalidArgumentException('client_id is required'),
                 'primary_practice_area_id' => $data['primary_practice_area_id'] ?? throw new \InvalidArgumentException('primary_practice_area_id is required'),
                 'matter_type_id' => $data['matter_type_id'] ?? throw new \InvalidArgumentException('matter_type_id is required'),
                 'status' => $data['status'] ?? 'draft',
             ])),
-            ImportEntityType::Party => (new TenantContextService())->runWithFirmContext($firm, fn () => Party::create([
+            ImportEntityType::Party => (new TenantContextService)->runWithFirmContext($firm, fn () => Party::create([
                 'firm_id' => $firm->id,
                 'name' => $data['name'] ?? throw new \InvalidArgumentException('name is required'),
                 'entity_type' => $data['entity_type'] ?? 'individual',
@@ -217,7 +222,7 @@ class ImportApplyService
                 'phone' => $data['phone'] ?? null,
             ])),
             ImportEntityType::Document => $this->applyDocument($firm, $data, $row),
-            ImportEntityType::TimeEntry => (new TenantContextService())->runWithFirmContext($firm, fn () => TimeEntry::create([
+            ImportEntityType::TimeEntry => (new TenantContextService)->runWithFirmContext($firm, fn () => TimeEntry::create([
                 'firm_id' => $firm->id,
                 'user_id' => $data['user_id'] ?? throw new \InvalidArgumentException('user_id is required'),
                 'matter_id' => $data['matter_id'] ?? null,
@@ -225,30 +230,104 @@ class ImportApplyService
                 'seconds' => $data['seconds'] ?? throw new \InvalidArgumentException('seconds is required'),
                 'worked_on' => $data['worked_on'] ?? throw new \InvalidArgumentException('worked_on is required'),
             ])),
-            ImportEntityType::Invoice => (new TenantContextService())->runWithFirmContext($firm, fn () => Invoice::create([
-                'firm_id' => $firm->id,
-                'client_id' => $data['client_id'] ?? throw new \InvalidArgumentException('client_id is required'),
-                'matter_id' => $data['matter_id'] ?? null,
-                'total_cents' => $data['total_cents'] ?? 0,
-                'subtotal_cents' => $data['subtotal_cents'] ?? ($data['total_cents'] ?? 0),
-            ])),
-            ImportEntityType::PaymentPlan => (new TenantContextService())->runWithFirmContext($firm, fn () => PaymentPlan::create([
-                'firm_id' => $firm->id,
-                'client_id' => $data['client_id'] ?? throw new \InvalidArgumentException('client_id is required'),
-                'matter_id' => $data['matter_id'] ?? null,
-                'invoice_id' => $data['invoice_id'] ?? null,
-                'total_cents' => $data['total_cents'] ?? throw new \InvalidArgumentException('total_cents is required'),
-                'installment_count' => $data['installment_count'] ?? 1,
-            ])),
+            ImportEntityType::Invoice => $this->applyInvoice($firm, $data),
+            ImportEntityType::PaymentPlan => $this->applyPaymentPlan($firm, $data),
             default => throw new \InvalidArgumentException("Unsupported entity type for apply: {$entityType->value}"),
         };
+    }
+
+    /**
+     * Routes through InvoiceDraftingService::createFlatFee() instead of
+     * Invoice::create() directly -- the previous direct-create path
+     * left the invoice with no InvoiceLine rows at all, so total_cents/
+     * subtotal_cents were taken verbatim from import data rather than
+     * derived the way every other invoice in the system is (invariant:
+     * "amount fields are recomputed from invoice_lines every time,
+     * never hand-set elsewhere" per InvoiceDraftingService's own
+     * docblock). createFlatFee() already fires WebhookEventType::
+     * InvoiceCreated itself, so that entity type is intentionally
+     * absent from recordWebhookEventForAppliedRecord()'s match below --
+     * firing it there too would duplicate the event.
+     */
+    private function applyInvoice(Firm $firm, array $data): Invoice
+    {
+        $client = (new TenantContextService)->runWithFirmContext(
+            $firm,
+            fn () => Client::query()->findOrFail($data['client_id'] ?? throw new \InvalidArgumentException('client_id is required'))
+        );
+
+        $matter = isset($data['matter_id'])
+            ? (new TenantContextService)->runWithFirmContext($firm, fn () => Matter::query()->find($data['matter_id']))
+            : null;
+
+        return $this->invoiceDrafting->createFlatFee(
+            $firm,
+            $client,
+            $data['description'] ?? 'Imported invoice',
+            $data['total_cents'] ?? throw new \InvalidArgumentException('total_cents is required'),
+            $matter,
+        );
+    }
+
+    /**
+     * Routes through PaymentPlanService::create() instead of
+     * PaymentPlan::create() directly -- the previous direct-create path
+     * created zero PaymentPlanInstallment rows despite storing
+     * installment_count, which would silently break
+     * PaymentApplicationService::applyToInstallment() and
+     * markCompletedIfAllInstallmentsPaid() for any imported plan (there
+     * would be nothing to apply a payment against). Import data carries
+     * only a total and a count, not the original per-installment
+     * breakdown, so the total is split evenly (remainder cents on the
+     * final installment to keep the sum exact) with monthly due dates
+     * starting one month out -- a reasonable reconstruction, not a
+     * claim of historical accuracy.
+     */
+    private function applyPaymentPlan(Firm $firm, array $data): PaymentPlan
+    {
+        $client = (new TenantContextService)->runWithFirmContext(
+            $firm,
+            fn () => Client::query()->findOrFail($data['client_id'] ?? throw new \InvalidArgumentException('client_id is required'))
+        );
+
+        $matter = isset($data['matter_id'])
+            ? (new TenantContextService)->runWithFirmContext($firm, fn () => Matter::query()->find($data['matter_id']))
+            : null;
+
+        $invoice = isset($data['invoice_id'])
+            ? (new TenantContextService)->runWithFirmContext($firm, fn () => Invoice::query()->find($data['invoice_id']))
+            : null;
+
+        $totalCents = $data['total_cents'] ?? throw new \InvalidArgumentException('total_cents is required');
+        $installmentCount = max(1, (int) ($data['installment_count'] ?? 1));
+
+        return $this->paymentPlanService->create($firm, $client, $this->splitIntoEvenInstallments($totalCents, $installmentCount), $matter, $invoice);
+    }
+
+    /**
+     * @return array<int, array{amount_cents:int, due_at:\DateTimeInterface}>
+     */
+    private function splitIntoEvenInstallments(int $totalCents, int $count): array
+    {
+        $base = intdiv($totalCents, $count);
+        $remainder = $totalCents % $count;
+        $installments = [];
+
+        for ($i = 0; $i < $count; $i++) {
+            $installments[] = [
+                'amount_cents' => $base + ($i < $remainder ? 1 : 0),
+                'due_at' => now()->addMonthsNoOverflow($i + 1),
+            ];
+        }
+
+        return $installments;
     }
 
     private function applyDocument(Firm $firm, array $data, ImportRow $row): Document
     {
         $this->documentSafetyService->assertSafeToAccept($firm, $row);
 
-        $document = (new TenantContextService())->runWithFirmContext($firm, fn () => Document::create([
+        $document = (new TenantContextService)->runWithFirmContext($firm, fn () => Document::create([
             'firm_id' => $firm->id,
             'matter_id' => $data['matter_id'] ?? null,
             'client_id' => $data['client_id'] ?? null,

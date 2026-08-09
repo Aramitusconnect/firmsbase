@@ -27,6 +27,8 @@ use App\Services\ImportDuplicateDetectionService;
 use App\Services\ImportMappingService;
 use App\Services\ImportPreviewService;
 use App\Services\ImportRowValidationService;
+use App\Services\InvoiceDraftingService;
+use App\Services\PaymentPlanService;
 use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
 use App\Services\TimelineEventRecorder;
@@ -283,6 +285,8 @@ class ContactsForceRlsActivationTest extends TestCase
         return new ImportApplyService(
             new ImportDocumentSafetyService(new DocumentUploadPolicyService, new FakeVirusScanner),
             $auditService,
+            app(InvoiceDraftingService::class),
+            app(PaymentPlanService::class),
         );
     }
 

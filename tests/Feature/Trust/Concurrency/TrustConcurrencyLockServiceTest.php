@@ -11,6 +11,7 @@ use App\Services\TrustDepositService;
 use App\Services\TrustLedgerService;
 use App\Services\TrustRefundRequestService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\Feature\Trust\Concerns\SetsUpTrustEligibleFirm;
 use Tests\TestCase;
 
@@ -86,7 +87,7 @@ class TrustConcurrencyLockServiceTest extends TestCase
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
 
         $capturedSql = [];
-        \Illuminate\Support\Facades\DB::listen(function ($query) use (&$capturedSql) {
+        DB::listen(function ($query) use (&$capturedSql) {
             $capturedSql[] = $query->sql;
         });
 
@@ -106,16 +107,17 @@ class TrustConcurrencyLockServiceTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
         $user = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $approver = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
 
         $deposits = app(TrustDepositService::class);
-        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 6000), $user);
+        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 6000), $approver);
         $deposits->post($firm, $ledger, $approved);
 
         $refunds = app(TrustRefundRequestService::class);
 
         $firstRequest = $refunds->requestRefund($firm, $ledger, $user, 4000);
-        $refunds->approveRefund($firm, $firstRequest, $user);
-        $refunds->complete($firm, $firstRequest->fresh(), $user);
+        $refunds->approveRefund($firm, $firstRequest, $approver);
+        $refunds->complete($firm, $firstRequest->fresh(), $approver);
 
         // The ledger only had 6000; 4000 is now gone. A second refund
         // for another 4000 must see the LOCKED, already-updated balance
@@ -123,9 +125,9 @@ class TrustConcurrencyLockServiceTest extends TestCase
         // re-read-under-lock semantics, not a stale request-time
         // snapshot of 6000.
         $secondRequest = $refunds->requestRefund($firm, $ledger, $user, 4000);
-        $refunds->approveRefund($firm, $secondRequest, $user);
+        $refunds->approveRefund($firm, $secondRequest, $approver);
 
         $this->expectException(\RuntimeException::class);
-        $refunds->complete($firm, $secondRequest->fresh(), $user);
+        $refunds->complete($firm, $secondRequest->fresh(), $approver);
     }
 }

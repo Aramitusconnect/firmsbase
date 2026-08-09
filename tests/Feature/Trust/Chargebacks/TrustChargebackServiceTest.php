@@ -8,6 +8,8 @@ use App\Enums\TrustLedgerEntryType;
 use App\Models\Client;
 use App\Models\FirmUser;
 use App\Models\Matter;
+use App\Models\MatterTrustBalance;
+use App\Models\TrustLedgerEntry;
 use App\Services\TrustAccountService;
 use App\Services\TrustChargebackService;
 use App\Services\TrustDepositService;
@@ -35,9 +37,10 @@ class TrustChargebackServiceTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
         $user = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $depositApprover = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
 
         $deposits = app(TrustDepositService::class);
-        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, $amount), $user);
+        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, $amount), $depositApprover);
         $entry = $deposits->post($firm, $ledger, $approved);
 
         return [$firm, $ledger, $entry, $user];
@@ -65,7 +68,7 @@ class TrustChargebackServiceTest extends TestCase
     public function test_chargeback_cannot_be_reported_against_a_non_deposit_entry(): void
     {
         [$firm, $ledger, $originalEntry, $user] = $this->setupDeposit(10000);
-        $withdrawal = \App\Models\TrustLedgerEntry::create([
+        $withdrawal = TrustLedgerEntry::create([
             'firm_id' => $firm->id,
             'trust_ledger_id' => $ledger->id,
             'entry_type' => TrustLedgerEntryType::WithdrawalToInvoice,
@@ -75,6 +78,23 @@ class TrustChargebackServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->service->report($firm, $withdrawal, $user, 1000, 'Not a deposit.');
+    }
+
+    /**
+     * Regression test: report() previously accepted and stored any
+     * $amountCents with no validation against the original deposit,
+     * while reverse() -> TrustLedgerEntryReversalService::reverse() has
+     * no amount parameter at all and always reverses the FULL original
+     * entry. That let a chargeback's own recorded amount silently
+     * diverge from what was actually reversed. report() must now reject
+     * any amount that does not exactly match the original entry.
+     */
+    public function test_chargeback_amount_must_match_the_original_deposit_amount(): void
+    {
+        [$firm, $ledger, $originalEntry, $user] = $this->setupDeposit(10000);
+
+        $this->expectException(\RuntimeException::class);
+        $this->service->report($firm, $originalEntry, $user, 4000, 'Partial amount does not match.');
     }
 
     public function test_chargeback_cannot_be_resolved_before_it_is_reversed(): void
@@ -111,21 +131,22 @@ class TrustChargebackServiceTest extends TestCase
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
         $matter = Matter::factory()->forClient($client)->create();
         $user = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $depositApprover = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
 
         $deposits = app(TrustDepositService::class);
-        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 10000, $matter), $user);
+        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 10000, $matter), $depositApprover);
         $originalEntry = $deposits->post($firm, $ledger, $approved, $matter);
 
         $chargeback = $this->service->report($firm, $originalEntry, $user, 10000, 'Client disputed with card issuer.');
         $chargeback = $this->service->reverse($firm, $chargeback, $user);
 
-        $reversalEntry = \App\Models\TrustLedgerEntry::query()->findOrFail($chargeback->reversal_trust_ledger_entry_id);
+        $reversalEntry = TrustLedgerEntry::query()->findOrFail($chargeback->reversal_trust_ledger_entry_id);
 
         $this->assertSame($matter->id, $reversalEntry->matter_id);
         $this->assertSame(TrustLedgerEntryType::ChargebackReversal, $reversalEntry->entry_type);
         $this->assertSame(-10000, $reversalEntry->amount_cents);
 
-        $matterBalance = $this->runWithFirmContext($firm, fn () => \App\Models\MatterTrustBalance::query()
+        $matterBalance = $this->runWithFirmContext($firm, fn () => MatterTrustBalance::query()
             ->where('trust_ledger_id', $ledger->id)
             ->where('matter_id', $matter->id)
             ->firstOrFail());

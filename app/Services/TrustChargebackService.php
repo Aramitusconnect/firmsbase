@@ -25,8 +25,7 @@ class TrustChargebackService
         private readonly TrustAccessPolicyService $accessPolicy,
         private readonly TenantSafeTrustPolicyService $tenantSafePolicy,
         private readonly TrustLedgerEntryReversalService $reversalService,
-    ) {
-    }
+    ) {}
 
     public function report(
         Firm $firm,
@@ -43,7 +42,18 @@ class TrustChargebackService
             throw new \RuntimeException('A chargeback can only be reported against a Deposit entry.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => TrustChargebackEvent::create([
+        // TrustLedgerEntryReversalService::reverse() has no amount
+        // parameter -- it always reverses the FULL original entry
+        // amount, regardless of what is stored here. Without this
+        // check, a reported amount could silently diverge from what
+        // reverse() actually posts (partial chargebacks are not
+        // structurally supported), so the reported amount must exactly
+        // match the original deposit to keep the two numbers honest.
+        if ($amountCents !== $originalEntry->amount_cents) {
+            throw new \RuntimeException('Chargeback amount must exactly match the original deposit amount; partial chargebacks are not supported.');
+        }
+
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => TrustChargebackEvent::create([
             'firm_id' => $firm->id,
             'original_trust_ledger_entry_id' => $originalEntry->id,
             'amount_cents' => $amountCents,
@@ -76,7 +86,7 @@ class TrustChargebackService
             throw new \RuntimeException('Only a Reported chargeback can be reversed.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $chargeback, $reversedBy) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $chargeback) {
             $originalEntry = $chargeback->originalEntry;
             $ledger = $originalEntry?->trustLedger;
 
@@ -113,7 +123,7 @@ class TrustChargebackService
             throw new \RuntimeException('Only a Reversed chargeback can be marked Resolved.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($chargeback) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($chargeback) {
             $chargeback->update([
                 'status' => TrustChargebackStatus::Resolved,
                 'resolved_at' => now(),

@@ -17,6 +17,7 @@ use App\Services\ImportApplyService;
 use App\Services\ImportAuditService;
 use App\Services\ImportBatchService;
 use App\Services\ImportDocumentSafetyService;
+use App\Services\InvoiceDraftingService;
 use App\Services\PaymentPlanService;
 use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TenantContextService;
@@ -717,7 +718,7 @@ class PaymentPlansForceRlsActivationTest extends TestCase
         $auditService = new ImportAuditService;
         $batchService = new ImportBatchService($auditService);
         $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService, new FakeVirusScanner);
-        $applyService = new ImportApplyService($documentSafetyService, $auditService);
+        $applyService = new ImportApplyService($documentSafetyService, $auditService, app(InvoiceDraftingService::class), app(PaymentPlanService::class));
 
         $batch = $batchService->create($firm, ImportEntityType::PaymentPlan, ImportSourceType::CsvUpload);
         // import_batches gained permanent FORCE ROW LEVEL SECURITY in a

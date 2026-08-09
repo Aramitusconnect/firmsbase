@@ -8,12 +8,14 @@ use App\Enums\ImportSourceType;
 use App\Enums\WebhookEventType;
 use App\Models\Client;
 use App\Models\FirmLead;
+use App\Services\DocumentUploadPolicyService;
 use App\Services\ImportApplyService;
 use App\Services\ImportAuditService;
 use App\Services\ImportBatchService;
 use App\Services\ImportDocumentSafetyService;
-use App\Services\DocumentUploadPolicyService;
+use App\Services\InvoiceDraftingService;
 use App\Services\LeadConversionService;
+use App\Services\PaymentPlanService;
 use App\Services\TimelineEventRecorder;
 use App\Services\VirusScan\FakeVirusScanner;
 use App\Services\WebhookEventRecorderService;
@@ -37,7 +39,7 @@ class ClientCreatedWiringTest extends TestCase
     {
         $firm = $this->makeWebhookEntitledFirm();
         $lead = FirmLead::factory()->forFirm($firm)->create();
-        $service = new LeadConversionService(new TimelineEventRecorder());
+        $service = new LeadConversionService(new TimelineEventRecorder);
 
         $client = $service->convert($lead, ['display_name' => 'Converted Client']);
 
@@ -60,7 +62,7 @@ class ClientCreatedWiringTest extends TestCase
     {
         $firm = $this->makeWebhookEntitledFirm();
         $lead = FirmLead::factory()->forFirm($firm)->create();
-        $service = new LeadConversionService(new TimelineEventRecorder());
+        $service = new LeadConversionService(new TimelineEventRecorder);
 
         $service->convert($lead, ['display_name' => 'First Conversion']);
 
@@ -80,7 +82,7 @@ class ClientCreatedWiringTest extends TestCase
 
         $firm = $this->makeWebhookEntitledFirm();
         $lead = FirmLead::factory()->forFirm($firm)->create();
-        $service = new LeadConversionService(new TimelineEventRecorder());
+        $service = new LeadConversionService(new TimelineEventRecorder);
 
         $client = $service->convert($lead, ['display_name' => 'Still Converted']);
 
@@ -95,10 +97,10 @@ class ClientCreatedWiringTest extends TestCase
     public function test_client_created_fires_exactly_once_on_successful_bulk_import(): void
     {
         $firm = $this->makeWebhookEntitledFirm();
-        $auditService = new ImportAuditService();
+        $auditService = new ImportAuditService;
         $batchService = new ImportBatchService($auditService);
-        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService(), new FakeVirusScanner());
-        $service = new ImportApplyService($documentSafetyService, $auditService);
+        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService, new FakeVirusScanner);
+        $service = new ImportApplyService($documentSafetyService, $auditService, app(InvoiceDraftingService::class), app(PaymentPlanService::class));
 
         $batch = $batchService->create($firm, ImportEntityType::Client, ImportSourceType::CsvUpload);
         $batchService->stageRows($batch, [['display_name' => 'Imported Client']]);
@@ -115,10 +117,10 @@ class ClientCreatedWiringTest extends TestCase
     public function test_client_created_does_not_fire_when_the_import_row_fails(): void
     {
         $firm = $this->makeWebhookEntitledFirm();
-        $auditService = new ImportAuditService();
+        $auditService = new ImportAuditService;
         $batchService = new ImportBatchService($auditService);
-        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService(), new FakeVirusScanner());
-        $service = new ImportApplyService($documentSafetyService, $auditService);
+        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService, new FakeVirusScanner);
+        $service = new ImportApplyService($documentSafetyService, $auditService, app(InvoiceDraftingService::class), app(PaymentPlanService::class));
 
         $batch = $batchService->create($firm, ImportEntityType::Client, ImportSourceType::CsvUpload);
         $batchService->stageRows($batch, [[]]); // no display_name -> throws inside the transaction

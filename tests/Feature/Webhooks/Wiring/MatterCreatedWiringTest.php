@@ -10,11 +10,13 @@ use App\Models\Client;
 use App\Models\Matter;
 use App\Models\MatterType;
 use App\Models\PracticeArea;
+use App\Services\DocumentUploadPolicyService;
 use App\Services\ImportApplyService;
 use App\Services\ImportAuditService;
 use App\Services\ImportBatchService;
 use App\Services\ImportDocumentSafetyService;
-use App\Services\DocumentUploadPolicyService;
+use App\Services\InvoiceDraftingService;
+use App\Services\PaymentPlanService;
 use App\Services\VirusScan\FakeVirusScanner;
 use App\Services\WebhookEventRecorderService;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
@@ -33,15 +35,16 @@ class MatterCreatedWiringTest extends TestCase
     use DatabaseMigrations, SetsUpWebhookEntitledFirm;
 
     private ImportApplyService $service;
+
     private ImportBatchService $batchService;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $auditService = new ImportAuditService();
+        $auditService = new ImportAuditService;
         $this->batchService = new ImportBatchService($auditService);
-        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService(), new FakeVirusScanner());
-        $this->service = new ImportApplyService($documentSafetyService, $auditService);
+        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService, new FakeVirusScanner);
+        $this->service = new ImportApplyService($documentSafetyService, $auditService, app(InvoiceDraftingService::class), app(PaymentPlanService::class));
     }
 
     public function test_matter_created_fires_exactly_once_on_successful_import_apply(): void

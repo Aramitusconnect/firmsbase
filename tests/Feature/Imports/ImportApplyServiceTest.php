@@ -6,12 +6,20 @@ use App\Enums\ImportBatchStatus;
 use App\Enums\ImportEntityType;
 use App\Enums\ImportRowStatus;
 use App\Enums\ImportSourceType;
+use App\Models\Client;
+use App\Models\Contact;
 use App\Models\Firm;
+use App\Models\Invoice;
+use App\Models\Party;
+use App\Models\PaymentPlan;
+use App\Models\PaymentPlanInstallment;
+use App\Services\DocumentUploadPolicyService;
 use App\Services\ImportApplyService;
 use App\Services\ImportAuditService;
 use App\Services\ImportBatchService;
 use App\Services\ImportDocumentSafetyService;
-use App\Services\DocumentUploadPolicyService;
+use App\Services\InvoiceDraftingService;
+use App\Services\PaymentPlanService;
 use App\Services\VirusScan\FakeVirusScanner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -21,15 +29,21 @@ class ImportApplyServiceTest extends TestCase
     use RefreshDatabase;
 
     private ImportApplyService $service;
+
     private ImportBatchService $batchService;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $auditService = new ImportAuditService();
+        $auditService = new ImportAuditService;
         $this->batchService = new ImportBatchService($auditService);
-        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService(), new FakeVirusScanner());
-        $this->service = new ImportApplyService($documentSafetyService, $auditService);
+        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService, new FakeVirusScanner);
+        $this->service = new ImportApplyService(
+            $documentSafetyService,
+            $auditService,
+            app(InvoiceDraftingService::class),
+            app(PaymentPlanService::class),
+        );
     }
 
     public function test_confirmed_rows_apply_and_create_a_production_client_record(): void
@@ -126,7 +140,7 @@ class ImportApplyServiceTest extends TestCase
 
         $row = $batch->rows()->first();
         $this->assertSame(ImportRowStatus::Applied, $row->status);
-        $this->assertSame(\App\Models\Contact::class, $row->applied_record_type);
+        $this->assertSame(Contact::class, $row->applied_record_type);
         $this->assertNotNull($row->applied_record_id);
     }
 
@@ -148,8 +162,90 @@ class ImportApplyServiceTest extends TestCase
 
         $row = $batch->rows()->first();
         $this->assertSame(ImportRowStatus::Applied, $row->status);
-        $this->assertSame(\App\Models\Party::class, $row->applied_record_type);
+        $this->assertSame(Party::class, $row->applied_record_type);
         $this->assertNotNull($row->applied_record_id);
+    }
+
+    /**
+     * Regression test: createRecordFor() previously wrote Invoice rows
+     * via a raw Invoice::create() with no InvoiceLine rows at all,
+     * leaving total_cents/subtotal_cents taken verbatim from import
+     * data instead of derived the way every other invoice in the
+     * system is. It must now route through
+     * InvoiceDraftingService::createFlatFee(), which creates exactly
+     * one FlatFee line and recomputes totals from it.
+     */
+    public function test_confirmed_invoice_row_applies_through_the_canonical_drafting_service_and_creates_a_line(): void
+    {
+        $firm = Firm::factory()->create();
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->create(['firm_id' => $firm->id]));
+
+        $batch = $this->batchService->create($firm, ImportEntityType::Invoice, ImportSourceType::CsvUpload);
+        $batch = $this->batchService->stageRows($batch, [[
+            'client_id' => $client->id,
+            'total_cents' => 50000,
+            'description' => 'Imported balance',
+        ]]);
+        $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
+
+        $confirmed = $this->service->confirmBatch($batch);
+        $applied = $this->service->apply($confirmed);
+
+        $this->assertSame(ImportBatchStatus::Applied, $applied->status);
+
+        $row = $batch->rows()->first();
+        $this->assertSame(ImportRowStatus::Applied, $row->status);
+        $this->assertSame(Invoice::class, $row->applied_record_type);
+
+        $this->runWithFirmContext($firm, function () use ($row) {
+            $invoice = Invoice::query()->findOrFail($row->applied_record_id);
+            $this->assertSame(50000, $invoice->total_cents);
+            $this->assertSame(50000, $invoice->subtotal_cents);
+            $this->assertSame(1, $invoice->lines()->count());
+            $this->assertSame(50000, $invoice->lines()->first()->amount_cents);
+        });
+    }
+
+    /**
+     * Regression test: createRecordFor() previously wrote PaymentPlan
+     * rows via a raw PaymentPlan::create() that stored
+     * installment_count but created zero PaymentPlanInstallment rows —
+     * which would silently break payment application against any
+     * imported plan. It must now route through
+     * PaymentPlanService::create(), which always generates real
+     * installment rows summing to the plan total.
+     */
+    public function test_confirmed_payment_plan_row_applies_through_the_canonical_service_and_creates_installments(): void
+    {
+        $firm = Firm::factory()->create();
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->create(['firm_id' => $firm->id]));
+
+        $batch = $this->batchService->create($firm, ImportEntityType::PaymentPlan, ImportSourceType::CsvUpload);
+        $batch = $this->batchService->stageRows($batch, [[
+            'client_id' => $client->id,
+            'total_cents' => 10000,
+            'installment_count' => 3,
+        ]]);
+        $batch->rows()->update(['status' => ImportRowStatus::Validated->value]);
+
+        $confirmed = $this->service->confirmBatch($batch);
+        $applied = $this->service->apply($confirmed);
+
+        $this->assertSame(ImportBatchStatus::Applied, $applied->status);
+
+        $row = $batch->rows()->first();
+        $this->assertSame(ImportRowStatus::Applied, $row->status);
+        $this->assertSame(PaymentPlan::class, $row->applied_record_type);
+
+        $this->runWithFirmContext($firm, function () use ($row) {
+            $plan = PaymentPlan::query()->findOrFail($row->applied_record_id);
+            $this->assertSame(10000, $plan->total_cents);
+            $this->assertSame(3, $plan->installment_count);
+
+            $installments = PaymentPlanInstallment::query()->where('payment_plan_id', $plan->id)->get();
+            $this->assertCount(3, $installments);
+            $this->assertSame(10000, $installments->sum('amount_cents'));
+        });
     }
 
     public function test_conflict_record_and_template_rows_are_skipped_not_fabricated(): void

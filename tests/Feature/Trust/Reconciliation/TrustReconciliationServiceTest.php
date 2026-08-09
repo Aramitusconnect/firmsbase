@@ -6,9 +6,9 @@ use App\Enums\FirmUserRole;
 use App\Enums\TrustReconciliationStatus;
 use App\Models\Client;
 use App\Models\FirmUser;
+use App\Services\TenantContextService;
 use App\Services\TrustAccountService;
 use App\Services\TrustDepositService;
-use App\Services\TenantContextService;
 use App\Services\TrustLedgerService;
 use App\Services\TrustReconciliationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -34,9 +34,10 @@ class TrustReconciliationServiceTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
         $user = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $depositApprover = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
 
         $deposits = app(TrustDepositService::class);
-        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 10000), $user);
+        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 10000), $depositApprover);
         $deposits->post($firm, $ledger, $approved);
 
         $reconciliation = $this->service->run($firm, $account, $user, now()->subMonth(), now(), 10000);
@@ -52,9 +53,10 @@ class TrustReconciliationServiceTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
         $user = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $depositApprover = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
 
         $deposits = app(TrustDepositService::class);
-        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 10000), $user);
+        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 10000), $depositApprover);
         $deposits->post($firm, $ledger, $approved);
 
         $reconciliation = $this->service->run($firm, $account, $user, now()->subMonth(), now(), 9500);
@@ -113,9 +115,10 @@ class TrustReconciliationServiceTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
         $user = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $depositApprover = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
 
         $deposits = app(TrustDepositService::class);
-        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 10000), $user);
+        $approved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $user, 10000), $depositApprover);
         $deposits->post($firm, $ledger, $approved);
 
         // Sanity-check the real ledger balance really is nonzero

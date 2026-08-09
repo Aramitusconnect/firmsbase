@@ -10,13 +10,14 @@ use App\Enums\WebhookEventType;
 use App\Models\Client;
 use App\Models\Invoice;
 use App\Models\TimeEntry;
+use App\Services\DocumentUploadPolicyService;
 use App\Services\EmployeeRateService;
 use App\Services\ImportApplyService;
 use App\Services\ImportAuditService;
 use App\Services\ImportBatchService;
 use App\Services\ImportDocumentSafetyService;
-use App\Services\DocumentUploadPolicyService;
 use App\Services\InvoiceDraftingService;
+use App\Services\PaymentPlanService;
 use App\Services\TimeEntryApprovalService;
 use App\Services\TimelineEventRecorder;
 use App\Services\VirusScan\FakeVirusScanner;
@@ -40,7 +41,7 @@ class InvoiceCreatedWiringTest extends TestCase
     {
         $firm = $this->makeWebhookEntitledFirm();
         $client = Client::factory()->forFirm($firm)->create();
-        $service = new InvoiceDraftingService(new TimeEntryApprovalService(new EmployeeRateService()), new TimelineEventRecorder());
+        $service = new InvoiceDraftingService(new TimeEntryApprovalService(new EmployeeRateService), new TimelineEventRecorder);
 
         $invoice = $service->createFlatFee($firm, $client, 'Flat fee for filing', 50000);
 
@@ -63,7 +64,7 @@ class InvoiceCreatedWiringTest extends TestCase
             'seconds' => 3600,
             'billing_rate_cents_snapshot' => 20000,
         ]);
-        $service = new InvoiceDraftingService(new TimeEntryApprovalService(new EmployeeRateService()), new TimelineEventRecorder());
+        $service = new InvoiceDraftingService(new TimeEntryApprovalService(new EmployeeRateService), new TimelineEventRecorder);
 
         $invoice = $service->draftFromTimeEntries($firm, $client, [$entry]);
 
@@ -80,7 +81,7 @@ class InvoiceCreatedWiringTest extends TestCase
         $firm = $this->makeWebhookEntitledFirm();
         $client = Client::factory()->forFirm($firm)->create();
         $entry = TimeEntry::factory()->forFirm($firm)->create(['client_id' => $client->id]); // still draft, not approved
-        $service = new InvoiceDraftingService(new TimeEntryApprovalService(new EmployeeRateService()), new TimelineEventRecorder());
+        $service = new InvoiceDraftingService(new TimeEntryApprovalService(new EmployeeRateService), new TimelineEventRecorder);
 
         try {
             $service->draftFromTimeEntries($firm, $client, [$entry]);
@@ -100,7 +101,7 @@ class InvoiceCreatedWiringTest extends TestCase
 
         $firm = $this->makeWebhookEntitledFirm();
         $client = Client::factory()->forFirm($firm)->create();
-        $service = new InvoiceDraftingService(new TimeEntryApprovalService(new EmployeeRateService()), new TimelineEventRecorder());
+        $service = new InvoiceDraftingService(new TimeEntryApprovalService(new EmployeeRateService), new TimelineEventRecorder);
 
         $invoice = $service->createFlatFee($firm, $client, 'Still drafted', 10000);
 
@@ -111,10 +112,10 @@ class InvoiceCreatedWiringTest extends TestCase
     {
         $firm = $this->makeWebhookEntitledFirm();
         $client = Client::factory()->forFirm($firm)->create();
-        $auditService = new ImportAuditService();
+        $auditService = new ImportAuditService;
         $batchService = new ImportBatchService($auditService);
-        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService(), new FakeVirusScanner());
-        $service = new ImportApplyService($documentSafetyService, $auditService);
+        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService, new FakeVirusScanner);
+        $service = new ImportApplyService($documentSafetyService, $auditService, app(InvoiceDraftingService::class), app(PaymentPlanService::class));
 
         $batch = $batchService->create($firm, ImportEntityType::Invoice, ImportSourceType::CsvUpload);
         $batchService->stageRows($batch, [['client_id' => $client->id, 'total_cents' => 15000]]);

@@ -21,6 +21,8 @@ use App\Services\ImportApplyService;
 use App\Services\ImportAuditService;
 use App\Services\ImportBatchService;
 use App\Services\ImportDocumentSafetyService;
+use App\Services\InvoiceDraftingService;
+use App\Services\PaymentPlanService;
 use App\Services\VirusScan\FakeVirusScanner;
 use App\Services\WebhookEventRecorderService;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
@@ -42,7 +44,7 @@ class DocumentUploadedWiringTest extends TestCase
     public function test_document_uploaded_fires_exactly_once_from_document_security_service_upload(): void
     {
         $firm = $this->makeWebhookEntitledFirm();
-        $service = new DocumentSecurityService(new DocumentUploadPolicyService());
+        $service = new DocumentSecurityService(new DocumentUploadPolicyService);
 
         $document = $service->upload(
             $firm,
@@ -71,7 +73,7 @@ class DocumentUploadedWiringTest extends TestCase
     public function test_document_uploaded_does_not_fire_when_upload_policy_rejects_the_file(): void
     {
         $firm = $this->makeWebhookEntitledFirm();
-        $service = new DocumentSecurityService(new DocumentUploadPolicyService());
+        $service = new DocumentSecurityService(new DocumentUploadPolicyService);
 
         try {
             $service->upload(
@@ -98,7 +100,7 @@ class DocumentUploadedWiringTest extends TestCase
         });
 
         $firm = $this->makeWebhookEntitledFirm();
-        $service = new DocumentSecurityService(new DocumentUploadPolicyService());
+        $service = new DocumentSecurityService(new DocumentUploadPolicyService);
 
         $document = $service->upload(
             $firm,
@@ -121,8 +123,8 @@ class DocumentUploadedWiringTest extends TestCase
         $attachment = EmailAttachment::factory()->forMessage($message)->create();
 
         $service = new EmailAttachmentPromotionService(
-            new EmailAttachmentSafetyService(new DocumentUploadPolicyService(), new FakeVirusScanner()),
-            new EmailSyncAuditService(),
+            new EmailAttachmentSafetyService(new DocumentUploadPolicyService, new FakeVirusScanner),
+            new EmailSyncAuditService,
         );
 
         $result = $service->scanAndPromote($attachment);
@@ -143,8 +145,8 @@ class DocumentUploadedWiringTest extends TestCase
         $attachment = EmailAttachment::factory()->forMessage($message)->create();
 
         $service = new EmailAttachmentPromotionService(
-            new EmailAttachmentSafetyService(new DocumentUploadPolicyService(), new FakeVirusScanner()),
-            new EmailSyncAuditService(),
+            new EmailAttachmentSafetyService(new DocumentUploadPolicyService, new FakeVirusScanner),
+            new EmailSyncAuditService,
         );
 
         $result = $service->scanAndPromote($attachment);
@@ -157,7 +159,7 @@ class DocumentUploadedWiringTest extends TestCase
     {
         $firm = $this->makeWebhookEntitledFirm();
         $original = Document::factory()->create(['firm_id' => $firm->id]);
-        $service = new DocumentReplacementService();
+        $service = new DocumentReplacementService;
 
         $replacement = $service->replaceWith(
             $original,
@@ -185,10 +187,10 @@ class DocumentUploadedWiringTest extends TestCase
     public function test_document_uploaded_fires_exactly_once_from_bulk_import(): void
     {
         $firm = $this->makeWebhookEntitledFirm();
-        $auditService = new ImportAuditService();
+        $auditService = new ImportAuditService;
         $batchService = new ImportBatchService($auditService);
-        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService(), new FakeVirusScanner());
-        $service = new ImportApplyService($documentSafetyService, $auditService);
+        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService, new FakeVirusScanner);
+        $service = new ImportApplyService($documentSafetyService, $auditService, app(InvoiceDraftingService::class), app(PaymentPlanService::class));
 
         $batch = $batchService->create($firm, ImportEntityType::Document, ImportSourceType::CsvUpload);
         $batchService->stageRows($batch, [[

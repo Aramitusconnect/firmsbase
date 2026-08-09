@@ -6,6 +6,7 @@ use App\Enums\FirmUserRole;
 use App\Models\Client;
 use App\Models\FirmUser;
 use App\Models\Matter;
+use App\Models\MatterTrustBalance;
 use App\Services\TrustAccountService;
 use App\Services\TrustBalanceService;
 use App\Services\TrustDepositService;
@@ -33,11 +34,12 @@ class TrustBalanceServiceTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
         $requester = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $approver = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
 
         $deposits = app(TrustDepositService::class);
-        $firstApproved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $requester, 10000), $requester);
+        $firstApproved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $requester, 10000), $approver);
         $deposits->post($firm, $ledger, $firstApproved);
-        $secondApproved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $requester, 5000), $requester);
+        $secondApproved = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $requester, 5000), $approver);
         $deposits->post($firm, $ledger, $secondApproved);
 
         $this->assertSame(15000, $ledger->balance->fresh()->balance_cents);
@@ -51,14 +53,15 @@ class TrustBalanceServiceTest extends TestCase
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
         $matter = Matter::factory()->forClient($client)->create();
         $requester = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $approver = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
 
         $deposits = app(TrustDepositService::class);
-        $forMatter = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $requester, 4000, $matter), $requester);
+        $forMatter = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $requester, 4000, $matter), $approver);
         $deposits->post($firm, $ledger, $forMatter, $matter);
-        $notForMatter = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $requester, 6000), $requester);
+        $notForMatter = $deposits->approveDeposit($firm, $deposits->requestDeposit($firm, $ledger, $requester, 6000), $approver);
         $deposits->post($firm, $ledger, $notForMatter);
 
-        $matterBalance = \App\Models\MatterTrustBalance::query()
+        $matterBalance = MatterTrustBalance::query()
             ->where('trust_ledger_id', $ledger->id)
             ->where('matter_id', $matter->id)
             ->first();

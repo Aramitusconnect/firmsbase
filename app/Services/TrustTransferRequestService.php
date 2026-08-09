@@ -14,8 +14,11 @@ use App\Models\FirmUser;
 use App\Models\Invoice;
 use App\Models\Matter;
 use App\Models\Payment;
+use App\Models\TrustApprovalEvent;
 use App\Models\TrustLedger;
+use App\Models\TrustLedgerEntry;
 use App\Models\TrustTransferRequest;
+use Illuminate\Support\Str;
 
 /**
  * TrustTransferRequestService — the trust-to-invoice transfer workflow
@@ -48,8 +51,7 @@ class TrustTransferRequestService
         private readonly TrustBalanceService $balanceService,
         private readonly PaymentClassificationService $classification,
         private readonly PaymentApplicationService $application,
-    ) {
-    }
+    ) {}
 
     public function requestTransfer(
         Firm $firm,
@@ -72,7 +74,7 @@ class TrustTransferRequestService
             throw new \RuntimeException('The invoice does not belong to this firm/matter.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use (
+        return (new TenantContextService)->runWithFirmContext($firm, function () use (
             $firm, $ledger, $matter, $invoice, $requestedBy, $amountCents
         ) {
             $request = TrustTransferRequest::create([
@@ -96,12 +98,13 @@ class TrustTransferRequestService
         $this->eligibility->assertEligible($firm);
         $this->tenantSafePolicy->assertTrustTransferRequestBelongsToFirm($request, $firm);
         $this->accessPolicy->assertCanApprove($approvedBy);
+        $this->accessPolicy->assertApproverIsNotRequester($approvedBy, $request->requested_by_firm_user_id);
 
         if (! in_array($request->status, [TrustTransferRequestStatus::Requested, TrustTransferRequestStatus::PendingApproval], true)) {
             throw new \RuntimeException('This transfer request is not awaiting approval.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $request, $approvedBy) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $request, $approvedBy) {
             $request->update([
                 'status' => TrustTransferRequestStatus::Approved,
                 'approved_by_firm_user_id' => $approvedBy->id,
@@ -123,7 +126,7 @@ class TrustTransferRequestService
             throw new \RuntimeException('This transfer request is not awaiting approval.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $request, $deniedBy, $reason) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $request, $deniedBy, $reason) {
             $request->update([
                 'status' => TrustTransferRequestStatus::Denied,
                 'denied_reason' => $reason,
@@ -165,8 +168,8 @@ class TrustTransferRequestService
         // by construction since runWithFirmContext() snapshots/restores
         // context regardless of nesting depth, and every nested wrap uses
         // this SAME $firm.
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $request, $appliedBy) {
-            [$ledger, $matter, $invoice] = (new TenantContextService())->runWithFirmContext($firm, fn () => [
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $request, $appliedBy) {
+            [$ledger, $matter, $invoice] = (new TenantContextService)->runWithFirmContext($firm, fn () => [
                 $request->trustLedger,
                 $request->matter,
                 $request->invoice,
@@ -190,7 +193,7 @@ class TrustTransferRequestService
 
                 $this->crossMatterProtection->assertDebitKeepsMatterBalanceNonNegative($lockedMatterBalance, -1 * $amountCents);
 
-                $entry = \App\Models\TrustLedgerEntry::create([
+                $entry = TrustLedgerEntry::create([
                     'firm_id' => $firm->id,
                     'trust_ledger_id' => $ledger->id,
                     'matter_id' => $matter->id,
@@ -203,7 +206,7 @@ class TrustTransferRequestService
                 $this->balanceService->recomputeForLedger($ledger, $lockedBalance);
                 $this->balanceService->recomputeForMatter($ledger, $matter, $lockedMatterBalance);
 
-                $payment = (new TenantContextService())->runWithFirmContext($firm, fn () => Payment::create([
+                $payment = (new TenantContextService)->runWithFirmContext($firm, fn () => Payment::create([
                     'firm_id' => $firm->id,
                     'client_id' => $ledger->client_id,
                     'matter_id' => $matter->id,
@@ -229,7 +232,7 @@ class TrustTransferRequestService
                 // only ever used here) rather than given its own separate
                 // wrap, since a second consecutive wrap for the very next
                 // line would be pure boilerplate with no isolation benefit.
-                $payment = (new TenantContextService())->runWithFirmContext($firm, function () use ($payment, $firm, $appliedBy) {
+                $payment = (new TenantContextService)->runWithFirmContext($firm, function () use ($payment, $firm, $appliedBy) {
                     $result = $this->classification->classify($firm, PaymentClassification::OperatingPayment);
                     $this->classification->recordDecision($payment, PaymentClassification::OperatingPayment, $result, $appliedBy->user);
 
@@ -242,7 +245,7 @@ class TrustTransferRequestService
 
                 // $entry is never updated or deleted from here on — it is
                 // handed back purely for the caller's/tests' inspection.
-                (new TenantContextService())->runWithFirmContext($firm, function () use ($payment, $invoice) {
+                (new TenantContextService)->runWithFirmContext($firm, function () use ($payment, $invoice) {
                     $this->application->applyToInvoice($payment, $invoice->fresh());
                 });
 
@@ -268,14 +271,14 @@ class TrustTransferRequestService
         int $amountCents,
         ?int $matterId,
     ): void {
-        \App\Models\TrustApprovalEvent::create([
+        TrustApprovalEvent::create([
             'firm_id' => $firm->id,
             'event_type' => $eventType,
             'actor_firm_user_id' => $actor->id,
             'amount_cents' => $amountCents,
             'matter_id' => $matterId,
             'approved_entry_type' => TrustLedgerEntryType::WithdrawalToInvoice->value,
-            'correlation_uuid' => (string) \Illuminate\Support\Str::uuid7(),
+            'correlation_uuid' => (string) Str::uuid7(),
             'trust_ledger_id' => $request->trust_ledger_id,
             'trust_transfer_request_id' => $request->id,
         ]);

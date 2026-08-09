@@ -9,11 +9,13 @@ use App\Enums\WebhookEventType;
 use App\Models\Firm;
 use App\Models\FirmLead;
 use App\Models\WebhookEvent;
+use App\Services\DocumentUploadPolicyService;
 use App\Services\ImportApplyService;
 use App\Services\ImportAuditService;
 use App\Services\ImportBatchService;
 use App\Services\ImportDocumentSafetyService;
-use App\Services\DocumentUploadPolicyService;
+use App\Services\InvoiceDraftingService;
+use App\Services\PaymentPlanService;
 use App\Services\VirusScan\FakeVirusScanner;
 use App\Services\WebhookEventRecorderService;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
@@ -40,15 +42,16 @@ class LeadCreatedWiringTest extends TestCase
     use DatabaseMigrations, SetsUpWebhookEntitledFirm;
 
     private ImportApplyService $service;
+
     private ImportBatchService $batchService;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $auditService = new ImportAuditService();
+        $auditService = new ImportAuditService;
         $this->batchService = new ImportBatchService($auditService);
-        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService(), new FakeVirusScanner());
-        $this->service = new ImportApplyService($documentSafetyService, $auditService);
+        $documentSafetyService = new ImportDocumentSafetyService(new DocumentUploadPolicyService, new FakeVirusScanner);
+        $this->service = new ImportApplyService($documentSafetyService, $auditService, app(InvoiceDraftingService::class), app(PaymentPlanService::class));
     }
 
     private function applyOneLeadRow(array $rowData): Firm

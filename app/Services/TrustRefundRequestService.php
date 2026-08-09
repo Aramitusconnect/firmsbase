@@ -31,8 +31,7 @@ class TrustRefundRequestService
         private readonly TrustCrossMatterProtectionService $crossMatterProtection,
         private readonly TrustConcurrencyLockService $lockService,
         private readonly TrustBalanceService $balanceService,
-    ) {
-    }
+    ) {}
 
     public function requestRefund(
         Firm $firm,
@@ -54,7 +53,7 @@ class TrustRefundRequestService
             throw new \RuntimeException('Refund amount must be positive.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use (
+        return (new TenantContextService)->runWithFirmContext($firm, function () use (
             $firm, $ledger, $matter, $requestedBy, $amountCents
         ) {
             $request = TrustRefundRequest::create([
@@ -77,12 +76,13 @@ class TrustRefundRequestService
         $this->eligibility->assertEligible($firm);
         $this->tenantSafePolicy->assertTrustRefundRequestBelongsToFirm($request, $firm);
         $this->accessPolicy->assertCanApprove($approvedBy);
+        $this->accessPolicy->assertApproverIsNotRequester($approvedBy, $request->requested_by_firm_user_id);
 
         if (! in_array($request->status, [TrustRefundRequestStatus::Requested, TrustRefundRequestStatus::PendingApproval], true)) {
             throw new \RuntimeException('This refund request is not awaiting approval.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $request, $approvedBy) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $request, $approvedBy) {
             $request->update([
                 'status' => TrustRefundRequestStatus::Approved,
                 'approved_by_firm_user_id' => $approvedBy->id,
@@ -104,7 +104,7 @@ class TrustRefundRequestService
             throw new \RuntimeException('This refund request is not awaiting approval.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $request, $deniedBy, $reason) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $request, $deniedBy, $reason) {
             $request->update([
                 'status' => TrustRefundRequestStatus::Denied,
                 'denied_reason' => $reason,
@@ -136,8 +136,8 @@ class TrustRefundRequestService
         // trust-table writes were not. The pre-existing narrow wrap
         // below (matters/trustLedger reads) survives unchanged as a
         // nested child — safe by construction, same $firm throughout.
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $request, $completedBy) {
-            [$ledger, $matter] = (new TenantContextService())->runWithFirmContext($firm, fn () => [
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $request, $completedBy) {
+            [$ledger, $matter] = (new TenantContextService)->runWithFirmContext($firm, fn () => [
                 $request->trustLedger,
                 $request->matter,
             ]);

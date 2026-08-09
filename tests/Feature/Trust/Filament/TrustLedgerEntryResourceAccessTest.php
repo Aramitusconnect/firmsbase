@@ -130,11 +130,12 @@ final class TrustLedgerEntryResourceAccessTest extends TestCase
 
         $refundEntry = $this->runWithFirmContext($firm, function () use ($firm, $ledger) {
             $requester = FirmUser::factory()->forFirm($firm)->role(FirmUserRole::FirmOwner)->create();
+            $approver = FirmUser::factory()->forFirm($firm)->role(FirmUserRole::FirmOwner)->create();
             $service = app(TrustRefundRequestService::class);
             $request = $service->requestRefund($firm, $ledger, $requester, 5000);
-            $service->approveRefund($firm, $request, $requester);
+            $service->approveRefund($firm, $request, $approver);
 
-            return $service->complete($firm, $request, $requester);
+            return $service->complete($firm, $request, $approver);
         });
 
         $this->actingAsRole($firm, FirmUserRole::FirmOwner);
@@ -162,7 +163,7 @@ final class TrustLedgerEntryResourceAccessTest extends TestCase
         [$firm, , $entry] = $this->makeDepositedEntry();
         $this->runWithFirmContext($firm, function () use ($firm, $entry): void {
             $reporter = FirmUser::factory()->forFirm($firm)->role(FirmUserRole::BillingStaff)->create();
-            app(TrustChargebackService::class)->report($firm, $entry, $reporter, 300, 'Reported');
+            app(TrustChargebackService::class)->report($firm, $entry, $reporter, $entry->amount_cents, 'Reported');
         });
 
         $this->actingAsRole($firm, FirmUserRole::BillingStaff);
