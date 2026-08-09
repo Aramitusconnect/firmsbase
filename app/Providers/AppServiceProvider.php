@@ -7,6 +7,8 @@ use App\Http\Middleware\EstablishFirmTenantContextForLivewireUpdate;
 use App\Models\PlatformAdmin;
 use App\Models\SecurityEvent;
 use App\Models\User;
+use App\Services\Stripe\FakeStripeGateway;
+use App\Services\Stripe\StripeGateway;
 use App\Services\TenantContextService;
 use Aws\Sqs\SqsClient;
 use Illuminate\Auth\Events\Failed;
@@ -80,6 +82,23 @@ class AppServiceProvider extends ServiceProvider
 
             return new SqsClient($clientConfig);
         });
+
+        // Payment Link / QR Routing phase — the StripeGateway interface
+        // (app/Services/Stripe/StripeGateway.php) already existed, used
+        // by PlatformPaymentService/PlatformRefundService, but was never
+        // container-bound anywhere; every existing caller constructed a
+        // FakeStripeGateway directly. PaymentRequestCheckoutService is
+        // the first production code path that needs to resolve
+        // StripeGateway from the container (a public HTTP request has
+        // no place to hand-construct one), so this binding is the
+        // minimal missing piece, not a new abstraction — reuses the
+        // interface exactly as designed. FakeStripeGateway remains the
+        // only implementation: per that interface's own documented
+        // project rule, no implementation may call a real Stripe SDK/API
+        // in this phase. A real connector is an explicit, disclosed
+        // BLOCKED_PROVIDER_CONNECTION limitation (see the final report),
+        // not something this binding fakes into looking live.
+        $this->app->bind(StripeGateway::class, FakeStripeGateway::class);
     }
 
     /**

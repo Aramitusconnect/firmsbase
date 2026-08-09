@@ -84,6 +84,19 @@ class TenantContextService
      */
     private const CLIENT_SELF_LOOKUP_SESSION_SETTING_NAME = 'app.current_client_id';
 
+    /**
+     * Payment Link / QR Routing phase — the RLS bootstrap hop for the
+     * one genuinely public, unauthenticated payment page. A visitor
+     * arrives holding nothing but a payment_requests.uuid (from a
+     * signed URL/QR code) — no firm context can exist yet, exactly the
+     * same bootstrap problem firm_users_self_lookup and
+     * clients_self_lookup already solve for their own tables. Set
+     * ONLY from the already-resolved uuid the caller itself supplies
+     * (the route parameter, never trusted further than that) — see
+     * withPaymentRequestSelfLookupContext() below.
+     */
+    private const PAYMENT_REQUEST_SELF_LOOKUP_SESSION_SETTING_NAME = 'app.current_payment_request_uuid';
+
     public function setFirmContext(Firm|int|string $firm): void
     {
         (new TenantContextResolver)->activateForFirm($this->resolveFirm($firm));
@@ -363,6 +376,31 @@ class TenantContextService
             });
         } finally {
             DB::select('select set_config(?, ?, ?)', [self::CLIENT_SELF_LOOKUP_SESSION_SETTING_NAME, '', $this->isLocalScoped()]);
+        }
+    }
+
+    /**
+     * Payment Link / QR Routing phase. Identical in shape to
+     * withClientSelfLookupContext() — activates ONLY the narrow
+     * app.current_payment_request_uuid session setting the
+     * payment_requests_self_lookup RLS policy reads, runs the
+     * callback, and always clears it afterward. Never touches
+     * app.current_firm_id or PHP-memory firm context. $uuid must be a
+     * value the caller already has independently (the public route's
+     * own uuid parameter) — this method grants no more than "find the
+     * one payment_requests row with this exact uuid," never a listing
+     * or any other table.
+     */
+    public function withPaymentRequestSelfLookupContext(string $uuid, callable $callback): mixed
+    {
+        try {
+            return DB::transaction(function () use ($uuid, $callback) {
+                DB::select('select set_config(?, ?, ?)', [self::PAYMENT_REQUEST_SELF_LOOKUP_SESSION_SETTING_NAME, $uuid, $this->isLocalScoped()]);
+
+                return $callback();
+            });
+        } finally {
+            DB::select('select set_config(?, ?, ?)', [self::PAYMENT_REQUEST_SELF_LOOKUP_SESSION_SETTING_NAME, '', $this->isLocalScoped()]);
         }
     }
 
