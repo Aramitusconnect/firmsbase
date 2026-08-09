@@ -273,4 +273,48 @@ class PaymentRequestCheckoutServiceTest extends TestCase
         $count = $this->runWithFirmContext($firm, fn () => Payment::query()->where('idempotency_key', $idempotencyKey)->count());
         $this->assertSame(1, $count);
     }
+
+    /**
+     * Payment-Channel Safety Hardening pass, item 8 — "Paid" must never
+     * mean merely "the provider UI returned success" when the
+     * downstream accounting application actually failed. A firm with
+     * accounting ENABLED but an incomplete Chart of Accounts (no
+     * LegalFeeRevenue account configured) causes ManualPaymentService::
+     * submit() to throw AccountingSetupIncompleteException — proves
+     * routeConfirmedPayment()'s own catch(Throwable) routes this to
+     * PendingReview, never Paid, and that no Payment row was left
+     * behind (the whole application rolled back atomically).
+     */
+    public function test_a_confirmed_payment_that_fails_accounting_application_never_reaches_paid(): void
+    {
+        $firm = Firm::factory()->create();
+        app(EntitlementService::class)->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, true);
+        // Deliberately no ChartOfAccount rows at all — accounting is
+        // enabled but not configured.
+        $client = Client::factory()->forFirm($firm)->create();
+        $creator = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::BillingStaff]);
+        // Must target a real invoice — a standalone (no invoice/
+        // installment target) payment never attempts a journal posting
+        // at all (ManualPaymentService::submit()'s own "if ($installment)
+        // ... elseif ($invoice) ..." branch is skipped entirely), so it
+        // would reach Paid regardless of the missing Chart of Accounts —
+        // that would prove nothing about this test's actual claim.
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forClient($client)->status(InvoiceStatus::Sent)->create(['total_cents' => 5000]));
+
+        $paymentRequest = app(PaymentRequestService::class)->create(
+            $firm, $client, PaymentRequestPurpose::EarnedFee, PaymentRequestAmountRule::Fixed, $creator,
+            requestedAmountCents: 5000, invoice: $invoice,
+        );
+        app(PaymentRequestService::class)->activate($firm, $paymentRequest->fresh(), $creator);
+
+        $checkout = $this->checkoutServiceWithGateway(new FakeStripeGateway(shouldSucceed: true));
+        $result = $checkout->submitPayment($paymentRequest->fresh(), 5000);
+
+        $this->assertSame(PaymentRequestStatus::PendingReview, $result->status, 'A gateway-confirmed payment whose accounting application fails must land in PendingReview, never Paid.');
+        $this->assertNull($result->payment_id);
+        $this->assertStringContainsString('could not be routed', (string) $result->failure_reason);
+
+        $paymentCount = $this->runWithFirmContext($firm, fn () => Payment::query()->where('firm_id', $firm->id)->count());
+        $this->assertSame(0, $paymentCount, 'The whole application must roll back atomically — no orphaned Payment row.');
+    }
 }

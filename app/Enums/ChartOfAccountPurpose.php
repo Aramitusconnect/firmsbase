@@ -113,16 +113,24 @@ enum ChartOfAccountPurpose: string
     case GeneralOperatingExpense = 'general_operating_expense';
 
     /**
-     * Not currently posted to by any service. This codebase's operating
-     * journal posts a single Revenue leg per payment
-     * (OperatingJournalRecorderService::recordFeeEarned()) without
-     * distinguishing which InvoiceLineType(s) funded it — fee lines and
-     * reimbursable-cost lines on the same invoice both post as ordinary
-     * LegalFeeRevenue today. Splitting cost-reimbursement revenue out
-     * as its own line-level posting would require line-level journal
-     * attribution, a real scope increase beyond this hardening pass —
-     * see the final report's "remaining blockers" item. Reserved for
-     * that future line-level split.
+     * Payment-Channel Safety Hardening pass, item 4/5 — now read by
+     * OperatingJournalRecorderService::recordFeeEarnedWithCostSplit(),
+     * required whenever a mixed invoice (both ordinary fee lines AND
+     * InvoiceLineType::ReimbursableExpense lines) is paid off in full
+     * by its own first and only payment — the one case
+     * resolveFeeCostSplitForFullyPaidInvoice() can split without
+     * inventing an allocation policy. A firm with reimbursable-expense
+     * invoice lines but no chart_of_accounts row of this purpose will
+     * have such a payment blocked atomically (AccountingSetupIncompleteException,
+     * same post-or-block policy as every other required purpose) rather
+     * than silently misposted as LegalFeeRevenue.
+     *
+     * A mixed invoice funded by more than one payment (this payment
+     * has predecessors, or leaves a remainder) still posts entirely to
+     * LegalFeeRevenue — that allocation policy (pro-rata vs cost-first
+     * vs fee-first) remains genuinely undefined by this codebase; see
+     * recordInvoicePaymentApplied()'s own docblock and the phase's
+     * final report.
      */
     case CostReimbursementRevenue = 'cost_reimbursement_revenue';
 

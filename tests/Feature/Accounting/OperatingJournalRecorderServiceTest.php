@@ -7,6 +7,7 @@ use App\Enums\ChartOfAccountType;
 use App\Enums\EntitlementSource;
 use App\Enums\ExpenseStatus;
 use App\Enums\FirmUserRole;
+use App\Enums\InvoiceLineType;
 use App\Enums\InvoiceStatus;
 use App\Enums\ManualPaymentMethod;
 use App\Enums\PaymentClassification;
@@ -19,6 +20,7 @@ use App\Models\ExpenseCategory;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\Invoice;
+use App\Models\InvoiceLine;
 use App\Models\Matter;
 use App\Models\Payment;
 use App\Services\AccountingBalanceService;
@@ -86,6 +88,109 @@ class OperatingJournalRecorderServiceTest extends TestCase
         $this->assertNotNull($entry);
         $this->assertSame(50000, $entry->postings->where('chart_of_account_id', $cash->id)->sum('debit_cents'));
         $this->assertSame(50000, $entry->postings->where('chart_of_account_id', $revenue->id)->sum('credit_cents'));
+    }
+
+    /**
+     * Payment-Channel Safety Hardening pass, item 4/5 — a mixed invoice
+     * (a legal-fee line + a ReimbursableExpense line), paid off in full
+     * by its own first and only payment, must split revenue between
+     * LegalFeeRevenue and CostReimbursementRevenue rather than posting
+     * the entire amount as undifferentiated legal-fee revenue.
+     */
+    public function test_a_mixed_invoice_paid_in_full_splits_fee_and_cost_reimbursement_revenue(): void
+    {
+        [$firm, $cash, $feeRevenue] = $this->makeFirmWithAccounts();
+        $costRevenue = $this->runWithFirmContext($firm, fn () => ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Revenue)->purpose(ChartOfAccountPurpose::CostReimbursementRevenue)->create(['account_code' => '4100', 'account_name' => 'Cost Reimbursement Revenue']));
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forClient($client)->status(InvoiceStatus::Sent)->create([
+            'subtotal_cents' => 80000, 'total_cents' => 80000,
+        ]));
+        $this->runWithFirmContext($firm, fn () => [
+            InvoiceLine::factory()->forInvoice($invoice)->create(['line_type' => InvoiceLineType::FlatFee, 'description' => 'Flat fee', 'amount_cents' => 50000]),
+            InvoiceLine::factory()->forInvoice($invoice)->create(['line_type' => InvoiceLineType::ReimbursableExpense, 'description' => 'Reimbursable filing cost', 'amount_cents' => 30000]),
+        ]);
+
+        app(ManualPaymentService::class)->submit(
+            $firm, $client, 80000, ManualPaymentMethod::Check, PaymentClassification::OperatingPayment,
+            (string) Str::uuid(), invoice: $invoice,
+        );
+
+        $entry = $this->runWithFirmContext($firm, fn () => AccountingJournalEntry::with('postings')->where('invoice_id', $invoice->id)->first());
+
+        $this->assertNotNull($entry);
+        $this->assertSame(80000, $entry->postings->where('chart_of_account_id', $cash->id)->sum('debit_cents'));
+        $this->assertSame(50000, $entry->postings->where('chart_of_account_id', $feeRevenue->id)->sum('credit_cents'));
+        $this->assertSame(30000, $entry->postings->where('chart_of_account_id', $costRevenue->id)->sum('credit_cents'));
+        $this->assertNotSame(80000, $entry->postings->where('chart_of_account_id', $feeRevenue->id)->sum('credit_cents'), 'The full payment must never be classified as 100% legal fee revenue when part of it is a reimbursable cost.');
+    }
+
+    /**
+     * Same mixed invoice, but the firm never configured a
+     * CostReimbursementRevenue chart account — this must atomically
+     * BLOCK the payment (the same post-or-block policy every other
+     * required purpose already uses), never silently mispost the cost
+     * portion as legal-fee revenue.
+     */
+    public function test_a_mixed_invoice_paid_in_full_blocks_atomically_without_a_cost_reimbursement_account(): void
+    {
+        [$firm, $cash, $feeRevenue] = $this->makeFirmWithAccounts();
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forClient($client)->status(InvoiceStatus::Sent)->create([
+            'subtotal_cents' => 80000, 'total_cents' => 80000,
+        ]));
+        $this->runWithFirmContext($firm, fn () => [
+            InvoiceLine::factory()->forInvoice($invoice)->create(['line_type' => InvoiceLineType::FlatFee, 'description' => 'Flat fee', 'amount_cents' => 50000]),
+            InvoiceLine::factory()->forInvoice($invoice)->create(['line_type' => InvoiceLineType::ReimbursableExpense, 'description' => 'Reimbursable filing cost', 'amount_cents' => 30000]),
+        ]);
+
+        $this->expectException(AccountingSetupIncompleteException::class);
+
+        app(ManualPaymentService::class)->submit(
+            $firm, $client, 80000, ManualPaymentMethod::Check, PaymentClassification::OperatingPayment,
+            (string) Str::uuid(), invoice: $invoice,
+        );
+    }
+
+    /**
+     * A mixed invoice funded by MORE THAN ONE payment is the
+     * genuinely ambiguous case this codebase has never defined an
+     * allocation policy for (pro-rata vs cost-first vs fee-first) —
+     * see OperatingJournalRecorderService::recordInvoicePaymentApplied()'s
+     * own docblock. Proves the deliberate, documented fallback: still
+     * posts (payments must never be blocked over this), but as a
+     * single undifferentiated LegalFeeRevenue leg, exactly as before
+     * this hardening pass — never a guessed split.
+     */
+    public function test_a_mixed_invoice_paid_by_more_than_one_payment_does_not_attempt_a_split(): void
+    {
+        [$firm, $cash, $feeRevenue] = $this->makeFirmWithAccounts();
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forClient($client)->status(InvoiceStatus::Sent)->create([
+            'subtotal_cents' => 80000, 'total_cents' => 80000,
+        ]));
+        $this->runWithFirmContext($firm, fn () => [
+            InvoiceLine::factory()->forInvoice($invoice)->create(['line_type' => InvoiceLineType::FlatFee, 'description' => 'Flat fee', 'amount_cents' => 50000]),
+            InvoiceLine::factory()->forInvoice($invoice)->create(['line_type' => InvoiceLineType::ReimbursableExpense, 'description' => 'Reimbursable filing cost', 'amount_cents' => 30000]),
+        ]);
+
+        app(ManualPaymentService::class)->submit(
+            $firm, $client, 20000, ManualPaymentMethod::Check, PaymentClassification::OperatingPayment,
+            (string) Str::uuid(), invoice: $invoice,
+        );
+        $invoiceAfterFirstPayment = $this->runWithFirmContext($firm, fn () => $invoice->fresh());
+        app(ManualPaymentService::class)->submit(
+            $firm, $client, 60000, ManualPaymentMethod::Check, PaymentClassification::OperatingPayment,
+            (string) Str::uuid(), invoice: $invoiceAfterFirstPayment,
+        );
+
+        $entries = $this->runWithFirmContext($firm, fn () => AccountingJournalEntry::with('postings')->where('invoice_id', $invoice->id)->get());
+
+        $this->assertCount(2, $entries);
+        foreach ($entries as $entry) {
+            $this->assertCount(2, $entry->postings, 'A non-split posting always has exactly two lines: cash debit, single revenue credit.');
+        }
+        $totalFeeRevenueCredited = $entries->flatMap->postings->where('chart_of_account_id', $feeRevenue->id)->sum('credit_cents');
+        $this->assertSame(80000, $totalFeeRevenueCredited, 'Without a defined allocation policy, a multi-payment mixed invoice still posts entirely to LegalFeeRevenue — documented, not silently guessed differently.');
     }
 
     /**
