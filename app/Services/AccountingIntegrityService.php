@@ -3,6 +3,9 @@
 namespace App\Services;
 
 use App\Enums\AccountingPeriodStatus;
+use App\Enums\PaymentRequestEventType;
+use App\Enums\PaymentRequestPurpose;
+use App\Enums\PaymentRequestStatus;
 use App\Enums\PaymentReversalType;
 use App\Enums\TrustTransferRequestStatus;
 use App\Models\AccountingJournalEntry;
@@ -10,6 +13,7 @@ use App\Models\AccountingPeriod;
 use App\Models\Firm;
 use App\Models\Payment;
 use App\Models\PaymentAllocation;
+use App\Models\PaymentRequest;
 use App\Models\PaymentReversal;
 use App\Models\TrustTransferRequest;
 use App\ValueObjects\AccountingIntegrityFinding;
@@ -60,8 +64,16 @@ class AccountingIntegrityService
                 $findings = $findings
                     ->merge($this->findPaymentsMissingJournalEntries($firm))
                     ->merge($this->findAppliedTransfersMissingJournalEntries($firm))
-                    ->merge($this->findReversalsMissingCompensatingEntries($firm));
+                    ->merge($this->findReversalsMissingCompensatingEntries($firm))
+                    ->merge($this->findPaymentRequestPaymentsMissingJournalEntries($firm));
             }
+
+            $findings = $findings
+                ->merge($this->findPaidPaymentRequestsMissingPayment($firm))
+                ->merge($this->findDuplicateProviderTransactionIds($firm))
+                ->merge($this->findPaymentRequestAmountMismatches($firm))
+                ->merge($this->findPaymentRequestTargetMismatches($firm))
+                ->merge($this->findUnpostedTrustDepositPaymentRequests($firm));
 
             return new AccountingIntegrityReport($firm->id, $findings->values(), now());
         });
@@ -288,6 +300,193 @@ class AccountingIntegrityService
             "PaymentReversal #{$reversal->id} ({$reversal->reversal_type->value}) has no compensating accounting journal entry.",
             'payment_reversal',
             (int) $reversal->id,
+        ));
+    }
+
+    /**
+     * Payment Link / QR Routing phase, master prompt item 13: a
+     * PaymentRequest whose own status says money was routed all the way
+     * to Paid, but which carries no payment_id at all — this should be
+     * structurally impossible given
+     * PaymentRequestCheckoutService::routeOperatingPayment() always sets
+     * both together in the same update() call, but this check exists as
+     * defense in depth against any future code path that might set
+     * status without the payment consequence.
+     */
+    private function findPaidPaymentRequestsMissingPayment(Firm $firm): Collection
+    {
+        $rows = PaymentRequest::query()
+            ->where('firm_id', $firm->id)
+            ->where('status', PaymentRequestStatus::Paid)
+            ->whereNull('payment_id')
+            ->get();
+
+        return $rows->map(fn (PaymentRequest $paymentRequest) => new AccountingIntegrityFinding(
+            'payment_request_paid_without_payment',
+            "PaymentRequest #{$paymentRequest->id} is Paid but has no payment_id — a completed entry-channel request must always carry its own accounting consequence.",
+            'payment_request',
+            (int) $paymentRequest->id,
+        ));
+    }
+
+    /**
+     * A Paid PaymentRequest's underlying Payment must itself have a
+     * journal entry — this is the payment-request-specific mirror of
+     * findPaymentsMissingJournalEntries() above, scoped to payments
+     * that arrived via the entry channel rather than every operating
+     * payment in the firm, so it surfaces even when the firm's general
+     * expenses-gated sweep above is skipped.
+     *
+     * Scoped to Payments with an invoice/installment target, exactly
+     * like findPaymentsMissingJournalEntries() above — a standalone
+     * PaymentRequest with no target (ManualPaymentService::submit()'s
+     * own "if ($installment) ... elseif ($invoice) ..." branch is
+     * skipped entirely otherwise) never posts a journal entry by
+     * design, so it must never be flagged here as drift.
+     */
+    private function findPaymentRequestPaymentsMissingJournalEntries(Firm $firm): Collection
+    {
+        $entriesWithPaymentId = AccountingJournalEntry::query()
+            ->where('firm_id', $firm->id)
+            ->whereNotNull('payment_id')
+            ->pluck('payment_id');
+
+        $rows = PaymentRequest::query()
+            ->where('payment_requests.firm_id', $firm->id)
+            ->where('payment_requests.status', PaymentRequestStatus::Paid)
+            ->whereNotNull('payment_requests.payment_id')
+            ->whereNotIn('payment_requests.payment_id', $entriesWithPaymentId)
+            ->join('payments', 'payments.id', '=', 'payment_requests.payment_id')
+            ->where(fn ($q) => $q->whereNotNull('payments.invoice_id')->orWhereNotNull('payments.payment_plan_installment_id'))
+            ->select('payment_requests.*')
+            ->get();
+
+        return $rows->map(fn (PaymentRequest $paymentRequest) => new AccountingIntegrityFinding(
+            'payment_request_payment_missing_journal_entry',
+            "PaymentRequest #{$paymentRequest->id} is Paid via Payment #{$paymentRequest->payment_id}, but that payment has no accounting journal entry.",
+            'payment_request',
+            (int) $paymentRequest->id,
+        ));
+    }
+
+    /**
+     * Defense in depth — payment_requests carries a
+     * unique(['firm_id','provider_transaction_id']) constraint already,
+     * so this should always be empty in practice; surfaced here anyway
+     * per the master prompt's own explicit reconciliation requirement
+     * ("duplicate provider transaction").
+     */
+    private function findDuplicateProviderTransactionIds(Firm $firm): Collection
+    {
+        $rows = PaymentRequest::query()
+            ->where('firm_id', $firm->id)
+            ->whereNotNull('provider_transaction_id')
+            ->select('provider_transaction_id')
+            ->groupBy('provider_transaction_id')
+            ->havingRaw('count(*) > 1')
+            ->pluck('provider_transaction_id');
+
+        return $rows->map(fn (string $providerTransactionId) => new AccountingIntegrityFinding(
+            'payment_request_duplicate_provider_transaction',
+            "Provider transaction [{$providerTransactionId}] is attributed to more than one payment request.",
+            'payment_request',
+            0,
+        ));
+    }
+
+    /**
+     * "Wrong amount": the amount a PaymentRequest recorded as paid must
+     * exactly match the amount its own resulting Payment records —
+     * these are written together in the same
+     * PaymentRequestCheckoutService::routeOperatingPayment() update(),
+     * so any mismatch indicates drift, not a legitimate partial state.
+     */
+    private function findPaymentRequestAmountMismatches(Firm $firm): Collection
+    {
+        $rows = PaymentRequest::query()
+            ->where('payment_requests.firm_id', $firm->id)
+            ->whereNotNull('payment_requests.payment_id')
+            ->join('payments', 'payments.id', '=', 'payment_requests.payment_id')
+            ->whereColumn('payment_requests.paid_amount_cents', '!=', 'payments.amount_cents')
+            ->select('payment_requests.id', 'payment_requests.paid_amount_cents', 'payments.amount_cents as payment_amount_cents')
+            ->get();
+
+        return $rows->map(fn ($row) => new AccountingIntegrityFinding(
+            'payment_request_amount_mismatch',
+            "PaymentRequest #{$row->id} recorded paid_amount_cents {$row->paid_amount_cents}, but its Payment records amount_cents {$row->payment_amount_cents}.",
+            'payment_request',
+            (int) $row->id,
+        ));
+    }
+
+    /**
+     * "Wrong target": the invoice/installment a PaymentRequest was
+     * created against must match the invoice/installment its own
+     * resulting Payment was applied to —
+     * PaymentRequestService::assertPurposeTargetConsistency() enforces
+     * this at creation time, but this check catches any drift after
+     * the fact (e.g. a Payment later re-applied by an unrelated code
+     * path).
+     */
+    private function findPaymentRequestTargetMismatches(Firm $firm): Collection
+    {
+        $rows = PaymentRequest::query()
+            ->where('payment_requests.firm_id', $firm->id)
+            ->whereNotNull('payment_requests.payment_id')
+            ->join('payments', 'payments.id', '=', 'payment_requests.payment_id')
+            ->where(function ($query) {
+                $query
+                    ->whereColumn('payment_requests.invoice_id', '!=', 'payments.invoice_id')
+                    ->orWhereColumn('payment_requests.payment_plan_installment_id', '!=', 'payments.payment_plan_installment_id')
+                    ->orWhere(function ($q) {
+                        $q->whereNotNull('payment_requests.invoice_id')->whereNull('payments.invoice_id');
+                    })
+                    ->orWhere(function ($q) {
+                        $q->whereNotNull('payment_requests.payment_plan_installment_id')->whereNull('payments.payment_plan_installment_id');
+                    });
+            })
+            ->select('payment_requests.id')
+            ->get();
+
+        return $rows->map(fn ($row) => new AccountingIntegrityFinding(
+            'payment_request_target_mismatch',
+            "PaymentRequest #{$row->id}'s invoice/installment target does not match the invoice/installment its resulting Payment was applied to.",
+            'payment_request',
+            (int) $row->id,
+        ));
+    }
+
+    /**
+     * "Trust request not posted": a Trust-deposit-purpose PaymentRequest
+     * whose provider already confirmed the money (provider_transaction_id
+     * set) must always have filed a TrustDepositRequested event —
+     * PaymentRequestCheckoutService::routeTrustDeposit() records this on
+     * every success path; its absence means a confirmed payment never
+     * reached TrustDepositService::requestDeposit() at all (e.g. the
+     * client had no trust ledger — that specific case ALSO produces a
+     * Failed event with a distinct, human-readable note, but still
+     * surfaces here since the underlying money was never filed toward
+     * an approvable trust deposit).
+     */
+    private function findUnpostedTrustDepositPaymentRequests(Firm $firm): Collection
+    {
+        $filed = DB::table('payment_request_events')
+            ->where('firm_id', $firm->id)
+            ->where('event_type', PaymentRequestEventType::TrustDepositRequested->value)
+            ->pluck('payment_request_id');
+
+        $rows = PaymentRequest::query()
+            ->where('firm_id', $firm->id)
+            ->where('purpose', PaymentRequestPurpose::TrustDeposit)
+            ->whereNotNull('provider_transaction_id')
+            ->whereNotIn('id', $filed)
+            ->get();
+
+        return $rows->map(fn (PaymentRequest $paymentRequest) => new AccountingIntegrityFinding(
+            'payment_request_trust_deposit_not_posted',
+            "PaymentRequest #{$paymentRequest->id} is a confirmed Trust deposit whose money was never filed as a TrustDepositService deposit request.",
+            'payment_request',
+            (int) $paymentRequest->id,
         ));
     }
 }
