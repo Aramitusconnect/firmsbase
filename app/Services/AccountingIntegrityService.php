@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\AccountingJournalSourceType;
 use App\Enums\AccountingPeriodStatus;
 use App\Enums\ChartOfAccountPurpose;
 use App\Enums\InvoiceLineType;
@@ -72,7 +73,11 @@ class AccountingIntegrityService
                     ->merge($this->findReversalsMissingCompensatingEntries($firm))
                     ->merge($this->findPaymentRequestPaymentsMissingJournalEntries($firm))
                     ->merge($this->findMixedInvoicesFullyPaidWithNoCostAllocation($firm))
-                    ->merge($this->findPaymentAllocationTotalsNotMatchingJournalRevenuePostings($firm));
+                    ->merge($this->findPaymentAllocationTotalsNotMatchingJournalRevenuePostings($firm))
+                    ->merge($this->findPendingAllocationsMissingCashReceiptEntry($firm))
+                    ->merge($this->findUnappliedLiabilityAmountMismatches($firm))
+                    ->merge($this->findResolvedAllocationsWithUnclearedLiability($firm))
+                    ->merge($this->findLiabilityClearedMultipleTimes($firm));
             }
 
             $findings = $findings
@@ -81,7 +86,8 @@ class AccountingIntegrityService
                 ->merge($this->findPaymentRequestAmountMismatches($firm))
                 ->merge($this->findPaymentRequestTargetMismatches($firm))
                 ->merge($this->findUnpostedTrustDepositPaymentRequests($firm))
-                ->merge($this->findUnresolvedPendingPaymentAllocations($firm));
+                ->merge($this->findUnresolvedPendingPaymentAllocations($firm))
+                ->merge($this->findRevenueRecognizedWhilePending($firm));
 
             return new AccountingIntegrityReport($firm->id, $findings->values(), now());
         });
@@ -571,9 +577,11 @@ class AccountingIntegrityService
                 ->sum('accounting_postings.credit_cents');
 
             if ($journalTotal !== (int) $row->total_cents) {
+                $revenuePurposeValue = $row->revenue_purpose instanceof ChartOfAccountPurpose ? $row->revenue_purpose->value : $row->revenue_purpose;
+
                 $findings->push(new AccountingIntegrityFinding(
                     'payment_allocation_total_mismatches_journal_posting',
-                    "Invoice #{$row->invoice_id}'s {$row->revenue_purpose} PaymentAllocation total ({$row->total_cents}) does not match its journal postings to that account ({$journalTotal}).",
+                    "Invoice #{$row->invoice_id}'s {$revenuePurposeValue} PaymentAllocation total ({$row->total_cents}) does not match its journal postings to that account ({$journalTotal}).",
                     'invoice',
                     (int) $row->invoice_id,
                 ));
@@ -605,6 +613,203 @@ class AccountingIntegrityService
             "Payment #{$pending->payment_id} has {$pending->amount_cents} cents awaiting a fee/cost allocation decision on invoice #{$pending->invoice_id} ({$pending->reason}).",
             'pending_payment_allocation',
             (int) $pending->id,
+        ));
+    }
+
+    /**
+     * Pending-Cash Accounting pass, item 7 — covers BOTH of the master
+     * prompt's first two bullets ("successful Payment with no cash-side
+     * accounting entry" and "PendingPaymentAllocation without Unapplied
+     * liability posting"): in this codebase's architecture they are the
+     * SAME fact. Every PendingPaymentAllocation row — Pending, Resolved,
+     * or Cancelled alike — must have been created alongside a genuine
+     * UnappliedFundsReceived entry (ManualPaymentService::applyOrDeferInvoice()/
+     * applyOrDeferInstallment(), same transaction as the row itself); its
+     * absence means the payment's cash was never represented in the
+     * accounting journal at all.
+     */
+    private function findPendingAllocationsMissingCashReceiptEntry(Firm $firm): Collection
+    {
+        $entriesWithPendingId = AccountingJournalEntry::query()
+            ->where('firm_id', $firm->id)
+            ->where('source_type', AccountingJournalSourceType::UnappliedFundsReceived->value)
+            ->whereNotNull('pending_payment_allocation_id')
+            ->pluck('pending_payment_allocation_id');
+
+        $rows = PendingPaymentAllocation::query()
+            ->where('firm_id', $firm->id)
+            ->whereNotIn('id', $entriesWithPendingId)
+            ->get();
+
+        return $rows->map(fn (PendingPaymentAllocation $pending) => new AccountingIntegrityFinding(
+            'pending_allocation_missing_cash_receipt_entry',
+            "PendingPaymentAllocation #{$pending->id} (payment #{$pending->payment_id}) has no UnappliedFundsReceived journal entry — its cash receipt is not represented in the accounting journal.",
+            'pending_payment_allocation',
+            (int) $pending->id,
+        ));
+    }
+
+    /**
+     * Pending-Cash Accounting pass, item 7, bullet 3 — a
+     * PendingPaymentAllocation's own UnappliedFundsReceived entry must
+     * credit the UnappliedOperatingFundsLiability account for EXACTLY
+     * the pending amount, never more, never less. Skips rows already
+     * caught by findPendingAllocationsMissingCashReceiptEntry() (no
+     * receipt entry at all) to avoid a redundant second finding for the
+     * same underlying gap.
+     */
+    private function findUnappliedLiabilityAmountMismatches(Firm $firm): Collection
+    {
+        $liabilityPurpose = ChartOfAccountPurpose::UnappliedOperatingFundsLiability->value;
+
+        $rows = PendingPaymentAllocation::query()->where('firm_id', $firm->id)->get();
+        $findings = new Collection;
+
+        foreach ($rows as $pending) {
+            $receiptEntry = AccountingJournalEntry::query()
+                ->where('pending_payment_allocation_id', $pending->id)
+                ->where('source_type', AccountingJournalSourceType::UnappliedFundsReceived->value)
+                ->whereNull('reverses_journal_entry_id')
+                ->first();
+
+            if ($receiptEntry === null) {
+                continue;
+            }
+
+            $liabilityCredited = (int) DB::table('accounting_postings')
+                ->join('chart_of_accounts', 'chart_of_accounts.id', '=', 'accounting_postings.chart_of_account_id')
+                ->where('accounting_postings.accounting_journal_entry_id', $receiptEntry->id)
+                ->where('chart_of_accounts.purpose', $liabilityPurpose)
+                ->sum('accounting_postings.credit_cents');
+
+            if ($liabilityCredited !== $pending->amount_cents) {
+                $findings->push(new AccountingIntegrityFinding(
+                    'unapplied_liability_amount_mismatch',
+                    "PendingPaymentAllocation #{$pending->id}'s cash-received entry credited {$liabilityCredited} cents to the unapplied liability account, but the pending amount is {$pending->amount_cents} cents.",
+                    'pending_payment_allocation',
+                    (int) $pending->id,
+                ));
+            }
+        }
+
+        return $findings;
+    }
+
+    /**
+     * Pending-Cash Accounting pass, item 7, bullet 4 — a Resolved
+     * PendingPaymentAllocation must have a matching UnappliedFundsResolved
+     * entry that debits the liability account for EXACTLY the pending
+     * amount, fully clearing what the receipt entry credited. A missing
+     * entry, or one that only partially clears the liability, leaves a
+     * stale balance sitting in UnappliedOperatingFundsLiability forever.
+     */
+    private function findResolvedAllocationsWithUnclearedLiability(Firm $firm): Collection
+    {
+        $rows = PendingPaymentAllocation::query()
+            ->where('firm_id', $firm->id)
+            ->where('status', PendingPaymentAllocationStatus::Resolved)
+            ->get();
+
+        $findings = new Collection;
+
+        foreach ($rows as $pending) {
+            $resolvedEntry = AccountingJournalEntry::query()
+                ->where('pending_payment_allocation_id', $pending->id)
+                ->where('source_type', AccountingJournalSourceType::UnappliedFundsResolved->value)
+                ->first();
+
+            if ($resolvedEntry === null) {
+                $findings->push(new AccountingIntegrityFinding(
+                    'resolved_pending_allocation_liability_not_cleared',
+                    "PendingPaymentAllocation #{$pending->id} is Resolved, but no UnappliedFundsResolved journal entry reclassified its liability.",
+                    'pending_payment_allocation',
+                    (int) $pending->id,
+                ));
+
+                continue;
+            }
+
+            $liabilityDebited = (int) DB::table('accounting_postings')
+                ->join('chart_of_accounts', 'chart_of_accounts.id', '=', 'accounting_postings.chart_of_account_id')
+                ->where('accounting_postings.accounting_journal_entry_id', $resolvedEntry->id)
+                ->where('chart_of_accounts.purpose', ChartOfAccountPurpose::UnappliedOperatingFundsLiability->value)
+                ->sum('accounting_postings.debit_cents');
+
+            if ($liabilityDebited !== $pending->amount_cents) {
+                $findings->push(new AccountingIntegrityFinding(
+                    'resolved_pending_allocation_liability_not_cleared',
+                    "PendingPaymentAllocation #{$pending->id} is Resolved, but its resolution entry only cleared {$liabilityDebited} of {$pending->amount_cents} cents from the unapplied liability account.",
+                    'pending_payment_allocation',
+                    (int) $pending->id,
+                ));
+            }
+        }
+
+        return $findings;
+    }
+
+    /**
+     * Pending-Cash Accounting pass, item 7, bullet 5 — a
+     * PendingPaymentAllocation's liability may be cleared exactly once:
+     * either an UnappliedFundsResolved entry (normal resolution) OR a
+     * reversal of its own receipt entry
+     * (OperatingPaymentRefundService::refundWhilePending()/
+     * OperatingChargebackService::chargebackWhilePending(), via
+     * AccountingJournalReversalService::reverse() — which carries the
+     * SAME source_type as the original, distinguished here by
+     * reverses_journal_entry_id being set), never both and never twice.
+     */
+    private function findLiabilityClearedMultipleTimes(Firm $firm): Collection
+    {
+        $rows = AccountingJournalEntry::query()
+            ->where('firm_id', $firm->id)
+            ->whereNotNull('pending_payment_allocation_id')
+            ->where(function ($query) {
+                $query
+                    ->where('source_type', AccountingJournalSourceType::UnappliedFundsResolved->value)
+                    ->orWhereNotNull('reverses_journal_entry_id');
+            })
+            ->select('pending_payment_allocation_id')
+            ->groupBy('pending_payment_allocation_id')
+            ->havingRaw('count(*) > 1')
+            ->pluck('pending_payment_allocation_id');
+
+        return $rows->map(fn (int $pendingId) => new AccountingIntegrityFinding(
+            'unapplied_liability_cleared_multiple_times',
+            "PendingPaymentAllocation #{$pendingId}'s unapplied liability was cleared (resolved or reversed) more than once.",
+            'pending_payment_allocation',
+            (int) $pendingId,
+        ));
+    }
+
+    /**
+     * Pending-Cash Accounting pass, item 7, bullet 6 — the single most
+     * important safety invariant this pass introduces: revenue must
+     * NEVER be recognized for a payment whose fee/cost allocation is
+     * still Pending. Ungated (unlike the four checks above): recordRevenueAllocation()
+     * writes revenue_purpose-tagged PaymentAllocation rows unconditionally,
+     * regardless of whether journal posting itself is applicable for
+     * this firm, so this check must run even for a firm that has never
+     * enabled accounting.
+     */
+    private function findRevenueRecognizedWhilePending(Firm $firm): Collection
+    {
+        $pendingPaymentIds = PendingPaymentAllocation::query()
+            ->where('firm_id', $firm->id)
+            ->where('status', PendingPaymentAllocationStatus::Pending)
+            ->pluck('payment_id');
+
+        $rows = PaymentAllocation::query()
+            ->where('firm_id', $firm->id)
+            ->whereIn('payment_id', $pendingPaymentIds)
+            ->whereNotNull('revenue_purpose')
+            ->get();
+
+        return $rows->map(fn (PaymentAllocation $row) => new AccountingIntegrityFinding(
+            'revenue_recognized_while_pending',
+            "Payment #{$row->payment_id} has a revenue_purpose-tagged PaymentAllocation row, but its fee/cost allocation is still Pending — revenue must never be recognized before resolution.",
+            'payment_allocation',
+            (int) $row->id,
         ));
     }
 }
