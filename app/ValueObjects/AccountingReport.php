@@ -21,6 +21,5 @@ final readonly class AccountingReport
         public ?\DateTimeInterface $periodEnd,
         public mixed $data,
         public \DateTimeInterface $generatedAt,
-    ) {
-    }
+    ) {}
 }

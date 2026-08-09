@@ -5,10 +5,11 @@ namespace Tests\Feature\Accounting;
 use App\Enums\AccountingJournalSourceType;
 use App\Enums\ChartOfAccountType;
 use App\Integrations\Models\FirmIntegration;
+use App\Models\AccountingJournalEntry;
 use App\Models\ChartOfAccount;
-use App\Models\Firm;
 use App\Models\FinancialEvidenceBankAccount;
 use App\Models\FinancialEvidenceTransaction;
+use App\Models\Firm;
 use App\Services\AccountingJournalPostingService;
 use App\Services\OperatingLedgerBankMatchingService;
 use App\ValueObjects\OperatingBankMatchResult;
@@ -163,7 +164,7 @@ class OperatingLedgerBankMatchingServiceTest extends TestCase
 
         $this->runWithFirmContext($firm, fn () => $this->service->matchOne($firm, $transaction));
 
-        $entryCount = $this->runWithFirmContext($firm, fn () => \App\Models\AccountingJournalEntry::count());
+        $entryCount = $this->runWithFirmContext($firm, fn () => AccountingJournalEntry::count());
         $this->assertSame(0, $entryCount);
     }
 }

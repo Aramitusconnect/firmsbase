@@ -7,6 +7,7 @@ use App\Enums\ChartOfAccountType;
 use App\Models\AccountingPeriod;
 use App\Models\Firm;
 use App\Models\FirmUser;
+use App\Models\TrustBalance;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -29,8 +30,7 @@ class AccountingPeriodCloseService
         private readonly AccountingReportingService $reporting,
         private readonly ChartOfAccountsService $chartOfAccounts,
         private readonly TrustBalanceService $trustBalance,
-    ) {
-    }
+    ) {}
 
     public function close(Firm $firm, \DateTimeInterface $periodStart, \DateTimeInterface $periodEnd, FirmUser $closedBy): AccountingPeriod
     {
@@ -67,7 +67,7 @@ class AccountingPeriodCloseService
         // per the extend-never-parallel mandate, has no historical/
         // as-of query) — this snapshot is explicitly labeled as such
         // rather than presented as a true as-of-periodEnd figure.
-        $trustLiabilityCents = (new TenantContextService)->runWithFirmContext($firm, fn () => \App\Models\TrustBalance::query()
+        $trustLiabilityCents = (new TenantContextService)->runWithFirmContext($firm, fn () => TrustBalance::query()
             ->where('firm_id', $firm->id)
             ->sum('balance_cents'));
 

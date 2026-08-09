@@ -46,8 +46,7 @@ class TrustReconciliationService
         private readonly TenantSafeTrustPolicyService $tenantSafePolicy,
         private readonly TrustBalanceService $balanceService,
         private readonly TrustEligibilityService $eligibility,
-    ) {
-    }
+    ) {}
 
     /**
      * The entire method body — from the $account->ledgers relation load
@@ -73,7 +72,7 @@ class TrustReconciliationService
         $this->tenantSafePolicy->assertTrustAccountBelongsToFirm($account, $firm);
         $this->eligibility->assertEligible($firm);
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use (
+        return (new TenantContextService)->runWithFirmContext($firm, function () use (
             $firm, $account, $performedBy, $periodStart, $periodEnd, $assertedBankBalanceCents
         ) {
             $systemBalanceCents = 0;

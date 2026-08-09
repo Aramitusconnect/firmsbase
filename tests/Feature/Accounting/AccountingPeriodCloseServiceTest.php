@@ -6,7 +6,6 @@ use App\Enums\AccountingJournalSourceType;
 use App\Enums\AccountingPeriodStatus;
 use App\Enums\ChartOfAccountType;
 use App\Enums\FirmUserRole;
-use App\Models\AccountingPeriod;
 use App\Models\ChartOfAccount;
 use App\Models\Firm;
 use App\Models\FirmUser;

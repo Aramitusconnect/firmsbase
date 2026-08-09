@@ -3,10 +3,12 @@
 namespace App\Services;
 
 use App\Enums\InvoiceStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\TrustReconciliationStatus;
 use App\Models\AccountingJournalEntry;
 use App\Models\Firm;
 use App\Models\InvoiceWriteOff;
+use App\Models\MatterTrustBalance;
 use App\Models\PaymentAllocation;
 use App\Models\PaymentReversal;
 use App\Models\TrustAccount;
@@ -36,8 +38,7 @@ class AccountingReportingService
         private readonly AccountingBalanceService $accountingBalance,
         private readonly TrustBalanceService $trustBalance,
         private readonly AccountingEarnedFeeService $earnedFee,
-    ) {
-    }
+    ) {}
 
     public function operatingLedger(Firm $firm, \DateTimeInterface $periodStart, \DateTimeInterface $periodEnd): AccountingReport
     {
@@ -87,7 +88,7 @@ class AccountingReportingService
      */
     public function matterTrustBalances(Firm $firm): AccountingReport
     {
-        $rows = (new TenantContextService)->runWithFirmContext($firm, fn () => \App\Models\MatterTrustBalance::query()
+        $rows = (new TenantContextService)->runWithFirmContext($firm, fn () => MatterTrustBalance::query()
             ->where('firm_id', $firm->id)
             ->selectRaw('matter_id, sum(balance_cents) as balance_cents')
             ->groupBy('matter_id')
@@ -146,7 +147,7 @@ class AccountingReportingService
     {
         $rows = (new TenantContextService)->runWithFirmContext($firm, function () use ($firm) {
             return $firm->invoices()->get()->map(function ($invoice) {
-                $paymentsTotal = (int) $invoice->payments()->where('status', \App\Enums\PaymentStatus::Succeeded)->sum('amount_cents');
+                $paymentsTotal = (int) $invoice->payments()->where('status', PaymentStatus::Succeeded)->sum('amount_cents');
                 $reversalsTotal = (int) PaymentReversal::query()->where('invoice_id', $invoice->id)->sum('amount_cents');
                 $expected = $paymentsTotal - $reversalsTotal;
 

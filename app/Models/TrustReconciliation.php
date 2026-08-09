@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class TrustReconciliation extends Model
 {
-    use HasFactory, HasPublicUuid, BelongsToTenant;
+    use BelongsToTenant, HasFactory, HasPublicUuid;
 
     protected $fillable = [
         'firm_id',

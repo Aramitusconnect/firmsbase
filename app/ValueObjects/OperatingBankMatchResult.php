@@ -31,6 +31,5 @@ final readonly class OperatingBankMatchResult
         public FinancialEvidenceTransaction $transaction,
         public Collection $candidateEntries,
         public string $status,
-    ) {
-    }
+    ) {}
 }
