@@ -544,6 +544,17 @@ class RowLevelSecurityCoverageMappingService
         // 2026_10_31_100003_prepare_row_level_security_and_force_rls_on_accounting_period_events_table.php.
         // Never in MISSING_PREPARED_TABLES.
         'accounting_period_events',
+        // payment_requests, payment_request_events (Payment Link / QR
+        // Routing phase) — each prepared and forced together with its
+        // own table-creation migration:
+        // 2026_11_01_100002_prepare_row_level_security_and_force_rls_on_payment_requests_table.php,
+        // 2026_11_01_100005_prepare_row_level_security_and_force_rls_on_payment_request_events_table.php.
+        // payment_requests additionally carries the
+        // payment_requests_self_lookup FOR SELECT-only policy
+        // (2026_11_01_100003_add_self_lookup_clause_to_payment_requests_rls_policy.php)
+        // — see TenantContextService::withPaymentRequestSelfLookupContext().
+        // Neither was ever in MISSING_PREPARED_TABLES.
+        'payment_requests', 'payment_request_events',
     ];
 
     /**

@@ -167,6 +167,28 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
         'quick-add-menu.blade.php',
     ];
 
+    /**
+     * Payment Link / QR Routing phase addition:
+     * `resources/views/layouts/public.blade.php` and
+     * `resources/views/livewire/payment-requests/public-payment-page.blade.php`
+     * — the payment_flows surface's first genuinely public,
+     * unauthenticated screen (routes/web.php's public.payment-requests.show
+     * route). Reviewed and found accessible: a real `<h1>` heading, a
+     * real `<label for="...">` bound to its `<input>` by id (never a
+     * placeholder-only label), a real `<button type="button">` (not a
+     * clickable `<div>`), status messages (`.notice.success`/
+     * `.notice.error`) that convey their meaning through visible text
+     * content — never color alone, and no bespoke/custom interactive
+     * markup (no custom dropdowns, modals, or keyboard traps). No JS
+     * framework beyond Livewire's own wire:model/wire:click directives,
+     * identical in kind to every other Livewire-backed screen already
+     * reviewed elsewhere in this codebase.
+     */
+    private const PAYMENT_LINK_QR_ROUTING_ALLOWED_BLADE_BASENAMES = [
+        'public.blade.php',
+        'public-payment-page.blade.php',
+    ];
+
     public function test_no_blade_filament_livewire_frontend_or_browser_accessibility_files_exist(): void
     {
         $bladeFiles = [];
@@ -191,7 +213,8 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
             $bladeFiles,
             fn (string $path) => basename($path) !== 'welcome.blade.php'
                 && ! in_array(basename($path), self::CHECKPOINT_4_ALLOWED_BLADE_BASENAMES, true)
-                && ! in_array(basename($path), self::FIRM_WORKSPACE_QUICK_ADD_MENU_ALLOWED_BLADE_BASENAMES, true),
+                && ! in_array(basename($path), self::FIRM_WORKSPACE_QUICK_ADD_MENU_ALLOWED_BLADE_BASENAMES, true)
+                && ! in_array(basename($path), self::PAYMENT_LINK_QR_ROUTING_ALLOWED_BLADE_BASENAMES, true),
         ));
 
         $this->assertEmpty($nonDefaultBladeFiles, 'Found unexpected Blade files: '.implode(', ', $nonDefaultBladeFiles));

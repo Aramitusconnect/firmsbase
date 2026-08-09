@@ -245,7 +245,7 @@ class RlsForceActivationFirewallTest extends TestCase
             // prepared and FORCE-activated in the same migration --
             // this test's own scope (39A-3A) only asserts clients here
             // — additive only, no existing assertion removed or weakened.
-            'accounting_journal_entries', 'accounting_postings', 'payment_allocations', 'payment_reversals', 'invoice_write_offs', 'accounting_periods', 'accounting_period_events',
+            'accounting_journal_entries', 'accounting_postings', 'payment_allocations', 'payment_reversals', 'invoice_write_offs', 'accounting_periods', 'accounting_period_events', 'payment_requests', 'payment_request_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

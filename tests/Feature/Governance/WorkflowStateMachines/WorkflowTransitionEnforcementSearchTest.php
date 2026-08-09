@@ -110,10 +110,20 @@ class WorkflowTransitionEnforcementSearchTest extends TestCase
         // workflow-state-machine model or writes a status/license_status
         // field directly -- orthogonal to this test's actual concern.
         // Additive only, no existing assertion removed or weakened.
+        //
+        // Narrowly updated AGAIN by the Payment Link / QR Routing phase
+        // -- resources/views/layouts/public.blade.php is a reviewed,
+        // narrow exception of the same shape: a pure HTML/CSS layout
+        // wrapper for the public payment page (no PHP logic beyond
+        // {{ $slot }}, no enum reference, no status write of any kind).
+        // The page's own real logic (submit(), status transitions) all
+        // lives in PublicPaymentPage.php/PaymentRequestCheckoutService.php
+        // under app/, both already covered by the first assertion above.
         $bladeFiles = glob(resource_path('views/**/*.blade.php')) ?: [];
         $bladeFiles = array_values(array_filter(
             $bladeFiles,
             fn (string $path) => $path !== resource_path('views/filament-client-portal/plaid-link.blade.php')
+                && $path !== resource_path('views/layouts/public.blade.php')
         ));
         $this->assertEmpty($bladeFiles, 'No Blade views should exist that could write workflow status directly.');
     }
