@@ -6,13 +6,16 @@ use App\Enums\SignatureRequestStatus;
 use App\Models\Document;
 use App\Models\DocumentHash;
 use App\Models\Firm;
+use App\Models\SignatureCertificate;
 use App\Models\SignatureEvent;
 use App\Models\SignatureRequest;
 use App\Services\AcknowledgmentSignatureFoundationService;
+use App\Services\Automation\DomainEventRecorderService;
 use App\Services\DocumentHashService;
 use App\Services\SignatureCertificateService;
 use App\Services\SignatureEventLogger;
 use App\Services\SignatureWorkflowTransitionService;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -28,9 +31,10 @@ class SignatureCertificateOnePerRequestTest extends TestCase
     public function test_service_level_pre_check_blocks_a_second_generation_call(): void
     {
         $service = new SignatureCertificateService(
-            new SignatureWorkflowTransitionService(),
-            new DocumentHashService(),
-            new SignatureEventLogger(new AcknowledgmentSignatureFoundationService()),
+            new SignatureWorkflowTransitionService,
+            new DocumentHashService,
+            new SignatureEventLogger(new AcknowledgmentSignatureFoundationService),
+            app(DomainEventRecorderService::class),
         );
 
         // documents has permanent FORCE ROW LEVEL SECURITY (Section
@@ -52,9 +56,9 @@ class SignatureCertificateOnePerRequestTest extends TestCase
     public function test_database_unique_constraint_rejects_a_second_row_for_the_same_request_bypassing_the_service(): void
     {
         $request = SignatureRequest::factory()->create();
-        \App\Models\SignatureCertificate::factory()->create(['signature_request_id' => $request->id]);
+        SignatureCertificate::factory()->create(['signature_request_id' => $request->id]);
 
-        $this->expectException(\Illuminate\Database\QueryException::class);
-        \App\Models\SignatureCertificate::factory()->create(['signature_request_id' => $request->id]);
+        $this->expectException(QueryException::class);
+        SignatureCertificate::factory()->create(['signature_request_id' => $request->id]);
     }
 }

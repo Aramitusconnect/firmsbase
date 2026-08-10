@@ -6,9 +6,11 @@ use App\Enums\SignatureRequestStatus;
 use App\Enums\WebhookEventType;
 use App\Models\Document;
 use App\Models\DocumentHash;
+use App\Models\Firm;
 use App\Models\SignatureEvent;
 use App\Models\SignatureRequest;
 use App\Services\AcknowledgmentSignatureFoundationService;
+use App\Services\Automation\DomainEventRecorderService;
 use App\Services\DocumentHashService;
 use App\Services\SignatureCertificateService;
 use App\Services\SignatureEventLogger;
@@ -37,13 +39,14 @@ class SignatureCompletedWiringTest extends TestCase
     {
         parent::setUp();
         $this->service = new SignatureCertificateService(
-            new SignatureWorkflowTransitionService(),
-            new DocumentHashService(),
-            new SignatureEventLogger(new AcknowledgmentSignatureFoundationService()),
+            new SignatureWorkflowTransitionService,
+            new DocumentHashService,
+            new SignatureEventLogger(new AcknowledgmentSignatureFoundationService),
+            app(DomainEventRecorderService::class),
         );
     }
 
-    private function signedRequestReadyForCertificate(\App\Models\Firm $firm): SignatureRequest
+    private function signedRequestReadyForCertificate(Firm $firm): SignatureRequest
     {
         $document = Document::factory()->create(['firm_id' => $firm->id]);
         $request = SignatureRequest::factory()->status(SignatureRequestStatus::Signed)->create([

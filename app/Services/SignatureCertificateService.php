@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Enums\DomainEventType;
+use App\Enums\SignatureCertificateStatus;
 use App\Enums\SignatureEventActorType;
 use App\Enums\SignatureEventType;
 use App\Enums\SignatureRequestStatus;
@@ -10,6 +12,7 @@ use App\Enums\WebhookEventType;
 use App\Models\DocumentHash;
 use App\Models\SignatureCertificate;
 use App\Models\SignatureRequest;
+use App\Services\Automation\DomainEventRecorderService;
 use App\ValueObjects\CertificateGenerationResult;
 use App\ValueObjects\SignatureEvidenceSnapshot;
 use Illuminate\Support\Facades\DB;
@@ -60,8 +63,8 @@ class SignatureCertificateService
         private readonly SignatureWorkflowTransitionService $transitions,
         private readonly DocumentHashService $hashService,
         private readonly SignatureEventLogger $eventLogger,
-    ) {
-    }
+        private readonly DomainEventRecorderService $domainEvents,
+    ) {}
 
     public function generate(SignatureRequest $request): CertificateGenerationResult
     {
@@ -71,7 +74,7 @@ class SignatureCertificateService
             );
         }
 
-        $certificateAlreadyExists = (new TenantContextService())->runWithFirmContext(
+        $certificateAlreadyExists = (new TenantContextService)->runWithFirmContext(
             $request->firm_id,
             fn () => $request->certificate()->exists(),
         );
@@ -85,8 +88,8 @@ class SignatureCertificateService
         // for generated_documents) — each branch below wraps only the lazy
         // relation load its own source_document_type actually needs.
         $hash = $request->source_document_type === SignatureSourceDocumentType::Document
-            ? (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $this->hashService->latestForDocument($request->document))
-            : (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $this->hashService->latestForGeneratedDocument($request->generatedDocument));
+            ? (new TenantContextService)->runWithFirmContext($request->firm_id, fn () => $this->hashService->latestForDocument($request->document))
+            : (new TenantContextService)->runWithFirmContext($request->firm_id, fn () => $this->hashService->latestForGeneratedDocument($request->generatedDocument));
 
         if ($hash === null) {
             throw new \RuntimeException('Cannot generate a certificate: no document_hashes row exists for the source document.');
@@ -94,7 +97,7 @@ class SignatureCertificateService
 
         $certificate = null;
 
-        $completedRequest = (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $hash, &$certificate) {
+        $completedRequest = (new TenantContextService)->runWithFirmContext($request->firm_id, function () use ($request, $hash, &$certificate) {
             if ($request->events()->doesntExist()) {
                 throw new \RuntimeException('Cannot generate a certificate: no signature_events trail exists for this request.');
             }
@@ -104,7 +107,7 @@ class SignatureCertificateService
             $certificate = SignatureCertificate::create([
                 'firm_id' => $request->firm_id,
                 'signature_request_id' => $request->id,
-                'status' => \App\Enums\SignatureCertificateStatus::Generated,
+                'status' => SignatureCertificateStatus::Generated,
                 'certificate_data_json' => $this->snapshotToArray($snapshot),
                 'document_hash_id' => $hash->id,
                 'generated_at' => now(),
@@ -125,6 +128,18 @@ class SignatureCertificateService
                 eventType: SignatureEventType::RequestCompleted,
                 actorType: SignatureEventActorType::System,
             );
+
+            $this->domainEvents->record($request->firm, DomainEventType::SignatureRequestCompleted, [
+                'signature_request' => [
+                    'id' => $request->id,
+                    'title' => $request->title,
+                ],
+                'matter' => [
+                    'id' => $request->matter_id,
+                    'client_id' => $request->client_id,
+                    'assigned_attorney_id' => $request->matter?->assigned_attorney_id,
+                ],
+            ], subject: $request);
 
             return $request->fresh();
         });

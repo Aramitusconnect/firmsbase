@@ -3,6 +3,7 @@
 namespace App\Services\Automation;
 
 use App\Enums\AutomationActionExecutionStatus;
+use App\Enums\AutomationActionType;
 use App\Enums\AutomationExecutionStatus;
 use App\Enums\DomainEventProcessingStatus;
 use App\Models\AutomationActionExecution;
@@ -10,6 +11,7 @@ use App\Models\AutomationExecution;
 use App\Models\AutomationRule;
 use App\Models\DomainEvent;
 use App\Models\Firm;
+use App\Models\Task;
 
 /**
  * AutomationObservabilityService — Event-Driven Automation Engine, item
@@ -45,7 +47,53 @@ class AutomationObservabilityService
             'average_execution_duration_seconds' => $this->averageExecutionDurationSeconds($firm),
             'oldest_queued_event_created_at' => $this->oldestQueuedEventCreatedAt($firm),
             'repeatedly_failing_rule_ids' => $this->repeatedlyFailingRuleIds($firm),
+            'tasks_created' => $this->countSucceededActionsOfType($firm, [
+                AutomationActionType::CreateTask, AutomationActionType::NotifyBillingStaff,
+                AutomationActionType::NotifyResponsibleAttorney, AutomationActionType::EscalateDeadline,
+            ]),
+            'document_requests_created' => $this->countSucceededActionsOfType($firm, [AutomationActionType::CreateDocumentRequest]),
+            'checklist_completions' => $this->countSucceededActionsOfType($firm, [
+                AutomationActionType::MarkDocumentRequestItemSubmitted, AutomationActionType::MatchDocumentToRequest,
+            ]),
+            'reminders_attempted' => $this->countSucceededActionsOfType($firm, [AutomationActionType::NotifyClient]),
+            'reminders_delivered' => $this->countRemindersByOutcome($firm, delivered: true),
+            'reminders_blocked' => $this->countRemindersByOutcome($firm, delivered: false),
         ];
+    }
+
+    /**
+     * Zero-Click Core Workflow Automation pass. Same read-only,
+     * firm-scoped shape as every other counter above — no new
+     * observability pipeline, purely additive keys on this service's
+     * own existing summary().
+     *
+     * @param  array<int, AutomationActionType>  $types
+     */
+    private function countSucceededActionsOfType(Firm $firm, array $types): int
+    {
+        return AutomationActionExecution::query()
+            ->where('firm_id', $firm->id)
+            ->whereIn('action_type', array_map(fn (AutomationActionType $t) => $t->value, $types))
+            ->where('status', AutomationActionExecutionStatus::Succeeded)
+            ->count();
+    }
+
+    /**
+     * NotifyClientActionHandler's own two success shapes distinguish a
+     * genuinely delivered reminder (no result reference) from a
+     * blocked-and-reviewed one (result reference is the fallback
+     * Task) — see that handler's own docblock.
+     */
+    private function countRemindersByOutcome(Firm $firm, bool $delivered): int
+    {
+        $query = AutomationActionExecution::query()
+            ->where('firm_id', $firm->id)
+            ->where('action_type', AutomationActionType::NotifyClient->value)
+            ->where('status', AutomationActionExecutionStatus::Succeeded);
+
+        return $delivered
+            ? $query->whereNull('result_reference_id')->count()
+            : $query->where('result_reference_type', (new Task)->getMorphClass())->count();
     }
 
     private function countActionsWithStatus(Firm $firm, AutomationActionExecutionStatus $status): int

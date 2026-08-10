@@ -198,6 +198,32 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('automation:sweep:leverage-recommendations')
             ->hourly()
             ->withoutOverlapping();
+
+        // Zero-Click Core Workflow Automation — wraps the existing,
+        // previously-uncalled DocumentChaseSchedulerService/
+        // DocumentChaseService (checkAndLog()/escalate()) with the
+        // scheduled trigger they never had, emitting
+        // DomainEventType::DocumentRequestReminderDue for the
+        // Automation Engine to react to. Daily, matching the existing
+        // Deadline/Invoice sweeps' own cadence for day-count-based
+        // checkpoints.
+        $schedule->command('automation:sweep:document-request-reminders')
+            ->dailyAt('06:30')
+            ->withoutOverlapping();
+
+        // Payment Plan installment scheduling remains INTENTIONALLY
+        // DEFERRED (Phase 14b, decision F — see
+        // PaymentPlanInstallmentDueDeferredTest, which structurally
+        // forbids any Console Command from referencing
+        // PaymentPlanInstallmentService at all). This mission's own
+        // item 17 ("Payment Plan Automation") is therefore
+        // INTENTIONALLY_DEFERRED, not implemented — no scheduled
+        // trigger was added here. The payment_plan_installment_missed/
+        // payment_plan_installment_client_reminder starter Automation
+        // templates remain correct, inspectable rule DEFINITIONS; they
+        // simply stay dormant until PaymentPlanInstallmentMissed is
+        // ever actually emitted, exactly as this deferral already
+        // implies for every other consumer of that event.
     })
     ->withMiddleware(function (Middleware $middleware): void {
         // Trust the AWS ALB in front of this container for exactly the

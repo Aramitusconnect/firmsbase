@@ -6,7 +6,10 @@ use App\Enums\SignatureRequestStatus;
 use App\Models\Document;
 use App\Models\DocumentHash;
 use App\Models\Firm;
+use App\Models\SignatureEvent;
 use App\Models\SignatureRequest;
+use App\Services\AcknowledgmentSignatureFoundationService;
+use App\Services\Automation\DomainEventRecorderService;
 use App\Services\DocumentHashService;
 use App\Services\SignatureCertificateService;
 use App\Services\SignatureEventLogger;
@@ -31,9 +34,10 @@ class SignatureCertificateRequiresHashAndEventTrailTest extends TestCase
         parent::setUp();
 
         $this->service = new SignatureCertificateService(
-            new SignatureWorkflowTransitionService(),
-            new DocumentHashService(),
-            new SignatureEventLogger(new \App\Services\AcknowledgmentSignatureFoundationService()),
+            new SignatureWorkflowTransitionService,
+            new DocumentHashService,
+            new SignatureEventLogger(new AcknowledgmentSignatureFoundationService),
+            app(DomainEventRecorderService::class),
         );
     }
 
@@ -54,7 +58,7 @@ class SignatureCertificateRequiresHashAndEventTrailTest extends TestCase
         $firm = Firm::factory()->create();
         $document = Document::factory()->create(['firm_id' => $firm->id]);
         $request = SignatureRequest::factory()->status(SignatureRequestStatus::Signed)->create(['firm_id' => $firm->id, 'document_id' => $document->id]);
-        \App\Models\SignatureEvent::factory()->forRequest($request)->create();
+        SignatureEvent::factory()->forRequest($request)->create();
 
         $this->expectException(\RuntimeException::class);
         $this->service->generate($request);
@@ -77,7 +81,7 @@ class SignatureCertificateRequiresHashAndEventTrailTest extends TestCase
         $document = Document::factory()->create(['firm_id' => $firm->id]);
         $request = SignatureRequest::factory()->status(SignatureRequestStatus::Signed)->create(['firm_id' => $firm->id, 'document_id' => $document->id]);
         DocumentHash::factory()->forDocument($document)->create();
-        \App\Models\SignatureEvent::factory()->forRequest($request)->create();
+        SignatureEvent::factory()->forRequest($request)->create();
 
         $result = $this->service->generate($request);
 

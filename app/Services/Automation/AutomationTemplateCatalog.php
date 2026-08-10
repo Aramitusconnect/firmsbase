@@ -114,6 +114,113 @@ final class AutomationTemplateCatalog
                     ]],
                 ],
             ],
+
+            // Zero-Click Core Workflow Automation pass — items 4B/12/29.
+            // A separate rule per is_escalation value (conditions are
+            // AND-only, no OR groups — see ConditionEvaluatorService's
+            // own docblock), matching the codebase's own established
+            // "many small rules over one complex rule" convention
+            // (deadline_approaching/deadline_missed are two separate
+            // event types for the same reason).
+            'document_request_reminder' => [
+                'name' => 'Document request reminder',
+                'description' => 'Sends a client reminder when a document request reaches a configured reminder checkpoint.',
+                'event_type' => DomainEventType::DocumentRequestReminderDue,
+                'conditions' => [
+                    ['field' => 'document_request_item.is_escalation', 'operator' => AutomationConditionOperator::Equals->value, 'value' => false],
+                ],
+                'actions' => [
+                    ['action_type' => AutomationActionType::NotifyClient->value, 'config' => [
+                        'template_key' => 'document_request_reminder',
+                        'channel' => 'email',
+                    ]],
+                ],
+            ],
+            'document_request_reminder_escalation' => [
+                'name' => 'Document request escalation',
+                'description' => 'Creates a follow-up task for the responsible attorney once a document request passes the Firm\'s own escalation threshold.',
+                'event_type' => DomainEventType::DocumentRequestReminderDue,
+                'conditions' => [
+                    ['field' => 'document_request_item.is_escalation', 'operator' => AutomationConditionOperator::Equals->value, 'value' => true],
+                ],
+                'actions' => [
+                    ['action_type' => AutomationActionType::CreateTask->value, 'config' => [
+                        'title' => 'Document request overdue — needs attention',
+                        'assigned_to' => 'matter_assigned_attorney',
+                        'priority' => 'high',
+                    ]],
+                ],
+            ],
+
+            // Item 8/30. Ships with ONE clearly-labeled placeholder item
+            // — never a pre-filled, practice-area-specific document
+            // list (item 8's own explicit instruction: "Do not globally
+            // hardcode... requirements... Firm controls the template").
+            // A Firm duplicates and edits this before enabling it for
+            // real use.
+            'new_matter_onboarding_documents' => [
+                'name' => 'New matter onboarding — document request (example)',
+                'description' => 'Creates a starter document request when a matter opens. Edit the item list for your own practice area before enabling.',
+                'event_type' => DomainEventType::MatterOpened,
+                'conditions' => [],
+                'actions' => [
+                    ['action_type' => AutomationActionType::CreateDocumentRequest->value, 'config' => [
+                        'title' => 'Required documents',
+                        'due_in_days' => 14,
+                        'items' => [
+                            ['label' => 'Example required document — edit this item for your own practice area before enabling', 'is_required' => true],
+                        ],
+                    ]],
+                ],
+            ],
+
+            'invoice_overdue_client_reminder' => [
+                'name' => 'Invoice overdue — client reminder',
+                'description' => 'Sends a client reminder once an invoice has been overdue for 14 or more days (a later checkpoint than the internal Billing Staff follow-up).',
+                'event_type' => DomainEventType::InvoiceOverdue,
+                'conditions' => [
+                    ['field' => 'invoice.days_overdue', 'operator' => AutomationConditionOperator::GreaterThanOrEqual->value, 'value' => 14],
+                ],
+                'actions' => [
+                    ['action_type' => AutomationActionType::NotifyClient->value, 'config' => [
+                        'template_key' => 'invoice_overdue_reminder',
+                        'channel' => 'email',
+                    ]],
+                ],
+            ],
+
+            'payment_plan_installment_client_reminder' => [
+                'name' => 'Payment plan installment missed — client reminder',
+                'description' => 'Sends a client reminder when a scheduled payment plan installment is missed.',
+                'event_type' => DomainEventType::PaymentPlanInstallmentMissed,
+                'conditions' => [],
+                'actions' => [
+                    ['action_type' => AutomationActionType::NotifyClient->value, 'config' => [
+                        'template_key' => 'payment_plan_installment_missed',
+                        'channel' => 'email',
+                    ]],
+                ],
+            ],
+
+            // Item 10. Only fires an onboarding action when the
+            // completed signature request is matter-linked — not every
+            // SignatureRequest is (source_document_type may be a
+            // standalone Document with no matter_id).
+            'signature_request_completed_onboarding' => [
+                'name' => 'Signature completed — onboarding',
+                'description' => 'Creates a follow-up task for the assigned attorney once a matter-linked signature request completes.',
+                'event_type' => DomainEventType::SignatureRequestCompleted,
+                'conditions' => [
+                    ['field' => 'matter.id', 'operator' => AutomationConditionOperator::IsNotNull->value, 'value' => null],
+                ],
+                'actions' => [
+                    ['action_type' => AutomationActionType::CreateTask->value, 'config' => [
+                        'title' => 'Begin onboarding — signature completed',
+                        'assigned_to' => 'matter_assigned_attorney',
+                        'due_in_days' => 2,
+                    ]],
+                ],
+            ],
         ];
     }
 

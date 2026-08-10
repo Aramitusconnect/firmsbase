@@ -14,10 +14,13 @@ use App\Models\SignatureEvent;
 use App\Models\SignatureRequest;
 use App\Models\SignatureRequestRecipient;
 use App\Services\AcknowledgmentSignatureFoundationService;
+use App\Services\Automation\DomainEventRecorderService;
 use App\Services\DocumentHashService;
 use App\Services\SignatureCertificateService;
 use App\Services\SignatureEventLogger;
 use App\Services\SignatureWorkflowTransitionService;
+use App\Services\TenantContextResolver;
+use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -32,9 +35,10 @@ class SignatureCertificateServiceTest extends TestCase
         parent::setUp();
 
         $this->service = new SignatureCertificateService(
-            new SignatureWorkflowTransitionService(),
-            new DocumentHashService(),
-            new SignatureEventLogger(new AcknowledgmentSignatureFoundationService()),
+            new SignatureWorkflowTransitionService,
+            new DocumentHashService,
+            new SignatureEventLogger(new AcknowledgmentSignatureFoundationService),
+            app(DomainEventRecorderService::class),
         );
     }
 
@@ -166,8 +170,8 @@ class SignatureCertificateServiceTest extends TestCase
         DocumentHash::factory()->forDocument($document)->create();
         SignatureEvent::factory()->forRequest($request)->create();
 
-        (new \App\Services\TenantContextService())->clearDatabaseTenantContext();
-        \App\Services\TenantContextResolver::clear();
+        (new TenantContextService)->clearDatabaseTenantContext();
+        TenantContextResolver::clear();
         $this->assertNoDatabaseTenantContext();
 
         $this->service->generate($request);
@@ -208,8 +212,8 @@ class SignatureCertificateServiceTest extends TestCase
         $hash = DocumentHash::factory()->forDocument($document)->create();
         SignatureCertificate::factory()->forRequest($request, $hash)->create();
 
-        (new \App\Services\TenantContextService())->clearDatabaseTenantContext();
-        \App\Services\TenantContextResolver::clear();
+        (new TenantContextService)->clearDatabaseTenantContext();
+        TenantContextResolver::clear();
         $this->assertNoDatabaseTenantContext();
 
         $this->expectException(\RuntimeException::class);

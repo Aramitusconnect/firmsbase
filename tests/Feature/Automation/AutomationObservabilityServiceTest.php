@@ -3,6 +3,7 @@
 namespace Tests\Feature\Automation;
 
 use App\Enums\AutomationActionExecutionStatus;
+use App\Enums\AutomationActionType;
 use App\Enums\AutomationExecutionStatus;
 use App\Enums\DomainEventProcessingStatus;
 use App\Models\AutomationActionExecution;
@@ -10,7 +11,9 @@ use App\Models\AutomationExecution;
 use App\Models\AutomationRule;
 use App\Models\DomainEvent;
 use App\Models\Firm;
+use App\Models\Task;
 use App\Services\Automation\AutomationObservabilityService;
+use App\Services\TaskService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -102,5 +105,68 @@ class AutomationObservabilityServiceTest extends TestCase
         $summary = $this->runWithFirmContext($firm, fn () => $this->service->summary($firm));
 
         $this->assertContains($rule->id, $summary['repeatedly_failing_rule_ids']);
+    }
+
+    /**
+     * Zero-Click Core Workflow Automation pass — the new counters added
+     * on top of this same summary(). A genuinely delivered client
+     * reminder (no result reference) counts as delivered; a
+     * blocked-and-reviewed one (result reference = the fallback Task)
+     * counts as blocked — see NotifyClientActionHandler's own docblock
+     * for why this distinction is structurally derivable, not guessed.
+     */
+    public function test_summary_counts_the_new_zero_click_counters(): void
+    {
+        $firm = Firm::factory()->create();
+
+        $this->runWithFirmContext($firm, function () use ($firm) {
+            $execution = AutomationExecution::factory()->forFirm($firm)->create();
+
+            AutomationActionExecution::factory()->forFirm($firm)->create([
+                'automation_execution_id' => $execution->id,
+                'action_type' => AutomationActionType::CreateTask,
+                'status' => AutomationActionExecutionStatus::Succeeded,
+            ]);
+
+            AutomationActionExecution::factory()->forFirm($firm)->create([
+                'automation_execution_id' => $execution->id,
+                'action_type' => AutomationActionType::CreateDocumentRequest,
+                'status' => AutomationActionExecutionStatus::Succeeded,
+            ]);
+
+            AutomationActionExecution::factory()->forFirm($firm)->create([
+                'automation_execution_id' => $execution->id,
+                'action_type' => AutomationActionType::MarkDocumentRequestItemSubmitted,
+                'status' => AutomationActionExecutionStatus::Succeeded,
+            ]);
+
+            // A genuinely delivered reminder: no result reference.
+            AutomationActionExecution::factory()->forFirm($firm)->create([
+                'automation_execution_id' => $execution->id,
+                'action_type' => AutomationActionType::NotifyClient,
+                'status' => AutomationActionExecutionStatus::Succeeded,
+                'result_reference_type' => null,
+                'result_reference_id' => null,
+            ]);
+
+            // A blocked reminder: result reference is the fallback Task.
+            $task = app(TaskService::class)->create(firm: $firm, title: 'Review client reminder');
+            AutomationActionExecution::factory()->forFirm($firm)->create([
+                'automation_execution_id' => $execution->id,
+                'action_type' => AutomationActionType::NotifyClient,
+                'status' => AutomationActionExecutionStatus::Succeeded,
+                'result_reference_type' => (new Task)->getMorphClass(),
+                'result_reference_id' => $task->id,
+            ]);
+        });
+
+        $summary = $this->runWithFirmContext($firm, fn () => $this->service->summary($firm));
+
+        $this->assertSame(1, $summary['tasks_created']);
+        $this->assertSame(1, $summary['document_requests_created']);
+        $this->assertSame(1, $summary['checklist_completions']);
+        $this->assertSame(2, $summary['reminders_attempted']);
+        $this->assertSame(1, $summary['reminders_delivered']);
+        $this->assertSame(1, $summary['reminders_blocked']);
     }
 }
