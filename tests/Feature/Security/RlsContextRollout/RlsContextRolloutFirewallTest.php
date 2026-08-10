@@ -455,7 +455,7 @@ class RlsContextRolloutFirewallTest extends TestCase
             // prepared and FORCE-activated in the same migration --
             // additive only, no existing assertion removed or weakened.
             'accounting_journal_entries', 'accounting_postings', 'payment_allocations', 'payment_reversals', 'invoice_write_offs', 'accounting_periods', 'accounting_period_events', 'payment_requests', 'payment_request_events', 'payment_pending_allocations', 'domain_events', 'automation_rules', 'automation_executions', 'automation_action_executions',
-            'matter_budget_templates', 'matter_budgets', 'matter_budget_analyses', 'matter_budget_alerts',
+            'matter_budget_templates', 'matter_budgets', 'matter_budget_analyses', 'matter_budget_alerts', 'task_category_role_expectations', 'matter_leverage_recommendations',
         ];
 
         // security_events is the final checkpoint in this arc: every

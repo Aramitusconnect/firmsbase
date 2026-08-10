@@ -304,8 +304,8 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // automation_action_executions) — 157 -> 161.
         // Predictive Matter Budget Alerts pass added four more DirectTenant
         // tables (matter_budget_templates, matter_budgets,
-        // matter_budget_analyses, matter_budget_alerts) — 161 -> 165.
-        $this->assertCount(165, $this->service->preparedTables());
+        // matter_budget_analyses, matter_budget_alerts) — 161 -> 167.
+        $this->assertCount(167, $this->service->preparedTables());
         $this->assertCount(0, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
@@ -407,8 +407,8 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // automation_action_executions) — 157 -> 161.
         // Predictive Matter Budget Alerts pass added four more DirectTenant
         // tables (matter_budget_templates, matter_budgets,
-        // matter_budget_analyses, matter_budget_alerts) — 161 -> 165.
-        $this->assertCount(165, $this->service->tenantOwnedTables());
+        // matter_budget_analyses, matter_budget_alerts) — 161 -> 167.
+        $this->assertCount(167, $this->service->tenantOwnedTables());
         $forceMigrationFiles = glob(
             database_path('migrations/*_force_rls_on_*_table.php')
         ) ?: [];
@@ -765,8 +765,8 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // automation_action_executions) — 157 -> 161.
         // Predictive Matter Budget Alerts pass added four more DirectTenant
         // tables (matter_budget_templates, matter_budgets,
-        // matter_budget_analyses, matter_budget_alerts) — 161 -> 165.
-        $this->assertSame(165, $summary[TenantOwnershipClassification::DirectTenant->value]);
+        // matter_budget_analyses, matter_budget_alerts) — 161 -> 167.
+        $this->assertSame(167, $summary[TenantOwnershipClassification::DirectTenant->value]);
         $this->assertSame(24, $summary[TenantOwnershipClassification::InheritedTenant->value]);
         $this->assertSame(3, $summary[TenantOwnershipClassification::Pivot->value]);
         $this->assertSame(10, $summary[TenantOwnershipClassification::Hybrid->value]);
@@ -942,7 +942,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // tables: 273 -> 277.
         // Predictive Matter Budget Alerts pass added four more DirectTenant
         // tables: 277 -> 281.
-        $this->assertSame(281, array_sum($summary));
+        // Leverage Ratio Optimizer pass added two more DirectTenant
+        // tables (task_category_role_expectations,
+        // matter_leverage_recommendations): 281 -> 283.
+        $this->assertSame(283, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

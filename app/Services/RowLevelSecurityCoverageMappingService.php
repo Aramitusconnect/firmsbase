@@ -574,6 +574,12 @@ class RowLevelSecurityCoverageMappingService
         // 2026_11_05_100002/100004/100006/100008_prepare_row_level_security_and_force_rls_on_*.php.
         // Never in MISSING_PREPARED_TABLES.
         'matter_budget_templates', 'matter_budgets', 'matter_budget_analyses', 'matter_budget_alerts',
+        // task_category_role_expectations, matter_leverage_recommendations
+        // (Leverage Ratio Optimizer pass) — each prepared and forced
+        // together with its own create migration:
+        // 2026_11_06_100003/100005_prepare_row_level_security_and_force_rls_on_*.php.
+        // Never in MISSING_PREPARED_TABLES.
+        'task_category_role_expectations', 'matter_leverage_recommendations',
     ];
 
     /**
