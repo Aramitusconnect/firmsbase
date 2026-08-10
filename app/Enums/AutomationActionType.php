@@ -79,4 +79,46 @@ enum AutomationActionType: string
      * canonical method, never a direct write to document_request_items.
      */
     case MarkDocumentRequestItemSubmitted = 'mark_document_request_item_submitted';
+
+    /**
+     * Zero-Click Core Workflow Automation pass. Sends a client-facing
+     * reminder through the EXISTING, unmodified consent/eligibility/
+     * dispatch pipeline — ConsentService (via NotificationEligibilityService),
+     * NotificationEligibilityService, NotificationDispatchService::dispatch()
+     * — never a second notification system, never a raw mail call. Per
+     * this pass's own explicit safety rule ("if real delivery transport
+     * is unavailable, create a staff task — never fake a successful
+     * send"), a non-successful NotificationDispatchResult (no active
+     * template, unverified sender domain, or ineligible/blocked/
+     * suppressed recipient — dispatch()'s own existing gate chain)
+     * creates a REQUIRES_REVIEW staff Task instead of silently failing
+     * or silently claiming success. Config:
+     * {template_key: string, channel?: 'email'|'sms'|'whatsapp'|'portal' (default 'email'),
+     *  review_task_title?: string}.
+     */
+    case NotifyClient = 'notify_client';
+
+    /**
+     * Calls DocumentRequestService::create() — the ONLY canonical
+     * creator of a DocumentRequest — never writes document_requests/
+     * document_request_items directly. Config:
+     * {title?: string, instructions?: string, due_in_days?: int,
+     *  items: array<int, array{label: string, is_required?: bool}>}.
+     */
+    case CreateDocumentRequest = 'create_document_request';
+
+    /**
+     * Deterministic document-to-request matching (item 5). Only fires
+     * when the triggering DocumentUploaded event's document had NO
+     * document_request_item_id at upload time (see
+     * MarkDocumentRequestItemSubmitted for the already-linked case).
+     * Calls DocumentMatchingService::singleSafeMatch() — auto-links +
+     * marks submitted ONLY when exactly one open DocumentRequestItem
+     * exists for the same Firm+Matter; two or more candidates (or a
+     * Matter that cannot be resolved) creates a "Review Document
+     * Matching" Task instead of guessing. Never infers from filename
+     * alone. Config: {} (document/matter come entirely from the
+     * triggering event's own payload).
+     */
+    case MatchDocumentToRequest = 'match_document_to_request';
 }

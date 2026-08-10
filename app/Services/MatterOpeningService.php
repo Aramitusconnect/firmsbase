@@ -107,6 +107,8 @@ class MatterOpeningService
                     'client_id' => $matter->client_id,
                     'assigned_attorney_id' => $matter->assigned_attorney_id,
                     'status' => $matter->status->value,
+                    'primary_practice_area_id' => $matter->primary_practice_area_id,
+                    'matter_type_id' => $matter->matter_type_id,
                 ],
             ], subject: $matter);
 

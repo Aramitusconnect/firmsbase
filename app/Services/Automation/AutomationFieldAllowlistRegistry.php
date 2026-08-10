@@ -47,6 +47,7 @@ final class AutomationFieldAllowlistRegistry
         ],
         'matter_opened' => [
             'matter.id', 'matter.client_id', 'matter.assigned_attorney_id', 'matter.status',
+            'matter.primary_practice_area_id', 'matter.matter_type_id',
         ],
         'payment_plan_installment_missed' => [
             'installment.id', 'installment.amount_cents', 'installment.due_at', 'installment.sequence',
@@ -65,6 +66,14 @@ final class AutomationFieldAllowlistRegistry
             'leverage_recommendation.recommendation_type', 'leverage_recommendation.confidence',
             'leverage_recommendation.dedup_key',
             'matter.id', 'matter.assigned_attorney_id',
+        ],
+        'document_request_reminder_due' => [
+            'document_request_item.id', 'document_request_item.days_since_requested', 'document_request_item.is_escalation',
+            'document_request.id', 'matter.id', 'matter.assigned_attorney_id', 'client.id',
+        ],
+        'signature_request_completed' => [
+            'signature_request.id', 'signature_request.title',
+            'matter.id', 'matter.client_id', 'matter.assigned_attorney_id',
         ],
     ];
 

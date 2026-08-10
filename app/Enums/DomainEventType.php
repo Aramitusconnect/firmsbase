@@ -110,4 +110,38 @@ enum DomainEventType: string
      * transaction.
      */
     case MatterLeverageRecommendationCreated = 'matter_leverage_recommendation_created';
+
+    /**
+     * Zero-Click Core Workflow Automation pass. Emitted by a new sweep
+     * command (SweepDocumentRequestRemindersCommand) that wraps the
+     * EXISTING DocumentChaseSchedulerService (schedule/policy math) and
+     * DocumentChaseService::checkAndLog() (eligibility check + its own
+     * DocumentChaseEvent audit log) — never a duplicate scheduler. Only
+     * emitted when checkAndLog() returns eligible=true for a genuine,
+     * not-yet-logged-today reminder checkpoint (dedup: see the
+     * command's own docblock). Payload carries `is_escalation` so two
+     * separate starter rules can react distinctly — a plain reminder
+     * (NotifyClient) vs. an escalation past the Firm's own
+     * escalate_after_days threshold (CreateTask for responsible staff).
+     */
+    case DocumentRequestReminderDue = 'document_request_reminder_due';
+
+    /**
+     * Zero-Click Core Workflow Automation pass. Emitted at
+     * SignatureCertificateService::generate()'s existing completion call
+     * site — the exact same real mutation (SignatureRequest -> Completed)
+     * already wired to WebhookEventType::SignatureCompleted, as a
+     * parallel, independent emission (the webhook version is
+     * entitlement-gated per firm; this one is not). Named for what
+     * actually exists — a generic e-signature completion — never
+     * "EngagementAgreementSigned" or "EngagementLetterSigned": no
+     * canonical "this is the engagement letter" flag exists anywhere on
+     * SignatureRequest/GeneratedDocument (confirmed by audit), so
+     * claiming that semantic would overstate what FirmsVault actually
+     * knows about the signed document. A reacting rule that wants
+     * "onboarding" behavior should condition on
+     * signature_request.matter_id being present, since not every
+     * SignatureRequest is matter-linked.
+     */
+    case SignatureRequestCompleted = 'signature_request_completed';
 }
