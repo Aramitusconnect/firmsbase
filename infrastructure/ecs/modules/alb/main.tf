@@ -160,3 +160,42 @@ resource "aws_lb_listener" "http_redirect" {
     ignore_changes = [tags_all]
   }
 }
+
+# Mission 1 (canonical reconstruction — Domain & Security Boundary
+# Architecture). Host-header routing for the six canonical FirmsVault
+# hostnames — all forward to the same aws_lb_target_group.web (one ECS
+# service, multiple hostnames; see var.canonical_hostnames' own
+# docstring). No-op (creates nothing) until var.canonical_hostnames is
+# actually supplied with real, externally-provisioned hostnames — see
+# that variable's description for why this module cannot invent or
+# assign them itself.
+locals {
+  canonical_hostname_priorities = {
+    marketing     = 101
+    firm_app      = 102
+    client_portal = 103
+    admin         = 104
+    myattorney    = 105
+    api           = 106
+  }
+}
+
+resource "aws_lb_listener_rule" "host_routed" {
+  for_each = var.canonical_hostnames == null ? {} : var.canonical_hostnames
+
+  listener_arn = aws_lb_listener.https.arn
+  priority     = local.canonical_hostname_priorities[each.key]
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.web.arn
+  }
+
+  condition {
+    host_header {
+      values = [each.value]
+    }
+  }
+
+  tags = var.tags
+}

@@ -126,3 +126,29 @@ variable "http_redirect_listener_tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "canonical_hostnames" {
+  description = <<-EOT
+    Mission 1 (canonical reconstruction — Domain & Security Boundary
+    Architecture). Optional map of the six canonical FirmsVault
+    hostnames this ALB should route by Host header — all to the SAME
+    target group (aws_lb_target_group.web): it is acceptable for all
+    hostnames initially to point to the same ECS service/target group;
+    do NOT create separate ECS services simply because there are
+    multiple hostnames.
+
+    Real hostnames are an external DNS/ownership input this module does
+    not invent or assign — see docs/ecs/env.ecs.example and
+    docs/ecs/staging-readiness-report.md. Left null (the default) until
+    real hostnames are provisioned; while null, no listener rules are
+    created and the existing default forward action on
+    aws_lb_listener.https continues to serve every request exactly as
+    it did before this mission, so adding this variable has zero effect
+    on any currently-deployed environment.
+
+    Expected keys (all six, once real values exist): marketing,
+    firm_app, client_portal, admin, myattorney, api.
+  EOT
+  type        = map(string)
+  default     = null
+}

@@ -203,6 +203,8 @@ module "alb" {
   alb_name          = var.alb_name
   target_group_name = var.alb_target_group_name
 
+  canonical_hostnames = var.canonical_hostnames
+
   # This staging environment's live ALB has deletion protection enabled
   # (confirmed via aws elbv2 describe-load-balancer-attributes) — the
   # module's own default (false) is fine for a brand-new environment.

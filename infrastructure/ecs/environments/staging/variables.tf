@@ -618,6 +618,12 @@ variable "alb_target_group_name" {
   default     = null
 }
 
+variable "canonical_hostnames" {
+  description = "Mission 1 (canonical reconstruction — Domain & Security Boundary Architecture). See infrastructure/ecs/modules/alb's own variable of the same name. Null (default) until real hostnames are DNS-provisioned — passing it through unset changes nothing about the currently-deployed environment."
+  type        = map(string)
+  default     = null
+}
+
 variable "alb_enable_deletion_protection" {
   description = "Override for the ALB's deletion-protection setting. Defaults to false, matching the alb module's own original default — safe for a brand-new environment. This staging environment's live ALB has deletion protection enabled (confirmed via aws elbv2 describe-load-balancer-attributes) — deletion protection is safely updatable in place (never ForceNew), but leaving this false against an already-imported live ALB proposes disabling a real safety setting on the next apply."
   type        = bool
