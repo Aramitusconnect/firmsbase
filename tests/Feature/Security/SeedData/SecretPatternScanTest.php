@@ -217,6 +217,23 @@ class SecretPatternScanTest extends TestCase
             // AccountingIntegrityService findings for a human to
             // investigate through the normal service layer.
             'AccountingIntegrityCheckCommand.php',
+            // Event-Driven Automation Engine (item 9) added four
+            // commands — all reviewed and safe, none seeds demo/
+            // placeholder/synthetic data of any kind.
+            // DispatchAutomationEventsCommand/DispatchAutomationActionsCommand
+            // create no rows at all — they only dispatch a queued job
+            // per activated firm to drain rows that already exist.
+            // SweepInvoiceOverdueEventsCommand/SweepDeadlineEventsCommand
+            // emit a DomainEvent row derived entirely from a real,
+            // pre-existing Invoice/Deadline's own actual field values
+            // (via AccountingReportingService/DeadlineService, both
+            // unmodified) — never an invented/fixture invoice, client,
+            // or deadline, and never more than one event per
+            // subject/type ever (a dedup existence check).
+            'DispatchAutomationEventsCommand.php',
+            'DispatchAutomationActionsCommand.php',
+            'SweepInvoiceOverdueEventsCommand.php',
+            'SweepDeadlineEventsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

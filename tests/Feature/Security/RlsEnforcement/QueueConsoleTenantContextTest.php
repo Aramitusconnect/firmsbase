@@ -190,6 +190,22 @@ class QueueConsoleTenantContextTest extends TestCase
             // runs inside AccountingIntegrityService::checkFirm()'s own
             // TenantContextService::runWithFirmContext() wrap.
             'AccountingIntegrityCheckCommand.php',
+            // Event-Driven Automation Engine (item 9) added four
+            // commands — reviewed and safe: see
+            // QueueConsoleContextRolloutTest's own identical review
+            // note. DispatchAutomationEventsCommand/
+            // DispatchAutomationActionsCommand enumerate only the
+            // non-RLS `firms` table and dispatch one job per activated
+            // firm, each job scoping its own work via
+            // TenantAwareJobContext::runInFirmContext().
+            // SweepInvoiceOverdueEventsCommand/SweepDeadlineEventsCommand
+            // iterate activated firms explicitly and wrap every
+            // DomainEvent existence-check/write in
+            // TenantContextService::runWithFirmContext($firm, ...).
+            'DispatchAutomationEventsCommand.php',
+            'DispatchAutomationActionsCommand.php',
+            'SweepInvoiceOverdueEventsCommand.php',
+            'SweepDeadlineEventsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

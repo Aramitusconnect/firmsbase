@@ -181,6 +181,23 @@ class QueueConsoleContextRolloutTest extends TestCase
         // does nothing but loop over Firm::query()->cursor() calling
         // checkFirm() once per firm; there is no unscoped cross-firm
         // query anywhere in this command or the service it calls.
+        // Event-Driven Automation Engine (item 9) added four commands —
+        // all reviewed and safe. DispatchAutomationEventsCommand
+        // (automation:events:dispatch) and DispatchAutomationActionsCommand
+        // (automation:actions:dispatch) are the SAME shape as
+        // DispatchOutboxEventsCommand above: they enumerate only the
+        // non-RLS `firms` table and dispatch one AutomationEventDispatchJob/
+        // AutomationActionDispatchJob per activated firm; each job wraps
+        // its own claim/match/execute work in
+        // TenantAwareJobContext::runInFirmContext() (see those jobs' own
+        // tests). SweepInvoiceOverdueEventsCommand
+        // (automation:sweep:invoice-overdue) and SweepDeadlineEventsCommand
+        // (automation:sweep:deadlines) iterate activated firms explicitly
+        // and wrap every DomainEvent existence-check/write in
+        // TenantContextService::runWithFirmContext($firm, ...) — no raw
+        // SQL, no BYPASSRLS, no superuser role, no set_config
+        // manipulation of any RLS-relevant session variable in any of
+        // the four.
         $allowlist = [
             'SchemaTenantFirewallCommand.php',
             'RlsSecurityReportCommand.php',
@@ -199,6 +216,10 @@ class QueueConsoleContextRolloutTest extends TestCase
             'ReportMissingPurchasedSeatsCommand.php',
             'InitializeDefaultFirmReferenceDataCommand.php',
             'AccountingIntegrityCheckCommand.php',
+            'DispatchAutomationEventsCommand.php',
+            'DispatchAutomationActionsCommand.php',
+            'SweepInvoiceOverdueEventsCommand.php',
+            'SweepDeadlineEventsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

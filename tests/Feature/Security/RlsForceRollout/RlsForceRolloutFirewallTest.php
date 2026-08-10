@@ -710,7 +710,7 @@ class RlsForceRolloutFirewallTest extends TestCase
             // this test's own scope (39A-3B) only asserts clients and
             // firm_users here — additive only, no existing assertion
             // removed or weakened.
-            'accounting_journal_entries', 'accounting_postings', 'payment_allocations', 'payment_reversals', 'invoice_write_offs', 'accounting_periods', 'accounting_period_events', 'payment_requests', 'payment_request_events', 'payment_pending_allocations',
+            'accounting_journal_entries', 'accounting_postings', 'payment_allocations', 'payment_reversals', 'invoice_write_offs', 'accounting_periods', 'accounting_period_events', 'payment_requests', 'payment_request_events', 'payment_pending_allocations', 'domain_events', 'automation_rules', 'automation_executions', 'automation_action_executions',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

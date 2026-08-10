@@ -560,6 +560,13 @@ class RowLevelSecurityCoverageMappingService
         // 2026_11_02_100003_prepare_row_level_security_and_force_rls_on_payment_pending_allocations_table.php.
         // Never in MISSING_PREPARED_TABLES.
         'payment_pending_allocations',
+        // domain_events, automation_rules, automation_executions,
+        // automation_action_executions (Event-Driven Automation Engine
+        // pass) — each prepared and forced together with its own
+        // create migration:
+        // 2026_11_04_100002/100004/100006/100008_prepare_row_level_security_and_force_rls_on_*.php.
+        // Never in MISSING_PREPARED_TABLES.
+        'domain_events', 'automation_rules', 'automation_executions', 'automation_action_executions',
     ];
 
     /**
