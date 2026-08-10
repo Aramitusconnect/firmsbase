@@ -173,6 +173,35 @@ class DocumentSecurityService
     }
 
     /**
+     * Zero-Click Core Workflow Automation pass. Links an already-
+     * uploaded Document to a DocumentRequestItem discovered after the
+     * fact (deterministic matching — see DocumentMatchingService) —
+     * the upload-time linkage upload() itself sets is the common case,
+     * but several real upload paths (confirmed by audit — e.g. the
+     * client-portal fallback page, email-attachment promotion) never
+     * know the target item at creation time. Never overwrites an
+     * existing link (a document already tied to one request item is
+     * never silently re-tied to another), and never links across a
+     * firm boundary.
+     */
+    public function linkToRequestItem(Document $document, DocumentRequestItem $item): Document
+    {
+        if ($document->document_request_item_id !== null) {
+            throw new \RuntimeException('This document is already linked to a document request item.');
+        }
+
+        return (new TenantContextService)->runWithFirmContext($document->firm_id, function () use ($document, $item) {
+            if ((int) $item->documentRequest->firm_id !== (int) $document->firm_id) {
+                throw new \RuntimeException('This document request item does not belong to this document\'s firm.');
+            }
+
+            $document->update(['document_request_item_id' => $item->id]);
+
+            return $document->fresh();
+        });
+    }
+
+    /**
      * The explicit private-access check. Documents are never exposed
      * via a public URL; any future signed-URL/download endpoint must
      * call this first (project rule).

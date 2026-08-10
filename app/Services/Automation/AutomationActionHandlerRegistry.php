@@ -3,10 +3,13 @@
 namespace App\Services\Automation;
 
 use App\Enums\AutomationActionType;
+use App\Services\Automation\Actions\CreateDocumentRequestActionHandler;
 use App\Services\Automation\Actions\CreateTaskActionHandler;
 use App\Services\Automation\Actions\EscalateDeadlineActionHandler;
 use App\Services\Automation\Actions\MarkDocumentRequestItemSubmittedActionHandler;
+use App\Services\Automation\Actions\MatchDocumentToRequestActionHandler;
 use App\Services\Automation\Actions\NotifyBillingStaffActionHandler;
+use App\Services\Automation\Actions\NotifyClientActionHandler;
 use App\Services\Automation\Actions\NotifyResponsibleAttorneyActionHandler;
 use App\Services\Automation\Contracts\AutomationActionHandler;
 
@@ -29,6 +32,9 @@ final class AutomationActionHandlerRegistry
         AutomationActionType::NotifyResponsibleAttorney->value => NotifyResponsibleAttorneyActionHandler::class,
         AutomationActionType::EscalateDeadline->value => EscalateDeadlineActionHandler::class,
         AutomationActionType::MarkDocumentRequestItemSubmitted->value => MarkDocumentRequestItemSubmittedActionHandler::class,
+        AutomationActionType::NotifyClient->value => NotifyClientActionHandler::class,
+        AutomationActionType::CreateDocumentRequest->value => CreateDocumentRequestActionHandler::class,
+        AutomationActionType::MatchDocumentToRequest->value => MatchDocumentToRequestActionHandler::class,
     ];
 
     public function resolve(AutomationActionType $type): AutomationActionHandler
