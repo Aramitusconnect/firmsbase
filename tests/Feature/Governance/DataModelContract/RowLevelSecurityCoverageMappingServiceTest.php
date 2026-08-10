@@ -302,7 +302,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Event-Driven Automation Engine pass added four more DirectTenant
         // tables (domain_events, automation_rules, automation_executions,
         // automation_action_executions) — 157 -> 161.
-        $this->assertCount(161, $this->service->preparedTables());
+        // Predictive Matter Budget Alerts pass added four more DirectTenant
+        // tables (matter_budget_templates, matter_budgets,
+        // matter_budget_analyses, matter_budget_alerts) — 161 -> 165.
+        $this->assertCount(165, $this->service->preparedTables());
         $this->assertCount(0, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
@@ -402,7 +405,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Event-Driven Automation Engine pass added four more DirectTenant
         // tables (domain_events, automation_rules, automation_executions,
         // automation_action_executions) — 157 -> 161.
-        $this->assertCount(161, $this->service->tenantOwnedTables());
+        // Predictive Matter Budget Alerts pass added four more DirectTenant
+        // tables (matter_budget_templates, matter_budgets,
+        // matter_budget_analyses, matter_budget_alerts) — 161 -> 165.
+        $this->assertCount(165, $this->service->tenantOwnedTables());
         $forceMigrationFiles = glob(
             database_path('migrations/*_force_rls_on_*_table.php')
         ) ?: [];
@@ -757,7 +763,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Event-Driven Automation Engine pass added four more DirectTenant
         // tables (domain_events, automation_rules, automation_executions,
         // automation_action_executions) — 157 -> 161.
-        $this->assertSame(161, $summary[TenantOwnershipClassification::DirectTenant->value]);
+        // Predictive Matter Budget Alerts pass added four more DirectTenant
+        // tables (matter_budget_templates, matter_budgets,
+        // matter_budget_analyses, matter_budget_alerts) — 161 -> 165.
+        $this->assertSame(165, $summary[TenantOwnershipClassification::DirectTenant->value]);
         $this->assertSame(24, $summary[TenantOwnershipClassification::InheritedTenant->value]);
         $this->assertSame(3, $summary[TenantOwnershipClassification::Pivot->value]);
         $this->assertSame(10, $summary[TenantOwnershipClassification::Hybrid->value]);
@@ -931,7 +940,9 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // table (payment_pending_allocations): 272 -> 273.
         // Event-Driven Automation Engine pass added four more DirectTenant
         // tables: 273 -> 277.
-        $this->assertSame(277, array_sum($summary));
+        // Predictive Matter Budget Alerts pass added four more DirectTenant
+        // tables: 277 -> 281.
+        $this->assertSame(281, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

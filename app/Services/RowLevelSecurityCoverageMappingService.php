@@ -567,6 +567,13 @@ class RowLevelSecurityCoverageMappingService
         // 2026_11_04_100002/100004/100006/100008_prepare_row_level_security_and_force_rls_on_*.php.
         // Never in MISSING_PREPARED_TABLES.
         'domain_events', 'automation_rules', 'automation_executions', 'automation_action_executions',
+        // matter_budget_templates, matter_budgets, matter_budget_analyses,
+        // matter_budget_alerts (Predictive Matter Budget Alerts pass) —
+        // each prepared and forced together with its own create
+        // migration:
+        // 2026_11_05_100002/100004/100006/100008_prepare_row_level_security_and_force_rls_on_*.php.
+        // Never in MISSING_PREPARED_TABLES.
+        'matter_budget_templates', 'matter_budgets', 'matter_budget_analyses', 'matter_budget_alerts',
     ];
 
     /**
