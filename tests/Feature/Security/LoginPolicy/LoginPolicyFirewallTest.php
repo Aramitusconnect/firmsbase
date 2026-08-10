@@ -171,9 +171,20 @@ class LoginPolicyFirewallTest extends TestCase
 
     public function test_no_login_route_or_auth_controller_was_introduced(): void
     {
+        // The blanket "the word login never appears anywhere in the
+        // file" check is narrowed to "no dedicated login ROUTE was
+        // registered" — Mission 1 (Domain & Security Boundary
+        // Architecture), an entirely separate, later mission, found a
+        // genuine need to build real canonical-hostname routing in
+        // routes/web.php (marketing site, legacy /firm and /admin GET
+        // redirects, the MyAttorney placeholder), whose own code
+        // comments mention Filament's pre-existing "login" page by
+        // name. This test's actual concern — Section 39D never rolling
+        // its own auth/login surface instead of reusing Filament's
+        // built-in one — is unaffected and still checked below.
         $webRoutesSource = file_get_contents(base_path('routes/web.php'));
 
-        $this->assertStringNotContainsStringIgnoringCase('login', $webRoutesSource);
+        $this->assertDoesNotMatchRegularExpression('/Route::\w+\([\'"].*login/i', $webRoutesSource, 'No dedicated login route may be registered in routes/web.php — Filament\'s own built-in login pages are the only login surface.');
         $this->assertFileDoesNotExist(base_path('routes/api.php'));
         $this->assertDirectoryDoesNotExist(app_path('Http/Controllers/Auth'));
 
