@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\TaskPriority;
 use App\Enums\TaskStatus;
+use App\Enums\TaskWorkCategory;
 use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -19,7 +20,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class Task extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     protected $fillable = [
         'firm_id',
@@ -30,6 +31,7 @@ class Task extends Model
         'description',
         'status',
         'priority',
+        'task_category',
         'due_at',
         'completed_at',
         'cancelled_at',
@@ -41,6 +43,7 @@ class Task extends Model
         return [
             'status' => TaskStatus::class,
             'priority' => TaskPriority::class,
+            'task_category' => TaskWorkCategory::class,
             'due_at' => 'datetime',
             'completed_at' => 'datetime',
             'cancelled_at' => 'datetime',

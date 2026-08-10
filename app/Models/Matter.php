@@ -249,4 +249,12 @@ class Matter extends Model
     {
         return $this->hasMany(MatterBudgetAlert::class);
     }
+
+    /**
+     * Leverage Ratio Optimizer addition.
+     */
+    public function leverageRecommendations(): HasMany
+    {
+        return $this->hasMany(MatterLeverageRecommendation::class);
+    }
 }
