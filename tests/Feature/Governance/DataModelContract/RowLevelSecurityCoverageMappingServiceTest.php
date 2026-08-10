@@ -309,8 +309,13 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertCount(count($migrationCreatedTables), $inventoryTables);
     }
 
-    public function test_full_table_inventory_classification_counts_reconcile_to_208(): void
+    public function test_full_table_inventory_classification_counts_reconcile_to_210(): void
     {
+        // Mission 1 (Domain & Security Boundary Architecture) added two
+        // new System-classified tables (client_password_reset_tokens,
+        // platform_admin_password_reset_tokens), bumping System from 8
+        // to 10 and the grand total from 208 to 210. Every other
+        // classification count is unchanged.
         $summary = $this->service->classificationSummary();
 
         $this->assertSame(113, $summary[TenantOwnershipClassification::DirectTenant->value]);
@@ -319,11 +324,11 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         $this->assertSame(10, $summary[TenantOwnershipClassification::Hybrid->value]);
         $this->assertSame(44, $summary[TenantOwnershipClassification::Global->value]);
         $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
-        $this->assertSame(8, $summary[TenantOwnershipClassification::System->value]);
+        $this->assertSame(10, $summary[TenantOwnershipClassification::System->value]);
         $this->assertSame(1, $summary[TenantOwnershipClassification::RootTenant->value]);
         $this->assertSame(1, $summary[TenantOwnershipClassification::Uncertain->value]);
 
-        $this->assertSame(208, array_sum($summary));
+        $this->assertSame(210, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

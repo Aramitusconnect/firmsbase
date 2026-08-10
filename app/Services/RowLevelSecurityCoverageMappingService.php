@@ -201,20 +201,27 @@ class RowLevelSecurityCoverageMappingService
 
     /**
      * Wave 1A canonical inventory (Section 39A-4B): every one of the
-     * 208 repository tables that is NOT DirectTenant (i.e. not already
-     * in PREPARED_TABLES/MISSING_PREPARED_TABLES). Built entirely from
-     * direct database/migrations inspection — every ownership_path
-     * below traces a real foreignId()/constrained() FK found in the
-     * cited migration file, never a live-database query.
+     * (now 210, see Mission 1 note below) repository tables that is NOT
+     * DirectTenant (i.e. not already in PREPARED_TABLES/
+     * MISSING_PREPARED_TABLES). Built entirely from direct
+     * database/migrations inspection — every ownership_path below
+     * traces a real foreignId()/constrained() FK found in the cited
+     * migration file, never a live-database query.
      *
-     * 95 entries: 1 RootTenant (firms) + 1 Uncertain
+     * 97 entries: 1 RootTenant (firms) + 1 Uncertain
      * (offboarding_exports) + 24 InheritedTenant + 3 Pivot +
      * 10 Hybrid + 44 Global (the 22 EXEMPT_TABLES entries plus the 20
      * further platform-wide tables classified Global here but not
-     * added to EXEMPT_TABLES) + 4 Audit + 8 System.
+     * added to EXEMPT_TABLES) + 4 Audit + 10 System.
      * fullTableInventory() below merges this with a DirectTenant entry
      * synthesized for every PREPARED_TABLES/MISSING_PREPARED_TABLES
-     * table (113), for 95 + 113 = 208 total.
+     * table (113), for 97 + 113 = 210 total.
+     *
+     * Mission 1 (Domain & Security Boundary Architecture) added 2 new
+     * System-classified tables (client_password_reset_tokens,
+     * platform_admin_password_reset_tokens — see their entries below,
+     * next to password_reset_tokens), bumping System from 8 to 10 and
+     * the grand total from 208 to 210.
      *
      * @var array<string, array{classification: TenantOwnershipClassification, ownership_path: ?string, notes: string}>
      */
@@ -758,6 +765,24 @@ class RowLevelSecurityCoverageMappingService
             'classification' => TenantOwnershipClassification::System,
             'ownership_path' => null,
             'notes' => 'Laravel default auth-scaffolding table.',
+        ],
+        // Mission 1 (Domain & Security Boundary Architecture) additions
+        // below — the `clients` and `platform_admins` guards' own
+        // dedicated password-reset token tables (see
+        // 2026_08_26_100002_create_client_and_platform_admin_password_reset_tokens_tables.php).
+        // Same shape/classification as password_reset_tokens above —
+        // deliberately NOT shared with it, to close a narrow
+        // cross-identity token-collision risk (see that migration's own
+        // docblock).
+        'client_password_reset_tokens' => [
+            'classification' => TenantOwnershipClassification::System,
+            'ownership_path' => null,
+            'notes' => 'Auth-scaffolding table for the `clients` password-reset broker (Mission 1).',
+        ],
+        'platform_admin_password_reset_tokens' => [
+            'classification' => TenantOwnershipClassification::System,
+            'ownership_path' => null,
+            'notes' => 'Auth-scaffolding table for the `platform_admins` password-reset broker (Mission 1).',
         ],
         'users' => [
             'classification' => TenantOwnershipClassification::System,
