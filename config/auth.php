@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Client;
 use App\Models\PlatformAdmin;
 use App\Models\User;
 
@@ -52,6 +53,18 @@ return [
             'driver' => 'session',
             'provider' => 'platform_admins',
         ],
+
+        // Mission 1 — Domain & Security Boundary Architecture. The
+        // client.firmsvault.com Client Portal panel's own guard, backed
+        // by the `clients` table itself (Client now implements
+        // Authenticatable — see app/Models/Client.php) rather than a
+        // separate identity table, matching the project rule that a
+        // Client is created ONLY by LeadConversionService and never
+        // duplicated into a second table.
+        'client' => [
+            'driver' => 'session',
+            'provider' => 'clients',
+        ],
     ],
 
     /*
@@ -80,6 +93,11 @@ return [
         'platform_admins' => [
             'driver' => 'eloquent',
             'model' => PlatformAdmin::class,
+        ],
+
+        'clients' => [
+            'driver' => 'eloquent',
+            'model' => Client::class,
         ],
 
         // 'users' => [
@@ -111,6 +129,20 @@ return [
         'users' => [
             'provider' => 'users',
             'table' => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
+            'expire' => 60,
+            'throttle' => 60,
+        ],
+
+        'clients' => [
+            'provider' => 'clients',
+            'table' => 'client_password_reset_tokens',
+            'expire' => 60,
+            'throttle' => 60,
+        ],
+
+        'platform_admins' => [
+            'provider' => 'platform_admins',
+            'table' => 'platform_admin_password_reset_tokens',
             'expire' => 60,
             'throttle' => 60,
         ],

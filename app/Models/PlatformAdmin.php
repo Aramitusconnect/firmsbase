@@ -9,6 +9,7 @@ use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
 
 /**
  * PlatformAdmin — a distinct identity from firm-facing `users`, for
@@ -31,10 +32,18 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
  * resources exist yet (app/Filament/ has no Resources/Pages beyond the
  * built-in Dashboard) — there is nothing narrower to gate against
  * today.
+ *
+ * Mission 1 (Domain & Security Boundary Architecture) addition:
+ * Notifiable, so the framework's stock password-reset notification
+ * (sendPasswordResetNotification(), inherited from CanResetPassword —
+ * already present via the base Illuminate\Foundation\Auth\User class,
+ * see vendor source) has something to call ->notify() on. Without
+ * this trait, requesting a password reset for a PlatformAdmin would
+ * fatal rather than merely being unbuilt.
  */
 class PlatformAdmin extends Authenticatable implements FilamentUser
 {
-    use HasFactory, HasPublicUuid;
+    use HasFactory, HasPublicUuid, Notifiable;
 
     protected $table = 'platform_admins';
 

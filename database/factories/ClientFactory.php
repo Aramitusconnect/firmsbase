@@ -42,6 +42,25 @@ class ClientFactory extends Factory
     }
 
     /**
+     * Mission 1 (Domain & Security Boundary Architecture) — a Client
+     * that has actually completed portal invitation acceptance and has
+     * a real, login-capable password, exactly the two conditions
+     * Client::canAccessPanel() requires. Mirrors what
+     * ClientPortalService::acceptInvitation() would leave behind, for
+     * tests that need a genuinely authenticatable Client without
+     * exercising the full invite/accept flow themselves.
+     */
+    public function activeOnPortal(string $password = 'password'): static
+    {
+        return $this->state(fn () => [
+            'portal_status' => ClientPortalStatus::Active,
+            'portal_invitation_token' => null,
+            'portal_invitation_accepted_at' => now(),
+            'password' => $password,
+        ]);
+    }
+
+    /**
      * Section 39A-3A — clients has FORCE ROW LEVEL SECURITY active, so
      * every INSERT (test or app) must run under the row's own
      * app.current_firm_id context. firm_id is always fully resolved by
@@ -79,7 +98,7 @@ class ClientFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);

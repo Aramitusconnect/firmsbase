@@ -2,6 +2,8 @@
 
 namespace App\Providers\Filament;
 
+use App\Http\Middleware\ConfigurePanelSessionCookie;
+use App\Services\CanonicalUrlService;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -28,6 +30,13 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
  * middleware is applied here, so this panel has zero standing access
  * to any firm's tenant data, by omission rather than an explicit
  * bypass check).
+ *
+ * Mission 1 (Domain & Security Boundary Architecture) moved this,
+ * FirmsVault's highest-security browser zone (section 26), off the
+ * shared legacy hostname's `/admin` path onto its own canonical
+ * hostname — CanonicalUrlService::adminHost(), i.e. admin.firmsvault.com
+ * in production. A GET-only compatibility redirect from the legacy
+ * `/admin/*` path is registered separately (routes/web.php).
  */
 class AdminPanelProvider extends PanelProvider
 {
@@ -36,8 +45,10 @@ class AdminPanelProvider extends PanelProvider
         return $panel
             ->default()
             ->id('admin')
-            ->path('admin')
+            ->domain(app(CanonicalUrlService::class)->adminHost())
+            ->path('')
             ->login()
+            ->passwordReset()
             ->authGuard('platform_admin')
             ->colors([
                 'primary' => Color::Amber,
@@ -53,6 +64,7 @@ class AdminPanelProvider extends PanelProvider
                 FilamentInfoWidget::class,
             ])
             ->middleware([
+                ConfigurePanelSessionCookie::class.':admin',
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,

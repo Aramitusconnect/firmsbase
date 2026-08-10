@@ -5,10 +5,17 @@ namespace App\Models;
 use App\Enums\ClientPortalStatus;
 use App\Models\Concerns\BelongsToTenant;
 use App\Models\Concerns\HasPublicUuid;
+use Filament\Models\Contracts\FilamentUser;
+use Filament\Panel;
+use Illuminate\Auth\Authenticatable;
+use Illuminate\Auth\Passwords\CanResetPassword;
+use Illuminate\Contracts\Auth\Authenticatable as AuthenticatableContract;
+use Illuminate\Contracts\Auth\CanResetPassword as CanResetPasswordContract;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Notifications\Notifiable;
 
 /**
  * Client — created ONLY by LeadConversionService (never any other
@@ -23,10 +30,19 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * matter-only and never reach a client).
  * Phase 5 addition: pilot feedback items submitted by or about this
  * client.
+ *
+ * Mission 1 (Domain & Security Boundary Architecture) addition:
+ * Client becomes a real Laravel-authenticatable identity — the
+ * `client` guard for client.firmsvault.com's own Client Portal panel
+ * (ClientPortalPanelProvider). canAccessPanel() is the sole gate:
+ * portal_status must already be Active, which itself only happens
+ * through ClientPortalService::acceptInvitation() (never set any
+ * other way) — a not-yet-invited or not-yet-accepted Client has no
+ * password set and is correctly refused login twice over.
  */
-class Client extends Model
+class Client extends Model implements AuthenticatableContract, CanResetPasswordContract, FilamentUser
 {
-    use HasFactory, HasPublicUuid, BelongsToTenant;
+    use Authenticatable, BelongsToTenant, CanResetPassword, HasFactory, HasPublicUuid, Notifiable;
 
     protected $fillable = [
         'firm_id',
@@ -35,6 +51,7 @@ class Client extends Model
         'legal_name',
         'email',
         'phone',
+        'password',
         'preferred_language',
         'preferred_timezone',
         'portal_status',
@@ -44,13 +61,24 @@ class Client extends Model
         'created_by',
     ];
 
+    protected $hidden = [
+        'password',
+        'remember_token',
+    ];
+
     protected function casts(): array
     {
         return [
+            'password' => 'hashed',
             'portal_status' => ClientPortalStatus::class,
             'portal_invitation_sent_at' => 'datetime',
             'portal_invitation_accepted_at' => 'datetime',
         ];
+    }
+
+    public function canAccessPanel(Panel $panel): bool
+    {
+        return $this->portal_status === ClientPortalStatus::Active;
     }
 
     public function firm(): BelongsTo

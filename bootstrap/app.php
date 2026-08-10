@@ -1,11 +1,15 @@
 <?php
 
 use App\Http\Controllers\ReadinessController;
+use App\Http\Middleware\AddSearchIndexingHeader;
+use App\Http\Middleware\AddSecurityHeaders;
+use App\Services\CanonicalUrlService;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Symfony\Component\HttpFoundation\Exception\SuspiciousOperationException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -68,9 +72,48 @@ return Application::configure(basePath: dirname(__DIR__))
             at: '*',
             headers: Request::HEADER_X_FORWARDED_AWS_ELB,
         );
+
+        // Mission 1 — Domain & Security Boundary Architecture, section 10.
+        // Explicit host allow-list: exactly the six canonical FirmsVault
+        // hostnames (CanonicalUrlService::trustedHosts(), itself driven by
+        // config/hosts.php) and nothing else — `subdomains: false` because
+        // section 10 explicitly forbids trusting arbitrary wildcard
+        // subdomains "unless there is a genuine documented product
+        // requirement." A Host header that matches none of these six never
+        // reaches a route (Laravel throws a SuspiciousOperationException,
+        // handled below as a safe 4xx rather than leaking a stack trace),
+        // so a malicious/forged Host header can never influence a reset
+        // link, a verification link, an invitation, or any other
+        // canonical-URL-dependent behavior — those are read from
+        // CanonicalUrlService directly, never from the request.
+        $middleware->trustHosts(
+            at: fn () => app(CanonicalUrlService::class)->trustedHosts(),
+            subdomains: false,
+        );
+
+        // Mission 1 — sections 31/32 (search-indexing boundary) and 36
+        // (baseline security headers). Global, not per-route-group:
+        // Filament panel routes do not run through the `web` middleware
+        // group, so either these run globally or they would need
+        // duplicating across routes/web.php and all three panels.
+        $middleware->append([
+            AddSecurityHeaders::class,
+            AddSearchIndexingHeader::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*'),
         );
+
+        // Mission 1, section 10 — a Host header outside the
+        // TrustHosts allow-list throws SuspiciousOperationException
+        // deep in Symfony's Request::getHost(); rendered as a plain
+        // 400 here rather than the framework's default (which would
+        // otherwise be a 500 in production, since this exception isn't
+        // an HttpExceptionInterface) — never leaking the offending
+        // Host value, a stack trace, or any other diagnostic detail.
+        $exceptions->render(function (SuspiciousOperationException $e) {
+            return response('Bad Request', 400);
+        });
     })->create();

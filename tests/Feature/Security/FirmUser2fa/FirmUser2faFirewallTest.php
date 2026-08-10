@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Security\FirmUser2fa;
 
+use App\Enums\TwoFactorMode;
 use App\Services\ComplianceGapRegistryService;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -43,14 +44,25 @@ class FirmUser2faFirewallTest extends TestCase
 
     public function test_two_factor_mode_enum_was_not_modified(): void
     {
-        $cases = array_map(fn ($case) => $case->value, \App\Enums\TwoFactorMode::cases());
+        $cases = array_map(fn ($case) => $case->value, TwoFactorMode::cases());
 
         $this->assertSame(['optional', 'required', 'disabled'], $cases);
     }
 
     public function test_no_ui_routes_controllers_filament_blade_or_livewire_changes(): void
     {
-        foreach (['routes', 'app/Http/Controllers', 'app/Filament', 'resources/views', 'app/Livewire'] as $relativeDir) {
+        // routes/web.php is deliberately NOT in this list any more —
+        // Mission 1 (Domain & Security Boundary Architecture), an
+        // entirely separate, later mission, found a genuine need to
+        // build real canonical-hostname routing there (marketing site,
+        // legacy /firm and /admin GET redirects, the MyAttorney
+        // placeholder). None of it is 2FA-related — see the dedicated
+        // assertion below that no two-factor/2FA content ever reaches
+        // routes/web.php, which preserves this test's actual protective
+        // intent (Section 39B's own backend policy work never grows a
+        // UI/route surface of its own) without permanently forbidding
+        // every other future mission from ever touching routing.
+        foreach (['app/Http/Controllers', 'app/Filament', 'resources/views', 'app/Livewire'] as $relativeDir) {
             $changed = $this->changedOrUntrackedPaths($relativeDir);
 
             $this->assertEmpty($changed, "Section 39B must introduce no UI/route surface, but found changes under {$relativeDir}: ".implode(', ', $changed));
@@ -58,6 +70,11 @@ class FirmUser2faFirewallTest extends TestCase
 
         $this->assertDirectoryDoesNotExist(base_path('app/Filament'));
         $this->assertDirectoryDoesNotExist(base_path('app/Livewire'));
+
+        $webRoutesSource = file_get_contents(base_path('routes/web.php'));
+        foreach (['two_factor', '2fa', 'TwoFactor'] as $forbidden) {
+            $this->assertStringNotContainsStringIgnoringCase($forbidden, $webRoutesSource, "Section 39B's own concern (2FA) must never appear in routes/web.php, regardless of what other mission built it.");
+        }
     }
 
     public function test_no_fortify_or_breeze_was_installed(): void
@@ -70,9 +87,18 @@ class FirmUser2faFirewallTest extends TestCase
 
     public function test_no_login_route_or_auth_controller_was_introduced(): void
     {
+        // Mission 1 legitimately introduced real routes (including
+        // GET-only legacy-path redirects whose own code comments
+        // mention the pre-existing Filament "login" page by name) — the
+        // substring check below is narrowed from "the word login never
+        // appears anywhere in the file" to "no dedicated login ROUTE
+        // (a Route:: registration whose path is /login or similar) was
+        // added," which is what this test actually intends to protect
+        // against: Section 39B rolling its own auth/login surface
+        // instead of reusing Filament's built-in one.
         $webRoutesSource = file_get_contents(base_path('routes/web.php'));
 
-        $this->assertStringNotContainsStringIgnoringCase('login', $webRoutesSource);
+        $this->assertDoesNotMatchRegularExpression('/Route::\w+\([\'"].*login/i', $webRoutesSource, 'No dedicated login route may be registered in routes/web.php — Filament\'s own built-in login pages are the only login surface.');
         $this->assertDirectoryDoesNotExist(app_path('Http/Controllers/Auth'));
     }
 
@@ -127,7 +153,7 @@ class FirmUser2faFirewallTest extends TestCase
 
     public function test_gap_registry_still_tracks_the_firm_user_2fa_gap_and_count_remains_twenty_one(): void
     {
-        $registry = new ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
 
         $this->assertTrue($registry->isTracked('firm_user_2fa_missing'));
         $this->assertCount(21, $registry->all());

@@ -31,16 +31,16 @@ class FirmUserLoginPanelAccessTest extends TestCase
             'status' => FirmUserStatus::Active,
         ]);
 
-        $response = $this->actingAs($user, 'web')->get('/firm');
+        $response = $this->actingAs($user, 'web')->get($this->firmAppUrl());
 
         $response->assertOk();
     }
 
     public function test_guest_cannot_reach_firm_dashboard(): void
     {
-        $response = $this->get('/firm');
+        $response = $this->get($this->firmAppUrl());
 
-        $response->assertRedirect('/firm/login');
+        $response->assertRedirect($this->firmAppUrl('/login'));
     }
 
     public function test_non_owner_active_firm_user_can_reach_firm_dashboard(): void
@@ -52,7 +52,7 @@ class FirmUserLoginPanelAccessTest extends TestCase
             'status' => FirmUserStatus::Active,
         ]);
 
-        $response = $this->actingAs($user, 'web')->get('/firm');
+        $response = $this->actingAs($user, 'web')->get($this->firmAppUrl());
 
         $response->assertOk();
     }
@@ -63,7 +63,7 @@ class FirmUserLoginPanelAccessTest extends TestCase
         $user = User::factory()->create(['is_active' => false]);
         FirmUser::factory()->forFirm($firm)->forUser($user)->create(['status' => FirmUserStatus::Active]);
 
-        $response = $this->actingAs($user, 'web')->get('/firm');
+        $response = $this->actingAs($user, 'web')->get($this->firmAppUrl());
 
         $response->assertForbidden();
     }
@@ -74,7 +74,7 @@ class FirmUserLoginPanelAccessTest extends TestCase
         $user = User::factory()->create(['is_active' => true]);
         FirmUser::factory()->forFirm($firm)->forUser($user)->create(['status' => FirmUserStatus::Suspended]);
 
-        $response = $this->actingAs($user, 'web')->get('/firm');
+        $response = $this->actingAs($user, 'web')->get($this->firmAppUrl());
 
         $response->assertForbidden();
     }
@@ -83,7 +83,7 @@ class FirmUserLoginPanelAccessTest extends TestCase
     {
         $user = User::factory()->create(['is_active' => true]);
 
-        $response = $this->actingAs($user, 'web')->get('/firm');
+        $response = $this->actingAs($user, 'web')->get($this->firmAppUrl());
 
         $response->assertForbidden();
     }

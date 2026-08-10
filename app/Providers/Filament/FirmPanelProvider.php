@@ -3,7 +3,9 @@
 namespace App\Providers\Filament;
 
 use App\Http\Middleware\ApplyTenantDatabaseContext;
+use App\Http\Middleware\ConfigurePanelSessionCookie;
 use App\Http\Middleware\EstablishFirmTenantContext;
+use App\Services\CanonicalUrlService;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -22,8 +24,18 @@ use Illuminate\Session\Middleware\StartSession;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 /**
- * FirmPanelProvider — internal login/panel access wiring. The
- * firm-facing panel (path 'firm'), guarded by the default `web` guard
+ * FirmPanelProvider — internal login/panel access wiring. Mission 1
+ * (Domain & Security Boundary Architecture) moved this panel from a
+ * path prefix on the single legacy hostname (`/firm`) to its own
+ * canonical hostname — CanonicalUrlService::firmAppHost(), i.e.
+ * app.firmsvault.com in production — at path `''` (root of that host).
+ * A GET-only compatibility redirect from the legacy `/firm/*` path on
+ * the marketing hostname to this new host is registered separately
+ * (routes/web.php) — this panel itself no longer answers on the old
+ * path at all, so there is exactly one authoritative registration, not
+ * two competing panels.
+ *
+ * The firm-facing panel, guarded by the default `web` guard
  * (User model) — firm owners/admins/users all authenticate here, and
  * User::canAccessPanel() is the sole gate deciding whether a given
  * authenticated User may enter: active account, an ACTIVE FirmUser
@@ -46,8 +58,10 @@ class FirmPanelProvider extends PanelProvider
     {
         return $panel
             ->id('firm')
-            ->path('firm')
+            ->domain(app(CanonicalUrlService::class)->firmAppHost())
+            ->path('')
             ->login()
+            ->passwordReset()
             ->colors([
                 'primary' => Color::Blue,
             ])
@@ -62,6 +76,7 @@ class FirmPanelProvider extends PanelProvider
                 FilamentInfoWidget::class,
             ])
             ->middleware([
+                ConfigurePanelSessionCookie::class.':firm',
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,
