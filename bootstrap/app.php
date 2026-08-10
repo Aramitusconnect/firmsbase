@@ -1,12 +1,16 @@
 <?php
 
 use App\Http\Controllers\ReadinessController;
+use App\Http\Middleware\AddSearchIndexingHeader;
+use App\Http\Middleware\AddSecurityHeaders;
+use App\Services\CanonicalUrlService;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Symfony\Component\HttpFoundation\Exception\SuspiciousOperationException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -273,6 +277,47 @@ return Application::configure(basePath: dirname(__DIR__))
             headers: Request::HEADER_X_FORWARDED_AWS_ELB,
         );
 
+        // Mission 1 (canonical reconstruction) — Domain & Security
+        // Boundary Architecture, section 25. Explicit host allow-list:
+        // exactly the six canonical FirmsVault hostnames
+        // (CanonicalUrlService::trustedHosts(), itself driven by
+        // config/hosts.php) and nothing else — `subdomains: false`
+        // because arbitrary wildcard subdomains must not be trusted
+        // "unless repository requirements justify it," and none do
+        // here. A Host header that matches none of these six never
+        // reaches a route (Laravel throws a SuspiciousOperationException,
+        // handled below as a safe 400 rather than leaking a stack
+        // trace), so a malicious/forged Host header can never influence
+        // a reset link, an OAuth redirect_uri, or any other
+        // canonical-URL-dependent behavior — those are read from
+        // CanonicalUrlService directly, never from the request.
+        //
+        // NOTE for cutover: routes/webhooks.php's inbound webhook route
+        // carries no domain() constraint of its own (see that file's
+        // own docblock — genuinely host-agnostic by design), but this
+        // TrustHosts gate is a request-layer check that still applies
+        // to it. Before this gate is enabled anywhere real webhook
+        // traffic flows, confirm which hostname Google/Microsoft/Plaid
+        // are actually configured to POST to (not captured in this
+        // repo — INTEGRATIONS_PLAID_WEBHOOK_URL's real deployed value
+        // lives only in the real environment's secrets) and ensure that
+        // exact hostname is one of the six trusted here, or add it
+        // explicitly, before cutover.
+        $middleware->trustHosts(
+            at: fn () => app(CanonicalUrlService::class)->trustedHosts(),
+            subdomains: false,
+        );
+
+        // Mission 1 — sections 33 (search-indexing boundary) and 37
+        // (baseline security headers). Global, not per-route-group:
+        // Filament panel routes do not run through the `web` middleware
+        // group, so either these run globally or they would need
+        // duplicating across routes/web.php and all three panels.
+        $middleware->append([
+            AddSecurityHeaders::class,
+            AddSearchIndexingHeader::class,
+        ]);
+
         // Checkpoint 4 ("Plaid financial evidence add-on") test-gate fix.
         // Laravel's own ApplicationBuilder::withMiddleware() unconditionally
         // registers a default `redirectGuestsTo(fn () => route('login'))`
@@ -291,12 +336,24 @@ return Application::configure(basePath: dirname(__DIR__))
         // Fixed at the shared root cause rather than with a route-specific
         // workaround, since more than one panel now has a raw,
         // guard-protected HTTP endpoint outside its own Filament panel
-        // middleware stack. Dispatches purely on request path prefix,
-        // matching each PanelProvider's own ->path() registration.
+        // middleware stack.
+        //
+        // Mission 1 (canonical reconstruction) update: each panel now
+        // mounts at path('') on its OWN canonical hostname
+        // (app./client./admin.firmsvault.com) rather than at a distinct
+        // path prefix on one shared hostname — dispatching on
+        // $request->is('admin', 'admin/*') etc. would no longer
+        // distinguish anything (every panel's own path is now just
+        // '/'). Dispatch is host-based instead, via CanonicalUrlService
+        // (never the raw, potentially-forged request Host — TrustHosts
+        // above has already rejected anything outside the six
+        // canonical hostnames by the time this runs).
         $middleware->redirectGuestsTo(function (Request $request): string {
-            return match (true) {
-                $request->is('admin', 'admin/*') => route('filament.admin.auth.login'),
-                $request->is('portal', 'portal/*') => route('filament.client-portal.auth.login'),
+            $hosts = app(CanonicalUrlService::class);
+
+            return match ($request->getHost()) {
+                $hosts->adminHost() => route('filament.admin.auth.login'),
+                $hosts->clientPortalHost() => route('filament.client-portal.auth.login'),
                 default => route('filament.firm.auth.login'),
             };
         });
@@ -305,4 +362,15 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*'),
         );
+
+        // Mission 1, section 25/26 — a Host header outside the
+        // TrustHosts allow-list throws SuspiciousOperationException
+        // deep in Symfony's Request::getHost(); rendered as a plain
+        // 400 here rather than the framework's default (which would
+        // otherwise be a 500 in production, since this exception isn't
+        // an HttpExceptionInterface) — never leaking the offending
+        // Host value, a stack trace, or any other diagnostic detail.
+        $exceptions->render(function (SuspiciousOperationException $e) {
+            return response('Bad Request', 400);
+        });
     })->create();

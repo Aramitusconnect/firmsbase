@@ -3,7 +3,9 @@
 namespace App\Providers\Filament;
 
 use App\Http\Middleware\ApplyTenantDatabaseContext;
+use App\Http\Middleware\ConfigurePanelSessionCookie;
 use App\Http\Middleware\EstablishClientPortalTenantContext;
+use App\Services\CanonicalUrlService;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -23,11 +25,18 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
  * add-on"), Client Portal authentication foundation
  * (checkpoint4-combined-design.md §5;
  * checkpoint4-design-matter-and-client-portal.md §2.3). The panel's
- * Filament-internal identifier is `client-portal`, but its actual
- * mounted URL path is `portal` — per checkpoint4-combined-design.md
- * §1.3's found-and-fixed URL-path drift (a later Financial Evidence
- * track's own `portal/plaid/exchange` route depends on this being
- * exactly `path('portal')`, not `path('client-portal')`).
+ * Filament-internal identifier is `client-portal`. It was originally
+ * mounted at path `portal` on the single legacy hostname (per
+ * checkpoint4-combined-design.md §1.3's found-and-fixed URL-path
+ * drift) — Mission 1 (canonical reconstruction — Domain & Security
+ * Boundary Architecture) moved it to its own canonical hostname,
+ * client.firmsvault.com in production (CanonicalUrlService::
+ * clientPortalHost()), at path `''` (root of that host). The sibling
+ * `plaid/exchange` route (formerly `portal/plaid/exchange`) moved with
+ * it — see routes/web.php. A GET-only compatibility redirect from the
+ * legacy `/portal/*` path lives in routes/web.php.
+ * ConfigurePanelSessionCookie gives this panel its own distinctly-
+ * named, host-only session cookie.
  *
  * `authGuard('client')` — same explicit-guard pattern
  * `AdminPanelProvider` already uses for `platform_admin`, never relies
@@ -69,7 +78,8 @@ class ClientPortalPanelProvider extends PanelProvider
     {
         return $panel
             ->id('client-portal')
-            ->path('portal')
+            ->domain(app(CanonicalUrlService::class)->clientPortalHost())
+            ->path('')
             ->login()
             ->passwordReset()
             ->colors([
@@ -79,6 +89,7 @@ class ClientPortalPanelProvider extends PanelProvider
             ->discoverPages(in: app_path('Filament/ClientPortal/Pages'), for: 'App\Filament\ClientPortal\Pages')
             ->authGuard('client')
             ->middleware([
+                ConfigurePanelSessionCookie::class.':client',
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,

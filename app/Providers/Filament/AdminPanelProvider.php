@@ -5,7 +5,9 @@ namespace App\Providers\Filament;
 use App\Filament\Auth\Pages\PlatformAdminLogin;
 use App\Filament\MultiFactor\AuditedAppAuthentication;
 use App\Filament\Pages\Dashboard;
+use App\Http\Middleware\ConfigurePanelSessionCookie;
 use App\Http\Middleware\EnsurePlatformAdminMfaIsEnrolledAndVerified;
+use App\Services\CanonicalUrlService;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -56,6 +58,15 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
  *    proposal's own headline finding, Filament's multi-factor wiring
  *    does not auto-apply any enrollment/verification enforcement on
  *    its own; this is the one explicit fix required to close that gap.
+ *
+ * Mission 1 (canonical reconstruction) moved this, FirmsVault's
+ * highest-security browser zone, off the shared legacy hostname's
+ * `/admin` path onto its own canonical hostname — admin.firmsvault.com
+ * in production (CanonicalUrlService::adminHost()). A GET-only
+ * compatibility redirect from the legacy `/admin/*` path lives in
+ * routes/web.php. ConfigurePanelSessionCookie gives this panel its own
+ * distinctly-named, host-only session cookie. Real TOTP MFA is
+ * untouched by this change.
  */
 class AdminPanelProvider extends PanelProvider
 {
@@ -64,9 +75,11 @@ class AdminPanelProvider extends PanelProvider
         return $panel
             ->default()
             ->id('admin')
-            ->path('admin')
+            ->domain(app(CanonicalUrlService::class)->adminHost())
+            ->path('')
             ->login(PlatformAdminLogin::class)
             ->profile()
+            ->passwordReset()
             ->authGuard('platform_admin')
             ->colors([
                 'primary' => Color::Amber,
@@ -108,6 +121,7 @@ class AdminPanelProvider extends PanelProvider
             // already provide.
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\Filament\Widgets')
             ->middleware([
+                ConfigurePanelSessionCookie::class.':admin',
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,

@@ -159,10 +159,25 @@ class Section40LimitedPilotSafetyGateService
      */
     public function hasNoPublicLegalDocumentUrls(): bool
     {
+        // Mission 1 (canonical reconstruction — Domain & Security
+        // Boundary Architecture) moved the admin panel from a path
+        // prefix (`admin`/`admin/*`) to its own canonical hostname
+        // (admin.firmsvault.*), so its own routes' URIs no longer start
+        // with `admin/` at all — the domain-based check below is now
+        // the real exclusion; the path-based check is kept alongside it
+        // (never a security weakening, since it only ever narrows which
+        // routes are treated as "the admin panel," and any route it
+        // still matches was already excluded before this mission).
+        $adminHost = app(CanonicalUrlService::class)->adminHost();
+
         foreach (Route::getRoutes() as $route) {
             $uri = strtolower($route->uri());
 
             if ($uri === 'admin' || str_starts_with($uri, 'admin/')) {
+                continue;
+            }
+
+            if ($route->getDomain() === $adminHost) {
                 continue;
             }
 

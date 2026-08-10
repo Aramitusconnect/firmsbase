@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Services\CanonicalUrlService;
 use App\Services\TenantContextService;
 use Closure;
 use Illuminate\Http\Request;
@@ -38,26 +39,27 @@ use Illuminate\Http\Request;
  *
  * Panel scoping is done INSIDE the middleware (the update route is a
  * single shared route for all panels, so any middleware on it is
- * global): the primary gate is the incoming component snapshot's
- * `memo.path` (each snapshot carries its render path) — only requests
- * whose component belongs to the `firm` panel path establish firm
- * context; Admin/SuperAdmin (`platform_admin` guard, `admin` path)
- * requests fall straight through untouched. Path-gating (not
- * guard-only) is deliberate so the dual-login edge case — one browser
- * session authenticated on BOTH `web` and `platform_admin` guards —
- * still correctly no-ops for an admin-panel update.
+ * global, and is itself deliberately domain-unconstrained so every
+ * panel's browser can reach it). Originally gated on the incoming
+ * component snapshot's `memo.path` first segment being the literal
+ * string `firm` (FirmPanelProvider::path('firm')); Mission 1 (canonical
+ * reconstruction) moved every panel from a shared host + distinct path
+ * onto its own distinct canonical host (path('') on each), which
+ * removed that `firm/` prefix from every real snapshot. The gate is
+ * therefore now the REQUEST'S OWN Host header against
+ * CanonicalUrlService::firmAppHost() — equally reliable (a real
+ * browser's Livewire POST always carries the Host of the page it was
+ * rendered on) and immune to the same dual-login edge case: an
+ * admin-panel update arrives on admin.firmsvault.com, never
+ * app.firmsvault.com, regardless of which guards the session happens to
+ * carry.
  */
 class EstablishFirmTenantContextForLivewireUpdate
 {
-    /**
-     * The Firm panel's own path prefix (FirmPanelProvider::path('firm')).
-     * The Admin panel uses 'admin' and is never matched here.
-     */
-    private const FIRM_PANEL_PATH_PREFIX = 'firm';
-
-    public function __construct(private readonly TenantContextService $tenant)
-    {
-    }
+    public function __construct(
+        private readonly TenantContextService $tenant,
+        private readonly CanonicalUrlService $canonicalUrlService,
+    ) {}
 
     public function handle(Request $request, Closure $next): mixed
     {
@@ -88,34 +90,12 @@ class EstablishFirmTenantContextForLivewireUpdate
     }
 
     /**
-     * True only when at least one component in the update payload renders
-     * under the Firm panel's path prefix. Each Livewire component
-     * snapshot is a JSON string carrying `memo.path` — the render path of
-     * the page the component belongs to.
+     * True only when this request arrived on the Firm app's own
+     * canonical host — see the class docblock for why the Host header
+     * replaced the old `memo.path` prefix check.
      */
     private function isFirmPanelUpdate(Request $request): bool
     {
-        $components = $request->input('components');
-
-        if (! is_array($components) || $components === []) {
-            return false;
-        }
-
-        foreach ($components as $component) {
-            $snapshot = json_decode((string) ($component['snapshot'] ?? ''), true);
-
-            if (! is_array($snapshot)) {
-                continue;
-            }
-
-            $path = ltrim((string) ($snapshot['memo']['path'] ?? ''), '/');
-            $firstSegment = explode('/', $path)[0] ?? '';
-
-            if ($firstSegment === self::FIRM_PANEL_PATH_PREFIX) {
-                return true;
-            }
-        }
-
-        return false;
+        return $request->getHost() === $this->canonicalUrlService->firmAppHost();
     }
 }

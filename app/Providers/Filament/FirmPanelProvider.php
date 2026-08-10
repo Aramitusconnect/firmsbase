@@ -5,7 +5,9 @@ namespace App\Providers\Filament;
 use App\Filament\Firm\Livewire\FirmTopbar;
 use App\Filament\Firm\Pages\Auth\ResetPassword;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
+use App\Http\Middleware\ConfigurePanelSessionCookie;
 use App\Http\Middleware\EstablishFirmTenantContext;
+use App\Services\CanonicalUrlService;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
@@ -172,6 +174,16 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
  *    direct DB access. This section only makes it possible for a user
  *    to become compliant in the first place; it grants no new bypass and
  *    removes no existing check.
+ *
+ * Mission 1 (canonical reconstruction — Domain & Security Boundary
+ * Architecture) moved this panel from a path prefix on the single
+ * legacy hostname (`/firm`) to its own canonical hostname —
+ * CanonicalUrlService::firmAppHost(), i.e. app.firmsvault.com in
+ * production — at path `''` (root of that host). A GET-only
+ * compatibility redirect from the legacy `/firm/*` path is registered
+ * separately (routes/web.php). ConfigurePanelSessionCookie is
+ * prepended to ->middleware() so this panel gets its own distinctly-
+ * named, host-only session cookie.
  */
 class FirmPanelProvider extends PanelProvider
 {
@@ -179,7 +191,8 @@ class FirmPanelProvider extends PanelProvider
     {
         return $panel
             ->id('firm')
-            ->path('firm')
+            ->domain(app(CanonicalUrlService::class)->firmAppHost())
+            ->path('')
             ->login()
             // resetAction overridden with App\Filament\Firm\Pages\Auth\ResetPassword —
             // Filament's own stock page refuses to complete a reset unless
@@ -215,6 +228,7 @@ class FirmPanelProvider extends PanelProvider
                 fn (): string => view('filament.firm.quick-add-menu')->render(),
             )
             ->middleware([
+                ConfigurePanelSessionCookie::class.':firm',
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,
