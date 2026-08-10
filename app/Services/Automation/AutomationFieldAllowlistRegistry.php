@@ -61,6 +61,11 @@ final class AutomationFieldAllowlistRegistry
             'matter_budget_alert.severity', 'matter_budget_alert.threshold_percent_crossed',
             'matter.id', 'matter.assigned_attorney_id',
         ],
+        'matter_leverage_recommendation_created' => [
+            'leverage_recommendation.recommendation_type', 'leverage_recommendation.confidence',
+            'leverage_recommendation.dedup_key',
+            'matter.id', 'matter.assigned_attorney_id',
+        ],
     ];
 
     /**

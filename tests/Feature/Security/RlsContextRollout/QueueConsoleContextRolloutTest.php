@@ -232,6 +232,19 @@ class QueueConsoleContextRolloutTest extends TestCase
             // set_config manipulation of any RLS-relevant session
             // variable.
             'SweepMatterBudgetAlertsCommand.php',
+            // Leverage Ratio Optimizer pass added
+            // SweepLeverageRecommendationsCommand
+            // (automation:sweep:leverage-recommendations) — reviewed
+            // and safe: the SAME shape as SweepMatterBudgetAlertsCommand
+            // directly above, reusing its own matter_budgets-scoped
+            // matter enumeration. It enumerates only the non-RLS
+            // `firms` table, then wraps each firm's ENTIRE per-matter
+            // recommendation evaluation AND stale-marking sweep in a
+            // single TenantContextService::runWithFirmContext($firm,
+            // ...) call — no raw SQL, no BYPASSRLS, no superuser role,
+            // no set_config manipulation of any RLS-relevant session
+            // variable.
+            'SweepLeverageRecommendationsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

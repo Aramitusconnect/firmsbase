@@ -98,4 +98,16 @@ enum DomainEventType: string
      * transaction).
      */
     case MatterBudgetThresholdCrossed = 'matter_budget_threshold_crossed';
+
+    /**
+     * Leverage Ratio Optimizer pass. Emitted by
+     * LeverageRecommendationService the moment a NEW (never previously
+     * open/acknowledged for this exact matter/user + type + dedup_key)
+     * staffing-leverage recommendation is created —
+     * matter_leverage_recommendations' own dedup unique index is the
+     * real gate; this event is only ever emitted alongside a
+     * successfully newly-created recommendation row, in the same
+     * transaction.
+     */
+    case MatterLeverageRecommendationCreated = 'matter_leverage_recommendation_created';
 }

@@ -243,6 +243,15 @@ class SecretPatternScanTest extends TestCase
             // vs. actual comparisons) — never an invented matter,
             // budget, or figure of any kind.
             'SweepMatterBudgetAlertsCommand.php',
+            // Leverage Ratio Optimizer pass added
+            // SweepLeverageRecommendationsCommand — reviewed and safe:
+            // it creates no demo/placeholder/synthetic data. It writes
+            // matter_leverage_recommendations rows derived entirely
+            // from LeverageAnalysisService's own real hours/cost/margin
+            // figures and marks existing recommendations Stale by
+            // status update only — never an invented matter,
+            // recommendation, or figure of any kind.
+            'SweepLeverageRecommendationsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

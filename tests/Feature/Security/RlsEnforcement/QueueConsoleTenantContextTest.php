@@ -211,6 +211,11 @@ class QueueConsoleTenantContextTest extends TestCase
             // QueueConsoleContextRolloutTest's own identical review
             // note.
             'SweepMatterBudgetAlertsCommand.php',
+            // Leverage Ratio Optimizer pass added
+            // SweepLeverageRecommendationsCommand — reviewed and safe:
+            // see QueueConsoleContextRolloutTest's own identical review
+            // note.
+            'SweepLeverageRecommendationsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

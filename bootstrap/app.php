@@ -186,6 +186,18 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('automation:sweep:matter-budgets')
             ->hourly()
             ->withoutOverlapping();
+
+        // Leverage Ratio Optimizer — evaluates staffing/task-role/
+        // margin recommendations for every Matter that has a budget
+        // configured (recommendation dedup is a database partial-
+        // unique-index guarantee, never re-checked here) and marks any
+        // recommendation nobody acted on past its staleness window as
+        // Stale. Hourly, same cadence and reasoning as the Matter
+        // Budget sweep this reuses matter_budgets' own matter_id
+        // enumeration from.
+        $schedule->command('automation:sweep:leverage-recommendations')
+            ->hourly()
+            ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware): void {
         // Trust the AWS ALB in front of this container for exactly the
