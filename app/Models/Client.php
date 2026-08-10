@@ -6,6 +6,7 @@ use App\Enums\ClientPortalStatus;
 use App\Models\Concerns\BelongsToTenant;
 use App\Models\Concerns\HasPublicUuid;
 use Filament\Models\Contracts\FilamentUser;
+use Filament\Models\Contracts\HasName;
 use Filament\Panel;
 use Illuminate\Auth\Authenticatable;
 use Illuminate\Auth\Passwords\CanResetPassword;
@@ -40,7 +41,7 @@ use Illuminate\Notifications\Notifiable;
  * other way) — a not-yet-invited or not-yet-accepted Client has no
  * password set and is correctly refused login twice over.
  */
-class Client extends Model implements AuthenticatableContract, CanResetPasswordContract, FilamentUser
+class Client extends Model implements AuthenticatableContract, CanResetPasswordContract, FilamentUser, HasName
 {
     use Authenticatable, BelongsToTenant, CanResetPassword, HasFactory, HasPublicUuid, Notifiable;
 
@@ -79,6 +80,18 @@ class Client extends Model implements AuthenticatableContract, CanResetPasswordC
     public function canAccessPanel(Panel $panel): bool
     {
         return $this->portal_status === ClientPortalStatus::Active;
+    }
+
+    /**
+     * Client has no `name` column (it has `display_name`) — without
+     * this, Filament's default account-widget/avatar rendering falls
+     * back to $user->getAttributeValue('name'), which is always null
+     * for a Client and fatals with a TypeError (getUserName() is
+     * declared to return a non-nullable string).
+     */
+    public function getFilamentName(): string
+    {
+        return $this->display_name;
     }
 
     public function firm(): BelongsTo

@@ -32,6 +32,12 @@ variable "acm_certificate_arn" {
   type        = string
 }
 
+variable "canonical_hostnames" {
+  description = "Mission 1 (Domain & Security Boundary Architecture). See infrastructure/ecs/modules/alb's own variable of the same name. Null (default) until real hostnames are DNS-provisioned — passing it through unset changes nothing about the currently-deployed environment."
+  type        = map(string)
+  default     = null
+}
+
 # --- RDS — existing instance, not created by this mission ------------------
 variable "rds_instance_id" {
   type = string

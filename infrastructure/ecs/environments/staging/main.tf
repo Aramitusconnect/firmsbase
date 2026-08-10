@@ -88,6 +88,7 @@ module "alb" {
   public_subnet_ids   = var.public_subnet_ids
   security_group_id   = module.security_groups.alb_security_group_id
   acm_certificate_arn = var.acm_certificate_arn
+  canonical_hostnames = var.canonical_hostnames
 }
 
 locals {
