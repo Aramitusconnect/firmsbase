@@ -9,6 +9,7 @@ use App\Enums\DocumentVersionStatus;
 use App\Models\Document;
 use App\Models\DocumentRequestItem;
 use App\Models\Firm;
+use App\Services\Automation\DomainEventRecorderService;
 use App\Services\DocumentReplacementService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -22,7 +23,7 @@ class DocumentReplacementServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new DocumentReplacementService();
+        $this->service = new DocumentReplacementService(app(DomainEventRecorderService::class));
     }
 
     public function test_capture_current_as_version_snapshots_the_existing_pointer(): void

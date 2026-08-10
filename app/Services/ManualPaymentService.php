@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\DomainEventType;
 use App\Enums\ManualPaymentMethod;
 use App\Enums\PaymentClassification;
 use App\Enums\PaymentRequestPurpose;
@@ -17,6 +18,7 @@ use App\Models\Payment;
 use App\Models\PaymentPlanInstallment;
 use App\Models\PendingPaymentAllocation;
 use App\Models\User;
+use App\Services\Automation\DomainEventRecorderService;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -41,19 +43,22 @@ use Illuminate\Support\Facades\DB;
  * cannot double-fire), registered via DB::afterCommit() from inside
  * the DB::transaction() below.
  *
- * Pending-Cash Accounting pass — submit()'s body is now wrapped in a
- * real DB::transaction() (previously only runWithFirmContext(), which
- * sets the RLS session variable but does not itself open a
- * transaction). Without it, a downstream posting failure
+ * Pending-Cash Accounting pass — submit()'s body now has an explicit
+ * nested DB::transaction() as well as runWithFirmContext()'s own
+ * (runWithFirmContext() already wraps its callback in a transaction —
+ * an earlier revision of this docblock claimed otherwise; corrected
+ * here). The explicit inner transaction is deliberately redundant with
+ * the outer one (Laravel resolves the nesting as a savepoint, not a
+ * second independent transaction) — kept as a readable, self-contained
+ * statement of the actual atomicity guarantee this pass depends on: a
+ * downstream posting failure
  * (AccountingSetupIncompleteException from
  * OperatingJournalRecorderService::recordUnappliedFundsReceived(), most
- * critically) would leave an already-committed Payment/
- * ManualPaymentRecord/PendingPaymentAllocation row with no
- * corresponding accounting entry — exactly the "received cash with no
- * accounting representation" state this pass exists to make
- * impossible. This closes that gap for every caller, including
- * RecordsManualPayment (the Filament "record a manual payment" action),
- * which calls submit() directly with no transaction of its own.
+ * critically) must roll back the Payment/ManualPaymentRecord/
+ * PendingPaymentAllocation row together with it, never leaving the
+ * "received cash with no accounting representation" state this pass
+ * exists to make impossible — true for every caller, including
+ * RecordsManualPayment (the Filament "record a manual payment" action).
  *
  * Mixed-Invoice Revenue Allocation pass — the optional $purposeHint
  * (PaymentRequestPurpose::EarnedFee/FilingCostReimbursement/
@@ -76,6 +81,7 @@ class ManualPaymentService
         private PaymentApplicationService $application,
         private TimelineEventRecorder $timeline,
         private OperatingJournalRecorderService $journal,
+        private DomainEventRecorderService $domainEvents,
     ) {}
 
     public function submit(
@@ -221,6 +227,15 @@ class ManualPaymentService
 
             $this->journal->recordUnappliedFundsReceived($firm, $payment->fresh(), $pending);
 
+            $this->domainEvents->record($firm, DomainEventType::PaymentAllocationPending, [
+                'pending_allocation' => [
+                    'id' => $pending->id,
+                    'payment_id' => $pending->payment_id,
+                    'invoice_id' => $pending->invoice_id,
+                    'amount_cents' => $pending->amount_cents,
+                ],
+            ], subject: $pending);
+
             return;
         }
 
@@ -262,6 +277,15 @@ class ManualPaymentService
             ]);
 
             $this->journal->recordUnappliedFundsReceived($firm, $payment->fresh(), $pending);
+
+            $this->domainEvents->record($firm, DomainEventType::PaymentAllocationPending, [
+                'pending_allocation' => [
+                    'id' => $pending->id,
+                    'payment_id' => $pending->payment_id,
+                    'invoice_id' => $pending->invoice_id,
+                    'amount_cents' => $pending->amount_cents,
+                ],
+            ], subject: $pending);
 
             return;
         }

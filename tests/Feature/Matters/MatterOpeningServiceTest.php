@@ -4,9 +4,11 @@ namespace Tests\Feature\Matters;
 
 use App\Enums\ConflictCheckResultStatus;
 use App\Enums\MatterStatus;
+use App\Models\ConflictCheckRun;
 use App\Models\Matter;
 use App\Models\Party;
 use App\Models\User;
+use App\Services\Automation\DomainEventRecorderService;
 use App\Services\ConflictCheckService;
 use App\Services\MatterOpeningService;
 use App\Services\TimelineEventRecorder;
@@ -25,14 +27,15 @@ class MatterOpeningServiceTest extends TestCase
     use RefreshDatabase;
 
     private MatterOpeningService $service;
+
     private ConflictCheckService $conflictCheckService;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $timeline = new TimelineEventRecorder();
+        $timeline = new TimelineEventRecorder;
         $this->conflictCheckService = new ConflictCheckService($timeline);
-        $this->service = new MatterOpeningService($this->conflictCheckService, $timeline);
+        $this->service = new MatterOpeningService($this->conflictCheckService, $timeline, app(DomainEventRecorderService::class));
     }
 
     public function test_request_conflict_check_moves_draft_matter_to_conflict_review(): void
@@ -113,7 +116,7 @@ class MatterOpeningServiceTest extends TestCase
     public function test_open_matter_throws_when_matter_is_not_in_conflict_review(): void
     {
         $matter = Matter::factory()->status(MatterStatus::Draft)->create();
-        $run = \App\Models\ConflictCheckRun::factory()->forMatter($matter)->completed()->create();
+        $run = ConflictCheckRun::factory()->forMatter($matter)->completed()->create();
 
         $this->expectException(\RuntimeException::class);
 

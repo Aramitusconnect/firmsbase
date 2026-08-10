@@ -6,10 +6,12 @@ use App\Enums\DocumentRequestItemStatus;
 use App\Enums\DocumentScanStatus;
 use App\Enums\DocumentStatus;
 use App\Enums\DocumentVersionStatus;
+use App\Enums\DomainEventType;
 use App\Enums\WebhookEventType;
 use App\Models\Document;
 use App\Models\DocumentVersion;
 use App\Models\User;
+use App\Services\Automation\DomainEventRecorderService;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -30,6 +32,8 @@ use Illuminate\Support\Facades\DB;
  */
 class DocumentReplacementService
 {
+    public function __construct(private DomainEventRecorderService $domainEvents) {}
+
     /**
      * Snapshots the document's CURRENT storage pointer into a new
      * document_versions row before the document itself is updated to
@@ -73,7 +77,7 @@ class DocumentReplacementService
         string $fileHash,
         ?User $uploadedBy = null,
     ): Document {
-        return (new TenantContextService())->runWithFirmContext($original->firm_id, function () use ($original, $storageDisk, $storagePath, $originalFilename, $mimeType, $sizeBytes, $fileHash, $uploadedBy) {
+        return (new TenantContextService)->runWithFirmContext($original->firm_id, function () use ($original, $storageDisk, $storagePath, $originalFilename, $mimeType, $sizeBytes, $fileHash, $uploadedBy) {
             $this->captureCurrentAsVersion($original);
 
             $replacement = Document::create([
@@ -98,6 +102,20 @@ class DocumentReplacementService
             if ($original->documentRequestItem && $original->documentRequestItem->status === DocumentRequestItemStatus::NeedsReplacement) {
                 $original->documentRequestItem->update(['status' => DocumentRequestItemStatus::Submitted, 'submitted_at' => now()]);
             }
+
+            $this->domainEvents->record($original->firm, DomainEventType::DocumentUploaded, [
+                'document' => [
+                    'id' => $replacement->id,
+                    'file_name' => $replacement->original_filename,
+                    'document_request_item_id' => $replacement->document_request_item_id,
+                    'matter_id' => $replacement->matter_id,
+                ],
+                'matter' => [
+                    'id' => $replacement->matter_id,
+                    'assigned_attorney_id' => $replacement->matter?->assigned_attorney_id,
+                ],
+                'client' => ['id' => $replacement->client_id],
+            ], subject: $replacement);
 
             DB::afterCommit(function () use ($replacement) {
                 try {

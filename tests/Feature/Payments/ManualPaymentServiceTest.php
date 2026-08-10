@@ -15,6 +15,7 @@ use App\Models\ManualPaymentRecord;
 use App\Models\Payment;
 use App\Models\PaymentPlan;
 use App\Models\PaymentPlanInstallment;
+use App\Services\Automation\DomainEventRecorderService;
 use App\Services\ManualPaymentService;
 use App\Services\OperatingJournalRecorderService;
 use App\Services\PaymentApplicationService;
@@ -42,6 +43,7 @@ class ManualPaymentServiceTest extends TestCase
             new PaymentApplicationService(new PaymentPlanService($timeline), $timeline),
             $timeline,
             app(OperatingJournalRecorderService::class),
+            app(DomainEventRecorderService::class),
         );
     }
 

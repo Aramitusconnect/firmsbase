@@ -7,6 +7,7 @@ use App\Models\Firm;
 use App\Models\PaymentPlan;
 use App\Models\PaymentPlanInstallment;
 use App\Models\User;
+use App\Services\Automation\DomainEventRecorderService;
 use App\Services\PaymentPlanInstallmentService;
 use App\Services\TenantContextService;
 use App\Services\TimelineEventRecorder;
@@ -23,12 +24,12 @@ class PaymentPlanInstallmentServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new PaymentPlanInstallmentService(new TimelineEventRecorder());
+        $this->service = new PaymentPlanInstallmentService(new TimelineEventRecorder, app(DomainEventRecorderService::class));
     }
 
     private function tenantContext(): TenantContextService
     {
-        return new TenantContextService();
+        return new TenantContextService;
     }
 
     public function test_mark_missed_transitions_status_and_is_idempotent(): void

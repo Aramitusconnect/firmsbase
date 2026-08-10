@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Enums\DomainEventType;
 use App\Enums\PaymentPlanInstallmentStatus;
 use App\Models\PaymentPlan;
 use App\Models\PaymentPlanInstallment;
 use App\Models\User;
+use App\Services\Automation\DomainEventRecorderService;
 
 /**
  * PaymentPlanInstallmentService — installment LIFECYCLE only
@@ -30,9 +32,10 @@ use App\Models\User;
  */
 class PaymentPlanInstallmentService
 {
-    public function __construct(private TimelineEventRecorder $timeline)
-    {
-    }
+    public function __construct(
+        private TimelineEventRecorder $timeline,
+        private DomainEventRecorderService $domainEvents,
+    ) {}
 
     /**
      * Idempotent: calling this on an installment that is already
@@ -59,7 +62,7 @@ class PaymentPlanInstallmentService
             throw new \RuntimeException('This installment cannot be marked missed from its current status.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($plan->firm_id, function () use ($plan, $installment) {
+        return (new TenantContextService)->runWithFirmContext($plan->firm_id, function () use ($plan, $installment) {
             $installment->update(['status' => PaymentPlanInstallmentStatus::Missed]);
 
             $plan->events()->create([
@@ -69,6 +72,20 @@ class PaymentPlanInstallmentService
             ]);
 
             $this->timeline->record($plan->firm, 'payment_plan_installment_missed', $plan);
+
+            $this->domainEvents->record($plan->firm, DomainEventType::PaymentPlanInstallmentMissed, [
+                'installment' => [
+                    'id' => $installment->id,
+                    'amount_cents' => $installment->amount_cents,
+                    'due_at' => optional($installment->due_at)->toIso8601String(),
+                    'sequence' => $installment->sequence,
+                ],
+                'payment_plan' => [
+                    'id' => $plan->id,
+                    'client_id' => $plan->client_id,
+                    'matter_id' => $plan->matter_id,
+                ],
+            ], subject: $installment);
 
             return $installment->fresh();
         });
@@ -84,7 +101,7 @@ class PaymentPlanInstallmentService
             throw new \RuntimeException('This installment cannot be waived from its current status.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($plan->firm_id, function () use ($plan, $installment, $actor, $reason) {
+        return (new TenantContextService)->runWithFirmContext($plan->firm_id, function () use ($plan, $installment, $actor, $reason) {
             $installment->update(['status' => PaymentPlanInstallmentStatus::Waived]);
 
             $plan->events()->create([

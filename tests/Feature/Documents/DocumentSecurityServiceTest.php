@@ -4,12 +4,13 @@ namespace Tests\Feature\Documents;
 
 use App\Enums\DocumentScanStatus;
 use App\Enums\DocumentStatus;
+use App\Models\Document;
 use App\Models\Firm;
 use App\Models\User;
+use App\Services\Automation\DomainEventRecorderService;
 use App\Services\DocumentSecurityService;
 use App\Services\DocumentUploadPolicyService;
 use App\Services\VirusScan\FakeVirusScanner;
-use App\ValueObjects\VirusScanResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -18,13 +19,14 @@ class DocumentSecurityServiceTest extends TestCase
     use RefreshDatabase;
 
     private DocumentSecurityService $service;
+
     private FakeVirusScanner $scanner;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new DocumentSecurityService(new DocumentUploadPolicyService());
-        $this->scanner = new FakeVirusScanner();
+        $this->service = new DocumentSecurityService(new DocumentUploadPolicyService, app(DomainEventRecorderService::class));
+        $this->scanner = new FakeVirusScanner;
     }
 
     public function test_upload_creates_a_document_pending_scan(): void
@@ -54,7 +56,7 @@ class DocumentSecurityServiceTest extends TestCase
         try {
             $this->service->upload($firm, 'malware.exe', 'application/octet-stream', 2048, 'local', 'documents/malware.exe', hash('sha256', 'x'));
         } finally {
-            $this->assertSame(0, \App\Models\Document::query()->count());
+            $this->assertSame(0, Document::query()->count());
         }
     }
 
@@ -134,7 +136,7 @@ class DocumentSecurityServiceTest extends TestCase
         $firm = Firm::factory()->create();
         $reviewer = User::factory()->create();
 
-        $document = \App\Models\Document::factory()->create([
+        $document = Document::factory()->create([
             'firm_id' => $firm->id,
             'scan_status' => DocumentScanStatus::Infected,
             'status' => DocumentStatus::Rejected,
@@ -149,7 +151,7 @@ class DocumentSecurityServiceTest extends TestCase
         $firm = Firm::factory()->create();
         $otherFirm = Firm::factory()->create();
 
-        $document = \App\Models\Document::factory()->create(['firm_id' => $firm->id]);
+        $document = Document::factory()->create(['firm_id' => $firm->id]);
 
         $this->assertTrue($this->service->canAccess($document, $firm));
         $this->assertFalse($this->service->canAccess($document, $otherFirm));

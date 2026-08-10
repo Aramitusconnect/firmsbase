@@ -135,6 +135,44 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('scheduler:heartbeat:record')
             ->everyMinute()
             ->withoutOverlapping();
+
+        // Event-Driven Automation Engine — same two-layer
+        // command-enumerates-firms/job-does-the-work shape as the
+        // integrations:outbox:* entries above, deliberately reusing it
+        // rather than inventing a different scheduling convention.
+        // events:dispatch (rule matching) and actions:dispatch (actually
+        // invoking a handler) are separate commands/jobs/schedules on
+        // purpose — see DomainEventClaimService's own docblock for why
+        // one action's failure must never block matching, or a
+        // different action, for the same event.
+        $schedule->command('automation:events:dispatch')
+            ->everyMinute()
+            ->withoutOverlapping();
+
+        $schedule->command('automation:actions:dispatch')
+            ->everyMinute()
+            ->withoutOverlapping();
+
+        // Threshold/time-based domain events (InvoiceOverdue,
+        // DeadlineApproaching, DeadlineMissed) have no real business
+        // mutation to hook into — "overdue"/"approaching" is a derived,
+        // time-crossing state, not a service-level write. This sweep
+        // walks each firm's own already-existing calculation services
+        // (AccountingReportingService::accountsReceivableAging(),
+        // DeadlineService::reminderDates()/refreshMissedStatus()) once
+        // daily and emits the corresponding DomainEvent the moment a
+        // threshold is newly crossed — see
+        // InvoiceOverdueSweepCommand/DeadlineReminderSweepCommand's own
+        // docblocks for exactly how "newly crossed" (not "still
+        // crossed, again") is determined, so this never re-emits the
+        // same event on every run.
+        $schedule->command('automation:sweep:invoice-overdue')
+            ->dailyAt('06:00')
+            ->withoutOverlapping();
+
+        $schedule->command('automation:sweep:deadlines')
+            ->dailyAt('06:15')
+            ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware): void {
         // Trust the AWS ALB in front of this container for exactly the

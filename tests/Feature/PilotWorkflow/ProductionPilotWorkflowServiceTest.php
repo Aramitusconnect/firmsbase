@@ -19,6 +19,7 @@ use App\Models\IntakeTemplate;
 use App\Models\MatterType;
 use App\Models\PracticeArea;
 use App\Models\ReadinessScorecardComponent;
+use App\Services\Automation\DomainEventRecorderService;
 use App\Services\CalendarEventService;
 use App\Services\ConflictCheckService;
 use App\Services\DeadlineService;
@@ -71,9 +72,9 @@ class ProductionPilotWorkflowServiceTest extends TestCase
 
         $this->pilot = new ProductionPilotWorkflowService(
             new LeadConversionService($timeline),
-            new MatterOpeningService(new ConflictCheckService($timeline), $timeline),
+            new MatterOpeningService(new ConflictCheckService($timeline), $timeline, app(DomainEventRecorderService::class)),
             new DocumentRequestService,
-            new DocumentSecurityService(new DocumentUploadPolicyService),
+            new DocumentSecurityService(new DocumentUploadPolicyService, app(DomainEventRecorderService::class)),
             new FakeVirusScanner,
             new DeadlineService(new CalendarEventService),
             $this->invoices,
@@ -83,6 +84,7 @@ class ProductionPilotWorkflowServiceTest extends TestCase
                 new PaymentApplicationService($paymentPlanService, $timeline),
                 $timeline,
                 app(OperatingJournalRecorderService::class),
+                app(DomainEventRecorderService::class),
             ),
             new MatterReadinessService(new ReadinessScorecardRegistry),
         );

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\DocumentScanStatus;
 use App\Enums\DocumentStatus;
+use App\Enums\DomainEventType;
 use App\Enums\EmailAttachmentPromotionStatus;
 use App\Enums\EmailStorageMode;
 use App\Enums\EmailSyncEventType;
@@ -11,6 +12,7 @@ use App\Enums\EmailSyncOutcome;
 use App\Enums\WebhookEventType;
 use App\Models\Document;
 use App\Models\EmailAttachment;
+use App\Services\Automation\DomainEventRecorderService;
 use App\ValueObjects\EmailAttachmentPromotionResult;
 use Illuminate\Support\Facades\DB;
 
@@ -72,12 +74,12 @@ class EmailAttachmentPromotionService
     public function __construct(
         private readonly EmailAttachmentSafetyService $safetyService,
         private readonly EmailSyncAuditService $auditService,
-    ) {
-    }
+        private readonly DomainEventRecorderService $domainEvents,
+    ) {}
 
     public function scanAndPromote(EmailAttachment $attachment): EmailAttachmentPromotionResult
     {
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $message = $service->runWithFirmContext($attachment->firm_id, fn () => $attachment->emailMessage);
 
@@ -130,6 +132,24 @@ class EmailAttachmentPromotionService
             throw new \RuntimeException('Promoted document must not cross firms.');
         }
 
+        // Own sibling-sequential wrap, matching every other statement in
+        // this method (class docblock: "never a wrap spanning more than
+        // one statement, and never two wraps nested inside each other").
+        // Deliberately $document->firm (the just-verified, two-hop-safe
+        // firm), never $attachment->firm — see this class's own
+        // "REQUIRED, security-relevant correction" docblock paragraph on
+        // why $attachment->firm_id is not interchangeable with it.
+        $service->runWithFirmContext($firmId, fn () => $this->domainEvents->record($document->firm, DomainEventType::DocumentUploaded, [
+            'document' => [
+                'id' => $document->id,
+                'file_name' => $document->original_filename,
+                'document_request_item_id' => null,
+                'matter_id' => null,
+            ],
+            'matter' => ['id' => null, 'assigned_attorney_id' => null],
+            'client' => ['id' => null],
+        ], subject: $document));
+
         $service->runWithFirmContext($attachment->firm_id, fn () => $attachment->update([
             'document_id' => $document->id,
             'promotion_status' => EmailAttachmentPromotionStatus::Promoted,
@@ -151,7 +171,7 @@ class EmailAttachmentPromotionService
 
     private function block(EmailAttachment $attachment, string $reason, bool $writeStatus = true): EmailAttachmentPromotionResult
     {
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         if ($writeStatus) {
             $service->runWithFirmContext($attachment->firm_id, fn () => $attachment->update([
@@ -169,7 +189,7 @@ class EmailAttachmentPromotionService
 
     private function auditPromoted(EmailAttachment $attachment): void
     {
-        (new TenantContextService())->runWithFirmContext($attachment->firm_id, fn () => $this->auditService->record(
+        (new TenantContextService)->runWithFirmContext($attachment->firm_id, fn () => $this->auditService->record(
             $attachment->firm,
             $attachment->emailMessage->emailAccount,
             EmailSyncEventType::AttachmentPromoted,
@@ -180,7 +200,7 @@ class EmailAttachmentPromotionService
 
     private function auditBlocked(EmailAttachment $attachment, string $reason): void
     {
-        (new TenantContextService())->runWithFirmContext($attachment->firm_id, fn () => $this->auditService->record(
+        (new TenantContextService)->runWithFirmContext($attachment->firm_id, fn () => $this->auditService->record(
             $attachment->firm,
             $attachment->emailMessage->emailAccount,
             EmailSyncEventType::AttachmentBlocked,

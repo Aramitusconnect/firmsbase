@@ -11,6 +11,7 @@ use App\Models\Document;
 use App\Models\EmailAccount;
 use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
+use App\Services\Automation\DomainEventRecorderService;
 use App\Services\DocumentReplacementService;
 use App\Services\DocumentSecurityService;
 use App\Services\DocumentUploadPolicyService;
@@ -44,7 +45,7 @@ class DocumentUploadedWiringTest extends TestCase
     public function test_document_uploaded_fires_exactly_once_from_document_security_service_upload(): void
     {
         $firm = $this->makeWebhookEntitledFirm();
-        $service = new DocumentSecurityService(new DocumentUploadPolicyService);
+        $service = new DocumentSecurityService(new DocumentUploadPolicyService, app(DomainEventRecorderService::class));
 
         $document = $service->upload(
             $firm,
@@ -73,7 +74,7 @@ class DocumentUploadedWiringTest extends TestCase
     public function test_document_uploaded_does_not_fire_when_upload_policy_rejects_the_file(): void
     {
         $firm = $this->makeWebhookEntitledFirm();
-        $service = new DocumentSecurityService(new DocumentUploadPolicyService);
+        $service = new DocumentSecurityService(new DocumentUploadPolicyService, app(DomainEventRecorderService::class));
 
         try {
             $service->upload(
@@ -100,7 +101,7 @@ class DocumentUploadedWiringTest extends TestCase
         });
 
         $firm = $this->makeWebhookEntitledFirm();
-        $service = new DocumentSecurityService(new DocumentUploadPolicyService);
+        $service = new DocumentSecurityService(new DocumentUploadPolicyService, app(DomainEventRecorderService::class));
 
         $document = $service->upload(
             $firm,
@@ -125,6 +126,7 @@ class DocumentUploadedWiringTest extends TestCase
         $service = new EmailAttachmentPromotionService(
             new EmailAttachmentSafetyService(new DocumentUploadPolicyService, new FakeVirusScanner),
             new EmailSyncAuditService,
+            app(DomainEventRecorderService::class),
         );
 
         $result = $service->scanAndPromote($attachment);
@@ -147,6 +149,7 @@ class DocumentUploadedWiringTest extends TestCase
         $service = new EmailAttachmentPromotionService(
             new EmailAttachmentSafetyService(new DocumentUploadPolicyService, new FakeVirusScanner),
             new EmailSyncAuditService,
+            app(DomainEventRecorderService::class),
         );
 
         $result = $service->scanAndPromote($attachment);
@@ -159,7 +162,7 @@ class DocumentUploadedWiringTest extends TestCase
     {
         $firm = $this->makeWebhookEntitledFirm();
         $original = Document::factory()->create(['firm_id' => $firm->id]);
-        $service = new DocumentReplacementService;
+        $service = new DocumentReplacementService(app(DomainEventRecorderService::class));
 
         $replacement = $service->replaceWith(
             $original,

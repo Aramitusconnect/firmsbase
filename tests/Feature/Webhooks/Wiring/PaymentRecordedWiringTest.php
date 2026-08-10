@@ -8,6 +8,7 @@ use App\Enums\WebhookEventType;
 use App\Exceptions\PaymentBlockedException;
 use App\Models\Client;
 use App\Models\Payment;
+use App\Services\Automation\DomainEventRecorderService;
 use App\Services\ManualPaymentService;
 use App\Services\OperatingJournalRecorderService;
 use App\Services\PaymentApplicationService;
@@ -40,6 +41,7 @@ class PaymentRecordedWiringTest extends TestCase
             new PaymentApplicationService(new PaymentPlanService($timeline), $timeline),
             $timeline,
             app(OperatingJournalRecorderService::class),
+            app(DomainEventRecorderService::class),
         );
     }
 

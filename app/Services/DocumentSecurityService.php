@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\DocumentScanStatus;
 use App\Enums\DocumentStatus;
+use App\Enums\DomainEventType;
 use App\Enums\WebhookEventType;
 use App\Models\Client;
 use App\Models\Document;
@@ -12,6 +13,7 @@ use App\Models\Firm;
 use App\Models\Matter;
 use App\Models\TenantEncryptionKey;
 use App\Models\User;
+use App\Services\Automation\DomainEventRecorderService;
 use App\ValueObjects\VirusScanResult;
 use Illuminate\Support\Facades\DB;
 
@@ -36,9 +38,10 @@ use Illuminate\Support\Facades\DB;
  */
 class DocumentSecurityService
 {
-    public function __construct(private DocumentUploadPolicyService $uploadPolicy)
-    {
-    }
+    public function __construct(
+        private DocumentUploadPolicyService $uploadPolicy,
+        private DomainEventRecorderService $domainEvents,
+    ) {}
 
     public function upload(
         Firm $firm,
@@ -64,22 +67,43 @@ class DocumentSecurityService
         // to whatever it was beforehand by the time afterCommit() is
         // reached, preserving the "runs immediately outside a real
         // transaction" behavior this method's own docblock documents.
-        $document = (new TenantContextService())->runWithFirmContext($firm, fn () => Document::create([
-            'firm_id' => $firm->id,
-            'matter_id' => $matter?->id,
-            'client_id' => $client?->id,
-            'document_request_item_id' => $requestItem?->id,
-            'status' => DocumentStatus::Uploaded,
-            'scan_status' => DocumentScanStatus::Pending,
-            'storage_disk' => $storageDisk,
-            'storage_path' => $storagePath,
-            'original_filename' => $originalFilename,
-            'mime_type' => $mimeType,
-            'size_bytes' => $sizeBytes,
-            'file_hash' => $fileHash,
-            'encryption_key_id' => $encryptionKey?->id,
-            'uploaded_by' => $uploadedBy?->id,
-        ]));
+        $document = (new TenantContextService)->runWithFirmContext($firm, function () use (
+            $firm, $matter, $client, $requestItem, $storageDisk, $storagePath, $originalFilename,
+            $mimeType, $sizeBytes, $fileHash, $encryptionKey, $uploadedBy,
+        ) {
+            $document = Document::create([
+                'firm_id' => $firm->id,
+                'matter_id' => $matter?->id,
+                'client_id' => $client?->id,
+                'document_request_item_id' => $requestItem?->id,
+                'status' => DocumentStatus::Uploaded,
+                'scan_status' => DocumentScanStatus::Pending,
+                'storage_disk' => $storageDisk,
+                'storage_path' => $storagePath,
+                'original_filename' => $originalFilename,
+                'mime_type' => $mimeType,
+                'size_bytes' => $sizeBytes,
+                'file_hash' => $fileHash,
+                'encryption_key_id' => $encryptionKey?->id,
+                'uploaded_by' => $uploadedBy?->id,
+            ]);
+
+            $this->domainEvents->record($firm, DomainEventType::DocumentUploaded, [
+                'document' => [
+                    'id' => $document->id,
+                    'file_name' => $document->original_filename,
+                    'document_request_item_id' => $document->document_request_item_id,
+                    'matter_id' => $document->matter_id,
+                ],
+                'matter' => [
+                    'id' => $matter?->id,
+                    'assigned_attorney_id' => $matter?->assigned_attorney_id,
+                ],
+                'client' => ['id' => $client?->id],
+            ], subject: $document);
+
+            return $document;
+        });
 
         DB::afterCommit(function () use ($firm, $document) {
             try {
@@ -99,7 +123,7 @@ class DocumentSecurityService
      */
     public function applyScanResult(Document $document, VirusScanResult $result): Document
     {
-        return (new TenantContextService())->runWithFirmContext($document->firm_id, function () use ($document, $result) {
+        return (new TenantContextService)->runWithFirmContext($document->firm_id, function () use ($document, $result) {
             $document->update([
                 'scan_status' => $result->status,
                 'scan_result_detail' => $result->detail,
@@ -123,7 +147,7 @@ class DocumentSecurityService
             throw new \RuntimeException('Only a document with a clean scan result can be approved.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($document->firm_id, function () use ($document, $approver) {
+        return (new TenantContextService)->runWithFirmContext($document->firm_id, function () use ($document, $approver) {
             $document->update([
                 'status' => DocumentStatus::Approved,
                 'approved_by' => $approver->id,
@@ -136,7 +160,7 @@ class DocumentSecurityService
 
     public function reject(Document $document, User $approver, string $reason): Document
     {
-        return (new TenantContextService())->runWithFirmContext($document->firm_id, function () use ($document, $approver, $reason) {
+        return (new TenantContextService)->runWithFirmContext($document->firm_id, function () use ($document, $approver, $reason) {
             $document->update([
                 'status' => DocumentStatus::Rejected,
                 'approved_by' => $approver->id,
