@@ -102,6 +102,8 @@ class MatterBudgetAnalysisServiceTest extends TestCase
 
         // 2 hours * 5000 cents/hr = 10000 cents.
         $this->assertSame(10000, $analysis->total_labor_cost_cents);
+        // Leverage Ratio Optimizer addition: the same figure broken out by role.
+        $this->assertSame(10000, $analysis->cost_by_role_cents_json['paralegal']);
     }
 
     public function test_approved_expenses_are_mapped_into_the_closed_budget_categories(): void

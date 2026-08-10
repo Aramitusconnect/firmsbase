@@ -87,7 +87,7 @@ class MatterBudgetAnalysisService
         [$invoicedCents, $collectedCents] = $this->revenueTotals($matter);
         $outstandingCents = $invoicedCents - $collectedCents;
 
-        [$estimatedMarginCents, $estimatedMarginPercent] = $this->estimatedMargin($firm, $budget);
+        [$estimatedMarginCents, $estimatedMarginPercent, $estimatedLaborCostCents] = $this->estimatedMargin($firm, $budget);
         [$currentMarginCents, $currentMarginPercent] = $this->currentMargin($invoicedCents, $totalLaborCostCents, $totalExpensesCents);
 
         $progress = $this->progress->compute($matter);
@@ -104,6 +104,7 @@ class MatterBudgetAnalysisService
                 'hours_by_role_json' => $hoursBreakdown,
                 'expenses_by_category_json' => $expensesBreakdown,
                 'total_labor_cost_cents' => $totalLaborCostCents,
+                'cost_by_role_cents_json' => $laborCostByRole,
                 'total_expenses_cents' => $totalExpensesCents,
                 'revenue_expected_cents' => $budget->expected_revenue_cents,
                 'revenue_invoiced_cents' => $invoicedCents,
@@ -111,6 +112,7 @@ class MatterBudgetAnalysisService
                 'revenue_outstanding_cents' => $outstandingCents,
                 'estimated_margin_cents' => $estimatedMarginCents,
                 'estimated_margin_percent' => $estimatedMarginPercent,
+                'estimated_labor_cost_cents' => $estimatedLaborCostCents,
                 'current_margin_cents' => $currentMarginCents,
                 'current_margin_percent' => $currentMarginPercent,
                 'work_completion_percent' => $progress['completion_percent'],
@@ -166,7 +168,16 @@ class MatterBudgetAnalysisService
     }
 
     /**
-     * @return array<string, float> role value => actual cost cents
+     * Predictive Matter Budget Alerts pass built this keyed only by an
+     * opaque numeric index (its own docblock claimed role-keying it
+     * never actually did — harmless there, since its only caller just
+     * array_sum()'d the result). The Leverage Ratio Optimizer needs a
+     * REAL role breakdown, so this now keys by FirmUserRole value —
+     * array_sum() over the result is identical either way, so
+     * total_labor_cost_cents (this method's other caller) is
+     * unaffected.
+     *
+     * @return array<string, int> role value => actual cost cents
      */
     private function actualLaborCostByRole(Firm $firm, Matter $matter): array
     {
@@ -180,9 +191,20 @@ class MatterBudgetAnalysisService
         }
 
         $secondsByUser = $entries->groupBy('user_id')->map(fn ($group) => $group->sum('seconds'));
+        $roleByUser = FirmUser::query()
+            ->where('firm_id', $matter->firm_id)
+            ->whereIn('user_id', $secondsByUser->keys())
+            ->pluck('role', 'user_id');
+
         $costByRole = [];
 
         foreach ($secondsByUser as $userId => $seconds) {
+            $role = $roleByUser->get($userId);
+
+            if ($role === null) {
+                continue;
+            }
+
             $user = User::find($userId);
             $rate = $user === null ? null : $this->employeeRates->currentRateFor($firm, $user);
 
@@ -191,7 +213,8 @@ class MatterBudgetAnalysisService
             }
 
             $hours = $seconds / 3600;
-            $costByRole[] = $hours * $rate->cost_rate_cents;
+            $roleValue = $role instanceof FirmUserRole ? $role->value : (string) $role;
+            $costByRole[$roleValue] = ($costByRole[$roleValue] ?? 0) + (int) round($hours * $rate->cost_rate_cents);
         }
 
         return $costByRole;
@@ -292,14 +315,10 @@ class MatterBudgetAnalysisService
     }
 
     /**
-     * @return array{0: ?int, 1: ?int} [margin_cents, margin_percent]
+     * @return array{0: ?int, 1: ?int, 2: ?int} [margin_cents, margin_percent, expected_labor_cost_cents]
      */
     private function estimatedMargin(Firm $firm, MatterBudget $budget): array
     {
-        if ($budget->expected_revenue_cents === null) {
-            return [null, null];
-        }
-
         $expectedLaborCostCents = 0;
 
         foreach ($budget->expected_hours_json as $role => $hours) {
@@ -310,6 +329,12 @@ class MatterBudgetAnalysisService
             }
         }
 
+        $expectedLaborCostCents = (int) round($expectedLaborCostCents);
+
+        if ($budget->expected_revenue_cents === null) {
+            return [null, null, $expectedLaborCostCents];
+        }
+
         $expectedExpensesCents = array_sum($budget->expected_expenses_json);
 
         $marginCents = (int) round($budget->expected_revenue_cents - $expectedLaborCostCents - $expectedExpensesCents);
@@ -317,7 +342,7 @@ class MatterBudgetAnalysisService
             ? (int) round(($marginCents / $budget->expected_revenue_cents) * 100)
             : null;
 
-        return [$marginCents, $marginPercent];
+        return [$marginCents, $marginPercent, $expectedLaborCostCents];
     }
 
     /**
