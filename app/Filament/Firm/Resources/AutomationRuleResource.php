@@ -6,6 +6,7 @@ namespace App\Filament\Firm\Resources;
 
 use App\Enums\AutomationConditionOperator;
 use App\Enums\DomainEventType;
+use App\Filament\Firm\Resources\AutomationRuleResource\Actions\PreviewOnMatterAction;
 use App\Filament\Firm\Resources\AutomationRuleResource\Pages\CreateAutomationRule;
 use App\Filament\Firm\Resources\AutomationRuleResource\Pages\EditAutomationRule;
 use App\Filament\Firm\Resources\AutomationRuleResource\Pages\ListAutomationRules;
@@ -137,7 +138,7 @@ class AutomationRuleResource extends Resource
         return $table
             ->columns([
                 TextColumn::make('name')->searchable()->sortable(),
-                TextColumn::make('event_type')->badge()->formatStateUsing(fn ($state): string => str((is_object($state) ? $state->value : $state))->headline()),
+                TextColumn::make('event_type')->badge()->formatStateUsing(fn ($state): string => (string) str((is_object($state) ? $state->value : $state))->headline()),
                 IconColumn::make('is_starter_template')->label('Template')->boolean()->toggleable(isToggledHiddenByDefault: true),
                 ToggleColumn::make('enabled'),
                 TextColumn::make('priority')->sortable(),
@@ -151,6 +152,10 @@ class AutomationRuleResource extends Resource
                 SelectFilter::make('event_type')
                     ->options(fn (): array => collect(DomainEventType::cases())->mapWithKeys(fn ($case): array => [$case->value => str($case->value)->headline()])->all()),
                 TernaryFilter::make('enabled'),
+            ])
+            ->recordActions([
+                PreviewOnMatterAction::make()
+                    ->visible(fn (AutomationRule $record): bool => $record->event_type === DomainEventType::MatterOpened),
             ]);
     }
 
