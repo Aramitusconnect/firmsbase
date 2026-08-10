@@ -224,4 +224,29 @@ class Matter extends Model
     {
         return $this->hasMany(Contact::class, 'client_id', 'client_id');
     }
+
+    /**
+     * Predictive Matter Budget Alerts addition. Append-only history —
+     * the CURRENT budget is the highest-version row, never this
+     * relation's own "first" (see MatterBudgetService::current()).
+     */
+    public function matterBudgets(): HasMany
+    {
+        return $this->hasMany(MatterBudget::class);
+    }
+
+    /**
+     * One current row, recomputed in place by
+     * MatterBudgetAnalysisService — same shape as readinessScore()
+     * above.
+     */
+    public function budgetAnalysis(): HasOne
+    {
+        return $this->hasOne(MatterBudgetAnalysis::class);
+    }
+
+    public function budgetAlerts(): HasMany
+    {
+        return $this->hasMany(MatterBudgetAlert::class);
+    }
 }
