@@ -159,7 +159,7 @@ final class ProviderOperationReconciliationTest extends TestCase
 
         $this->actingAs($firmUser->user);
 
-        $this->get(PlatformProviderOperationReconciliationPage::getUrl())->assertRedirect('/admin/login');
+        $this->get(PlatformProviderOperationReconciliationPage::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_the_query_excludes_rows_not_requiring_reconciliation(): void

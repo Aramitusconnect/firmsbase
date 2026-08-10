@@ -48,7 +48,7 @@ final class FirmResourceSeatLicensingTest extends TestCase
         $firm = Firm::factory()->create();
 
         $this->get(FirmResource::getUrl('view', ['record' => $firm]))
-            ->assertRedirect('/admin/login');
+            ->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

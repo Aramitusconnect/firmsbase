@@ -66,7 +66,7 @@ final class FailedPaymentResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_failed_payments_list(): void
     {
-        $this->get(FailedPaymentResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(FailedPaymentResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

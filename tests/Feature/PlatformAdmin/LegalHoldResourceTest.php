@@ -67,7 +67,7 @@ final class LegalHoldResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_legal_holds_list(): void
     {
-        $this->get(LegalHoldResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(LegalHoldResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

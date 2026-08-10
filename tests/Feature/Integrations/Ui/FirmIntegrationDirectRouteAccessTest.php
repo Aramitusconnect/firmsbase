@@ -28,7 +28,8 @@ use Tests\TestCase;
  * role gating holds at the route boundary itself — never merely because a
  * link was hidden.
  *
- * Firm panel: path 'firm', ->login() (login route '/firm/login'), default
+ * Firm panel: canonical host (app.firmsvault.test), ->login() (login route
+ * '/login' on that host), default
  * `web` guard. Resource slug 'firm-integrations'.
  */
 final class FirmIntegrationDirectRouteAccessTest extends TestCase
@@ -47,7 +48,7 @@ final class FirmIntegrationDirectRouteAccessTest extends TestCase
 
     public function test_guest_is_redirected_to_firm_login_from_the_list_route(): void
     {
-        $this->get(ListFirmIntegrations::getUrl())->assertRedirect('/firm/login');
+        $this->get(ListFirmIntegrations::getUrl())->assertRedirect($this->firmAppUrl('/login'));
     }
 
     public function test_guest_is_redirected_to_firm_login_from_the_view_route(): void
@@ -55,7 +56,7 @@ final class FirmIntegrationDirectRouteAccessTest extends TestCase
         $firm = $this->entitledFirm();
         $connection = $this->connectionFor($firm);
 
-        $this->get(ViewFirmIntegration::getUrl(['record' => $connection->uuid]))->assertRedirect('/firm/login');
+        $this->get(ViewFirmIntegration::getUrl(['record' => $connection->uuid]))->assertRedirect($this->firmAppUrl('/login'));
     }
 
     // ------------------------------------------------------------
@@ -70,7 +71,7 @@ final class FirmIntegrationDirectRouteAccessTest extends TestCase
 
         $this->actingAs($admin, 'platform_admin')
             ->get(ListFirmIntegrations::getUrl())
-            ->assertRedirect('/firm/login');
+            ->assertRedirect($this->firmAppUrl('/login'));
     }
 
     public function test_a_platform_admin_on_the_wrong_guard_is_redirected_to_firm_login_from_the_view_route(): void
@@ -81,7 +82,7 @@ final class FirmIntegrationDirectRouteAccessTest extends TestCase
 
         $this->actingAs($admin, 'platform_admin')
             ->get(ViewFirmIntegration::getUrl(['record' => $connection->uuid]))
-            ->assertRedirect('/firm/login');
+            ->assertRedirect($this->firmAppUrl('/login'));
     }
 
     // ------------------------------------------------------------

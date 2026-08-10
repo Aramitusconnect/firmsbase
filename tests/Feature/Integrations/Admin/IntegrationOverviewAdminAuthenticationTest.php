@@ -44,7 +44,7 @@ final class IntegrationOverviewAdminAuthenticationTest extends TestCase
     {
         $response = $this->get(PlatformIntegrationOverviewPage::getUrl());
 
-        $response->assertRedirect('/admin/login');
+        $response->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_guest_is_redirected_to_platform_admin_login_from_the_firm_integrations_page(): void
@@ -53,7 +53,7 @@ final class IntegrationOverviewAdminAuthenticationTest extends TestCase
 
         $response = $this->get(PlatformFirmIntegrationsPage::getUrl(['firmUuid' => $firm->uuid]));
 
-        $response->assertRedirect('/admin/login');
+        $response->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_guest_is_redirected_to_platform_admin_login_from_the_connection_detail_page(): void
@@ -66,7 +66,7 @@ final class IntegrationOverviewAdminAuthenticationTest extends TestCase
             'connectionUuid' => $connection->uuid,
         ]));
 
-        $response->assertRedirect('/admin/login');
+        $response->assertRedirect($this->adminUrl('/login'));
     }
 
     // ------------------------------------------------------------
@@ -87,7 +87,7 @@ final class IntegrationOverviewAdminAuthenticationTest extends TestCase
         // Not authenticated on the platform_admin guard at all — Filament
         // redirects to that panel's own login rather than ever reaching
         // canAccess().
-        $response->assertRedirect('/admin/login');
+        $response->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_an_authenticated_firm_panel_user_is_still_denied_the_firm_integrations_page(): void
@@ -100,7 +100,7 @@ final class IntegrationOverviewAdminAuthenticationTest extends TestCase
 
         $response = $this->actingAs($firmUser->user)->get(PlatformFirmIntegrationsPage::getUrl(['firmUuid' => $firm->uuid]));
 
-        $response->assertRedirect('/admin/login');
+        $response->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_an_authenticated_firm_panel_user_is_still_denied_the_connection_detail_page(): void
@@ -117,7 +117,7 @@ final class IntegrationOverviewAdminAuthenticationTest extends TestCase
             'connectionUuid' => $connection->uuid,
         ]));
 
-        $response->assertRedirect('/admin/login');
+        $response->assertRedirect($this->adminUrl('/login'));
     }
 
     // ------------------------------------------------------------

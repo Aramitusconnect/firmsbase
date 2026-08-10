@@ -91,7 +91,7 @@ final class DeadLetterQueueResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_dead_letter_queue_list(): void
     {
-        $this->get(DeadLetterQueueResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(DeadLetterQueueResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

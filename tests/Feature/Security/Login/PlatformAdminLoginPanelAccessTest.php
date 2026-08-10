@@ -4,6 +4,7 @@ namespace Tests\Feature\Security\Login;
 
 use App\Models\PlatformAdmin;
 use App\Models\SecurityEvent;
+use Illuminate\Auth\Events\Failed;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -22,23 +23,23 @@ class PlatformAdminLoginPanelAccessTest extends TestCase
     {
         $admin = PlatformAdmin::factory()->create(['is_active' => true]);
 
-        $response = $this->actingAs($admin, 'platform_admin')->get('/admin');
+        $response = $this->actingAs($admin, 'platform_admin')->get($this->adminUrl());
 
         $response->assertOk();
     }
 
     public function test_guest_cannot_reach_platform_admin_dashboard(): void
     {
-        $response = $this->get('/admin');
+        $response = $this->get($this->adminUrl());
 
-        $response->assertRedirect('/admin/login');
+        $response->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_inactive_platform_admin_cannot_reach_dashboard(): void
     {
         $admin = PlatformAdmin::factory()->create(['is_active' => false]);
 
-        $response = $this->actingAs($admin, 'platform_admin')->get('/admin');
+        $response = $this->actingAs($admin, 'platform_admin')->get($this->adminUrl());
 
         $response->assertForbidden();
     }
@@ -64,7 +65,7 @@ class PlatformAdminLoginPanelAccessTest extends TestCase
     {
         PlatformAdmin::factory()->create(['email' => 'admin@example.com', 'is_active' => true]);
 
-        event(new \Illuminate\Auth\Events\Failed('platform_admin', null, ['email' => 'admin@example.com', 'password' => 'wrong']));
+        event(new Failed('platform_admin', null, ['email' => 'admin@example.com', 'password' => 'wrong']));
 
         $event = SecurityEvent::query()
             ->where('event_type', 'login_failed')

@@ -70,7 +70,7 @@ final class WebhookEventResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_webhook_events_list(): void
     {
-        $this->get(WebhookEventResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(WebhookEventResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

@@ -70,7 +70,7 @@ final class PlatformQueuesAndJobsPageTest extends TestCase
 
     public function test_guest_is_redirected(): void
     {
-        $this->get(PlatformQueuesAndJobsPage::getUrl())->assertRedirect('/admin/login');
+        $this->get(PlatformQueuesAndJobsPage::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_sales_rep_is_forbidden(): void

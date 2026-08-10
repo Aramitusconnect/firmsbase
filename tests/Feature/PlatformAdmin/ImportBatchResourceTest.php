@@ -48,7 +48,7 @@ final class ImportBatchResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_import_batches_list(): void
     {
-        $this->get(ImportBatchResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(ImportBatchResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

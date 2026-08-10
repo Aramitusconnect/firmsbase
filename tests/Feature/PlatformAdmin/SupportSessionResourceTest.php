@@ -82,7 +82,7 @@ final class SupportSessionResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_approved_support_sessions_list(): void
     {
-        $this->get(SupportSessionResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(SupportSessionResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

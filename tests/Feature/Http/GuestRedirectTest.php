@@ -24,7 +24,7 @@ class GuestRedirectTest extends TestCase
 {
     public function test_unauthenticated_post_to_client_portal_plaid_exchange_redirects_to_the_client_portal_login_page(): void
     {
-        $response = $this->post('/portal/plaid/exchange');
+        $response = $this->post($this->clientPortalUrl('/plaid/exchange'));
 
         $response->assertRedirect(route('filament.client-portal.auth.login'));
     }
@@ -36,14 +36,14 @@ class GuestRedirectTest extends TestCase
         // docblock) — the guest-redirect middleware fires before the
         // controller is ever reached, so no real FirmIntegration row is
         // needed here.
-        $response = $this->get('/integrations/oauth/1/initiate');
+        $response = $this->get($this->firmAppUrl('/integrations/oauth/1/initiate'));
 
         $response->assertRedirect(route('filament.firm.auth.login'));
     }
 
     public function test_unauthenticated_get_to_admin_panel_redirects_to_the_admin_login_page(): void
     {
-        $response = $this->get('/admin');
+        $response = $this->get($this->adminUrl());
 
         $response->assertRedirect(route('filament.admin.auth.login'));
     }

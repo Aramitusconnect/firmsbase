@@ -47,7 +47,7 @@ final class PlatformBackupsPageTest extends TestCase
 
     public function test_guest_is_redirected(): void
     {
-        $this->get(PlatformBackupsPage::getUrl())->assertRedirect('/admin/login');
+        $this->get(PlatformBackupsPage::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_sales_rep_is_forbidden(): void

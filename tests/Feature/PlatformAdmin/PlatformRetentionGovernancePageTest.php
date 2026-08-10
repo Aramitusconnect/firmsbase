@@ -63,7 +63,7 @@ final class PlatformRetentionGovernancePageTest extends TestCase
 
     public function test_guest_is_redirected_from_the_retention_page(): void
     {
-        $this->get(PlatformRetentionGovernancePage::getUrl())->assertRedirect('/admin/login');
+        $this->get(PlatformRetentionGovernancePage::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

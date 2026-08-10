@@ -60,7 +60,7 @@ final class AuditLogResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_audit_logs_list(): void
     {
-        $this->get(AuditLogResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(AuditLogResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

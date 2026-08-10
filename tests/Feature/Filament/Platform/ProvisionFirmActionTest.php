@@ -135,14 +135,14 @@ final class ProvisionFirmActionTest extends TestCase
     {
         $this->actingAs($this->firmPanelUser());
 
-        $this->get(ListFirms::getUrl())->assertRedirect('/admin/login');
+        $this->get(ListFirms::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_client_user_cannot_access_it(): void
     {
         $this->actingAs($this->clientPortalUser(), 'client');
 
-        $this->get(ListFirms::getUrl())->assertRedirect('/admin/login');
+        $this->get(ListFirms::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     /**
@@ -238,7 +238,7 @@ final class ProvisionFirmActionTest extends TestCase
         // The password-setup route itself (a guest route) must be
         // reachable — this is "the firm authentication flow" the
         // invitation directs the owner to.
-        $this->get('/firm/login')->assertOk();
+        $this->get($this->firmAppUrl('/login'))->assertOk();
     }
 
     public function test_owner_cannot_access_another_firm(): void

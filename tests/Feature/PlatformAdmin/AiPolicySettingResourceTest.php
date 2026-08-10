@@ -80,7 +80,7 @@ final class AiPolicySettingResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_ai_policy_settings_list(): void
     {
-        $this->get(AiPolicySettingResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(AiPolicySettingResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

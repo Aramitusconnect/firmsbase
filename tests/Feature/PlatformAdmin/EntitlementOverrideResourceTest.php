@@ -80,7 +80,7 @@ final class EntitlementOverrideResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_entitlement_overrides_list(): void
     {
-        $this->get(EntitlementOverrideResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(EntitlementOverrideResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

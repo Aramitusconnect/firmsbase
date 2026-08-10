@@ -3,6 +3,7 @@
 namespace Tests;
 
 use App\Models\Firm;
+use App\Services\CanonicalUrlService;
 use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\DB;
@@ -106,5 +107,41 @@ abstract class TestCase extends BaseTestCase
     private function currentDatabaseTenantContextValue(): ?string
     {
         return DB::selectOne("select current_setting('app.current_firm_id', true) as value")->value;
+    }
+
+    /**
+     * Mission 1 (canonical reconstruction — Domain & Security Boundary
+     * Architecture) test helpers — absolute URLs on each canonical
+     * hostname, for use with $this->get()/->post()/etc. Laravel's HTTP
+     * test client performs no real network lookup for an absolute URL;
+     * it only sets the in-process request's Host header, so these never
+     * depend on public or local DNS. Reading through CanonicalUrlService
+     * (the same authority the application itself uses) rather than
+     * hardcoding a hostname here keeps tests correct if the
+     * config/hosts.php defaults ever change.
+     */
+    protected function marketingUrl(string $path = ''): string
+    {
+        return app(CanonicalUrlService::class)->marketingUrl().$path;
+    }
+
+    protected function firmAppUrl(string $path = ''): string
+    {
+        return app(CanonicalUrlService::class)->firmAppUrl().$path;
+    }
+
+    protected function clientPortalUrl(string $path = ''): string
+    {
+        return app(CanonicalUrlService::class)->clientPortalUrl().$path;
+    }
+
+    protected function adminUrl(string $path = ''): string
+    {
+        return app(CanonicalUrlService::class)->adminUrl().$path;
+    }
+
+    protected function myAttorneyUrl(string $path = ''): string
+    {
+        return app(CanonicalUrlService::class)->myAttorneyUrl().$path;
     }
 }

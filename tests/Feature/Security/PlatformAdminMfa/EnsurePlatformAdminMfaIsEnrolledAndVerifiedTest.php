@@ -28,7 +28,10 @@ class EnsurePlatformAdminMfaIsEnrolledAndVerifiedTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const PROTECTED_URL = '/admin/platform-administrators';
+    private function protectedUrl(): string
+    {
+        return $this->adminUrl('/platform-administrators');
+    }
 
     private function superAdmin(array $attributes = []): PlatformAdmin
     {
@@ -49,7 +52,7 @@ class EnsurePlatformAdminMfaIsEnrolledAndVerifiedTest extends TestCase
     {
         $admin = $this->superAdmin(['two_factor_secret' => null, 'two_factor_confirmed_at' => null]);
 
-        $response = $this->actingAs($admin, 'platform_admin')->get(self::PROTECTED_URL);
+        $response = $this->actingAs($admin, 'platform_admin')->get($this->protectedUrl());
 
         $response->assertRedirect();
         $response->assertStatus(302);
@@ -68,16 +71,16 @@ class EnsurePlatformAdminMfaIsEnrolledAndVerifiedTest extends TestCase
     {
         $admin = $this->superAdmin(['two_factor_secret' => null, 'two_factor_confirmed_at' => null]);
 
-        $response = $this->actingAs($admin, 'platform_admin')->get(self::PROTECTED_URL);
+        $response = $this->actingAs($admin, 'platform_admin')->get($this->protectedUrl());
 
-        $response->assertRedirect('/admin/multi-factor-authentication/set-up');
+        $response->assertRedirect($this->adminUrl('/multi-factor-authentication/set-up'));
     }
 
     public function test_never_enrolled_admin_can_reach_the_set_up_required_page_itself_without_looping(): void
     {
         $admin = $this->superAdmin(['two_factor_secret' => null, 'two_factor_confirmed_at' => null]);
 
-        $response = $this->actingAs($admin, 'platform_admin')->get('/admin/multi-factor-authentication/set-up');
+        $response = $this->actingAs($admin, 'platform_admin')->get($this->adminUrl('/multi-factor-authentication/set-up'));
 
         $response->assertOk();
     }
@@ -89,7 +92,7 @@ class EnsurePlatformAdminMfaIsEnrolledAndVerifiedTest extends TestCase
             'two_factor_confirmed_at' => now(),
         ]);
 
-        $response = $this->actingAs($admin, 'platform_admin')->get(self::PROTECTED_URL);
+        $response = $this->actingAs($admin, 'platform_admin')->get($this->protectedUrl());
 
         $response->assertOk();
     }
@@ -122,7 +125,7 @@ class EnsurePlatformAdminMfaIsEnrolledAndVerifiedTest extends TestCase
 
         PlatformAdmin::query()->where('id', $admin->id)->update(['is_active' => false]);
 
-        $response = $this->actingAs($admin, 'platform_admin')->get(self::PROTECTED_URL);
+        $response = $this->actingAs($admin, 'platform_admin')->get($this->protectedUrl());
 
         $response->assertRedirect();
         $this->assertNotSame(200, $response->getStatusCode());
@@ -148,7 +151,7 @@ class EnsurePlatformAdminMfaIsEnrolledAndVerifiedTest extends TestCase
         // Login-event listener would have stamped this at login time).
         $response = $this->actingAs($admin, 'platform_admin')
             ->withSession(['platform_admin_mfa_session_authenticated_at' => $sessionAuthenticatedAt->toISOString()])
-            ->get(self::PROTECTED_URL);
+            ->get($this->protectedUrl());
 
         $response->assertOk();
 
@@ -159,7 +162,7 @@ class EnsurePlatformAdminMfaIsEnrolledAndVerifiedTest extends TestCase
 
         $response = $this->actingAs($admin, 'platform_admin')
             ->withSession(['platform_admin_mfa_session_authenticated_at' => $sessionAuthenticatedAt->toISOString()])
-            ->get(self::PROTECTED_URL);
+            ->get($this->protectedUrl());
 
         $response->assertRedirect();
         $this->assertNotSame(200, $response->getStatusCode());
@@ -175,7 +178,7 @@ class EnsurePlatformAdminMfaIsEnrolledAndVerifiedTest extends TestCase
 
         $response = $this->actingAs($admin, 'platform_admin')
             ->withSession(['platform_admin_mfa_session_authenticated_at' => now()->toISOString()])
-            ->get(self::PROTECTED_URL);
+            ->get($this->protectedUrl());
 
         $response->assertOk();
     }
@@ -190,7 +193,7 @@ class EnsurePlatformAdminMfaIsEnrolledAndVerifiedTest extends TestCase
             'two_factor_reset_at' => now(),
         ]);
 
-        $response = $this->actingAs($admin, 'platform_admin')->get(self::PROTECTED_URL);
+        $response = $this->actingAs($admin, 'platform_admin')->get($this->protectedUrl());
 
         $response->assertRedirect();
         $this->assertNotSame(200, $response->getStatusCode());
@@ -224,7 +227,7 @@ class EnsurePlatformAdminMfaIsEnrolledAndVerifiedTest extends TestCase
         // resolve this admin PURELY through SessionGuard::
         // userFromRecaller(), the exact real bypass path gap #2
         // describes.
-        $response = $this->withCookie($recallerName, $recallerValue)->get(self::PROTECTED_URL);
+        $response = $this->withCookie($recallerName, $recallerValue)->get($this->protectedUrl());
 
         $response->assertRedirect();
         $this->assertNotSame(200, $response->getStatusCode());

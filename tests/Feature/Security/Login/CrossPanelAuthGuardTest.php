@@ -31,22 +31,22 @@ class CrossPanelAuthGuardTest extends TestCase
         $user = User::factory()->create(['is_active' => true]);
         FirmUser::factory()->forFirm($firm)->forUser($user)->create(['status' => FirmUserStatus::Active]);
 
-        $response = $this->actingAs($user, 'web')->get('/admin');
+        $response = $this->actingAs($user, 'web')->get($this->adminUrl());
 
-        $response->assertRedirect('/admin/login');
+        $response->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_platform_admin_guard_authenticated_admin_cannot_access_firm_panel_through_normal_routes(): void
     {
         $admin = PlatformAdmin::factory()->create(['is_active' => true]);
 
-        $response = $this->actingAs($admin, 'platform_admin')->get('/firm');
+        $response = $this->actingAs($admin, 'platform_admin')->get($this->firmAppUrl());
 
-        $response->assertRedirect('/firm/login');
+        $response->assertRedirect($this->firmAppUrl('/login'));
     }
 
     public function test_no_public_legal_document_urls_are_exposed_by_either_panel(): void
     {
-        $this->assertTrue((new Section40LimitedPilotSafetyGateService())->hasNoPublicLegalDocumentUrls());
+        $this->assertTrue((new Section40LimitedPilotSafetyGateService)->hasNoPublicLegalDocumentUrls());
     }
 }

@@ -76,7 +76,7 @@ final class ConflictResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_conflicts_list(): void
     {
-        $this->get(ConflictResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(ConflictResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

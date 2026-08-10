@@ -117,7 +117,7 @@ final class SyncFailureResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_sync_failures_list(): void
     {
-        $this->get(SyncFailureResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(SyncFailureResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

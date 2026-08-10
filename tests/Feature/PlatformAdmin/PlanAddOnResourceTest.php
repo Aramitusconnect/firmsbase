@@ -75,7 +75,7 @@ final class PlanAddOnResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_add_ons_list(): void
     {
-        $this->get(PlanAddOnResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(PlanAddOnResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

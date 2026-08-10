@@ -46,7 +46,7 @@ final class PlatformSchedulerPageTest extends TestCase
 
     public function test_guest_is_redirected(): void
     {
-        $this->get(PlatformSchedulerPage::getUrl())->assertRedirect('/admin/login');
+        $this->get(PlatformSchedulerPage::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_sales_rep_is_forbidden(): void

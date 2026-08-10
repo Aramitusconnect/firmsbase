@@ -65,7 +65,7 @@ final class PlatformRefundResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_refunds_list(): void
     {
-        $this->get(PlatformRefundResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(PlatformRefundResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_sales_rep_is_forbidden(): void

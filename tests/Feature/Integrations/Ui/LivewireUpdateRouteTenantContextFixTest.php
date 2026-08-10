@@ -46,7 +46,10 @@ use Tests\TestCase;
  *   1. does a REAL GET of the firm page (through the FirmPanelProvider
  *      page-load middleware that establishes context, exactly as a real
  *      browser page load does) to obtain a REAL firm-panel component
- *      snapshot (memo.path = 'firm/firm-integrations/...'), then
+ *      snapshot (memo.path = 'firm-integrations/...' — Mission 1
+ *      canonical reconstruction moved the Firm panel off a shared host's
+ *      `firm/` path prefix onto its own canonical host with path('')),
+ *      then
  *   2. POSTs that snapshot to the REAL `/livewire/update` route with the
  *      action's mount/fill/call sequence — with NO artificial ambient
  *      runWithFirmContext() wrap around the round trip.
@@ -279,7 +282,16 @@ final class LivewireUpdateRouteTenantContextFixTest extends TestCase
         $rmSnapshot = $this->extractSnapshot($html, 'failed-items-relation-manager');
         $decoded = json_decode($rmSnapshot, true);
         $this->assertIsArray($decoded, 'The nested RM must render a well-formed snapshot.');
-        $this->assertSame('firm', explode('/', ltrim((string) ($decoded['memo']['path'] ?? ''), '/'))[0] ?? '', 'The nested RM belongs to the firm panel path (the P1 gate path).');
+        // Mission 1 (canonical reconstruction) removed the `firm/` path
+        // prefix (FirmPanelProvider now uses path('') on its own
+        // canonical host) — the P1 gate's proof that this snapshot
+        // belongs to the firm panel is now the request's own Host
+        // header (asserted structurally by this whole round trip going
+        // through firmAppUrl()), not memo.path. This retains the
+        // original intent — proving the nested RM is NOT an admin-panel
+        // path — the other structural way that remains true after the
+        // migration: FirmIntegrationResource's own slug.
+        $this->assertSame('firm-integrations', explode('/', ltrim((string) ($decoded['memo']['path'] ?? ''), '/'))[0] ?? '', 'The nested RM belongs to the firm-integrations resource (the P1 gate path).');
 
         // A real dead-lettered event is present, so the RM's requeue row
         // action is part of this rendered nested table.
@@ -332,7 +344,18 @@ final class LivewireUpdateRouteTenantContextFixTest extends TestCase
 
     private function livewireUpdate(string $snapshotJson, array $calls, array $updates = []): TestResponse
     {
-        return $this->withHeaders(['X-Livewire' => 'true'])->postJson('/livewire/update', [
+        // A real browser's Livewire client issues this fetch() as a
+        // relative URL, which resolves against the CURRENT PAGE's own
+        // origin — always app.firmsvault.com for a firm-panel page. The
+        // PHPUnit test client has no notion of "current page origin" for
+        // a bare relative path (it would resolve against config('app.url')
+        // instead), so this must explicitly target the same canonical
+        // firm host the preceding pageSnapshot() GET used, to faithfully
+        // reproduce what a real browser round trip does — and to reach
+        // EstablishFirmTenantContextForLivewireUpdate's Host-based gate
+        // (see that middleware's own docblock for why it moved off
+        // memo.path after Mission 1's canonical reconstruction).
+        return $this->withHeaders(['X-Livewire' => 'true'])->postJson($this->firmAppUrl('/livewire/update'), [
             'components' => [[
                 'snapshot' => $snapshotJson,
                 'updates' => $updates === [] ? (object) [] : $updates,

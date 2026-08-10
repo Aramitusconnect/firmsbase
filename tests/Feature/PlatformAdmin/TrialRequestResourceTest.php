@@ -85,7 +85,7 @@ final class TrialRequestResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_trial_requests_list(): void
     {
-        $this->get(TrialRequestResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(TrialRequestResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_sales_rep_is_forbidden(): void

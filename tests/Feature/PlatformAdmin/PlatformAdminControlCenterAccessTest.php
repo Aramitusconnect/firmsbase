@@ -78,12 +78,12 @@ final class PlatformAdminControlCenterAccessTest extends TestCase
 
     public function test_guest_is_redirected_from_the_firms_list(): void
     {
-        $this->get(FirmResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(FirmResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_firm_panel_user_is_denied_the_firms_list(): void
     {
-        $this->actingAs($this->firmPanelUser())->get(FirmResource::getUrl())->assertRedirect('/admin/login');
+        $this->actingAs($this->firmPanelUser())->get(FirmResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden_from_the_firms_list(): void
@@ -131,7 +131,7 @@ final class PlatformAdminControlCenterAccessTest extends TestCase
 
     public function test_guest_is_redirected_from_the_firm_users_list(): void
     {
-        $this->get(FirmUserResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(FirmUserResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden_from_the_firm_users_list(): void
@@ -197,7 +197,7 @@ final class PlatformAdminControlCenterAccessTest extends TestCase
 
     public function test_guest_is_redirected_from_the_security_dashboard(): void
     {
-        $this->get(PlatformSecurityDashboardPage::getUrl())->assertRedirect('/admin/login');
+        $this->get(PlatformSecurityDashboardPage::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden_from_the_security_dashboard(): void
@@ -231,7 +231,7 @@ final class PlatformAdminControlCenterAccessTest extends TestCase
 
     public function test_guest_is_redirected_from_the_tenant_isolation_page(): void
     {
-        $this->get(PlatformTenantIsolationPage::getUrl())->assertRedirect('/admin/login');
+        $this->get(PlatformTenantIsolationPage::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden_from_the_tenant_isolation_page(): void

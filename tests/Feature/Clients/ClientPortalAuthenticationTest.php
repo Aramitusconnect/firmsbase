@@ -146,7 +146,7 @@ class ClientPortalAuthenticationTest extends TestCase
         $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create(['portal_status' => ClientPortalStatus::Active]));
         $portalUser = $this->makePortalUser($client);
 
-        $response = $this->actingAs($portalUser, 'client')->get('/portal');
+        $response = $this->actingAs($portalUser, 'client')->get($this->clientPortalUrl());
 
         $this->assertNotSame(403, $response->getStatusCode());
         $this->assertNotSame(500, $response->getStatusCode());
@@ -158,9 +158,9 @@ class ClientPortalAuthenticationTest extends TestCase
 
     public function test_an_unauthenticated_request_to_the_portal_is_redirected_to_login(): void
     {
-        $response = $this->get('/portal');
+        $response = $this->get($this->clientPortalUrl());
 
-        $response->assertRedirect('/portal/login');
+        $response->assertRedirect($this->clientPortalUrl('/login'));
     }
 
     public function test_a_web_guard_authenticated_firm_user_cannot_reach_the_client_portal(): void
@@ -171,9 +171,9 @@ class ClientPortalAuthenticationTest extends TestCase
         // $request->user('client'), never the default guard.
         $user = User::factory()->create();
 
-        $response = $this->actingAs($user, 'web')->get('/portal');
+        $response = $this->actingAs($user, 'web')->get($this->clientPortalUrl());
 
-        $response->assertRedirect('/portal/login');
+        $response->assertRedirect($this->clientPortalUrl('/login'));
     }
 
     /**
@@ -194,7 +194,7 @@ class ClientPortalAuthenticationTest extends TestCase
      */
     public function test_the_client_portal_plaid_exchange_route_rejects_an_unauthenticated_request_gracefully(): void
     {
-        $response = $this->post('/portal/plaid/exchange', []);
+        $response = $this->post($this->clientPortalUrl('/plaid/exchange'), []);
 
         $this->assertNotSame(500, $response->getStatusCode(), 'An unauthenticated request must be denied gracefully (redirect/401/403), never crash with a 500.');
         $this->assertContains($response->getStatusCode(), [302, 401, 403]);
@@ -204,7 +204,7 @@ class ClientPortalAuthenticationTest extends TestCase
     {
         $user = User::factory()->create();
 
-        $response = $this->actingAs($user, 'web')->post('/portal/plaid/exchange', []);
+        $response = $this->actingAs($user, 'web')->post($this->clientPortalUrl('/plaid/exchange'), []);
 
         $this->assertNotSame(500, $response->getStatusCode(), 'A wrongly-scoped web-guard session must be denied gracefully, never crash with a 500.');
         $this->assertContains($response->getStatusCode(), [302, 401, 403]);
@@ -236,7 +236,7 @@ class ClientPortalAuthenticationTest extends TestCase
         $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create(['portal_status' => ClientPortalStatus::Active]));
         $portalUser = $this->makePortalUser($client, ['is_active' => false]);
 
-        $response = $this->actingAs($portalUser, 'client')->get('/portal');
+        $response = $this->actingAs($portalUser, 'client')->get($this->clientPortalUrl());
 
         $response->assertForbidden();
     }
@@ -250,7 +250,7 @@ class ClientPortalAuthenticationTest extends TestCase
         $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create(['portal_status' => ClientPortalStatus::Disabled]));
         $portalUser = $this->makePortalUser($client, ['is_active' => true]);
 
-        $response = $this->actingAs($portalUser, 'client')->get('/portal');
+        $response = $this->actingAs($portalUser, 'client')->get($this->clientPortalUrl());
 
         $response->assertForbidden();
         $this->assertFalse($portalUser->canAccessPanel(Filament::getPanel('client-portal')));
@@ -468,8 +468,8 @@ class ClientPortalAuthenticationTest extends TestCase
 
     public function test_the_client_portal_login_and_password_reset_request_pages_are_reachable_by_a_guest(): void
     {
-        $this->get('/portal/login')->assertOk();
-        $this->get('/portal/password-reset/request')->assertOk();
+        $this->get($this->clientPortalUrl('/login'))->assertOk();
+        $this->get($this->clientPortalUrl('/password-reset/request'))->assertOk();
     }
 
     // ------------------------------------------------------------

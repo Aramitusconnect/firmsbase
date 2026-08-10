@@ -17,6 +17,7 @@ use App\Models\FirmUser;
 use App\Models\PlatformAdmin;
 use App\Models\TenantEncryptionKey;
 use App\Models\User;
+use App\Services\CanonicalUrlService;
 use App\Services\EntitlementService;
 use App\Services\PlatformRoleService;
 use App\Services\TenantContextService;
@@ -58,13 +59,19 @@ final class LivewireUpdateRouteMiddlewareLifecycleTest extends TestCase
     }
 
     /**
-     * A realistic `POST /livewire/update` request whose single component
-     * snapshot carries the given render `memo.path` — exactly the payload
-     * shape the middleware's `isFirmPanelUpdate()` gate inspects.
+     * A realistic `POST /livewire/update` request arriving on the given
+     * canonical host, carrying a component snapshot with the given
+     * render `memo.path`. Mission 1 (canonical reconstruction) moved the
+     * middleware's gate off `memo.path` (see
+     * EstablishFirmTenantContextForLivewireUpdate's own docblock) onto
+     * the request's own Host header — exactly what a real browser's
+     * same-origin Livewire fetch() always carries — so `$host` is now
+     * the load-bearing gate input; `$memoPath` is retained only as
+     * realistic payload shape, not as a signal the middleware reads.
      */
-    private function updateRequest(string $memoPath, ?object $user): Request
+    private function updateRequest(string $host, string $memoPath, ?object $user): Request
     {
-        $request = Request::create('/livewire/update', 'POST');
+        $request = Request::create('http://'.$host.'/livewire/update', 'POST');
         $request->setUserResolver(fn () => $user);
         $request->setLaravelSession($this->app['session']->driver());
         $request->merge([
@@ -109,7 +116,7 @@ final class LivewireUpdateRouteMiddlewareLifecycleTest extends TestCase
         $this->assertFalse(app(TenantContextService::class)->hasFirmContext(), 'clean slate');
         $this->assertNoDatabaseTenantContext('Expected no context before the middleware runs.');
 
-        $request = $this->updateRequest('firm/firm-integrations/'.$connection->uuid, $firmUser->user);
+        $request = $this->updateRequest(app(CanonicalUrlService::class)->firmAppHost(), 'firm-integrations/'.$connection->uuid, $firmUser->user);
 
         $observed = [];
         $response = $this->runMiddleware($request, function () use (&$observed, $connection) {
@@ -145,7 +152,7 @@ final class LivewireUpdateRouteMiddlewareLifecycleTest extends TestCase
         app(EntitlementService::class)->setForSource($firmB, 'integration', EntitlementSource::AdminOverride, true);
         $ownerB = $this->runWithFirmContext($firmB, fn () => FirmUser::factory()->forFirm($firmB)->forUser(User::factory()->create())->role(FirmUserRole::FirmOwner)->create());
 
-        $request = $this->updateRequest('firm/firm-integrations/'.$connectionA->uuid, $ownerB->user);
+        $request = $this->updateRequest(app(CanonicalUrlService::class)->firmAppHost(), 'firm-integrations/'.$connectionA->uuid, $ownerB->user);
 
         $threw = false;
         try {
@@ -176,7 +183,7 @@ final class LivewireUpdateRouteMiddlewareLifecycleTest extends TestCase
         // A component whose render path is under the admin panel — even if
         // the request user happens to have a firm membership, the path gate
         // must make the middleware no-op.
-        $request = $this->updateRequest('admin/platform-integration-overview', $firmUser->user);
+        $request = $this->updateRequest(app(CanonicalUrlService::class)->adminHost(), 'platform-integration-overview', $firmUser->user);
 
         $observed = [];
         $this->runMiddleware($request, function () use (&$observed) {
@@ -206,7 +213,7 @@ final class LivewireUpdateRouteMiddlewareLifecycleTest extends TestCase
         $this->actingAs($firmUser->user, 'web');
         $this->actingAs($admin, 'platform_admin');
 
-        $request = $this->updateRequest('admin/platform-integration-overview', $firmUser->user);
+        $request = $this->updateRequest(app(CanonicalUrlService::class)->adminHost(), 'platform-integration-overview', $firmUser->user);
 
         $observed = [];
         $this->runMiddleware($request, function () use (&$observed) {
@@ -229,7 +236,7 @@ final class LivewireUpdateRouteMiddlewareLifecycleTest extends TestCase
         // under FORCE RLS with no firm context).
         $stranger = User::factory()->create();
 
-        $request = $this->updateRequest('firm/firm-integrations/whatever', $stranger);
+        $request = $this->updateRequest(app(CanonicalUrlService::class)->firmAppHost(), 'firm-integrations/whatever', $stranger);
 
         $observed = [];
         $this->runMiddleware($request, function () use (&$observed) {
@@ -245,7 +252,7 @@ final class LivewireUpdateRouteMiddlewareLifecycleTest extends TestCase
 
     public function test_a_guest_firm_path_update_establishes_no_context(): void
     {
-        $request = $this->updateRequest('firm/firm-integrations/whatever', null);
+        $request = $this->updateRequest(app(CanonicalUrlService::class)->firmAppHost(), 'firm-integrations/whatever', null);
 
         $observed = [];
         $this->runMiddleware($request, function () use (&$observed) {

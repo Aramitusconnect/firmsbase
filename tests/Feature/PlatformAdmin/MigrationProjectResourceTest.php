@@ -48,7 +48,7 @@ final class MigrationProjectResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_migration_projects_list(): void
     {
-        $this->get(MigrationProjectResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(MigrationProjectResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

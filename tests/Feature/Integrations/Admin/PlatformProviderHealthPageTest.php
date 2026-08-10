@@ -77,7 +77,7 @@ final class PlatformProviderHealthPageTest extends TestCase
 
     public function test_guest_is_redirected_from_the_provider_health_page(): void
     {
-        $this->get(PlatformProviderHealthPage::getUrl())->assertRedirect('/admin/login');
+        $this->get(PlatformProviderHealthPage::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

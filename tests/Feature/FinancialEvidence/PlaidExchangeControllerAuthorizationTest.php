@@ -37,8 +37,10 @@ use Tests\TestCase;
  * regression coverage, proving both the fixed positive path and the
  * closed IDOR, hitting the real route through the real `client` guard
  * and middleware stack (mirrors ClientPortalAuthenticationTest's own
- * `actingAs($portalUser, 'client')->post('/portal/plaid/exchange', ...)`
- * pattern).
+ * `actingAs($portalUser, 'client')->post(clientPortalUrl('/plaid/exchange'), ...)`
+ * pattern — Mission 1 (canonical reconstruction) moved this route from
+ * the shared host's `/portal/plaid/exchange` path onto its own
+ * canonical Client Portal host).
  */
 final class PlaidExchangeControllerAuthorizationTest extends TestCase
 {
@@ -73,7 +75,7 @@ final class PlaidExchangeControllerAuthorizationTest extends TestCase
         [$firm, $matter, $portalUser, $connection, $request] = $this->makeGrantedClientWithPendingRequestAndConnection();
         $this->fakePublicTokenExchange('item-cp7-fixture-a', 'ins_fixture_a');
 
-        $response = $this->actingAs($portalUser, 'client')->post('/portal/plaid/exchange', [
+        $response = $this->actingAs($portalUser, 'client')->post($this->clientPortalUrl('/plaid/exchange'), [
             'public_token' => 'public-sandbox-fixture-token',
             'firm_integration_id' => $connection->id,
             'matter_id' => $matter->id,
@@ -98,7 +100,7 @@ final class PlaidExchangeControllerAuthorizationTest extends TestCase
         [$firm, $matterA, $portalUserA] = $this->makeGrantedClientWithPendingRequestAndConnection();
         [, $matterB, , $connectionB] = $this->makeGrantedClientWithPendingRequestAndConnection($firm);
 
-        $response = $this->actingAs($portalUserA, 'client')->post('/portal/plaid/exchange', [
+        $response = $this->actingAs($portalUserA, 'client')->post($this->clientPortalUrl('/plaid/exchange'), [
             'public_token' => 'attacker-controlled-public-token',
             'firm_integration_id' => $connectionB->id,
             'matter_id' => $matterA->id,
@@ -125,7 +127,7 @@ final class PlaidExchangeControllerAuthorizationTest extends TestCase
             ->create(['external_account_id' => null]));
         $this->runWithFirmContext($firm, fn () => $request->update(['firm_integration_id' => $secondConnection->id]));
 
-        $response = $this->actingAs($portalUser, 'client')->post('/portal/plaid/exchange', [
+        $response = $this->actingAs($portalUser, 'client')->post($this->clientPortalUrl('/plaid/exchange'), [
             'public_token' => 'public-sandbox-fixture-token',
             'firm_integration_id' => $originalConnection->id,
             'matter_id' => $matter->id,

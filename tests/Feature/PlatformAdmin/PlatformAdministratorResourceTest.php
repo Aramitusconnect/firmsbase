@@ -90,7 +90,7 @@ class PlatformAdministratorResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_platform_administrators_list(): void
     {
-        $this->get(PlatformAdministratorResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(PlatformAdministratorResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden_from_the_platform_administrators_list(): void
@@ -264,7 +264,7 @@ class PlatformAdministratorResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_roles_and_permissions_page(): void
     {
-        $this->get(PlatformRolesAndPermissionsPage::getUrl())->assertRedirect('/admin/login');
+        $this->get(PlatformRolesAndPermissionsPage::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_non_super_admin_is_forbidden_from_the_roles_and_permissions_page(): void

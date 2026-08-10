@@ -8,6 +8,7 @@ use App\Models\Firm;
 use App\Models\FirmSettings;
 use App\Models\FirmUser;
 use App\Models\User;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -24,26 +25,26 @@ class FirmUser2faLoginEnforcementTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_canAccessPanel_denies_when_2fa_required_and_not_compliant(): void
+    public function test_can_access_panel_denies_when_2fa_required_and_not_compliant(): void
     {
         $firm = Firm::factory()->create();
         FirmSettings::factory()->forFirm($firm)->create(['firm_user_2fa_mode' => TwoFactorMode::Required]);
         $user = User::factory()->create(['is_active' => true, 'two_factor_confirmed_at' => null]);
         FirmUser::factory()->forFirm($firm)->forUser($user)->create(['status' => FirmUserStatus::Active]);
 
-        $panel = \Filament\Facades\Filament::getPanel('firm');
+        $panel = Filament::getPanel('firm');
 
         $this->assertFalse($user->canAccessPanel($panel));
     }
 
-    public function test_canAccessPanel_allows_when_2fa_required_and_compliant(): void
+    public function test_can_access_panel_allows_when_2fa_required_and_compliant(): void
     {
         $firm = Firm::factory()->create();
         FirmSettings::factory()->forFirm($firm)->create(['firm_user_2fa_mode' => TwoFactorMode::Required]);
         $user = User::factory()->create(['is_active' => true, 'two_factor_confirmed_at' => now()]);
         FirmUser::factory()->forFirm($firm)->forUser($user)->create(['status' => FirmUserStatus::Active]);
 
-        $panel = \Filament\Facades\Filament::getPanel('firm');
+        $panel = Filament::getPanel('firm');
 
         $this->assertTrue($user->canAccessPanel($panel));
     }
@@ -55,7 +56,7 @@ class FirmUser2faLoginEnforcementTest extends TestCase
         $user = User::factory()->create(['is_active' => true, 'two_factor_confirmed_at' => null]);
         FirmUser::factory()->forFirm($firm)->forUser($user)->create(['status' => FirmUserStatus::Active]);
 
-        $response = $this->actingAs($user, 'web')->get('/firm');
+        $response = $this->actingAs($user, 'web')->get($this->firmAppUrl());
 
         $response->assertForbidden();
     }
@@ -67,7 +68,7 @@ class FirmUser2faLoginEnforcementTest extends TestCase
         $user = User::factory()->create(['is_active' => true, 'two_factor_confirmed_at' => null]);
         FirmUser::factory()->forFirm($firm)->forUser($user)->create(['status' => FirmUserStatus::Active]);
 
-        $response = $this->actingAs($user, 'web')->get('/firm');
+        $response = $this->actingAs($user, 'web')->get($this->firmAppUrl());
 
         $response->assertOk();
     }

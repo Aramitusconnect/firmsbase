@@ -89,7 +89,7 @@ final class ConnectionResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_connections_list(): void
     {
-        $this->get(ConnectionResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(ConnectionResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden_from_the_connections_list(): void
@@ -126,7 +126,7 @@ final class ConnectionResourceTest extends TestCase
         [$firm, $connection] = $this->entitledFirmWithConnection();
 
         $this->get(ViewConnection::getUrl(['firmUuid' => $firm->uuid, 'connectionUuid' => $connection->uuid]))
-            ->assertRedirect('/admin/login');
+            ->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden_from_the_view_connection_page(): void

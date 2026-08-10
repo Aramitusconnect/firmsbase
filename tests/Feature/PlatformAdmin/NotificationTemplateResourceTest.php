@@ -79,7 +79,7 @@ final class NotificationTemplateResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_notification_templates_list(): void
     {
-        $this->get(NotificationTemplateResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(NotificationTemplateResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_platform_admin_with_no_role_is_forbidden(): void

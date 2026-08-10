@@ -526,7 +526,7 @@ final class PlaidConsentPageRevokeConnectionTest extends TestCase
         $this->nextInstitutionId = $institutionId;
 
         $this->actingAs($fixture['portalUser'], 'client')
-            ->post('/portal/plaid/exchange', [
+            ->post($this->clientPortalUrl('/plaid/exchange'), [
                 'public_token' => 'public-sandbox-fixture-token',
                 'firm_integration_id' => $fixture['connection']->id,
                 'matter_id' => $fixture['matter']->id,

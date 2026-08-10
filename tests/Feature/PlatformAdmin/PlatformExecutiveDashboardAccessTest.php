@@ -53,7 +53,7 @@ final class PlatformExecutiveDashboardAccessTest extends TestCase
 
     public function test_guest_is_redirected_from_the_dashboard(): void
     {
-        $this->get(Dashboard::getUrl())->assertRedirect('/admin/login');
+        $this->get(Dashboard::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     /**
@@ -83,7 +83,7 @@ final class PlatformExecutiveDashboardAccessTest extends TestCase
 
         $this->actingAs($admin, 'platform_admin')
             ->get(Dashboard::getUrl())
-            ->assertRedirect('/admin/multi-factor-authentication/set-up');
+            ->assertRedirect($this->adminUrl('/multi-factor-authentication/set-up'));
     }
 
     /**

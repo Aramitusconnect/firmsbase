@@ -74,7 +74,7 @@ final class PlanResourceTest extends TestCase
 
     public function test_guest_is_redirected_from_the_plans_list(): void
     {
-        $this->get(PlanResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(PlanResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_sales_rep_is_forbidden(): void

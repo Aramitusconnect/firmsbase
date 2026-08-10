@@ -74,7 +74,7 @@ final class PlatformFleetMigrationRunResourceTest extends TestCase
 
     public function test_guest_is_redirected(): void
     {
-        $this->get(PlatformFleetMigrationRunResource::getUrl())->assertRedirect('/admin/login');
+        $this->get(PlatformFleetMigrationRunResource::getUrl())->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_sales_rep_is_forbidden(): void
@@ -255,7 +255,7 @@ final class PlatformFleetMigrationRunResourceTest extends TestCase
     {
         $run = FleetMigrationRun::factory()->create();
 
-        $this->get(PlatformFleetMigrationRunDetailPage::getUrl(['runUuid' => $run->uuid]))->assertRedirect('/admin/login');
+        $this->get(PlatformFleetMigrationRunDetailPage::getUrl(['runUuid' => $run->uuid]))->assertRedirect($this->adminUrl('/login'));
     }
 
     public function test_a_sales_rep_is_forbidden_from_the_detail_page(): void
