@@ -9,6 +9,7 @@ use App\Filament\Firm\Resources\MatterResource;
 use App\Filament\Firm\Resources\MatterResource\Actions\ApplyMatterBudgetTemplateAction;
 use App\Filament\Firm\Resources\MatterResource\Actions\OpenMatterAction;
 use App\Models\Matter;
+use App\Services\Leverage\LeverageAnalysisService;
 use App\Services\MatterAccessPolicyService;
 use App\Services\MatterBudget\MatterBudgetAccessPolicyService;
 use Filament\Infolists\Components\TextEntry;
@@ -120,6 +121,7 @@ class ViewMatter extends ViewRecord
                 ]),
 
             $this->budgetSection(),
+            $this->leverageSection(),
         ]);
     }
 
@@ -218,6 +220,146 @@ class ViewMatter extends ViewRecord
                     ->dateTime()
                     ->columnSpanFull()
                     ->visible($hasAnalysis),
+            ]);
+    }
+
+    /**
+     * Leverage Ratio Optimizer, item 25/27/28. Reuses the SAME
+     * MatterBudgetAccessPolicyService two-tier gate the Budget section
+     * above already uses — never a second permission architecture
+     * (item 27's own explicit instruction). Operational fields (hours,
+     * shares, task distribution, open recommendations) are visible to
+     * every role with operational budget visibility; labor cost and
+     * margin figures are additionally gated behind
+     * canViewProfitability() — EmployeeRate.cost_rate_cents never
+     * reaches a Paralegal/Legal Assistant view through this page
+     * (proven by LeverageMatterUiPrivacyTest).
+     *
+     * LeverageAnalysisService::analyze() is a pure, read-only
+     * computation (see its own docblock) — unlike the Budget section's
+     * cached MatterBudgetAnalysis row, it is safe to call live on this
+     * single-record page view. Memoized per-request via $cache so the
+     * several fields below don't each recompute it independently.
+     */
+    private function leverageSection(): Section
+    {
+        $accessPolicy = app(MatterBudgetAccessPolicyService::class);
+        $canViewOperational = fn (): bool => ($firmUser = Auth::user()?->activeFirmUser()) !== null
+            && $accessPolicy->canViewOperationalBudget($firmUser->role);
+        $canViewProfitability = fn (): bool => ($firmUser = Auth::user()?->activeFirmUser()) !== null
+            && $accessPolicy->canViewProfitability($firmUser->role);
+
+        $cache = [];
+        $analysis = function (Matter $record) use (&$cache): array {
+            return $cache[$record->id] ??= app(LeverageAnalysisService::class)->analyze($record);
+        };
+        $hasData = fn (Matter $record) => $analysis($record)['has_recorded_hours'];
+
+        return Section::make('Staffing & Leverage')
+            ->columns(2)
+            ->visible($canViewOperational)
+            ->schema([
+                TextEntry::make('leverage_no_data')
+                    ->label('')
+                    ->state('Insufficient staffing data — no budget or recorded hours yet.')
+                    ->columnSpanFull()
+                    ->visible(fn (Matter $record): bool => ! $hasData($record)),
+
+                TextEntry::make('leverage_status')
+                    ->label('Staffing Status')
+                    ->badge()
+                    ->state(fn (Matter $record) => $analysis($record)['status']->value)
+                    ->formatStateUsing(fn ($state): string => (string) str($state)->headline())
+                    ->color(fn ($state): string => match ($state) {
+                        'healthy' => 'success',
+                        'watch' => 'warning',
+                        'inefficient' => 'danger',
+                        default => 'gray',
+                    })
+                    ->visible($hasData),
+
+                TextEntry::make('leverage_hours_by_role')
+                    ->label('Recorded Hours by Role')
+                    ->state(fn (Matter $record): array => collect($analysis($record)['hours_by_role'])
+                        ->map(fn ($hours, $role): string => sprintf('%s: %.1f hrs', str($role)->headline(), $hours))
+                        ->values()->all())
+                    ->listWithLineBreaks()
+                    ->placeholder('—')
+                    ->columnSpanFull()
+                    ->visible($hasData),
+
+                TextEntry::make('leverage_attorney_share')
+                    ->label('Attorney Share')
+                    ->state(fn (Matter $record) => $analysis($record)['attorney_share_percent'])
+                    ->suffix('%')
+                    ->placeholder('—')
+                    ->visible($hasData),
+                TextEntry::make('leverage_support_share')
+                    ->label('Support Staff Share')
+                    ->state(fn (Matter $record) => $analysis($record)['support_share_percent'])
+                    ->suffix('%')
+                    ->placeholder('—')
+                    ->visible($hasData),
+
+                TextEntry::make('leverage_expected_mix')
+                    ->label('Expected vs. Actual Mix')
+                    ->state(fn (Matter $record): array => collect($analysis($record)['actual_mix_percent'] ?? [])
+                        ->map(fn ($actual, $role): string => sprintf(
+                            '%s: %s%% actual vs %s%% expected',
+                            str($role)->headline(),
+                            $actual,
+                            $analysis($record)['expected_mix_percent'][$role] ?? '—',
+                        ))->values()->all())
+                    ->listWithLineBreaks()
+                    ->placeholder('—')
+                    ->columnSpanFull()
+                    ->visible(fn (Matter $record): bool => $analysis($record)['expected_mix_percent'] !== null),
+
+                TextEntry::make('leverage_task_distribution')
+                    ->label('Task Distribution by Category')
+                    ->state(fn (Matter $record): array => collect($analysis($record)['task_category_distribution'])
+                        ->map(fn ($countsByRole, $category): string => sprintf(
+                            '%s: %s',
+                            str($category)->headline(),
+                            collect($countsByRole)->map(fn ($count, $role): string => str($role)->headline()." {$count}")->implode(', '),
+                        ))->values()->all())
+                    ->listWithLineBreaks()
+                    ->placeholder('—')
+                    ->columnSpanFull()
+                    ->visible(fn (Matter $record): bool => collect($analysis($record)['task_category_distribution'])->isNotEmpty()),
+
+                TextEntry::make('leverage_cost_by_role')
+                    ->label('Labor Cost by Role')
+                    ->state(fn (Matter $record): array => collect($analysis($record)['cost_by_role_cents'])
+                        ->map(fn ($cents, $role): string => sprintf('%s: $%s', str($role)->headline(), number_format($cents / 100, 2)))
+                        ->values()->all())
+                    ->listWithLineBreaks()
+                    ->placeholder('—')
+                    ->columnSpanFull()
+                    ->visible(fn (Matter $record): bool => $hasData($record) && $canViewProfitability()),
+
+                TextEntry::make('leverage_average_cost_per_hour')
+                    ->label('Average Cost / Recorded Hour')
+                    ->state(fn (Matter $record) => $analysis($record)['average_cost_per_hour_cents'])
+                    ->formatStateUsing(fn ($state): string => $state === null ? '—' : '$'.number_format(((int) $state) / 100, 2))
+                    ->visible(fn (Matter $record): bool => $hasData($record) && $canViewProfitability()),
+                TextEntry::make('leverage_current_margin')
+                    ->label('Current Margin')
+                    ->suffix('%')
+                    ->placeholder('—')
+                    ->state(fn (Matter $record) => $analysis($record)['current_margin_percent'])
+                    ->visible(fn (Matter $record): bool => $hasData($record) && $canViewProfitability()),
+
+                TextEntry::make('leverage_open_recommendations')
+                    ->label('Open Staffing Recommendations')
+                    ->state(fn (Matter $record): array => $record->leverageRecommendations()
+                        ->whereIn('status', ['open', 'acknowledged'])
+                        ->get()
+                        ->map(fn ($r): string => sprintf('%s (%s confidence)', str($r->recommendation_type->value)->headline(), $r->confidence->value))
+                        ->all())
+                    ->listWithLineBreaks()
+                    ->placeholder('None')
+                    ->columnSpanFull(),
             ]);
     }
 }
