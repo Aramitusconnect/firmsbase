@@ -245,6 +245,24 @@ class QueueConsoleContextRolloutTest extends TestCase
             // no set_config manipulation of any RLS-relevant session
             // variable.
             'SweepLeverageRecommendationsCommand.php',
+            // Zero-Click Core Workflow Automation pass added
+            // SweepDocumentRequestRemindersCommand — reviewed and safe:
+            // the SAME shape as every sweep command above. It
+            // enumerates only the non-RLS `firms` table, then wraps
+            // each firm's ENTIRE per-item work in a single
+            // TenantContextService::runWithFirmContext($firm, ...)
+            // call — no raw SQL, no BYPASSRLS, no superuser role, no
+            // set_config manipulation of any RLS-relevant session
+            // variable. Calls only existing, unmodified canonical
+            // services (DocumentChaseSchedulerService/
+            // DocumentChaseService). A sibling
+            // SweepPaymentPlanInstallmentsCommand was deliberately NOT
+            // added — Payment Plan installment scheduling remains
+            // INTENTIONALLY DEFERRED (Phase 14b, decision F) and
+            // PaymentPlanInstallmentDueDeferredTest structurally
+            // forbids any Console Command from referencing
+            // PaymentPlanInstallmentService.
+            'SweepDocumentRequestRemindersCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

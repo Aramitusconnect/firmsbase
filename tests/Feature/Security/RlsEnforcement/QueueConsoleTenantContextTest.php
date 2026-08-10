@@ -216,6 +216,12 @@ class QueueConsoleTenantContextTest extends TestCase
             // see QueueConsoleContextRolloutTest's own identical review
             // note.
             'SweepLeverageRecommendationsCommand.php',
+            // Zero-Click Core Workflow Automation pass added
+            // SweepDocumentRequestRemindersCommand — reviewed and safe:
+            // see QueueConsoleContextRolloutTest's own identical review
+            // note (including why SweepPaymentPlanInstallmentsCommand
+            // was deliberately NOT added — Phase 14b deferral).
+            'SweepDocumentRequestRemindersCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

@@ -252,6 +252,16 @@ class SecretPatternScanTest extends TestCase
             // status update only — never an invented matter,
             // recommendation, or figure of any kind.
             'SweepLeverageRecommendationsCommand.php',
+            // Zero-Click Core Workflow Automation pass added
+            // SweepDocumentRequestRemindersCommand — reviewed and safe:
+            // creates no demo/placeholder/synthetic data, only calls
+            // existing canonical services
+            // (DocumentChaseSchedulerService/DocumentChaseService)
+            // against real, already-existing rows. A sibling
+            // SweepPaymentPlanInstallmentsCommand was deliberately NOT
+            // added — see QueueConsoleContextRolloutTest's own note on
+            // the Phase 14b payment-plan-scheduling deferral.
+            'SweepDocumentRequestRemindersCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

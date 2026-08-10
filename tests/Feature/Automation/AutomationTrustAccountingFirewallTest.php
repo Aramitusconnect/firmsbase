@@ -53,12 +53,17 @@ class AutomationTrustAccountingFirewallTest extends TestCase
         }
     }
 
-    public function test_the_handler_registry_has_no_entry_for_any_prohibited_operation_and_only_five_registered_types(): void
+    public function test_the_handler_registry_has_no_entry_for_any_prohibited_operation_and_only_eight_registered_types(): void
     {
         $registry = new AutomationActionHandlerRegistry;
 
         // Every registered type maps to a real, resolvable handler...
-        $this->assertCount(5, $registry->registeredTypes());
+        // Narrowly updated by the Zero-Click Core Workflow Automation
+        // pass — NotifyClient, CreateDocumentRequest, and
+        // MatchDocumentToRequest added on top of the prior five,
+        // additive only, none touching Trust/Accounting/Conflict (both
+        // assertions below still hold unchanged).
+        $this->assertCount(8, $registry->registeredTypes());
 
         foreach ($registry->registeredTypes() as $type) {
             $this->assertNotContains($type, self::PROHIBITED_OPERATIONS);
