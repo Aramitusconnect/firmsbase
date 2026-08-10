@@ -1726,6 +1726,17 @@ class RowLevelSecurityCoverageMappingService
                 .'pre-tenant-context, no-RLS shape as the stock password_reset_tokens table '
                 .'immediately above.',
         ],
+        // Mission 1 (canonical reconstruction — Domain & Security
+        // Boundary Architecture) addition — platform_admin_password_reset_tokens,
+        // same shape/reasoning as client_portal_password_reset_tokens
+        // immediately above, backing the new `platform_admins` password
+        // broker (config/auth.php `passwords.platform_admins`).
+        'platform_admin_password_reset_tokens' => [
+            'classification' => TenantOwnershipClassification::System,
+            'ownership_path' => null,
+            'notes' => 'Platform Admin (platform_admin guard) password-reset-token table — same '
+                .'pre-tenant-context, no-RLS shape as the stock password_reset_tokens table above.',
+        ],
         'users' => [
             'classification' => TenantOwnershipClassification::System,
             'ownership_path' => null,

@@ -865,7 +865,13 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // 9 -> 10: client_portal_users' corrected System classification
         // (see the InheritedTenant/System comment above this method's
         // own client_portal_matter_grants block for the full reasoning).
-        $this->assertSame(10, $summary[TenantOwnershipClassification::System->value]);
+        // 10 -> 11: Mission 1 (canonical reconstruction) —
+        // platform_admin_password_reset_tokens added directly to
+        // FULL_TABLE_INVENTORY_EXTRA, classified System (same
+        // pre-tenant-context, no-RLS shape/reasoning as
+        // client_portal_password_reset_tokens immediately above it in
+        // the registry).
+        $this->assertSame(11, $summary[TenantOwnershipClassification::System->value]);
         $this->assertSame(1, $summary[TenantOwnershipClassification::RootTenant->value]);
         $this->assertSame(1, $summary[TenantOwnershipClassification::Uncertain->value]);
 
@@ -945,7 +951,9 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Leverage Ratio Optimizer pass added two more DirectTenant
         // tables (task_category_role_expectations,
         // matter_leverage_recommendations): 281 -> 283.
-        $this->assertSame(283, array_sum($summary));
+        // Mission 1 (canonical reconstruction) added one more System
+        // table (platform_admin_password_reset_tokens): 283 -> 284.
+        $this->assertSame(284, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

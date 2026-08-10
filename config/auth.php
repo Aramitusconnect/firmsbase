@@ -141,6 +141,17 @@ return [
             'expire' => 60,
             'throttle' => 60,
         ],
+
+        // Mission 1 (canonical reconstruction) — the admin panel had no
+        // password-reset broker at all before this mission.
+        // AdminPanelProvider's own new ->passwordReset() resolves
+        // against this broker.
+        'platform_admins' => [
+            'provider' => 'platform_admins',
+            'table' => 'platform_admin_password_reset_tokens',
+            'expire' => 60,
+            'throttle' => 60,
+        ],
     ],
 
     /*
