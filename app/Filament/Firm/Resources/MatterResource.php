@@ -8,6 +8,7 @@ use App\Enums\FirmUserRole;
 use App\Filament\Firm\Resources\MatterResource\Pages\ListMatters;
 use App\Filament\Firm\Resources\MatterResource\Pages\ViewMatter;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\ActivityRelationManager;
+use App\Filament\Firm\Resources\MatterResource\RelationManagers\BudgetAlertsRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\ConflictCheckResultsRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\ConflictChecksRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\ContactsRelationManager;
@@ -171,6 +172,7 @@ class MatterResource extends Resource
             DocumentsRelationManager::class,
             DocumentRequestsRelationManager::class,
             FinancialEvidenceRelationManager::class,
+            BudgetAlertsRelationManager::class,
             ActivityRelationManager::class,
             ConflictChecksRelationManager::class,
             ConflictCheckResultsRelationManager::class,
