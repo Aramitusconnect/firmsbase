@@ -206,6 +206,11 @@ class QueueConsoleTenantContextTest extends TestCase
             'DispatchAutomationActionsCommand.php',
             'SweepInvoiceOverdueEventsCommand.php',
             'SweepDeadlineEventsCommand.php',
+            // Predictive Matter Budget Alerts pass added
+            // SweepMatterBudgetAlertsCommand — reviewed and safe: see
+            // QueueConsoleContextRolloutTest's own identical review
+            // note.
+            'SweepMatterBudgetAlertsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

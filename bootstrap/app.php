@@ -173,6 +173,19 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('automation:sweep:deadlines')
             ->dailyAt('06:15')
             ->withoutOverlapping();
+
+        // Predictive Matter Budget Alerts — recomputes budget-vs-actual
+        // for every Matter that has a budget configured and raises any
+        // newly-crossed threshold alert (never a repeat for a tier
+        // already alerted against the Matter's current budget version
+        // — matter_budget_alerts' own dedup unique index is the real
+        // gate). Hourly: frequent enough that Time Entry/Expense
+        // activity logged during the day is reflected same-day,
+        // without recomputing on every minute the way live dispatch
+        // does for the Automation Engine's own event queues.
+        $schedule->command('automation:sweep:matter-budgets')
+            ->hourly()
+            ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware): void {
         // Trust the AWS ALB in front of this container for exactly the

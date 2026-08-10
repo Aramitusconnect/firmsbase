@@ -86,4 +86,16 @@ enum DomainEventType: string
      * (Mixed-Invoice Revenue Allocation pass, this session).
      */
     case PaymentAllocationPending = 'payment_allocation_pending';
+
+    /**
+     * Predictive Matter Budget Alerts pass. Emitted by
+     * MatterBudgetAlertService the moment a NEW (never-before-alerted,
+     * for the Matter's current budget version) threshold tier is
+     * crossed — never once per sweep tick, never a repeat for a tier
+     * already alerted (matter_budget_alerts' own dedup unique index is
+     * the real gate; this event is only ever emitted alongside a
+     * successfully newly-created MatterBudgetAlert row, in the same
+     * transaction).
+     */
+    case MatterBudgetThresholdCrossed = 'matter_budget_threshold_crossed';
 }

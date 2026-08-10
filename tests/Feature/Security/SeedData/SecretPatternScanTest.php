@@ -234,6 +234,15 @@ class SecretPatternScanTest extends TestCase
             'DispatchAutomationActionsCommand.php',
             'SweepInvoiceOverdueEventsCommand.php',
             'SweepDeadlineEventsCommand.php',
+            // Predictive Matter Budget Alerts pass added
+            // SweepMatterBudgetAlertsCommand — reviewed and safe: it
+            // creates no demo/placeholder/synthetic data. It writes
+            // matter_budget_analyses (a recomputed rollup derived
+            // entirely from real time_entries/expenses/invoices) and
+            // matter_budget_alerts (derived entirely from real budget
+            // vs. actual comparisons) — never an invented matter,
+            // budget, or figure of any kind.
+            'SweepMatterBudgetAlertsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

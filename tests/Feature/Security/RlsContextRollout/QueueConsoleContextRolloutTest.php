@@ -220,6 +220,18 @@ class QueueConsoleContextRolloutTest extends TestCase
             'DispatchAutomationActionsCommand.php',
             'SweepInvoiceOverdueEventsCommand.php',
             'SweepDeadlineEventsCommand.php',
+            // Predictive Matter Budget Alerts pass added
+            // SweepMatterBudgetAlertsCommand (automation:sweep:matter-budgets)
+            // — reviewed and safe: the SAME shape as
+            // SweepInvoiceOverdueEventsCommand/SweepDeadlineEventsCommand
+            // above. It enumerates only the non-RLS `firms` table, then
+            // wraps each firm's ENTIRE per-matter work (recompute +
+            // alert evaluation) in a single
+            // TenantContextService::runWithFirmContext($firm, ...) call
+            // — no raw SQL, no BYPASSRLS, no superuser role, no
+            // set_config manipulation of any RLS-relevant session
+            // variable.
+            'SweepMatterBudgetAlertsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

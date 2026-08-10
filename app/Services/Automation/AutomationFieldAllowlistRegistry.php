@@ -56,6 +56,11 @@ final class AutomationFieldAllowlistRegistry
             'pending_allocation.id', 'pending_allocation.payment_id',
             'pending_allocation.invoice_id', 'pending_allocation.amount_cents',
         ],
+        'matter_budget_threshold_crossed' => [
+            'matter_budget_alert.alert_type', 'matter_budget_alert.metric_key',
+            'matter_budget_alert.severity', 'matter_budget_alert.threshold_percent_crossed',
+            'matter.id', 'matter.assigned_attorney_id',
+        ],
     ];
 
     /**
