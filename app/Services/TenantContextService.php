@@ -13,20 +13,21 @@ use Illuminate\Support\Facades\DB;
  * (app.current_firm_id, the exact setting name used by every RLS-
  * preparation migration since Phase 1).
  *
- * Section 39A scope (approved decision): this service, its middleware,
- * and its job-context trait are new, fully-tested infrastructure that
- * proves the RLS activation mechanism is correct against the REAL,
- * already-prepared tables — but this section deliberately does NOT
- * flip FORCE ROW LEVEL SECURITY on for the live schema. Doing so today
- * would break every existing test (and any future real usage) that
- * creates/reads tenant-owned rows without first establishing this
- * context, since no code path anywhere yet calls setDatabaseTenantContext()
- * before such an operation — confirmed empirically (see the RLS
- * enforcement tests) and via direct repository search (120+ existing
- * test files create rows on these tables with no context at all). That
- * is a large, cross-cutting test-suite change explicitly out of scope
- * for this "small, reviewable" activation-infrastructure pass; see the
- * report for the residual gap this leaves.
+ * Section 39A scope (approved decision, HISTORICAL): this service, its
+ * middleware, and its job-context trait started as new, fully-tested
+ * infrastructure that proved the RLS activation mechanism was correct
+ * against the REAL, already-prepared tables, before FORCE ROW LEVEL
+ * SECURITY was flipped on for the live schema. That activation is no
+ * longer deferred: the many FORCE-RLS-activation waves since Section
+ * 39A completed the rollout (see
+ * RowLevelSecurityCoverageMappingService::forcedTables(), currently
+ * 167 tables). Every request/job/command that reads or writes a
+ * FORCE-RLS'd table MUST establish context through this service (or a
+ * caller that already wraps it, e.g. TenantAwareJobContext) — omitting
+ * it is a real bug today, not a deferred concern. (Mission 1B, Extreme
+ * Security Hardening, corrected this paragraph after finding it had
+ * gone stale following the rollout — see ScanDocumentJob's own
+ * docblock for the concrete bug that caused.)
  *
  * Rules:
  *  - set_config()'s third argument (is_local) is chosen adaptively:

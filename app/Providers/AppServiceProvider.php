@@ -12,6 +12,8 @@ use App\Services\Stripe\PaymentGatewaySimulationPolicyService;
 use App\Services\Stripe\StripeGateway;
 use App\Services\Stripe\UnavailablePaymentGateway;
 use App\Services\TenantContextService;
+use App\Services\VirusScan\FakeVirusScanner;
+use App\Services\VirusScan\VirusScanner;
 use Aws\Sqs\SqsClient;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Login;
@@ -115,6 +117,19 @@ class AppServiceProvider extends ServiceProvider
                 ? new FakeStripeGateway
                 : new UnavailablePaymentGateway;
         });
+
+        // Mission 1B (Extreme Security Hardening) fix: VirusScanner had NO
+        // container binding at all anywhere in this codebase — every real
+        // dispatch of ScanDocumentJob (its handle() type-hints this
+        // interface for automatic resolution, same mechanism as
+        // controller-method injection) would throw "Target [VirusScanner]
+        // is not instantiable" before ever reaching FakeVirusScanner. This
+        // is the disclosed, self-tracked stub (ComplianceGapRegistryService
+        // key `real_malware_scanning_engine_stubbed`) — the missing binding
+        // was a wiring bug, not a decision to fake scanning; a real scanner
+        // implementation remains a separate, later decision (see the final
+        // report).
+        $this->app->bind(VirusScanner::class, FakeVirusScanner::class);
     }
 
     /**

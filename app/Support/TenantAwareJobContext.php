@@ -11,16 +11,20 @@ use App\Services\TenantContextService;
  * use: run its tenant-scoped work through an explicit firm_id context
  * rather than querying tenant tables with no context at all.
  *
- * Deliberately NOT retrofitted onto the 4 existing job classes
- * (DispatchNotificationJob, RunHealthChecksJob, ScanDocumentJob,
- * WebhookDispatchJob) in this pass — none of them currently rely on
- * RLS enforcement (which is not live for any environment yet, see
- * TenantContextService's docblock), so rewriting them here would be an
- * unrelated, unreviewed behavior change. This trait exists so a job
- * CAN adopt explicit tenant context, and is proven correct by
- * dedicated tests, establishing the expected pattern for future queue
- * work rather than guessing a firm from a bare model id inside the
- * job body.
+ * FORCE RLS is live (167 tables, see
+ * RowLevelSecurityCoverageMappingService), so every job that reads or
+ * writes a FORCE-RLS'd table must use this trait or an equivalent
+ * explicit context — not "deliberately deferred" the way this
+ * docblock used to claim. WebhookDispatchJob already uses it.
+ * ScanDocumentJob was retrofitted onto it by Mission 1B (Extreme
+ * Security Hardening) after a real bug was found: its unscoped
+ * `Document::find()` silently returned null under live FORCE RLS,
+ * indistinguishable from the legitimate "already deleted" case —
+ * see ScanDocumentJob's own docblock. DispatchNotificationJob and
+ * RunHealthChecksJob remain untouched because they delegate every
+ * FORCE-RLS read/write to a service that already wraps in
+ * `runWithFirmContext` internally — not because RLS doesn't apply to
+ * them.
  */
 trait TenantAwareJobContext
 {

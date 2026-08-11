@@ -149,7 +149,7 @@ class PlaidUploadFallbackPage extends Page implements HasSchemas, HasTable
                 client: $portalUser->client,
             ));
 
-            ScanDocumentJob::dispatch($document->id);
+            ScanDocumentJob::dispatch($document->id, $matterModel->firm_id);
         } catch (InvalidArgumentException $e) {
             Notification::make()->title('Upload rejected')->body($e->getMessage())->danger()->send();
 
