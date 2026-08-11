@@ -9,6 +9,7 @@ use App\Filament\Firm\Pages\Auth\ResetPassword;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
 use App\Http\Middleware\ConfigurePanelSessionCookie;
 use App\Http\Middleware\EnforceSessionTimeouts;
+use App\Http\Middleware\EnsureFirmUserMfaComplianceOrRedirectToEnrollment;
 use App\Http\Middleware\EstablishFirmTenantContext;
 use App\Http\Middleware\EstablishPanelAuthGuardDefault;
 use App\Services\CanonicalUrlService;
@@ -165,19 +166,27 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
  *    protection today, it's just never compulsory from this panel
  *    config alone.
  *
- *    THE REAL HARD-ENFORCEMENT BOUNDARY REMAINS
- *    `User::canAccessPanel()`/`FirmUser2faPolicyService`, UNCHANGED BY
- *    THIS FILE. If/when `firm_user_2fa_mode` ever becomes toggleable to
- *    `Required` (still deliberately NOT exposed anywhere in the UI as
- *    of this change — see `FirmSettingsPage`'s own docblock), it is
- *    `canAccessPanel()` — which runs on every panel request via
- *    Filament's own `Authenticate` middleware/`FilamentUser` contract,
- *    fully independent of this file's `isRequired` setting — that would
- *    actually block a non-compliant user, exactly as it already does
- *    today for any firm a platform operator hand-sets to `Required` via
- *    direct DB access. This section only makes it possible for a user
- *    to become compliant in the first place; it grants no new bypass and
- *    removes no existing check.
+ *    MISSION 1C (Security Validation, Activation & Staging Proof)
+ *    UPDATE: the paragraph that used to be here claimed the real
+ *    hard-enforcement boundary was `User::canAccessPanel()`, "UNCHANGED
+ *    BY THIS FILE" — no longer accurate, corrected here rather than
+ *    left stale. `canAccessPanel()` used to hard-`return false` (a
+ *    panel-wide 403, no path to any page including one that could fix
+ *    it) for a non-compliant user whose firm requires 2FA — a real
+ *    lockout risk Mission 1B found and deliberately did not work
+ *    around. That check has moved to
+ *    `EnsureFirmUserMfaComplianceOrRedirectToEnrollment` (registered in
+ *    `authMiddleware()` below, immediately after `Authenticate::class`),
+ *    which redirects a non-compliant user to the profile page instead
+ *    of denying them outright — the real enforcement (the same
+ *    `FirmUser2faPolicyService` + `TenantContextService::
+ *    runWithFirmContext()` check) is unchanged, only WHERE it lives and
+ *    HOW it responds. `firm_user_2fa_mode` toggling to `Required` is
+ *    still deliberately NOT exposed anywhere in the self-service UI —
+ *    see `FirmSettingsPage`'s own docblock — this change only makes it
+ *    SAFE to do so later (a non-compliant user now gets a working path
+ *    to become compliant instead of being locked out); it does not
+ *    itself flip any firm's enforcement policy.
  *
  * Mission 1 (canonical reconstruction — Domain & Security Boundary
  * Architecture) moved this panel from a path prefix on the single
@@ -256,6 +265,18 @@ class FirmPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
+                // Mission 1C (Security Validation, Activation & Staging
+                // Proof), section 5: redirects a 2FA-required-but-not-
+                // yet-compliant user to the profile page instead of
+                // User::canAccessPanel() hard-denying the whole panel —
+                // see that middleware's own docblock for why this can't
+                // be Filament's native isRequired mechanism. Placed
+                // immediately after Authenticate::class (which is what
+                // resolves the acting user in the first place) and
+                // before tenant-context middleware, matching
+                // EnsurePlatformAdminMfaIsEnrolledAndVerified's placement
+                // on the Admin panel exactly.
+                EnsureFirmUserMfaComplianceOrRedirectToEnrollment::class,
                 EstablishFirmTenantContext::class,
                 ApplyTenantDatabaseContext::class,
             ]);

@@ -8,7 +8,6 @@ use App\Enums\FirmUserStatus;
 use App\Models\Concerns\HasPublicUuid;
 use App\Notifications\FirmOwnerInvitationNotification;
 use App\Services\CorrelatedPasswordResetSenderService;
-use App\Services\FirmUser2faPolicyService;
 use App\Services\LoginPolicyService;
 use App\Services\TenantContextService;
 use Database\Factories\UserFactory;
@@ -142,17 +141,28 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     /**
      * The firm-facing panel gate — checked by Filament on every panel
      * request, not just at login (see Filament\Http\Middleware\Authenticate).
-     * Deliberately routes through the existing LoginPolicyService and
-     * FirmUser2faPolicyService wrapper services rather than re-deriving
-     * their checks here, so this gate can never silently drift from the
-     * policy those services already define:
+     * Deliberately routes through the existing LoginPolicyService
+     * wrapper rather than re-deriving its checks here, so this gate can
+     * never silently drift from the policy that service already defines:
      *   - the account itself must be active;
      *   - the user must hold at least one ACTIVE FirmUser membership,
      *     and LoginPolicyService::canAttemptFirmLogin() must approve
-     *     that specific firm;
-     *   - if that firm requires 2FA (FirmUser2faPolicyService), the
-     *     user must already be confirmed-compliant — there is no
-     *     in-panel 2FA setup flow to complete it after the fact yet.
+     *     that specific firm.
+     *
+     * Mission 1C (Security Validation, Activation & Staging Proof),
+     * section 5: 2FA-required-but-not-yet-compliant enforcement used to
+     * live here too — a hard `return false`, denying the ENTIRE panel
+     * with no path to reach any page, including one that could fix it
+     * (Mission 1B found and deliberately did not work around this exact
+     * lockout risk). That check has moved to
+     * EnsureFirmUserMfaComplianceOrRedirectToEnrollment, registered in
+     * FirmPanelProvider::authMiddleware() immediately after
+     * Filament\Http\Middleware\Authenticate::class (which is what calls
+     * this method) — it redirects a non-compliant user to the profile
+     * page instead of denying them outright, closing the lockout risk
+     * while preserving the same real enforcement (verified via a real
+     * FirmUser2faPolicyService + TenantContextService::runWithFirmContext()
+     * check, unchanged from what used to run here).
      */
     public function canAccessPanel(Panel $panel): bool
     {
@@ -167,27 +177,6 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         }
 
         if (! (new LoginPolicyService)->canAttemptFirmLogin($this, $firmUser->firm)) {
-            return false;
-        }
-
-        $twoFactorPolicy = new FirmUser2faPolicyService;
-
-        // Section 39A-3L, Checkpoint 18 - firm_settings is FORCE-RLS
-        // protected as of this checkpoint, and no per-request middleware
-        // establishes tenant context before canAccessPanel() runs. Both
-        // isRequiredForFirmUser() and isCompliant() (which internally
-        // re-calls isRequiredForFirmUser()) read $firm->firmSettings, so
-        // the entire decision is wrapped in one whole-call context here
-        // rather than wrapping only one of the two calls - an unwrapped
-        // second read would still fail open (firmSettings resolves to
-        // null, isRequiredForFirm() returns false) for a firm configured
-        // with firm_user_2fa_mode = Required.
-        $twoFactorBlocksAccess = (new TenantContextService)->runWithFirmContext(
-            $firmUser->firm_id,
-            fn () => $twoFactorPolicy->isRequiredForFirmUser($firmUser) && ! $twoFactorPolicy->isCompliant($firmUser)
-        );
-
-        if ($twoFactorBlocksAccess) {
             return false;
         }
 

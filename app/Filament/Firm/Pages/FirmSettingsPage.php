@@ -49,14 +49,25 @@ use Illuminate\Support\Str;
  * DELIBERATELY EXCLUDED FROM THIS FORM — SCOPE BOUNDARY, NOT AN
  * OVERSIGHT:
  *
- *   - `firm_user_2fa_mode` / `client_2fa_mode`: a SEPARATE, not-yet-
- *     built 2FA enrollment task owns these. Toggling either to Required
- *     today, with no enrollment/recovery UI built yet, would
- *     permanently lock users out. Neither column is bound to a form
- *     field, an Action, or even a `TextEntry`/`Text` display component
- *     anywhere below — the one line that even acknowledges they exist
- *     ("2FA policy: managed separately") is plain, non-interactive
- *     `Text`, not bound to any model attribute.
+ *   - `firm_user_2fa_mode` / `client_2fa_mode`: Mission 1C (Security
+ *     Validation, Activation & Staging Proof), section 5 built the
+ *     enrollment/lockout-safety piece this comment used to say was
+ *     "not-yet-built" — `firm_user_2fa_mode = Required` no longer
+ *     permanently locks a non-compliant user out (see
+ *     `EnsureFirmUserMfaComplianceOrRedirectToEnrollment` and
+ *     `User::canAccessPanel()`'s own updated docblock). Still
+ *     deliberately excluded from THIS form, though: that mission
+ *     scoped "make enrollment safe" and "prove it's safe" separately
+ *     from "expose the enforcement toggle to firms" — flipping a real
+ *     firm's policy is a distinct, more cautious follow-up decision,
+ *     not a free byproduct of this checkpoint. `client_2fa_mode` has no
+ *     equivalent enrollment-safety work at all yet (Client Portal was
+ *     explicitly out of that mission's scope) — still genuinely unsafe
+ *     to toggle. Neither column is bound to a form field, an Action, or
+ *     even a `TextEntry`/`Text` display component anywhere below — the
+ *     one line that even acknowledges they exist ("2FA policy: managed
+ *     separately") is plain, non-interactive `Text`, not bound to any
+ *     model attribute.
  *
  *   - `payment_mode` / `trust_iolta_protection` / `ai_mode`: real
  *     downstream effects on other gated services (Trust eligibility,
