@@ -85,4 +85,62 @@ class SecurityHeadersAndSeoTest extends TestCase
         $response->assertNotFound();
         $response->assertHeader('X-Content-Type-Options', 'nosniff');
     }
+
+    // Mission 1B (Extreme Security Hardening), sections 19-20.
+
+    public function test_csp_is_present_in_report_only_mode_by_default(): void
+    {
+        $response = $this->get($this->firmAppUrl('/login'));
+
+        $response->assertHeaderMissing('Content-Security-Policy');
+        $response->assertHeader('Content-Security-Policy-Report-Only');
+    }
+
+    public function test_csp_switches_to_enforcing_when_report_only_is_disabled(): void
+    {
+        config(['security_headers.csp.report_only' => false]);
+
+        $response = $this->get($this->firmAppUrl('/login'));
+
+        $response->assertHeader('Content-Security-Policy');
+        $response->assertHeaderMissing('Content-Security-Policy-Report-Only');
+    }
+
+    public function test_csp_includes_the_real_configured_directives_and_a_fresh_nonce(): void
+    {
+        $response = $this->get($this->firmAppUrl('/login'));
+
+        $csp = $response->headers->get('Content-Security-Policy-Report-Only');
+
+        $this->assertStringContainsString("default-src 'self'", $csp);
+        $this->assertStringContainsString("object-src 'none'", $csp);
+        $this->assertStringContainsString("frame-ancestors 'none'", $csp);
+        $this->assertStringContainsString('https://cdn.plaid.com', $csp);
+        $this->assertMatchesRegularExpression("/script-src[^;]*'nonce-[A-Za-z0-9]{40}'/", $csp);
+    }
+
+    public function test_csp_can_be_disabled_entirely(): void
+    {
+        config(['security_headers.csp.enabled' => false]);
+
+        $response = $this->get($this->firmAppUrl('/login'));
+
+        $response->assertHeaderMissing('Content-Security-Policy');
+        $response->assertHeaderMissing('Content-Security-Policy-Report-Only');
+    }
+
+    public function test_csp_is_applied_uniformly_across_every_canonical_host(): void
+    {
+        foreach ([
+            $this->marketingUrl('/'),
+            $this->firmAppUrl('/login'),
+            $this->clientPortalUrl('/login'),
+            $this->adminUrl('/login'),
+            $this->myAttorneyUrl('/'),
+        ] as $url) {
+            $response = $this->get($url);
+
+            $response->assertHeader('Content-Security-Policy-Report-Only');
+        }
+    }
 }

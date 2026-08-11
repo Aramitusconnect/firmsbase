@@ -159,6 +159,17 @@ use Tests\TestCase;
  * (e.g. re-run this file's own tests) — this update reflects the file
  * set present in the shared worktree at the time this pass's own
  * verification ran, not a guess.
+ *
+ * POST-MISSION-1B-EXTREME-SECURITY-HARDENING UPDATE: a ninth cascade —
+ * WebAuthn/passkey infrastructure and its Actions (Platform Admin
+ * only), the reusable StepUpAuthentication helper (guard-agnostic,
+ * used by WebAuthn's own DisableWebAuthnCredentialAction and by future
+ * protected operations across all three panels — deliberately not
+ * under app/Filament/Firm since it isn't Firm-specific),
+ * ThrottlesLoginsPerAccount, and per-panel Platform Admin/Client
+ * Portal Login/RequestPasswordReset/ResetPassword subclasses added to
+ * close a shared-rate-limit-bucket finding. See
+ * $mission1bExtremeSecurityHardeningAllowedRelativeFiles below.
  */
 final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
 {
@@ -713,7 +724,29 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'DeactivateMatterTypeAction.php',
         ];
 
-        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles);
+        // Mission 1B (Extreme Security Hardening) — WebAuthn/passkey
+        // infrastructure for Platform Admin, the reusable step-up-
+        // authentication helper (guard-agnostic, not Firm-panel-
+        // specific — lives at app/Filament/Support, not under Firm),
+        // and per-panel Login/RequestPasswordReset/ResetPassword
+        // subclasses added to close a shared rate-limit-bucket finding
+        // (see this mission's own commits). None of these reference
+        // the Integration domain; the sweeps above independently
+        // re-confirm that on every run.
+        $mission1bExtremeSecurityHardeningAllowedRelativeFiles = [
+            'Auth'.DIRECTORY_SEPARATOR.'Concerns'.DIRECTORY_SEPARATOR.'ThrottlesLoginsPerAccount.php',
+            'Auth'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'PlatformAdminRequestPasswordReset.php',
+            'Auth'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'PlatformAdminResetPassword.php',
+            'MultiFactor'.DIRECTORY_SEPARATOR.'WebAuthn'.DIRECTORY_SEPARATOR.'WebAuthnAuthentication.php',
+            'MultiFactor'.DIRECTORY_SEPARATOR.'WebAuthn'.DIRECTORY_SEPARATOR.'Actions'.DIRECTORY_SEPARATOR.'RegisterWebAuthnCredentialAction.php',
+            'MultiFactor'.DIRECTORY_SEPARATOR.'WebAuthn'.DIRECTORY_SEPARATOR.'Actions'.DIRECTORY_SEPARATOR.'DisableWebAuthnCredentialAction.php',
+            'Support'.DIRECTORY_SEPARATOR.'StepUp'.DIRECTORY_SEPARATOR.'StepUpAuthentication.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'Auth'.DIRECTORY_SEPARATOR.'Login.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'Auth'.DIRECTORY_SEPARATOR.'RequestPasswordReset.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'Auth'.DIRECTORY_SEPARATOR.'ResetPassword.php',
+        ];
+
+        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles, $mission1bExtremeSecurityHardeningAllowedRelativeFiles);
 
         $unauthorizedNonFirmFilamentFiles = [];
 
