@@ -45,12 +45,23 @@ class MarketplaceRankingService
 
     private const RECENTLY_VERIFIED_WITHIN_DAYS = 90;
 
+    public function __construct(
+        private readonly MarketplaceBadgeService $badges = new MarketplaceBadgeService,
+    ) {}
+
     /**
      * @param  Collection<int, DirectoryFirm>  $firms
      * @return array<int, SearchResultView>
      */
     public function rank(Collection $firms, SearchCriteria $criteria): array
     {
+        // Checkpoint 14 (performance hardening): one batched
+        // verification query for the whole candidate set, computed
+        // once here — never per-candidate inside SearchResultView
+        // itself. See MarketplaceBadgeService::badgesForMany()'s own
+        // docblock for the N+1 this replaces.
+        $badgesByFirmId = $this->badges->badgesForMany($firms);
+
         $scored = $firms->map(function (DirectoryFirm $firm) use ($criteria) {
             $explanation = $this->explain($firm, $criteria);
 
@@ -64,7 +75,7 @@ class MarketplaceRankingService
         })->values();
 
         return $sorted
-            ->map(fn (array $entry) => SearchResultView::fromModel($entry['firm'], $entry['explanation']))
+            ->map(fn (array $entry) => SearchResultView::fromModel($entry['firm'], $entry['explanation'], $badgesByFirmId[$entry['firm']->id] ?? []))
             ->all();
     }
 

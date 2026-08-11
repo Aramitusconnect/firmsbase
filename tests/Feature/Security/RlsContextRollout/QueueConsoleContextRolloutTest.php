@@ -263,6 +263,16 @@ class QueueConsoleContextRolloutTest extends TestCase
             // forbids any Console Command from referencing
             // PaymentPlanInstallmentService.
             'SweepDocumentRequestRemindersCommand.php',
+            // Mission 2 (MyAttorney Marketplace Core), checkpoint 13
+            // added PruneMarketplaceAnalyticsEventsCommand
+            // (marketplace:analytics:prune) — reviewed and safe: it
+            // deletes only from directory_marketplace_analytics_events,
+            // a platform-Global, no-RLS, no-firm_id table (see that
+            // table's own migration docblock) — no tenant table is ever
+            // touched, no per-firm iteration is needed, no raw SQL, no
+            // BYPASSRLS, no superuser role, no set_config manipulation
+            // of any RLS-relevant session variable.
+            'PruneMarketplaceAnalyticsEventsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

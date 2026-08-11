@@ -24,8 +24,15 @@
             <meta property="og:url" content="{{ $og['url'] }}">
         @endisset
 
+        {{-- Mission 2 checkpoint 14 (security hardening): JSON_HEX_TAG
+             (plus the other JSON_HEX_* flags) \u-escapes < and >
+             regardless of slash handling — the correct, standard way
+             to safely embed untrusted data inside a <script> block.
+             A firm-controlled description/biography (CSV-imported,
+             untrusted) containing a literal "</script>" sequence must
+             never be able to break out of this tag. --}}
         @isset($structuredData)
-            <script type="application/ld+json">{!! json_encode($structuredData, JSON_UNESCAPED_SLASHES) !!}</script>
+            <script type="application/ld+json">{!! json_encode($structuredData, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) !!}</script>
         @endisset
 
         @if (file_exists(public_path('build/manifest.json')) || file_exists(public_path('hot')))

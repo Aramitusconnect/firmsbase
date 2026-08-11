@@ -32,9 +32,25 @@ use Illuminate\Support\Str;
  * exists in the schema but is not yet consulted here) are deliberately
  * deferred — disclosed, not silently missing — rather than building a
  * fuzzy-matching layer speculatively ahead of real search-quality data.
+ *
+ * Mission 2 checkpoint 14 (security/performance hardening):
+ * candidates() previously had no upper bound at all — a broad filter
+ * (or no filter beyond a single dimension, e.g. `?state=MI`) pulled
+ * every matching Published firm, plus three eager-loaded relations
+ * each, into PHP memory on every request, with no cap. MAX_CANDIDATES
+ * enforces a real, deterministic ceiling (ordered by id before the
+ * limit, so two identical requests always see the same capped set —
+ * section 38's own determinism requirement). Disclosed V1 trade-off:
+ * a query matching more than MAX_CANDIDATES firms will not rank the
+ * full universe — accepted for the same "Michigan-only, bounded row
+ * count" reason this class's own docblock already gives for not
+ * building an external search cluster; revisit this ceiling (or push
+ * scoring into SQL) if the directory's real scale ever approaches it.
  */
 class MarketplaceSearchService
 {
+    private const MAX_CANDIDATES = 1000;
+
     public function candidates(SearchCriteria $criteria): Collection
     {
         $query = DirectoryFirm::query()
@@ -94,6 +110,8 @@ class MarketplaceSearchService
         // distinct() — a firm matching via multiple attorney/office/
         // practice-area relations must never be returned twice
         // (section 85 AH: "duplicate result prevented").
-        return $query->distinct()->get();
+        // orderBy('id') before limit() — a deterministic cap, not an
+        // arbitrary truncation (see this class's own docblock).
+        return $query->distinct()->orderBy('directory_firms.id')->limit(self::MAX_CANDIDATES)->get();
     }
 }

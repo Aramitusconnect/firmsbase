@@ -8,6 +8,7 @@ use App\Marketplace\Enums\MarketplaceBadge;
 use App\Marketplace\Enums\VerificationDimension;
 use App\Marketplace\Models\DirectoryAttorney;
 use App\Marketplace\Models\DirectoryFirm;
+use Illuminate\Support\Collection;
 
 /**
  * MarketplaceBadgeService — Mission 2 (MyAttorney Marketplace Core),
@@ -45,6 +46,45 @@ class MarketplaceBadgeService
         }
 
         return $badges;
+    }
+
+    /**
+     * Mission 2 checkpoint 14 (performance hardening). Batch
+     * counterpart to badgesFor() — one verification query for the
+     * whole collection instead of one per firm. Exists specifically
+     * for MarketplaceRankingService::rank(): building a search-result
+     * list previously called badgesFor() (and therefore
+     * MarketplaceVerificationService::isVerified()) once per
+     * candidate, each issuing its own directory_verifications query —
+     * a real N+1 on the one path (broad search results) where N can
+     * be large. Single-record callers (profile pages, the Admin
+     * DirectoryFirmResource view, the Firm self-service profile page)
+     * are unaffected — badgesFor() itself is untouched.
+     *
+     * @param  Collection<int, DirectoryFirm>  $firms
+     * @return array<int, array<int, MarketplaceBadge>> keyed by firm id
+     */
+    public function badgesForMany(Collection $firms): array
+    {
+        $verifiedIds = $this->verification->verifiedIdsAmong(
+            DirectoryFirm::class,
+            $firms->pluck('id')->all(),
+            VerificationDimension::FirmAuthority,
+        );
+
+        return $firms->mapWithKeys(function (DirectoryFirm $firm) use ($verifiedIds) {
+            $badges = [$firm->is_claimed ? MarketplaceBadge::ClaimedProfile : MarketplaceBadge::PublicListing];
+
+            if ($firm->is_marketplace_member) {
+                $badges[] = MarketplaceBadge::FirmsVaultMember;
+            }
+
+            if (isset($verifiedIds[$firm->id])) {
+                $badges[] = MarketplaceBadge::FirmAuthorityVerified;
+            }
+
+            return [$firm->id => $badges];
+        })->all();
     }
 
     /**

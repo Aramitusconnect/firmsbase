@@ -217,9 +217,25 @@ Route::domain($hosts->clientPortalHost())
 | PUBLICLY = NO boundary).
 */
 Route::domain($hosts->myAttorneyHost())->group(function () {
-    Route::get('/', [MyAttorneyHomeController::class, 'index'])->name('myattorney.home');
-    Route::get('/firms/{slug}', [FirmProfileController::class, 'show'])->name('myattorney.firms.show');
-    Route::get('/attorneys/{slug}', [AttorneyProfileController::class, 'show'])->name('myattorney.attorneys.show');
+    // Mission 2 checkpoint 14 (security hardening): every route below
+    // was completely unthrottled before this checkpoint — an
+    // unauthenticated, DB-querying surface (search/candidates has no
+    // row cap of its own either — see MarketplaceSearchService's
+    // MAX_CANDIDATES — and every profile view fans out into several
+    // more queries) is a real scraping/compute-amplification target
+    // without one. `throttle:` keys by IP here (no session cookie on
+    // these routes — section 63/78 — so IP is the only signal
+    // available, matching how every other public/unauthenticated
+    // throttled route in this codebase already works). Limits are
+    // deliberately generous (real search/browsing traffic, and
+    // legitimate crawlers once indexing is enabled — see
+    // AddSearchIndexingHeader — must not be rate-limited into a bad
+    // experience) rather than tight abuse thresholds.
+    Route::middleware('throttle:60,1')->group(function () {
+        Route::get('/', [MyAttorneyHomeController::class, 'index'])->name('myattorney.home');
+        Route::get('/firms/{slug}', [FirmProfileController::class, 'show'])->name('myattorney.firms.show');
+        Route::get('/attorneys/{slug}', [AttorneyProfileController::class, 'show'])->name('myattorney.attorneys.show');
+    });
 
     // The global robots.txt route above (no domain constraint) loses
     // to this host's own catch-all below when both are candidate
@@ -227,12 +243,14 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
     // route ahead of a domain-less one regardless of file order. An
     // explicit route here, same controller, wins the same way the
     // sitemap routes below already do.
-    Route::get('/robots.txt', RobotsTxtController::class);
+    Route::middleware('throttle:120,1')->group(function () {
+        Route::get('/robots.txt', RobotsTxtController::class);
 
-    Route::get('/sitemap.xml', [SitemapController::class, 'index'])->name('myattorney.sitemap.index');
-    Route::get('/sitemap-pages.xml', [SitemapController::class, 'pages'])->name('myattorney.sitemap.pages');
-    Route::get('/sitemap-firms-{page}.xml', [SitemapController::class, 'firms'])->where('page', '[0-9]+')->name('myattorney.sitemap.firms');
-    Route::get('/sitemap-attorneys-{page}.xml', [SitemapController::class, 'attorneys'])->where('page', '[0-9]+')->name('myattorney.sitemap.attorneys');
+        Route::get('/sitemap.xml', [SitemapController::class, 'index'])->name('myattorney.sitemap.index');
+        Route::get('/sitemap-pages.xml', [SitemapController::class, 'pages'])->name('myattorney.sitemap.pages');
+        Route::get('/sitemap-firms-{page}.xml', [SitemapController::class, 'firms'])->where('page', '[0-9]+')->name('myattorney.sitemap.firms');
+        Route::get('/sitemap-attorneys-{page}.xml', [SitemapController::class, 'attorneys'])->where('page', '[0-9]+')->name('myattorney.sitemap.attorneys');
+    });
 
     Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:20,1'])->group(function () {
         Route::get('/firms/{slug}/report-correction', [CorrectionRequestController::class, 'create'])->name('myattorney.firms.report-correction.create');

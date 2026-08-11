@@ -123,6 +123,34 @@ class MarketplaceVerificationService
         return $this->statusFor($verifiable, $dimension)?->isCurrentlyVerified() ?? false;
     }
 
+    /**
+     * Mission 2 checkpoint 14 (performance hardening). Batch
+     * counterpart to isVerified() — one query for N subjects instead
+     * of N queries, for exactly the case isVerified() itself must
+     * never be used in: scoring/rendering a whole search-result list.
+     * See MarketplaceBadgeService::badgesForMany()'s own docblock for
+     * the N+1 this closes.
+     *
+     * @param  array<int, int>  $verifiableIds
+     * @return array<int, true> verifiable_id => true, for currently-verified subjects only
+     */
+    public function verifiedIdsAmong(string $verifiableType, array $verifiableIds, VerificationDimension $dimension): array
+    {
+        if ($verifiableIds === []) {
+            return [];
+        }
+
+        return DirectoryVerification::query()
+            ->where('verifiable_type', $verifiableType)
+            ->whereIn('verifiable_id', $verifiableIds)
+            ->where('dimension', $dimension->value)
+            ->where('state', VerificationState::Verified->value)
+            ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
+            ->pluck('verifiable_id')
+            ->mapWithKeys(fn (int $id) => [$id => true])
+            ->all();
+    }
+
     private function audit(Model $verifiable, PlatformAdmin $admin, string $eventType, DirectoryVerification $verification): void
     {
         $metadata = [

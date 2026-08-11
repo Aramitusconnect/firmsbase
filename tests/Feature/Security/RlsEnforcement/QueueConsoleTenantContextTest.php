@@ -222,6 +222,12 @@ class QueueConsoleTenantContextTest extends TestCase
             // note (including why SweepPaymentPlanInstallmentsCommand
             // was deliberately NOT added — Phase 14b deferral).
             'SweepDocumentRequestRemindersCommand.php',
+            // Mission 2 (MyAttorney Marketplace Core), checkpoint 13
+            // added PruneMarketplaceAnalyticsEventsCommand — reviewed
+            // and safe: see QueueConsoleContextRolloutTest's own
+            // identical review note (platform-Global, no-RLS,
+            // no-firm_id table; no tenant table ever touched).
+            'PruneMarketplaceAnalyticsEventsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

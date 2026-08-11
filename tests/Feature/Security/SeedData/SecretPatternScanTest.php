@@ -262,6 +262,14 @@ class SecretPatternScanTest extends TestCase
             // added — see QueueConsoleContextRolloutTest's own note on
             // the Phase 14b payment-plan-scheduling deferral.
             'SweepDocumentRequestRemindersCommand.php',
+            // Mission 2 (MyAttorney Marketplace Core), checkpoint 13
+            // added PruneMarketplaceAnalyticsEventsCommand — reviewed
+            // and safe: creates no demo/placeholder/synthetic data at
+            // all — it only DELETEs rows past a configured retention
+            // window from directory_marketplace_analytics_events, a
+            // platform-Global, no-firm_id table with no PII of any
+            // kind (see that table's own migration docblock).
+            'PruneMarketplaceAnalyticsEventsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

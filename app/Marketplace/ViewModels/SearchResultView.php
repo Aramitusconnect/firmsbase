@@ -6,7 +6,6 @@ namespace App\Marketplace\ViewModels;
 
 use App\Marketplace\Enums\MarketplaceBadge;
 use App\Marketplace\Models\DirectoryFirm;
-use App\Marketplace\Services\MarketplaceBadgeService;
 
 /**
  * SearchResultView — Mission 2 (MyAttorney Marketplace Core), section
@@ -15,6 +14,13 @@ use App\Marketplace\Services\MarketplaceBadgeService;
  * description). `Request Consultation`/`Secure Intake` actions are
  * NOT modeled here — section 40's own instruction: those are Mission 3
  * additions, never exposed prematurely.
+ *
+ * Mission 2 checkpoint 14: badges are now computed by the caller
+ * (MarketplaceRankingService::rank(), via
+ * MarketplaceBadgeService::badgesForMany() — one batched query for
+ * the whole result set) and passed in, rather than this method
+ * resolving MarketplaceBadgeService itself and querying per firm —
+ * closes an N+1 on the search-results path.
  */
 final readonly class SearchResultView
 {
@@ -37,7 +43,10 @@ final readonly class SearchResultView
         public RankingExplanation $explanation,
     ) {}
 
-    public static function fromModel(DirectoryFirm $firm, RankingExplanation $explanation): self
+    /**
+     * @param  array<int, MarketplaceBadge>  $badges
+     */
+    public static function fromModel(DirectoryFirm $firm, RankingExplanation $explanation, array $badges): self
     {
         $primaryOffice = $firm->offices->firstWhere('is_primary', true) ?? $firm->offices->first();
 
@@ -51,7 +60,7 @@ final readonly class SearchResultView
             practiceAreaNames: $firm->practiceAreas->pluck('name')->all(),
             languageNames: $firm->languages->pluck('name')->all(),
             acceptingInquiries: $firm->accepting_inquiries,
-            badges: app(MarketplaceBadgeService::class)->badgesFor($firm),
+            badges: $badges,
             explanation: $explanation,
         );
     }
