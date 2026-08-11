@@ -414,7 +414,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Narrowly updated AGAIN by Mission 2 checkpoint 8 —
         // directory_correction_requests and directory_profile_versions,
         // both Global, added to EXEMPT_TABLES (51 -> 53).
-        $this->assertCount(53, $this->service->exemptTables());
+        // Narrowly updated AGAIN by Mission 2 checkpoint 9 —
+        // directory_import_batches and directory_import_rows, both
+        // Global, added to EXEMPT_TABLES (53 -> 55).
+        $this->assertCount(55, $this->service->exemptTables());
         // Native accounting journal (Phase A) added two more DirectTenant
         // tables (accounting_journal_entries, accounting_postings) — 147 -> 149.
         // Payment allocation splitting (Phase F) added one more DirectTenant
@@ -899,7 +902,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Narrowly updated AGAIN by Mission 2 checkpoint 8 —
         // directory_correction_requests and directory_profile_versions,
         // both Global — 75 -> 77.
-        $this->assertSame(77, $summary[TenantOwnershipClassification::Global->value]);
+        // Narrowly updated AGAIN by Mission 2 checkpoint 9 —
+        // directory_import_batches and directory_import_rows, both
+        // Global — 77 -> 79.
+        $this->assertSame(79, $summary[TenantOwnershipClassification::Global->value]);
         $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
         // 9 -> 10: client_portal_users' corrected System classification
         // (see the InheritedTenant/System comment above this method's
@@ -1013,7 +1019,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Narrowly updated AGAIN by Mission 2 checkpoint 8 —
         // directory_correction_requests and directory_profile_versions
         // (two new Global tables) — 296 -> 298.
-        $this->assertSame(298, array_sum($summary));
+        // Narrowly updated AGAIN by Mission 2 checkpoint 9 —
+        // directory_import_batches and directory_import_rows (two new
+        // Global tables) — 298 -> 300.
+        $this->assertSame(300, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

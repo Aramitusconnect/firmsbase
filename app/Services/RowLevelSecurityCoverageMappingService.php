@@ -974,6 +974,13 @@ class RowLevelSecurityCoverageMappingService
         // directory_profile_versions. Neither has a real firm_id
         // column.
         'directory_correction_requests', 'directory_profile_versions',
+        // Mission 2 checkpoint 9 additions — directory_import_batches
+        // and directory_import_rows. Deliberately a PARALLEL, purpose-
+        // built import pipeline, not a reuse of the existing FORCE-RLS,
+        // Firm-scoped import_batches/import_rows tables — see
+        // directory_import_batches' own migration docblock for why.
+        // Neither has a real firm_id column.
+        'directory_import_batches', 'directory_import_rows',
     ];
 
     /**
@@ -2039,14 +2046,26 @@ class RowLevelSecurityCoverageMappingService
             'notes' => 'Lightweight public-profile versioning (Mission 2 checkpoint 8, section 25). No firm_id column. See '
                 .'database/migrations/2026_11_10_100016_create_directory_profile_versions_table.php.',
         ],
+        'directory_import_batches' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'CSV import batch history (Mission 2 checkpoint 9), a deliberate parallel to the Firm-scoped import_batches table. No firm_id column. See '
+                .'database/migrations/2026_11_10_100017_create_directory_import_batches_table.php.',
+        ],
+        'directory_import_rows' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'CSV import staged rows (Mission 2 checkpoint 9). No firm_id column. See '
+                .'database/migrations/2026_11_10_100018_create_directory_import_rows_table.php.',
+        ],
     ];
 
     /**
      * Reason, expected readers, and authorized writers for every one
-     * of the (now 53, after Mission 2's thirteen additions across
-     * checkpoints 1, 2, 6, 7, and 8 — this count was already stale at
-     * 44 before an earlier edit; verified programmatically, not copied
-     * forward) EXEMPT_TABLES entries. Readers/writers are expressed as human-readable
+     * of the (now 55, after Mission 2's fifteen additions across
+     * checkpoints 1, 2, 6, 7, 8, and 9 — this count was already stale
+     * at 44 before an earlier edit; verified programmatically, not
+     * copied forward) EXEMPT_TABLES entries. Readers/writers are expressed as human-readable
      * role/class descriptions, not a runtime-enforced allowlist — this
      * is documentation, mirroring how the rest of this registry is
      * declarative-only.
@@ -2632,6 +2651,16 @@ class RowLevelSecurityCoverageMappingService
             'reason' => 'Lightweight public-profile versioning (Mission 2 checkpoint 8, section 25) — no firm_id column, append-only history of directory_firms content changes.',
             'expected_readers' => ['platform admins (marketplace listing history review)'],
             'authorized_writers' => ['MarketplaceProfileVersionService (the sole write path — record())'],
+        ],
+        'directory_import_batches' => [
+            'reason' => 'CSV import batch history (Mission 2 checkpoint 9) — deliberately a parallel table to the Firm-scoped import_batches, since marketplace imports create/update platform-Global directory_firms rows with no real tenant owner. No firm_id column.',
+            'expected_readers' => ['platform admins (marketplace import review)'],
+            'authorized_writers' => ['MarketplaceCsvIngestionService', 'MarketplaceImportApplyService'],
+        ],
+        'directory_import_rows' => [
+            'reason' => 'CSV import staged rows (Mission 2 checkpoint 9) — same parallel-table reasoning as directory_import_batches. No firm_id column.',
+            'expected_readers' => ['platform admins (marketplace import review)'],
+            'authorized_writers' => ['MarketplaceCsvIngestionService', 'MarketplaceImportValidationService', 'MarketplaceImportDuplicateDetectionService', 'MarketplaceImportApplyService'],
         ],
     ];
 

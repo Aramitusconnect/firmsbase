@@ -1,0 +1,85 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Marketplace\Services;
+
+use App\Marketplace\Enums\DirectoryImportBatchStatus;
+use App\Marketplace\Enums\DirectoryImportRowStatus;
+use App\Marketplace\Models\DirectoryFirm;
+use App\Marketplace\Models\DirectoryImportBatch;
+use App\Marketplace\Models\DirectoryImportRow;
+
+/**
+ * MarketplaceImportDuplicateDetectionService — Mission 2 (MyAttorney
+ * Marketplace Core), section 52. Multi-signal matching against every
+ * EXISTING directory_firms row — normalized name, normalized phone,
+ * and website domain, exactly the signal set section 52 names (office/
+ * attorney-relationship/license-identifier signals are checkpoint 9's
+ * disclosed, deferred scope — this checkpoint covers Firm-level CSV
+ * import only; office/attorney bulk import is a future addition, not a
+ * re-architecture). A match NEVER auto-merges — the row is marked
+ * Duplicate with the candidate recorded, and stays that way until an
+ * admin explicitly decides via MarketplaceImportApplyService.
+ */
+class MarketplaceImportDuplicateDetectionService
+{
+    public function detectBatch(DirectoryImportBatch $batch): DirectoryImportBatch
+    {
+        $duplicateCount = 0;
+
+        foreach ($batch->rows()->where('status', DirectoryImportRowStatus::Valid->value)->get() as $row) {
+            if ($this->detectRow($row) !== null) {
+                $duplicateCount++;
+            }
+        }
+
+        $batch->update([
+            'status' => DirectoryImportBatchStatus::Previewed,
+            'duplicate_rows' => $duplicateCount,
+        ]);
+
+        return $batch->fresh();
+    }
+
+    public function detectRow(DirectoryImportRow $row): ?DirectoryFirm
+    {
+        $data = $row->mapped_data ?? [];
+
+        $match = null;
+
+        if (! empty($data['name_normalized'])) {
+            $match = DirectoryFirm::query()->where('name_normalized', $data['name_normalized'])->first();
+        }
+
+        if ($match === null && ! empty($data['phone'])) {
+            $match = DirectoryFirm::query()->where('phone', $data['phone'])->first();
+        }
+
+        // Disclosed limitation: no normalized website-domain column
+        // exists to index against, so this signal loads every website-
+        // having row and compares in PHP — acceptable for V1's
+        // Michigan-scoped catalog size (a SuperAdmin-run, occasional
+        // batch import, not a hot path), not a design meant to scale
+        // to a large multi-state catalog unchanged.
+        if ($match === null && ! empty($data['website'])) {
+            $domain = $this->domainOf($data['website']);
+            if ($domain !== null) {
+                $match = DirectoryFirm::query()->whereNotNull('website')->get()->first(fn (DirectoryFirm $firm) => $this->domainOf($firm->website) === $domain);
+            }
+        }
+
+        if ($match !== null) {
+            $row->update(['status' => DirectoryImportRowStatus::Duplicate, 'duplicate_of_directory_firm_id' => $match->id]);
+        }
+
+        return $match;
+    }
+
+    private function domainOf(string $url): ?string
+    {
+        $host = parse_url($url, PHP_URL_HOST) ?: parse_url('https://'.$url, PHP_URL_HOST);
+
+        return $host !== null ? strtolower((string) preg_replace('/^www\./', '', $host)) : null;
+    }
+}
