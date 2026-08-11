@@ -230,6 +230,15 @@ return Application::configure(basePath: dirname(__DIR__))
         // simply stay dormant until PaymentPlanInstallmentMissed is
         // ever actually emitted, exactly as this deferral already
         // implies for every other consumer of that event.
+
+        // Mission 2 (MyAttorney Marketplace Core), checkpoint 13. A
+        // plain, non-tenant, non-queued Artisan command — same shape
+        // as SweepIntegrationRetentionCommand's own direct-delete path
+        // for a platform-owned, no-RLS table. Daily, matching every
+        // other day-granularity retention sweep's own cadence.
+        $schedule->command('marketplace:analytics:prune')
+            ->daily()
+            ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware): void {
         // Trust the AWS ALB in front of this container for exactly the

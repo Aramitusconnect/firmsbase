@@ -7,6 +7,7 @@ namespace App\Http\Controllers\MyAttorney;
 use App\Http\Controllers\Controller;
 use App\Marketplace\Enums\DirectoryFirmProfileLevel;
 use App\Marketplace\Models\DirectoryFirm;
+use App\Marketplace\Services\MarketplaceAnalyticsService;
 use App\Marketplace\Services\MarketplaceStructuredDataService;
 use App\Marketplace\ViewModels\PublicFirmProfile;
 use App\Services\CanonicalUrlService;
@@ -28,13 +29,15 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class FirmProfileController extends Controller
 {
-    public function show(string $slug, CanonicalUrlService $hosts, MarketplaceStructuredDataService $structuredData): View
+    public function show(string $slug, CanonicalUrlService $hosts, MarketplaceStructuredDataService $structuredData, MarketplaceAnalyticsService $analytics): View
     {
         $firm = DirectoryFirm::query()->where('slug', $slug)->first();
 
         if ($firm === null || ! $firm->isPubliclyVisible()) {
             throw new NotFoundHttpException;
         }
+
+        $analytics->recordFirmProfileView($firm);
 
         $profile = PublicFirmProfile::fromModel($firm);
         $canonicalUrl = $hosts->myAttorneyFirmUrl($profile->slug);

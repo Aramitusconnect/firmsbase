@@ -468,6 +468,26 @@ class PlatformStaffAccessPolicyService
         PlatformRoleCode::PlatformAdmin,
     ];
 
+    /**
+     * Mission 2 (MyAttorney Marketplace Core) checkpoint 13 addition.
+     * Deliberately broader than MARKETPLACE_GOVERNANCE_ROLES — this
+     * gates read-only AGGREGATE reporting (view/search counts, no
+     * per-row visitor data exists to leak in the first place — see
+     * MarketplaceAnalyticsReportingService's own docblock), not
+     * mutating a listing/claim/import, so the same "no read-only-only
+     * audience" reasoning the governance gate uses does not apply
+     * here. SalesManager included because marketplace demand signal
+     * (which practice areas/cities get searched) is a genuine sales-
+     * relevant lead-gen metric; ReadOnlyAuditor included because rule
+     * 9 only forbids MUTATION, and there is nothing to mutate here.
+     */
+    private const MARKETPLACE_ANALYTICS_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+        PlatformRoleCode::SalesManager,
+        PlatformRoleCode::ReadOnlyAuditor,
+    ];
+
     public function __construct(
         private readonly PlatformRoleService $platformRoleService,
     ) {}
@@ -767,6 +787,11 @@ class PlatformStaffAccessPolicyService
     public function canManageMarketplaceGovernance(PlatformAdmin $admin): PlatformStaffAccessDecision
     {
         return $this->decideAgainst($admin, self::MARKETPLACE_GOVERNANCE_ROLES, 'marketplace governance');
+    }
+
+    public function canViewMarketplaceAnalytics(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::MARKETPLACE_ANALYTICS_ROLES, 'marketplace analytics');
     }
 
     /**

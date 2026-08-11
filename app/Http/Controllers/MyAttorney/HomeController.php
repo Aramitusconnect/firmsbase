@@ -6,6 +6,7 @@ namespace App\Http\Controllers\MyAttorney;
 
 use App\Http\Controllers\Controller;
 use App\Marketplace\Enums\ConsultationMode;
+use App\Marketplace\Services\MarketplaceAnalyticsService;
 use App\Marketplace\Services\MarketplaceRankingService;
 use App\Marketplace\Services\MarketplaceSearchService;
 use App\Marketplace\ViewModels\SearchCriteria;
@@ -27,13 +28,22 @@ class HomeController extends Controller
 {
     private const RESULTS_PER_PAGE = 20;
 
-    public function index(Request $request, MarketplaceSearchService $search, MarketplaceRankingService $ranking): View
+    public function index(Request $request, MarketplaceSearchService $search, MarketplaceRankingService $ranking, MarketplaceAnalyticsService $analytics): View
     {
         $hasQuery = $request->query->count() > 0;
         $criteria = SearchCriteria::fromArray($request->query());
         $allResults = $hasQuery ? $ranking->rank($search->candidates($criteria), $criteria) : [];
 
         $page = max(1, (int) $request->query('page', 1));
+
+        // Only the first page of a real search is recorded — paging
+        // through the same search's results is the same search, not a
+        // new one, and recording every page click would inflate the
+        // aggregate search-volume signal this exists to measure.
+        if ($hasQuery && $page === 1) {
+            $analytics->recordSearchPerformed($criteria);
+        }
+
         $results = new LengthAwarePaginator(
             array_slice($allResults, ($page - 1) * self::RESULTS_PER_PAGE, self::RESULTS_PER_PAGE),
             count($allResults),

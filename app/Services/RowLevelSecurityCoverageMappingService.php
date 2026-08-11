@@ -981,6 +981,12 @@ class RowLevelSecurityCoverageMappingService
         // directory_import_batches' own migration docblock for why.
         // Neither has a real firm_id column.
         'directory_import_batches', 'directory_import_rows',
+        // Mission 2 checkpoint 13 addition —
+        // directory_marketplace_analytics_events. Privacy-conscious
+        // aggregate analytics with no actor/visitor identifier of any
+        // kind (see that table's own migration docblock) — no firm_id
+        // column, not tenant-owned.
+        'directory_marketplace_analytics_events',
     ];
 
     /**
@@ -2058,14 +2064,20 @@ class RowLevelSecurityCoverageMappingService
             'notes' => 'CSV import staged rows (Mission 2 checkpoint 9). No firm_id column. See '
                 .'database/migrations/2026_11_10_100018_create_directory_import_rows_table.php.',
         ],
+        'directory_marketplace_analytics_events' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Privacy-conscious aggregate marketplace analytics (Mission 2 checkpoint 13) — no actor/visitor identifier, no firm_id column. See '
+                .'database/migrations/2026_11_10_100019_create_directory_marketplace_analytics_events_table.php.',
+        ],
     ];
 
     /**
      * Reason, expected readers, and authorized writers for every one
-     * of the (now 55, after Mission 2's fifteen additions across
-     * checkpoints 1, 2, 6, 7, 8, and 9 — this count was already stale
-     * at 44 before an earlier edit; verified programmatically, not
-     * copied forward) EXEMPT_TABLES entries. Readers/writers are expressed as human-readable
+     * of the (now 56, after Mission 2's sixteen additions across
+     * checkpoints 1, 2, 6, 7, 8, 9, and 13 — this count was already
+     * stale at 44 before an earlier edit; verified programmatically,
+     * not copied forward) EXEMPT_TABLES entries. Readers/writers are expressed as human-readable
      * role/class descriptions, not a runtime-enforced allowlist — this
      * is documentation, mirroring how the rest of this registry is
      * declarative-only.
@@ -2661,6 +2673,11 @@ class RowLevelSecurityCoverageMappingService
             'reason' => 'CSV import staged rows (Mission 2 checkpoint 9) — same parallel-table reasoning as directory_import_batches. No firm_id column.',
             'expected_readers' => ['platform admins (marketplace import review)'],
             'authorized_writers' => ['MarketplaceCsvIngestionService', 'MarketplaceImportValidationService', 'MarketplaceImportDuplicateDetectionService', 'MarketplaceImportApplyService'],
+        ],
+        'directory_marketplace_analytics_events' => [
+            'reason' => 'Privacy-conscious aggregate marketplace analytics (Mission 2 checkpoint 13) — no firm_id column, no actor/visitor identifier of any kind by design (no IP, no session/cookie id).',
+            'expected_readers' => ['platform admins (marketplace analytics reporting)', 'MarketplaceAnalyticsReportingService'],
+            'authorized_writers' => ['MarketplaceAnalyticsService (the sole write path — recordFirmProfileView/recordAttorneyProfileView/recordSearchPerformed)'],
         ],
     ];
 

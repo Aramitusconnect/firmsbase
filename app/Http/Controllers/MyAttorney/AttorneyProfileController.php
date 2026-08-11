@@ -6,6 +6,7 @@ namespace App\Http\Controllers\MyAttorney;
 
 use App\Http\Controllers\Controller;
 use App\Marketplace\Models\DirectoryAttorney;
+use App\Marketplace\Services\MarketplaceAnalyticsService;
 use App\Marketplace\Services\MarketplaceStructuredDataService;
 use App\Marketplace\ViewModels\PublicAttorneyProfile;
 use App\Services\CanonicalUrlService;
@@ -21,13 +22,15 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class AttorneyProfileController extends Controller
 {
-    public function show(string $slug, CanonicalUrlService $hosts, MarketplaceStructuredDataService $structuredData): View
+    public function show(string $slug, CanonicalUrlService $hosts, MarketplaceStructuredDataService $structuredData, MarketplaceAnalyticsService $analytics): View
     {
         $attorney = DirectoryAttorney::query()->where('slug', $slug)->first();
 
         if ($attorney === null || ! $attorney->isPubliclyVisible()) {
             throw new NotFoundHttpException;
         }
+
+        $analytics->recordAttorneyProfileView($attorney);
 
         $profile = PublicAttorneyProfile::fromModel($attorney);
         $canonicalUrl = $hosts->myAttorneyAttorneyUrl($profile->slug);
