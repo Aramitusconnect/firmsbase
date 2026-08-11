@@ -13,6 +13,7 @@ use App\Services\Stripe\PaymentGatewaySimulationPolicyService;
 use App\Services\Stripe\StripeGateway;
 use App\Services\Stripe\UnavailablePaymentGateway;
 use App\Services\TenantContextService;
+use App\Services\VirusScan\ClamAvVirusScanner;
 use App\Services\VirusScan\FakeVirusScanner;
 use App\Services\VirusScan\VirusScanner;
 use Aws\Sqs\SqsClient;
@@ -131,6 +132,18 @@ class AppServiceProvider extends ServiceProvider
         // implementation remains a separate, later decision (see the final
         // report).
         $this->app->bind(VirusScanner::class, FakeVirusScanner::class);
+
+        // Mission 1C (Security Validation, Activation & Staging Proof),
+        // section 15: registers the concrete real-engine implementation
+        // so it is resolvable (`app(ClamAvVirusScanner::class)`, e.g. by
+        // ClamAvVirusScannerLocalProofTest) without touching the
+        // VirusScanner::class default above. `services.clamav.socket`
+        // is unset by default everywhere except an environment that
+        // deliberately configures it.
+        $this->app->bind(ClamAvVirusScanner::class, fn () => new ClamAvVirusScanner(
+            socket: (string) config('services.clamav.socket'),
+            timeoutSeconds: (float) config('services.clamav.timeout_seconds', 10),
+        ));
     }
 
     /**

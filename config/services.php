@@ -63,6 +63,20 @@ return [
         ],
     ],
 
+    // Mission 1C (Security Validation, Activation & Staging Proof),
+    // section 15: config for App\Services\VirusScan\ClamAvVirusScanner
+    // — read only by that class's container binding
+    // (AppServiceProvider), never by VirusScanner::class's own default
+    // binding, which stays FakeVirusScanner everywhere. `socket`
+    // accepts anything PHP's stream_socket_client() understands —
+    // `unix:///var/run/clamav/clamd.ctl` for a co-located daemon
+    // sharing a socket path/volume, or `tcp://host:3310` for a
+    // network-reachable clamd (e.g. an ECS sidecar on localhost).
+    'clamav' => [
+        'socket' => env('CLAMAV_SOCKET'),
+        'timeout_seconds' => (float) env('CLAMAV_TIMEOUT_SECONDS', 10),
+    ],
+
     // Payment-Channel Safety Hardening pass, item 1. Read only by
     // App\Services\Stripe\PaymentGatewaySimulationPolicyService — this
     // flag can NEVER enable simulation by itself; it only takes effect
