@@ -456,6 +456,18 @@ class PlatformStaffAccessPolicyService
         PlatformRoleCode::PlatformAdmin,
     ];
 
+    /**
+     * Mission 2 (MyAttorney Marketplace Core) checkpoint 11 addition.
+     * Same single-role-split shape as PRACTICE_AREA_CATALOG_MANAGEMENT_ROLES
+     * — marketplace directory governance (listings, claims,
+     * verification, corrections, imports) has no legitimate read-only-
+     * only platform-staff audience either.
+     */
+    private const MARKETPLACE_GOVERNANCE_ROLES = [
+        PlatformRoleCode::SuperAdmin,
+        PlatformRoleCode::PlatformAdmin,
+    ];
+
     public function __construct(
         private readonly PlatformRoleService $platformRoleService,
     ) {}
@@ -739,6 +751,22 @@ class PlatformStaffAccessPolicyService
     public function canManagePracticeAreaCatalog(PlatformAdmin $admin): PlatformStaffAccessDecision
     {
         return $this->decideAgainst($admin, self::PRACTICE_AREA_CATALOG_MANAGEMENT_ROLES, 'practice area catalog management');
+    }
+
+    /**
+     * Mission 2 (MyAttorney Marketplace Core) checkpoint 11. Gates
+     * every marketplace governance Admin Resource (Directory Firms,
+     * Claims, Verification, Corrections, Import Batches) — both
+     * viewing (canAccess/canViewAny) and mutating, matching
+     * canManagePracticeAreaCatalog()'s own no-read-only-split
+     * reasoning. High-risk individual actions (approve/revoke claim,
+     * verify authority/identity, change member state) are additionally
+     * step-up-gated at the Action level — this method is the resource-
+     * level gate, not a substitute for that.
+     */
+    public function canManageMarketplaceGovernance(PlatformAdmin $admin): PlatformStaffAccessDecision
+    {
+        return $this->decideAgainst($admin, self::MARKETPLACE_GOVERNANCE_ROLES, 'marketplace governance');
     }
 
     /**

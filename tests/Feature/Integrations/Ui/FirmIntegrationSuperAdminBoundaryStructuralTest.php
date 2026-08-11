@@ -176,6 +176,13 @@ use Tests\TestCase;
  * audit-trail sibling to MultiFactor/AuditedAppAuthentication.php
  * above. See $mission1cSecurityValidationActivationAllowedRelativeFiles
  * below.
+ *
+ * POST-MISSION-2-MYATTORNEY-MARKETPLACE-CORE-CHECKPOINT-11 UPDATE: an
+ * eleventh cascade — Checkpoint 11's SuperAdmin/PlatformAdmin
+ * marketplace-governance surface (4 Resources + 15 Actions, gated
+ * behind PlatformStaffAccessPolicyService::canManageMarketplaceGovernance()).
+ * None of it references the Integration domain. See
+ * $mission2MarketplaceSuperAdminControlsAllowedRelativeFiles below.
  */
 final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
 {
@@ -764,7 +771,52 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'MultiFactor'.DIRECTORY_SEPARATOR.'AuditedFirmUserAppAuthentication.php',
         ];
 
-        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles, $mission1bExtremeSecurityHardeningAllowedRelativeFiles, $mission1cSecurityValidationActivationAllowedRelativeFiles);
+        // POST-MISSION-2-MYATTORNEY-MARKETPLACE-CORE-CHECKPOINT-11
+        // UPDATE: an eleventh cascade, same reasoning again. Checkpoint
+        // 11 of the MyAttorney Marketplace Core mission adds the first
+        // Admin-panel SuperAdmin/PlatformAdmin oversight surface for the
+        // marketplace domain (`directory_firms`/`directory_claims`/
+        // `directory_correction_requests`/`directory_import_batches`) —
+        // 4 Resources (each with List+View Pages) and 15 Action
+        // classes. None of these reference the Integration domain at
+        // all (confirmed: this is the Marketplace domain, an unrelated
+        // concern) — the Integration-domain sweeps above run
+        // unconditionally against every one of these files too and
+        // would independently fail if any of them referenced it. They
+        // still live outside app/Filament/Firm and so still need an
+        // explicit allowlist entry against this file's broader "which
+        // non-Firm files are allowed to exist" sweep.
+        $mission2MarketplaceSuperAdminControlsAllowedRelativeFiles = [
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryFirmResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryFirmResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListDirectoryFirms.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryFirmResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewDirectoryFirm.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryClaimResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryClaimResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListDirectoryClaims.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryClaimResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewDirectoryClaim.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryCorrectionRequestResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryCorrectionRequestResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListDirectoryCorrectionRequests.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryCorrectionRequestResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewDirectoryCorrectionRequest.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryImportBatchResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryImportBatchResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListDirectoryImportBatches.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryImportBatchResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewDirectoryImportBatch.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'PublishDirectoryFirmAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'SuspendDirectoryFirmAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RemoveDirectoryFirmAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ActivateMarketplaceMembershipAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'DeactivateMarketplaceMembershipAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'VerifyFirmAuthorityAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RevokeFirmVerificationAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ApproveDirectoryClaimAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RejectDirectoryClaimAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RevokeDirectoryClaimAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ApproveCorrectionRequestAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RejectCorrectionRequestAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ResolveCorrectionRequestAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ConfirmImportSourceRightsAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ApplyImportBatchAction.php',
+        ];
+
+        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles, $mission1bExtremeSecurityHardeningAllowedRelativeFiles, $mission1cSecurityValidationActivationAllowedRelativeFiles, $mission2MarketplaceSuperAdminControlsAllowedRelativeFiles);
 
         $unauthorizedNonFirmFilamentFiles = [];
 

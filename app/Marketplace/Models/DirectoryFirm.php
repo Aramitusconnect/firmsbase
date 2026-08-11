@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
  * DirectoryFirm — Mission 2 (MyAttorney Marketplace Core), section 8.
@@ -91,6 +92,30 @@ class DirectoryFirm extends Model
     public function attorneyRelationships(): HasMany
     {
         return $this->hasMany(DirectoryAttorneyFirm::class);
+    }
+
+    /**
+     * Mission 2 checkpoint 11 addition — read-only Admin review
+     * surfaces (DirectoryFirmResource) need these to render a firm's
+     * claim/correction/verification history without hand-rolled
+     * per-page queries. verifications() is a genuine morphMany (not an
+     * ad-hoc query) because DirectoryVerification.verifiable_type
+     * always stores the real ::class value — see
+     * MarketplaceVerificationService's own doc.
+     */
+    public function claims(): HasMany
+    {
+        return $this->hasMany(DirectoryClaim::class);
+    }
+
+    public function correctionRequests(): HasMany
+    {
+        return $this->hasMany(DirectoryCorrectionRequest::class);
+    }
+
+    public function verifications(): MorphMany
+    {
+        return $this->morphMany(DirectoryVerification::class, 'verifiable');
     }
 
     public function practiceAreas(): BelongsToMany
