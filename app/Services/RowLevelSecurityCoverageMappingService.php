@@ -932,6 +932,18 @@ class RowLevelSecurityCoverageMappingService
         // EXEMPT_TABLE_METADATA below.
         'platform_notification_correlations',
         'platform_notification_suppressions',
+        // Mission 2 (MyAttorney Marketplace Core) addition —
+        // directory_firms, firm_offices, directory_attorneys,
+        // directory_attorney_firm. Ordinary "no firm_id at all"
+        // exemptions (directory_firms carries a nullable, non-tenant-
+        // scoping firm_id FK — an OPTIONAL pointer to a linked tenant
+        // Firm, never the row's own ownership boundary; every other
+        // table here has no firm_id column whatsoever) — platform-
+        // global marketplace directory data, readable and writable
+        // independent of any single firm's tenant context, including
+        // for firms that have never signed up for FirmsBase at all.
+        // See EXEMPT_TABLE_METADATA below.
+        'directory_firms', 'firm_offices', 'directory_attorneys', 'directory_attorney_firm',
     ];
 
     /**
@@ -1906,14 +1918,48 @@ class RowLevelSecurityCoverageMappingService
                 .'PlatformNotificationCorrelationService::recordOutcome(). See '
                 .'database/migrations/2026_10_20_100002_create_platform_notification_suppressions_table.php.',
         ],
+        // Mission 2 (MyAttorney Marketplace Core) additions — four new
+        // marketplace directory tables, all Global/no-RLS (see
+        // EXEMPT_TABLES/EXEMPT_TABLE_METADATA above for the full
+        // reasoning). The entries above are untouched — this addition
+        // only appends.
+        'directory_firms' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'The authoritative marketplace directory listing — platform-global. Carries a nullable '
+                .'firm_id FK to firms (optional pointer to a linked tenant Firm, nullOnDelete(), never a scoping '
+                .'boundary) — the one EXEMPT_TABLES entry with a real firm_id column that is not itself the RLS '
+                .'ownership boundary. See '
+                .'database/migrations/2026_11_10_100001_create_directory_firms_table.php.',
+        ],
+        'firm_offices' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Office records for a directory_firms row — no firm_id column at all. See '
+                .'database/migrations/2026_11_10_100002_create_firm_offices_table.php.',
+        ],
+        'directory_attorneys' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Public attorney identity, independent of FirmUser/User — no firm_id column at all. See '
+                .'database/migrations/2026_11_10_100003_create_directory_attorneys_table.php.',
+        ],
+        'directory_attorney_firm' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Explicit Attorney<->Firm relationship record — no firm_id column at all (ownership flows '
+                .'through directory_firm_id). See '
+                .'database/migrations/2026_11_10_100004_create_directory_attorney_firm_table.php.',
+        ],
     ];
 
     /**
      * Reason, expected readers, and authorized writers for every one
-     * of the (now 27) EXEMPT_TABLES entries. Readers/writers are
-     * expressed as human-readable role/class descriptions, not a
-     * runtime-enforced allowlist — this is documentation, mirroring
-     * how the rest of this registry is declarative-only.
+     * of the (now 44, after Mission 2's four additions) EXEMPT_TABLES
+     * entries. Readers/writers are expressed as human-readable
+     * role/class descriptions, not a runtime-enforced allowlist — this
+     * is documentation, mirroring how the rest of this registry is
+     * declarative-only.
      *
      * @var array<string, array{reason: string, expected_readers: array<int, string>, authorized_writers: array<int, string>}>
      */
@@ -2427,6 +2473,30 @@ class RowLevelSecurityCoverageMappingService
             'authorized_writers' => [
                 'App\\Services\\PlatformNotificationCorrelationService::recordOutcome() — the sole writer, called only by SesEventConsumerService once a platform-scope correlation resolves a permanent bounce or complaint',
             ],
+        ],
+        // Mission 2 (MyAttorney Marketplace Core) additions — four new
+        // marketplace directory tables. See EXEMPT_TABLES above for
+        // the summary reasoning; each entry here documents its own
+        // reason/readers/writers per this registry's own convention.
+        'directory_firms' => [
+            'reason' => 'The authoritative marketplace directory listing — platform-global, not firm-tenant-owned. Must exist and be publicly readable independent of any single firm tenant context, including for firms that have never signed up for FirmsBase. Its nullable firm_id is an optional pointer to a linked tenant Firm, never a scoping boundary; authorization for who may mutate a given row is a separate, explicit app-level policy (DirectoryProfileAccessPolicyService), never inferred from firm_id or ambient tenant context.',
+            'expected_readers' => ['public MyAttorney marketplace visitors (published rows only)', 'MarketplaceSearchService/MarketplaceRankingService', 'platform admins (marketplace governance panel)', "a claimed Firm's own authorized FirmUser, via DirectoryProfileAccessPolicyService"],
+            'authorized_writers' => ['platform admins via the platform-admin panel', 'an authorized claimant FirmUser, only for their own claimed listing, via DirectoryProfileAccessPolicyService', 'the marketplace CSV import pipeline'],
+        ],
+        'firm_offices' => [
+            'reason' => 'Office records belonging to a directory_firms row — same global/no-tenant-RLS reasoning as directory_firms; no firm_id column at all (ownership flows through directory_firm_id).',
+            'expected_readers' => ['public MyAttorney marketplace visitors (published rows only)', 'MarketplaceSearchService (geographic search)', 'platform admins'],
+            'authorized_writers' => ['platform admins via the platform-admin panel', "an authorized claimant FirmUser for their own claimed listing's offices", 'the marketplace CSV import pipeline'],
+        ],
+        'directory_attorneys' => [
+            'reason' => 'A public attorney identity, independent of FirmUser/User — may exist even when the attorney has never used FirmsBase. No firm_id column; ownership of the public-facing record is platform-global, and its relationship(s) to any firm are tracked separately in directory_attorney_firm.',
+            'expected_readers' => ['public MyAttorney marketplace visitors (published rows only)', 'MarketplaceSearchService', 'platform admins'],
+            'authorized_writers' => ['platform admins via the platform-admin panel', 'an authorized claimant FirmUser for attorneys at their own claimed listing', 'the marketplace CSV import pipeline'],
+        ],
+        'directory_attorney_firm' => [
+            'reason' => 'The explicit Attorney<->Firm relationship record. No firm_id column of its own — ownership flows through directory_firm_id, itself a global/no-tenant-RLS table.',
+            'expected_readers' => ['public MyAttorney marketplace visitors (published/current relationships only)', 'platform admins'],
+            'authorized_writers' => ['platform admins via the platform-admin panel', "an authorized claimant FirmUser for their own claimed listing's attorney relationships", 'the marketplace CSV import pipeline'],
         ],
     ];
 
