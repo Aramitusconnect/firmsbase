@@ -394,11 +394,17 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // classified Global, so tenantOwnedTables()/preparedTables()
         // are unaffected.
         // Narrowly updated AGAIN by Mission 2 (MyAttorney Marketplace
-        // Core) — directory_firms, firm_offices, directory_attorneys,
-        // directory_attorney_firm, all Global exemptions, added to
-        // EXEMPT_TABLES (40 -> 44). All classified Global, so
-        // tenantOwnedTables()/preparedTables() are unaffected.
-        $this->assertCount(44, $this->service->exemptTables());
+        // Core) checkpoint 1 — directory_firms, firm_offices,
+        // directory_attorneys, directory_attorney_firm, all Global
+        // exemptions, added to EXEMPT_TABLES (40 -> 44). All classified
+        // Global, so tenantOwnedTables()/preparedTables() are
+        // unaffected.
+        // Narrowly updated AGAIN by Mission 2 checkpoint 2 —
+        // languages, directory_firm_practice_areas,
+        // directory_attorney_practice_areas, directory_firm_languages,
+        // directory_attorney_languages, all Global exemptions, added
+        // to EXEMPT_TABLES (44 -> 49).
+        $this->assertCount(49, $this->service->exemptTables());
         // Native accounting journal (Phase A) added two more DirectTenant
         // tables (accounting_journal_entries, accounting_postings) — 147 -> 149.
         // Payment allocation splitting (Phase F) added one more DirectTenant
@@ -869,9 +875,14 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Hardening) — webauthn_credentials, Global (see above,
         // platform_admin_id-scoped, not firm_id) — 63 -> 64.
         // Narrowly updated AGAIN by Mission 2 (MyAttorney Marketplace
-        // Core) — directory_firms, firm_offices, directory_attorneys,
-        // directory_attorney_firm, all Global — 64 -> 68.
-        $this->assertSame(68, $summary[TenantOwnershipClassification::Global->value]);
+        // Core) checkpoint 1 — directory_firms, firm_offices,
+        // directory_attorneys, directory_attorney_firm, all Global —
+        // 64 -> 68.
+        // Narrowly updated AGAIN by Mission 2 checkpoint 2 — languages,
+        // directory_firm_practice_areas,
+        // directory_attorney_practice_areas, directory_firm_languages,
+        // directory_attorney_languages, all Global — 68 -> 73.
+        $this->assertSame(73, $summary[TenantOwnershipClassification::Global->value]);
         $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
         // 9 -> 10: client_portal_users' corrected System classification
         // (see the InheritedTenant/System comment above this method's
@@ -968,11 +979,17 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Hardening) — webauthn_credentials (Global, see above) —
         // 284 -> 285.
         // Narrowly updated AGAIN by Mission 2 (MyAttorney Marketplace
-        // Core) — directory_firms, firm_offices, directory_attorneys,
-        // directory_attorney_firm (four new Global tables, all added
-        // to EXEMPT_TABLES/EXEMPT_TABLE_METADATA too — see that
-        // registry's own Mission 2 comments) — 285 -> 289.
-        $this->assertSame(289, array_sum($summary));
+        // Core) checkpoint 1 — directory_firms, firm_offices,
+        // directory_attorneys, directory_attorney_firm (four new
+        // Global tables, all added to EXEMPT_TABLES/
+        // EXEMPT_TABLE_METADATA too — see that registry's own Mission 2
+        // comments) — 285 -> 289.
+        // Narrowly updated AGAIN by Mission 2 checkpoint 2 — languages,
+        // directory_firm_practice_areas,
+        // directory_attorney_practice_areas, directory_firm_languages,
+        // directory_attorney_languages (five new Global tables) —
+        // 289 -> 294.
+        $this->assertSame(294, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

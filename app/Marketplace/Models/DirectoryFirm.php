@@ -10,10 +10,13 @@ use App\Marketplace\Enums\DirectoryPublicationState;
 use App\Marketplace\Models\Concerns\HasMarketplaceSlug;
 use App\Models\Concerns\HasPublicUuid;
 use App\Models\Firm;
+use App\Models\Language;
+use App\Models\PracticeArea;
 use Database\Factories\DirectoryFirmFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
@@ -88,6 +91,20 @@ class DirectoryFirm extends Model
     public function attorneyRelationships(): HasMany
     {
         return $this->hasMany(DirectoryAttorneyFirm::class);
+    }
+
+    public function practiceAreas(): BelongsToMany
+    {
+        return $this->belongsToMany(PracticeArea::class, 'directory_firm_practice_areas')
+            ->withPivot('source_type')
+            ->withTimestamps();
+    }
+
+    public function languages(): BelongsToMany
+    {
+        return $this->belongsToMany(Language::class, 'directory_firm_languages')
+            ->withPivot('source_type')
+            ->withTimestamps();
     }
 
     /**

@@ -8,9 +8,12 @@ use App\Marketplace\Enums\DataProvenanceSourceType;
 use App\Marketplace\Enums\DirectoryPublicationState;
 use App\Marketplace\Models\Concerns\HasMarketplaceSlug;
 use App\Models\Concerns\HasPublicUuid;
+use App\Models\Language;
+use App\Models\PracticeArea;
 use Database\Factories\DirectoryAttorneyFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
@@ -58,6 +61,20 @@ class DirectoryAttorney extends Model
     public function firmRelationships(): HasMany
     {
         return $this->hasMany(DirectoryAttorneyFirm::class);
+    }
+
+    public function practiceAreas(): BelongsToMany
+    {
+        return $this->belongsToMany(PracticeArea::class, 'directory_attorney_practice_areas')
+            ->withPivot('source_type')
+            ->withTimestamps();
+    }
+
+    public function languages(): BelongsToMany
+    {
+        return $this->belongsToMany(Language::class, 'directory_attorney_languages')
+            ->withPivot('source_type')
+            ->withTimestamps();
     }
 
     public function isPubliclyVisible(): bool

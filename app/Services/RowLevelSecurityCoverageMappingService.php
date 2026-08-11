@@ -944,6 +944,13 @@ class RowLevelSecurityCoverageMappingService
         // for firms that have never signed up for FirmsBase at all.
         // See EXEMPT_TABLE_METADATA below.
         'directory_firms', 'firm_offices', 'directory_attorneys', 'directory_attorney_firm',
+        // Mission 2 (MyAttorney Marketplace Core) checkpoint 2 addition
+        // — languages (a genuinely new global reference table, same
+        // shape as practice_areas) and four Firm/Attorney <->
+        // PracticeArea/Language pivot tables. No firm_id column on
+        // any of them. See EXEMPT_TABLE_METADATA below.
+        'languages', 'directory_firm_practice_areas', 'directory_attorney_practice_areas',
+        'directory_firm_languages', 'directory_attorney_languages',
     ];
 
     /**
@@ -1951,6 +1958,40 @@ class RowLevelSecurityCoverageMappingService
                 .'through directory_firm_id). See '
                 .'database/migrations/2026_11_10_100004_create_directory_attorney_firm_table.php.',
         ],
+        // Mission 2 (MyAttorney Marketplace Core) checkpoint 2
+        // additions — languages plus four Firm/Attorney <->
+        // PracticeArea/Language pivot tables, all Global. The entries
+        // above are untouched — this addition only appends.
+        'languages' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Global reference catalog, same shape as practice_areas — no firm_id column. See '
+                .'database/migrations/2026_11_10_100006_create_languages_table.php.',
+        ],
+        'directory_firm_practice_areas' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Firm<->PracticeArea association pivot — no firm_id column. See '
+                .'database/migrations/2026_11_10_100007_create_directory_firm_practice_areas_table.php.',
+        ],
+        'directory_attorney_practice_areas' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Attorney<->PracticeArea association pivot — no firm_id column. See '
+                .'database/migrations/2026_11_10_100008_create_directory_attorney_practice_areas_table.php.',
+        ],
+        'directory_firm_languages' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Firm<->Language association pivot — no firm_id column. See '
+                .'database/migrations/2026_11_10_100009_create_directory_firm_languages_table.php.',
+        ],
+        'directory_attorney_languages' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Attorney<->Language association pivot — no firm_id column. See '
+                .'database/migrations/2026_11_10_100010_create_directory_attorney_languages_table.php.',
+        ],
     ];
 
     /**
@@ -2497,6 +2538,31 @@ class RowLevelSecurityCoverageMappingService
             'reason' => 'The explicit Attorney<->Firm relationship record. No firm_id column of its own — ownership flows through directory_firm_id, itself a global/no-tenant-RLS table.',
             'expected_readers' => ['public MyAttorney marketplace visitors (published/current relationships only)', 'platform admins'],
             'authorized_writers' => ['platform admins via the platform-admin panel', "an authorized claimant FirmUser for their own claimed listing's attorney relationships", 'the marketplace CSV import pipeline'],
+        ],
+        'languages' => [
+            'reason' => 'Global reference catalog — no firm_id column, same shape as practice_areas.',
+            'expected_readers' => ['public MyAttorney marketplace visitors', 'MarketplaceSearchService (language filter)', 'platform admins'],
+            'authorized_writers' => ['platform admins via the platform-admin panel'],
+        ],
+        'directory_firm_practice_areas' => [
+            'reason' => 'Firm<->PracticeArea association pivot. No firm_id column — ownership flows through directory_firm_id (global) and practice_area_id (global).',
+            'expected_readers' => ['public MyAttorney marketplace visitors', 'MarketplaceSearchService', 'platform admins'],
+            'authorized_writers' => ['platform admins via the platform-admin panel', 'an authorized claimant FirmUser for their own claimed listing', 'the marketplace CSV import pipeline'],
+        ],
+        'directory_attorney_practice_areas' => [
+            'reason' => 'Attorney<->PracticeArea association pivot. No firm_id column.',
+            'expected_readers' => ['public MyAttorney marketplace visitors', 'MarketplaceSearchService', 'platform admins'],
+            'authorized_writers' => ['platform admins via the platform-admin panel', 'an authorized claimant FirmUser for attorneys at their own claimed listing', 'the marketplace CSV import pipeline'],
+        ],
+        'directory_firm_languages' => [
+            'reason' => 'Firm<->Language association pivot. No firm_id column.',
+            'expected_readers' => ['public MyAttorney marketplace visitors', 'MarketplaceSearchService (language filter)', 'platform admins'],
+            'authorized_writers' => ['platform admins via the platform-admin panel', 'an authorized claimant FirmUser for their own claimed listing', 'the marketplace CSV import pipeline'],
+        ],
+        'directory_attorney_languages' => [
+            'reason' => 'Attorney<->Language association pivot. No firm_id column.',
+            'expected_readers' => ['public MyAttorney marketplace visitors', 'MarketplaceSearchService (language filter)', 'platform admins'],
+            'authorized_writers' => ['platform admins via the platform-admin panel', 'an authorized claimant FirmUser for attorneys at their own claimed listing', 'the marketplace CSV import pipeline'],
         ],
     ];
 
