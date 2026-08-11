@@ -3,6 +3,8 @@
 namespace App\Providers\Filament;
 
 use App\Filament\Firm\Livewire\FirmTopbar;
+use App\Filament\Firm\Pages\Auth\Login;
+use App\Filament\Firm\Pages\Auth\RequestPasswordReset;
 use App\Filament\Firm\Pages\Auth\ResetPassword;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
 use App\Http\Middleware\ConfigurePanelSessionCookie;
@@ -195,7 +197,16 @@ class FirmPanelProvider extends PanelProvider
             ->id('firm')
             ->domain(app(CanonicalUrlService::class)->firmAppHost())
             ->path('')
-            ->login()
+            // Login overridden with App\Filament\Firm\Pages\Auth\Login —
+            // Mission 1B (Extreme Security Hardening), section 13: gives
+            // this panel its own account-throttle + IP rate-limit
+            // identity, distinct from the Client Portal (previously both
+            // shared Filament's base Login class and its rate-limit
+            // bucket).
+            ->login(Login::class)
+            // requestAction overridden with
+            // App\Filament\Firm\Pages\Auth\RequestPasswordReset for the
+            // same rate-limit-bucket-isolation reason as Login above.
             // resetAction overridden with App\Filament\Firm\Pages\Auth\ResetPassword —
             // Filament's own stock page refuses to complete a reset unless
             // canAccessPanel() already returns true, which can never be
@@ -203,7 +214,7 @@ class FirmPanelProvider extends PanelProvider
             // membership exists until THIS completion creates one — see
             // that class's own docblock for the full deadlock this
             // resolves).
-            ->passwordReset(resetAction: ResetPassword::class)
+            ->passwordReset(requestAction: RequestPasswordReset::class, resetAction: ResetPassword::class)
             ->profile()
             ->multiFactorAuthentication(
                 [AppAuthentication::make()->recoverable()],

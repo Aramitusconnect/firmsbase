@@ -7,6 +7,7 @@ use App\Http\Middleware\EstablishFirmTenantContextForLivewireUpdate;
 use App\Models\PlatformAdmin;
 use App\Models\SecurityEvent;
 use App\Models\User;
+use App\Services\Security\AccountLoginThrottleService;
 use App\Services\Stripe\FakeStripeGateway;
 use App\Services\Stripe\PaymentGatewaySimulationPolicyService;
 use App\Services\Stripe\StripeGateway;
@@ -270,6 +271,18 @@ class AppServiceProvider extends ServiceProvider
                 request()->session()->put('platform_admin_mfa_session_authenticated_at', now()->toISOString());
             }
 
+            // Mission 1B (Extreme Security Hardening), section 13: a
+            // successful login clears this account's throttle counter
+            // (see AccountLoginThrottleService/ThrottlesLoginsPerAccount)
+            // — standard practice, since the point of the counter is
+            // detecting sustained failure, not penalizing an account
+            // that just proved it isn't compromised.
+            $email = $event->user->email ?? null;
+
+            if (is_string($email) && $email !== '') {
+                app(AccountLoginThrottleService::class)->clear($event->guard, $email);
+            }
+
             // Fix #0 (Section 39A-3L Phase B6): activeFirmUser() correctly
             // bootstraps via app.current_user_id, unlike a raw firmUsers()
             // query, which returns NULL under firm_users' own FORCE RLS
@@ -303,6 +316,20 @@ class AppServiceProvider extends ServiceProvider
         });
 
         Event::listen(Failed::class, function (Failed $event): void {
+            // Mission 1B (Extreme Security Hardening), section 13: hit
+            // the account-level throttle counter here, independent of
+            // which panel/Login subclass/source IP the attempt came
+            // from, so a credential-stuffing attack distributed across
+            // many source IPs against one target account is still
+            // caught (see AccountLoginThrottleService/
+            // ThrottlesLoginsPerAccount, which reads this same counter
+            // before allowing the next attempt through).
+            $attemptedEmail = $event->credentials['email'] ?? null;
+
+            if (is_string($attemptedEmail) && $attemptedEmail !== '') {
+                app(AccountLoginThrottleService::class)->hit($event->guard, $attemptedEmail);
+            }
+
             $context = new TenantContextService;
             $context->clearDatabaseTenantContext();
 

@@ -3,6 +3,8 @@
 namespace App\Providers\Filament;
 
 use App\Filament\Auth\Pages\PlatformAdminLogin;
+use App\Filament\Auth\Pages\PlatformAdminRequestPasswordReset;
+use App\Filament\Auth\Pages\PlatformAdminResetPassword;
 use App\Filament\MultiFactor\AuditedAppAuthentication;
 use App\Filament\MultiFactor\WebAuthn\WebAuthnAuthentication;
 use App\Filament\Pages\Dashboard;
@@ -82,7 +84,7 @@ class AdminPanelProvider extends PanelProvider
             ->path('')
             ->login(PlatformAdminLogin::class)
             ->profile()
-            ->passwordReset()
+            ->passwordReset(requestAction: PlatformAdminRequestPasswordReset::class, resetAction: PlatformAdminResetPassword::class)
             ->authGuard('platform_admin')
             ->colors([
                 'primary' => Color::Amber,

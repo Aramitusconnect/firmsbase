@@ -2,6 +2,9 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\ClientPortal\Pages\Auth\Login;
+use App\Filament\ClientPortal\Pages\Auth\RequestPasswordReset;
+use App\Filament\ClientPortal\Pages\Auth\ResetPassword;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
 use App\Http\Middleware\ConfigurePanelSessionCookie;
 use App\Http\Middleware\EnforceSessionTimeouts;
@@ -82,8 +85,16 @@ class ClientPortalPanelProvider extends PanelProvider
             ->id('client-portal')
             ->domain(app(CanonicalUrlService::class)->clientPortalHost())
             ->path('')
-            ->login()
-            ->passwordReset()
+            // Login/passwordReset pages overridden with this panel's own
+            // subclasses — Mission 1B (Extreme Security Hardening),
+            // section 13: gives the Client Portal its own account-
+            // throttle + IP rate-limit identity for login, and its own
+            // IP rate-limit bucket for password reset, distinct from the
+            // Firm and Platform Admin panels (previously all three
+            // shared Filament's base auth pages and their rate-limit
+            // buckets).
+            ->login(Login::class)
+            ->passwordReset(requestAction: RequestPasswordReset::class, resetAction: ResetPassword::class)
             ->colors([
                 'primary' => Color::Blue,
             ])

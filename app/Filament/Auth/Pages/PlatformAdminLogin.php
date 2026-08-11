@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Auth\Pages;
 
+use App\Filament\Auth\Concerns\ThrottlesLoginsPerAccount;
 use Filament\Auth\Pages\Login;
 use Filament\Schemas\Schema;
 
@@ -35,9 +36,17 @@ use Filament\Schemas\Schema;
  * a cookie that predates this policy or is forged/replayed anyway —
  * this page is the structural fix, that middleware step is defense in
  * depth, not a substitute for it.
+ *
+ * Also uses ThrottlesLoginsPerAccount (Mission 1B, section 13) — the
+ * highest-security surface in this application gets the same
+ * account-level brute-force layer as every other panel, on top of the
+ * IP-based bucket this class already isolates for free by virtue of
+ * being its own distinct Login subclass.
  */
 class PlatformAdminLogin extends Login
 {
+    use ThrottlesLoginsPerAccount;
+
     public function form(Schema $schema): Schema
     {
         return $schema->components([
