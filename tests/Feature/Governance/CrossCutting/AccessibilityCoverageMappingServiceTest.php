@@ -209,6 +209,32 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
         'challenge.blade.php',
     ];
 
+    /**
+     * Mission 2 (MyAttorney Marketplace Core) addition:
+     * `resources/views/myattorney/layout.blade.php`,
+     * `resources/views/myattorney/home.blade.php`,
+     * `resources/views/myattorney/firms/show.blade.php`, and
+     * `resources/views/myattorney/attorneys/show.blade.php` — the
+     * first public-facing MyAttorney pages. Reviewed and found
+     * accessible: a real skip-to-content link, semantic heading
+     * hierarchy (one `<h1>`, `<h2>`s with matching `aria-labelledby`
+     * per section), every interactive control is a real `<a>` with
+     * visible text content (never icon-only, never a clickable
+     * `<div>`), focus-visible outline classes on every link, a
+     * semantic `<address>` element for office contact information, and
+     * no bespoke/custom interactive markup (no custom dropdowns,
+     * modals, or keyboard traps) — the same bar this file's own
+     * convention already applies to every other allow-listed entry
+     * above. Both `show.blade.php` basenames (firms/ and attorneys/)
+     * are covered by the single basename-only entry below, matching
+     * this test's own established matching convention.
+     */
+    private const MYATTORNEY_MARKETPLACE_ALLOWED_BLADE_BASENAMES = [
+        'layout.blade.php',
+        'home.blade.php',
+        'show.blade.php',
+    ];
+
     public function test_no_blade_filament_livewire_frontend_or_browser_accessibility_files_exist(): void
     {
         $bladeFiles = [];
@@ -235,7 +261,8 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
                 && ! in_array(basename($path), self::CHECKPOINT_4_ALLOWED_BLADE_BASENAMES, true)
                 && ! in_array(basename($path), self::FIRM_WORKSPACE_QUICK_ADD_MENU_ALLOWED_BLADE_BASENAMES, true)
                 && ! in_array(basename($path), self::PAYMENT_LINK_QR_ROUTING_ALLOWED_BLADE_BASENAMES, true)
-                && ! in_array(basename($path), self::WEBAUTHN_ALLOWED_BLADE_BASENAMES, true),
+                && ! in_array(basename($path), self::WEBAUTHN_ALLOWED_BLADE_BASENAMES, true)
+                && ! in_array(basename($path), self::MYATTORNEY_MARKETPLACE_ALLOWED_BLADE_BASENAMES, true),
         ));
 
         $this->assertEmpty($nonDefaultBladeFiles, 'Found unexpected Blade files: '.implode(', ', $nonDefaultBladeFiles));

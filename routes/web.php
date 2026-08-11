@@ -2,6 +2,9 @@
 
 use App\Http\Controllers\ClientPortal\PlaidExchangeController;
 use App\Http\Controllers\Integrations\OAuthConnectionController;
+use App\Http\Controllers\MyAttorney\AttorneyProfileController;
+use App\Http\Controllers\MyAttorney\FirmProfileController;
+use App\Http\Controllers\MyAttorney\HomeController as MyAttorneyHomeController;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
 use App\Http\Middleware\EstablishClientPortalTenantContext;
 use App\Livewire\PaymentRequests\PublicPaymentPage;
@@ -153,16 +156,39 @@ Route::domain($hosts->clientPortalHost())
 
 /*
 |--------------------------------------------------------------------------
-| MyAttorney host — myattorney.firmsvault.com (RESERVED)
+| MyAttorney host — myattorney.firmsvault.com
 |--------------------------------------------------------------------------
 |
-| Hostname/routing/session boundary only, in this mission. A safe,
-| honestly-labeled placeholder — never the FirmsVault marketing welcome
-| view (that would misrepresent MyAttorney's own future identity) and
-| never any directory/search/AI-intake/marketplace functionality
-| (explicitly out of scope until Mission 2).
+| Mission 2 (MyAttorney Marketplace Core), checkpoint 4: real public
+| routes replace the Mission 1 "coming soon" placeholder. Plain
+| Laravel routes (not a Filament panel) — see
+| docs/product/mission-2-myattorney-marketplace-design.md for why: this
+| surface is mostly public, unauthenticated, SEO-indexable reads, which
+| don't fit a panel's admin-oriented UX model, and the marketing host
+| above is the only existing precedent for exactly this shape.
+|
+| No session/CSRF middleware applied yet — every route here is a pure
+| public read in this checkpoint (no forms exist until checkpoint 6's
+| claim-initiation form, which is what will need real session/cookie
+| isolation via ConfigurePanelSessionCookie — deliberately not added
+| speculatively ahead of that need).
+|
+| Explicit slug lookups in each controller, not implicit route-model
+| binding — DirectoryFirm/DirectoryAttorney's own HasPublicUuid trait
+| already claims getRouteKeyName() for internal/API uuid resolution
+| (section 43: the public SEO slug and the internal opaque identifier
+| stay fully independent).
+|
+| Not yet indexable — AddSearchIndexingHeader still marks every
+| non-marketing host noindex; checkpoint 12 (SEO/sitemap) is where that
+| deliberately changes, alongside real sitemap/robots/structured-data
+| work landing together.
 */
 Route::domain($hosts->myAttorneyHost())->group(function () {
+    Route::get('/', [MyAttorneyHomeController::class, 'index'])->name('myattorney.home');
+    Route::get('/firms/{slug}', [FirmProfileController::class, 'show'])->name('myattorney.firms.show');
+    Route::get('/attorneys/{slug}', [AttorneyProfileController::class, 'show'])->name('myattorney.attorneys.show');
+
     Route::get('/{any?}', function () {
         return response('MyAttorney — coming soon.', 200);
     })->where('any', '.*');

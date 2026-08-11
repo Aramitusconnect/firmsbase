@@ -119,11 +119,25 @@ class WorkflowTransitionEnforcementSearchTest extends TestCase
         // The page's own real logic (submit(), status transitions) all
         // lives in PublicPaymentPage.php/PaymentRequestCheckoutService.php
         // under app/, both already covered by the first assertion above.
+        // Narrowly updated AGAIN by Mission 2 (MyAttorney Marketplace
+        // Core), checkpoint 4 -- the four new resources/views/myattorney/*
+        // Blade views are a reviewed, narrow exception of the same
+        // shape: pure read-only public-profile display (server-rendered
+        // from PublicFirmProfile/PublicAttorneyProfile view-model DTOs --
+        // see app/Marketplace/ViewModels), no PHP logic beyond
+        // conditionals/loops over already-resolved data, no reference to
+        // any of the 14 workflow-state-machine enums above, and no
+        // status/license_status write of any kind. None of Mission 2's
+        // own new marketplace lifecycle enums (DirectoryPublicationState,
+        // DirectoryAttorneyFirmRelationshipState, etc.) are in this
+        // test's WORKFLOW_ENUMS catalog either -- a distinct, later
+        // mission's own domain, out of this test's scope by construction.
         $bladeFiles = glob(resource_path('views/**/*.blade.php')) ?: [];
         $bladeFiles = array_values(array_filter(
             $bladeFiles,
             fn (string $path) => $path !== resource_path('views/filament-client-portal/plaid-link.blade.php')
                 && $path !== resource_path('views/layouts/public.blade.php')
+                && ! str_starts_with($path, resource_path('views/myattorney/'))
         ));
         $this->assertEmpty($bladeFiles, 'No Blade views should exist that could write workflow status directly.');
     }
