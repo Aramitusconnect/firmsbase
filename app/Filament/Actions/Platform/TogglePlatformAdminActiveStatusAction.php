@@ -8,6 +8,7 @@ use App\Models\PlatformAdmin;
 use App\Services\PlatformAdminAuditEventRecorder;
 use App\Services\PlatformRoleService;
 use App\Services\PlatformStaffAccessPolicyService;
+use App\Services\Security\SessionRevocationService;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
@@ -32,6 +33,16 @@ use Illuminate\Support\Facades\DB;
  * admin can never reduce the active-SuperAdmin count, so the guard is
  * skipped entirely on that path rather than evaluated and trivially
  * passing.
+ *
+ * Mission 1B (Extreme Security Hardening), sections 11 & 52: the
+ * DEACTIVATE direction also calls SessionRevocationService to delete
+ * every session row belonging to the target admin immediately, rather
+ * than relying solely on Filament's own per-request canAccessPanel()
+ * re-check to eventually deny a request that never comes (a long-
+ * lived open connection wouldn't otherwise be forced to make one). The
+ * modal copy below reflects this — "on its next request" was true
+ * before this mission and is now additionally backstopped by immediate
+ * revocation.
  */
 class TogglePlatformAdminActiveStatusAction extends Action
 {
@@ -51,10 +62,10 @@ class TogglePlatformAdminActiveStatusAction extends Action
         $this->requiresConfirmation();
         $this->modalHeading(fn (PlatformAdmin $record): string => $record->is_active ? 'Deactivate platform administrator' : 'Activate platform administrator');
         $this->modalDescription(fn (PlatformAdmin $record): string => $record->is_active
-            ? 'This immediately blocks this administrator from the panel — any active session is force-logged-out on its next request. This can be reversed by activating them again.'
+            ? 'This immediately blocks this administrator from the panel and revokes every one of their active sessions. This can be reversed by activating them again.'
             : 'This restores this administrator\'s access to the panel.');
 
-        $this->action(function (PlatformAdmin $record, PlatformStaffAccessPolicyService $accessPolicy, PlatformRoleService $roleService, PlatformAdminAuditEventRecorder $auditRecorder): void {
+        $this->action(function (PlatformAdmin $record, PlatformStaffAccessPolicyService $accessPolicy, PlatformRoleService $roleService, PlatformAdminAuditEventRecorder $auditRecorder, SessionRevocationService $sessionRevocation): void {
             $actor = Auth::guard('platform_admin')->user();
 
             if (! $actor instanceof PlatformAdmin) {
@@ -102,6 +113,10 @@ class TogglePlatformAdminActiveStatusAction extends Action
                     ],
                 );
             });
+
+            if ($isDeactivating) {
+                $sessionRevocation->revokeAllSessionsFor($target, 'platform_admin');
+            }
 
             Notification::make()
                 ->title($isDeactivating ? 'Platform administrator deactivated' : 'Platform administrator activated')
