@@ -33,6 +33,7 @@ use App\Models\SupportAccessRequest;
 use App\Models\SupportAccessSession;
 use App\Models\TenantEncryptionKey;
 use App\Services\PlatformRoleService;
+use App\Services\Security\StepUpAuthenticationService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -156,6 +157,14 @@ final class PlatformOperationalActionsLivewireTest extends TestCase
     {
         $firm = Firm::factory()->activated()->create();
         $admin = $this->actingSuperAdmin();
+
+        // Mission 1B (Extreme Security Hardening), section 45:
+        // EnterSupportAccessSessionAction now requires a recent
+        // step-up verification (see StepUpAuthenticationTest for that
+        // mechanism's own coverage) — marking it verified here proves
+        // this test's own concern (the action resolves the admin and
+        // starts the session) without re-testing step-up itself.
+        app(StepUpAuthenticationService::class)->markVerified('platform_admin');
 
         $request = $this->runWithFirmContext($firm, fn () => SupportAccessRequest::factory()->forFirm($firm)->create([
             'requested_by' => $admin->id,

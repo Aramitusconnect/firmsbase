@@ -42,6 +42,25 @@ class StepUpAuthentication
     }
 
     /**
+     * For an Action that already has its own domain-specific schema
+     * (e.g. EnterSupportAccessSessionAction's request-selection field)
+     * — appends the step-up password field to that existing schema
+     * instead of replacing it. $baseSchema may be a plain array or a
+     * Closure returning one, matching what Action::schema() itself
+     * already accepts.
+     */
+    public static function mergeInto(Action $action, array|Closure $baseSchema, string $guard, int $withinMinutes = 5): Action
+    {
+        return $action
+            ->requiresConfirmation()
+            ->schema(function () use ($baseSchema, $guard, $withinMinutes): array {
+                $base = $baseSchema instanceof Closure ? $baseSchema() : $baseSchema;
+
+                return [...$base, ...self::schemaFor($guard, $withinMinutes)];
+            });
+    }
+
+    /**
      * @return array<int, TextInput>
      */
     public static function schemaFor(string $guard, int $withinMinutes = 5): array

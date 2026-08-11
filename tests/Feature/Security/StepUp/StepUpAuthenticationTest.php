@@ -6,8 +6,10 @@ use App\Filament\Support\StepUp\StepUpAuthentication;
 use App\Models\PlatformAdmin;
 use App\Models\User;
 use App\Services\Security\StepUpAuthenticationService;
+use Filament\Actions\Action;
 use Filament\Forms\Components\TextInput;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use ReflectionProperty;
 use Tests\TestCase;
 
 /**
@@ -109,5 +111,40 @@ class StepUpAuthenticationTest extends TestCase
         $components = StepUpAuthentication::schemaFor('platform_admin', 5);
 
         $this->assertCount(0, $components);
+    }
+
+    private function resolveSchemaComponents(Action $action): array
+    {
+        $property = new ReflectionProperty(Action::class, 'schema');
+        $property->setAccessible(true);
+        $schema = $property->getValue($action);
+
+        return $schema();
+    }
+
+    public function test_merge_into_appends_the_step_up_field_to_an_existing_schema(): void
+    {
+        $baseField = TextInput::make('someExistingField');
+        $action = Action::make('test');
+        StepUpAuthentication::mergeInto($action, [$baseField], 'platform_admin');
+
+        $components = $this->resolveSchemaComponents($action);
+
+        $this->assertCount(2, $components);
+        $this->assertSame($baseField, $components[0]);
+        $this->assertSame('stepUpCurrentPassword', $components[1]->getName());
+    }
+
+    public function test_merge_into_omits_the_step_up_field_with_a_recent_verification(): void
+    {
+        app(StepUpAuthenticationService::class)->markVerified('platform_admin');
+        $baseField = TextInput::make('someExistingField');
+        $action = Action::make('test');
+        StepUpAuthentication::mergeInto($action, [$baseField], 'platform_admin');
+
+        $components = $this->resolveSchemaComponents($action);
+
+        $this->assertCount(1, $components);
+        $this->assertSame($baseField, $components[0]);
     }
 }

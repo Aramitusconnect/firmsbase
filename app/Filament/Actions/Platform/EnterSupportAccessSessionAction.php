@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Actions\Platform;
 
 use App\Enums\SupportAccessRequestStatus;
+use App\Filament\Support\StepUp\StepUpAuthentication;
 use App\Models\Firm;
 use App\Models\PlatformAdmin;
 use App\Models\SupportAccessRequest;
@@ -32,6 +33,15 @@ use RuntimeException;
  * a UX narrowing only; the chokepoint's own requester-identity check is
  * the real enforcement, re-verified fresh regardless of what this list
  * shows.
+ *
+ * Mission 1B (Extreme Security Hardening), section 45: "Require
+ * authorization, recent step-up authentication, explicit reason, audit
+ * record, start/end timestamp, automatic expiration." Everything but
+ * step-up authentication already existed (authorization via the
+ * bounded-access chokepoint, reason/audit/timestamps/expiry via
+ * SupportAccessRequest/SupportAccessSession) — StepUpAuthentication::
+ * mergeInto() adds the missing layer onto this action's existing
+ * request-selection schema rather than replacing it.
  */
 class EnterSupportAccessSessionAction extends Action
 {
@@ -48,7 +58,7 @@ class EnterSupportAccessSessionAction extends Action
         $this->icon(Heroicon::OutlinedLockOpen);
         $this->color('gray');
 
-        $this->schema([
+        StepUpAuthentication::mergeInto($this, [
             Select::make('request_uuid')
                 ->label('Support access request')
                 ->options(function ($livewire): array {
@@ -76,9 +86,8 @@ class EnterSupportAccessSessionAction extends Action
                 })
                 ->required()
                 ->native(false),
-        ]);
+        ], 'platform_admin');
 
-        $this->requiresConfirmation();
         $this->modalHeading('Enter Support Access Session');
 
         $this->action(function (array $data, $livewire, PlatformFirmIntegrationBoundedAccessService $boundedAccess): void {
