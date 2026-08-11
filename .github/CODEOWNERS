@@ -1,0 +1,32 @@
+# Mission 1B (Extreme Security Hardening) — Supply-Chain / CI Security.
+#
+# This repository had no CODEOWNERS file before this mission (confirmed by
+# audit — no CODEOWNERS anywhere in the repo). Enforcing this file as a
+# required review gate for the paths below is a GitHub *branch protection*
+# setting, not something this file alone controls — that setting could not
+# be verified or changed from this environment (repository settings are not
+# part of the git history this mission can inspect or modify); confirm/
+# enable "Require review from Code Owners" directly in GitHub.
+#
+# The single owner below (@Aramitusconnect, the account this repository's
+# origin remote — git@github.com:Aramitusconnect/firmsbase.git — belongs to)
+# is a best-effort default, not a verified team roster. Replace it with the
+# real reviewer(s)/team(s) responsible for each area before relying on this
+# file for actual review enforcement.
+
+# CI/CD pipelines — a compromised workflow can exfiltrate secrets or push
+# unreviewed code to production.
+/.github/workflows/  @Aramitusconnect
+
+# Infrastructure-as-Code — network/IAM/security-group/WAF changes affect the
+# whole platform's blast radius.
+/infrastructure/     @Aramitusconnect
+
+# Tenant isolation / encryption / security-boundary core — see
+# docs/security/mission-1-canonical-domain-security-threat-model.md and this
+# mission's own threat model for why these are the highest-impact app paths.
+/app/Services/EncryptionKeyService.php        @Aramitusconnect
+/app/Services/TenantContextService.php        @Aramitusconnect
+/app/Http/Middleware/                         @Aramitusconnect
+/config/hosts.php                             @Aramitusconnect
+/config/auth.php                              @Aramitusconnect
