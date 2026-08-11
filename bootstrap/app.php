@@ -3,12 +3,14 @@
 use App\Http\Controllers\ReadinessController;
 use App\Http\Middleware\AddSearchIndexingHeader;
 use App\Http\Middleware\AddSecurityHeaders;
+use App\Http\Middleware\ConfigurePanelSessionCookie;
 use App\Services\CanonicalUrlService;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 use Symfony\Component\HttpFoundation\Exception\SuspiciousOperationException;
 
@@ -317,6 +319,28 @@ return Application::configure(basePath: dirname(__DIR__))
             AddSecurityHeaders::class,
             AddSearchIndexingHeader::class,
         ]);
+
+        // Mission 2 checkpoint 8. Each Filament panel's own middleware
+        // stack (declared directly on the Panel object, never through
+        // `web`'s group merge — see the comment immediately above) runs
+        // ConfigurePanelSessionCookie before StartSession simply because
+        // Filament controls its exact array order. routes/web.php's
+        // myattorney correction-report routes are ordinary `web`-group
+        // routes, though, and Laravel's own middleware priority sorting
+        // (SortedMiddleware — StartSession is a known, prioritized
+        // framework middleware; a plain custom route middleware with no
+        // priority registration is not) otherwise runs StartSession
+        // BEFORE ConfigurePanelSessionCookie regardless of declaration
+        // order in the route group — confirmed empirically: without this
+        // line, ConfigurePanelSessionCookie's config('session.cookie')
+        // mutation happens too late, and the response still carries the
+        // generic `laravel-session` cookie, not the isolated
+        // `firmsvault-myattorney-session` one. prependToPriorityList()
+        // is Laravel's own documented mechanism for exactly this case.
+        $middleware->prependToPriorityList(
+            before: StartSession::class,
+            prepend: ConfigurePanelSessionCookie::class,
+        );
 
         // Checkpoint 4 ("Plaid financial evidence add-on") test-gate fix.
         // Laravel's own ApplicationBuilder::withMiddleware() unconditionally

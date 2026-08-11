@@ -228,11 +228,22 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
      * above. Both `show.blade.php` basenames (firms/ and attorneys/)
      * are covered by the single basename-only entry below, matching
      * this test's own established matching convention.
+     *
+     * Checkpoint 8 addition:
+     * `resources/views/myattorney/firms/report-correction.blade.php` —
+     * the public correction-report form. Reviewed and found accessible:
+     * every field has a real `<label for="...">` matched to its
+     * input/select/textarea `id`, the submit control is a genuine
+     * `<button type="submit">` with visible text, validation errors
+     * render as a real `role="alert"` list (never color-only), and no
+     * bespoke/custom interactive markup exists — same bar as every
+     * other entry.
      */
     private const MYATTORNEY_MARKETPLACE_ALLOWED_BLADE_BASENAMES = [
         'layout.blade.php',
         'home.blade.php',
         'show.blade.php',
+        'report-correction.blade.php',
     ];
 
     public function test_no_blade_filament_livewire_frontend_or_browser_accessibility_files_exist(): void

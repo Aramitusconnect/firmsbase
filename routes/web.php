@@ -3,9 +3,11 @@
 use App\Http\Controllers\ClientPortal\PlaidExchangeController;
 use App\Http\Controllers\Integrations\OAuthConnectionController;
 use App\Http\Controllers\MyAttorney\AttorneyProfileController;
+use App\Http\Controllers\MyAttorney\CorrectionRequestController;
 use App\Http\Controllers\MyAttorney\FirmProfileController;
 use App\Http\Controllers\MyAttorney\HomeController as MyAttorneyHomeController;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
+use App\Http\Middleware\ConfigurePanelSessionCookie;
 use App\Http\Middleware\EstablishClientPortalTenantContext;
 use App\Livewire\PaymentRequests\PublicPaymentPage;
 use App\Services\CanonicalUrlService;
@@ -167,11 +169,15 @@ Route::domain($hosts->clientPortalHost())
 | don't fit a panel's admin-oriented UX model, and the marketing host
 | above is the only existing precedent for exactly this shape.
 |
-| No session/CSRF middleware applied yet — every route here is a pure
-| public read in this checkpoint (no forms exist until checkpoint 6's
-| claim-initiation form, which is what will need real session/cookie
-| isolation via ConfigurePanelSessionCookie — deliberately not added
-| speculatively ahead of that need).
+| No session/CSRF middleware on the pure-read routes below (home/firms/
+| attorneys show) — kept exactly as checkpoint 4 left them, preserving
+| cacheability (section 78). The correction-report routes (checkpoint
+| 8, section 51) are the first real form on this host, so they alone
+| get ConfigurePanelSessionCookie::class.':myattorney' — the same
+| mechanism the Firm/Client/Admin panels use for their own distinctly-
+| named, host-only session cookie (section 63: MyAttorney's session
+| boundary must stay independent, never widen any `.firmsvault.com`
+| cookie) — plus a request-volume-bounded throttle (section 64).
 |
 | Explicit slug lookups in each controller, not implicit route-model
 | binding — DirectoryFirm/DirectoryAttorney's own HasPublicUuid trait
@@ -188,6 +194,11 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
     Route::get('/', [MyAttorneyHomeController::class, 'index'])->name('myattorney.home');
     Route::get('/firms/{slug}', [FirmProfileController::class, 'show'])->name('myattorney.firms.show');
     Route::get('/attorneys/{slug}', [AttorneyProfileController::class, 'show'])->name('myattorney.attorneys.show');
+
+    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:20,1'])->group(function () {
+        Route::get('/firms/{slug}/report-correction', [CorrectionRequestController::class, 'create'])->name('myattorney.firms.report-correction.create');
+        Route::post('/firms/{slug}/report-correction', [CorrectionRequestController::class, 'store'])->middleware('throttle:5,1')->name('myattorney.firms.report-correction.store');
+    });
 
     Route::get('/{any?}', function () {
         return response('MyAttorney — coming soon.', 200);

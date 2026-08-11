@@ -968,6 +968,12 @@ class RowLevelSecurityCoverageMappingService
         // verifiable_id instead), same simple Global reasoning as
         // every checkpoint 1-2 marketplace table.
         'directory_verifications',
+        // Mission 2 checkpoint 8 additions — directory_correction_requests
+        // (submittable by an unauthenticated public visitor, so a
+        // real firm-scoped session is not always even available) and
+        // directory_profile_versions. Neither has a real firm_id
+        // column.
+        'directory_correction_requests', 'directory_profile_versions',
     ];
 
     /**
@@ -2021,14 +2027,26 @@ class RowLevelSecurityCoverageMappingService
             'notes' => 'Multi-dimensional verification (Mission 2 checkpoint 7). No firm_id column — polymorphic verifiable_type/verifiable_id instead. See '
                 .'database/migrations/2026_11_10_100014_create_directory_verifications_table.php.',
         ],
+        'directory_correction_requests' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Correction/removal workflow (Mission 2 checkpoint 8), submittable by an unauthenticated public visitor. No firm_id column. See '
+                .'database/migrations/2026_11_10_100015_create_directory_correction_requests_table.php.',
+        ],
+        'directory_profile_versions' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Lightweight public-profile versioning (Mission 2 checkpoint 8, section 25). No firm_id column. See '
+                .'database/migrations/2026_11_10_100016_create_directory_profile_versions_table.php.',
+        ],
     ];
 
     /**
      * Reason, expected readers, and authorized writers for every one
-     * of the (now 51, after Mission 2's eleven additions across
-     * checkpoints 1, 2, 6, and 7 — this count was already stale at 44
-     * before an earlier edit; verified programmatically, not copied forward)
-     * EXEMPT_TABLES entries. Readers/writers are expressed as human-readable
+     * of the (now 53, after Mission 2's thirteen additions across
+     * checkpoints 1, 2, 6, 7, and 8 — this count was already stale at
+     * 44 before an earlier edit; verified programmatically, not copied
+     * forward) EXEMPT_TABLES entries. Readers/writers are expressed as human-readable
      * role/class descriptions, not a runtime-enforced allowlist — this
      * is documentation, mirroring how the rest of this registry is
      * declarative-only.
@@ -2604,6 +2622,16 @@ class RowLevelSecurityCoverageMappingService
             'reason' => 'Multi-dimensional verification (Mission 2 checkpoint 7) — no firm_id column at all, ownership flows through the polymorphic verifiable_type/verifiable_id subject, itself already a Global marketplace table.',
             'expected_readers' => ['MarketplaceBadgeService (FirmAuthorityVerified/AttorneyIdentityVerified badge resolution)', 'platform admins (marketplace verification review)'],
             'authorized_writers' => ['MarketplaceVerificationService (the sole write path — verify/revoke/expireStale)'],
+        ],
+        'directory_correction_requests' => [
+            'reason' => 'Correction/removal workflow (Mission 2 checkpoint 8) — no firm_id column; submittable by an unauthenticated public visitor as well as an authenticated FirmUser, never scoped to a single tenant.',
+            'expected_readers' => ['platform admins (marketplace correction review)', 'MarketplaceCorrectionService'],
+            'authorized_writers' => ['MarketplaceCorrectionService (the sole write path — submit/markUnderReview/approve/reject/resolve)'],
+        ],
+        'directory_profile_versions' => [
+            'reason' => 'Lightweight public-profile versioning (Mission 2 checkpoint 8, section 25) — no firm_id column, append-only history of directory_firms content changes.',
+            'expected_readers' => ['platform admins (marketplace listing history review)'],
+            'authorized_writers' => ['MarketplaceProfileVersionService (the sole write path — record())'],
         ],
     ];
 

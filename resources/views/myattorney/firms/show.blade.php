@@ -5,6 +5,12 @@
 
 @section('content')
     <article>
+        @if (session('correction_submitted'))
+            <div class="mb-6 rounded border border-green-300 bg-green-50 p-4 text-sm text-green-800" role="status">
+                Thanks — your report has been submitted for review.
+            </div>
+        @endif
+
         <header class="mb-6">
             <div class="flex flex-wrap items-center gap-2">
                 <h1 class="text-2xl font-bold text-gray-900">{{ $profile->displayName }}</h1>
@@ -43,7 +49,9 @@
                     Claim This Listing
                 </a>
             @endif
-            {{-- "Suggest a Correction" (checkpoint 8) action lands here once that route exists. --}}
+            <a href="{{ route('myattorney.firms.report-correction.create', $profile->slug) }}" class="rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-blue-600">
+                Report a Correction
+            </a>
         </section>
 
         @if (count($profile->practiceAreaNames) > 0)
