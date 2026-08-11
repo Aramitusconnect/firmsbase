@@ -170,6 +170,12 @@ use Tests\TestCase;
  * Portal Login/RequestPasswordReset/ResetPassword subclasses added to
  * close a shared-rate-limit-bucket finding. See
  * $mission1bExtremeSecurityHardeningAllowedRelativeFiles below.
+ *
+ * POST-MISSION-1C-SECURITY-VALIDATION-ACTIVATION UPDATE: a tenth
+ * cascade — AuditedFirmUserAppAuthentication, the Firm-user MFA
+ * audit-trail sibling to MultiFactor/AuditedAppAuthentication.php
+ * above. See $mission1cSecurityValidationActivationAllowedRelativeFiles
+ * below.
  */
 final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
 {
@@ -746,7 +752,19 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'ClientPortal'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'Auth'.DIRECTORY_SEPARATOR.'ResetPassword.php',
         ];
 
-        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles, $mission1bExtremeSecurityHardeningAllowedRelativeFiles);
+        // Mission 1C (Security Validation, Activation & Staging Proof)
+        // — AuditedFirmUserAppAuthentication, the Firm-user MFA
+        // audit-trail sibling to MultiFactor/AuditedAppAuthentication.php
+        // above (Platform Admin's own). Deliberately lives here, not
+        // under app/Filament/Firm, mirroring that exact same
+        // established convention for this MultiFactor namespace. Does
+        // not reference the Integration domain; the sweeps above
+        // independently re-confirm that on every run.
+        $mission1cSecurityValidationActivationAllowedRelativeFiles = [
+            'MultiFactor'.DIRECTORY_SEPARATOR.'AuditedFirmUserAppAuthentication.php',
+        ];
+
+        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles, $mission1bExtremeSecurityHardeningAllowedRelativeFiles, $mission1cSecurityValidationActivationAllowedRelativeFiles);
 
         $unauthorizedNonFirmFilamentFiles = [];
 

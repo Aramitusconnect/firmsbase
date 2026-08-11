@@ -45,18 +45,28 @@ use Tests\TestCase;
  * document_chase_events — this is a genuine difference in this table's
  * shape, not an omission.
  *
- * The single most important proof in this file is
- * test_can_access_panel_correctly_fails_closed_when_2fa_required_with_no_ambient_context_established_beforehand()
- * below: it is the regression proof for the highest-priority production
- * fix in this checkpoint (User::canAccessPanel() wrapping its entire
- * 2FA decision in TenantContextService::runWithFirmContext(), since
- * firm_settings becoming FORCE-RLS protected would otherwise make
- * firm->firmSettings silently resolve to null and 2FA enforcement
- * silently fail OPEN for a firm configured with
- * firm_user_2fa_mode = Required). This test deliberately never wraps
- * its own call to canAccessPanel() in any ambient context — the whole
- * point is proving the PRODUCTION CODE establishes its own context
- * internally, not that the test spoon-feeds it one.
+ * The single most important proof in this file was
+ * test_can_access_panel_correctly_fails_closed_when_2fa_required_with_no_ambient_context_established_beforehand():
+ * the regression proof for the highest-priority production fix in this
+ * checkpoint (User::canAccessPanel() wrapping its entire 2FA decision
+ * in TenantContextService::runWithFirmContext(), since firm_settings
+ * becoming FORCE-RLS protected would otherwise make firm->firmSettings
+ * silently resolve to null and 2FA enforcement silently fail OPEN for
+ * a firm configured with firm_user_2fa_mode = Required).
+ *
+ * Mission 1C (Security Validation, Activation & Staging Proof),
+ * section 5 UPDATE: that 2FA decision moved out of canAccessPanel()
+ * entirely, into EnsureFirmUserMfaComplianceOrRedirectToEnrollment
+ * (real enforcement is now a redirect to the profile page, not a
+ * hard panel-wide deny with no path to enrollment). The renamed
+ * test_can_access_panel_no_longer_denies_when_2fa_required_with_no_ambient_context_established_beforehand()
+ * proves canAccessPanel()'s new, narrower behavior; the same
+ * "production code must establish its own context, must not silently
+ * fail open with no ambient context" discipline this file has always
+ * enforced now lives in
+ * test_the_new_mfa_enforcement_middleware_correctly_fails_closed_when_2fa_required_with_no_ambient_context_established_beforehand(),
+ * which deliberately never wraps its own HTTP request in any ambient
+ * context either — same rigor, new enforcement point.
  */
 class FirmSettingsForceRlsActivationTest extends TestCase
 {
@@ -483,7 +493,22 @@ class FirmSettingsForceRlsActivationTest extends TestCase
     // internally, not that the test supplies one ambiently.
     // ---------------------------------------------------------------
 
-    public function test_can_access_panel_correctly_fails_closed_when_2fa_required_with_no_ambient_context_established_beforehand(): void
+    /**
+     * Mission 1C (Security Validation, Activation & Staging Proof),
+     * section 5 UPDATE: the 2FA-required-but-not-compliant decision no
+     * longer lives in canAccessPanel() at all — it moved to
+     * EnsureFirmUserMfaComplianceOrRedirectToEnrollment, so a
+     * non-compliant user redirects to the profile page (real path to
+     * enrollment) instead of being hard-denied the whole panel with no
+     * path forward. canAccessPanel() itself now correctly returns
+     * true here — this test's assertion was updated to match, not
+     * weakened; the original FORCE-RLS "must establish its own tenant
+     * context, must not silently fail open with no ambient context"
+     * concern this test protected is proven below, against the new
+     * enforcement point, in
+     * test_the_new_mfa_enforcement_middleware_correctly_fails_closed_when_2fa_required_with_no_ambient_context_established_beforehand().
+     */
+    public function test_can_access_panel_no_longer_denies_when_2fa_required_with_no_ambient_context_established_beforehand(): void
     {
         $firm = Firm::factory()->create();
         $this->runWithFirmContext(
@@ -497,23 +522,54 @@ class FirmSettingsForceRlsActivationTest extends TestCase
             fn () => FirmUser::factory()->forFirm($firm)->forUser($user)->create(['status' => FirmUserStatus::Active]),
         );
 
-        // Explicitly clear any ambient context left active by the
-        // fixture-building factories above (both FirmSettingsFactory
-        // and FirmUserFactory deliberately leave context set afterward
-        // for the common "create then read" pattern) — this test's
-        // entire point depends on NO context being active the moment
-        // canAccessPanel() is called.
         (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
         $panel = Filament::getPanel('firm');
 
-        $this->assertFalse(
+        $this->assertTrue(
             $user->canAccessPanel($panel),
-            'canAccessPanel() must establish its own tenant context internally and correctly deny access for a non-compliant firm user at a Required-2FA firm — this is the regression proof for the User::canAccessPanel() FORCE-RLS fix. A pre-fix build would silently resolve firm_settings to null here and incorrectly ALLOW access.'
+            'canAccessPanel() no longer decides 2FA compliance (Mission 1C moved that to EnsureFirmUserMfaComplianceOrRedirectToEnrollment) — it must return true here regardless of ambient context, since none of its remaining checks (is_active, activeFirmUser(), LoginPolicyService) depend on firm_settings at all.'
         );
 
-        $this->assertNoDatabaseTenantContext('canAccessPanel() must clear its own internal context wrap before returning, leaving no leaked context behind for the next check.');
+        $this->assertNoDatabaseTenantContext();
+    }
+
+    /**
+     * The real successor to this file's original highest-priority
+     * proof: the FORCE-RLS "must establish its own tenant context
+     * internally, must not silently fail open with no ambient context"
+     * concern now lives in EnsureFirmUserMfaComplianceOrRedirectToEnrollment
+     * (its own handle() wraps the firm_settings-dependent policy check
+     * in TenantContextService::runWithFirmContext()), not
+     * canAccessPanel(). Deliberately clears ambient context right
+     * before the real HTTP request — same discipline as this file's
+     * original proof — so a pre-fix build (or any future regression
+     * that makes the middleware rely on ambient context instead of
+     * establishing its own) would fail this test by silently allowing
+     * the request through instead of redirecting.
+     */
+    public function test_the_new_mfa_enforcement_middleware_correctly_fails_closed_when_2fa_required_with_no_ambient_context_established_beforehand(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->runWithFirmContext(
+            $firm,
+            fn () => FirmSettings::factory()->forFirm($firm)->create(['firm_user_2fa_mode' => TwoFactorMode::Required]),
+        );
+
+        $user = User::factory()->create(['is_active' => true, 'two_factor_confirmed_at' => null]);
+        $this->runWithFirmContext(
+            $firm,
+            fn () => FirmUser::factory()->forFirm($firm)->forUser($user)->create(['status' => FirmUserStatus::Active]),
+        );
+
+        (new TenantContextService)->clearDatabaseTenantContext();
+        $this->assertNoDatabaseTenantContext();
+
+        $response = $this->actingAs($user, 'web')->get($this->firmAppUrl());
+
+        $response->assertRedirect((string) Filament::getPanel('firm')->getProfileUrl());
+        $this->assertNoDatabaseTenantContext('The middleware must clear its own internal context wrap before the request completes, leaving no leaked context behind for the next request.');
     }
 
     /**
