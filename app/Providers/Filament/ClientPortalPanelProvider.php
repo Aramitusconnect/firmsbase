@@ -4,7 +4,9 @@ namespace App\Providers\Filament;
 
 use App\Http\Middleware\ApplyTenantDatabaseContext;
 use App\Http\Middleware\ConfigurePanelSessionCookie;
+use App\Http\Middleware\EnforceSessionTimeouts;
 use App\Http\Middleware\EstablishClientPortalTenantContext;
+use App\Http\Middleware\EstablishPanelAuthGuardDefault;
 use App\Services\CanonicalUrlService;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
@@ -90,10 +92,12 @@ class ClientPortalPanelProvider extends PanelProvider
             ->authGuard('client')
             ->middleware([
                 ConfigurePanelSessionCookie::class.':client',
+                EstablishPanelAuthGuardDefault::class.':client',
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,
                 AuthenticateSession::class,
+                EnforceSessionTimeouts::class.':30,1440',
                 ShareErrorsFromSession::class,
                 PreventRequestForgery::class,
                 SubstituteBindings::class,

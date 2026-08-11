@@ -6,7 +6,9 @@ use App\Filament\Firm\Livewire\FirmTopbar;
 use App\Filament\Firm\Pages\Auth\ResetPassword;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
 use App\Http\Middleware\ConfigurePanelSessionCookie;
+use App\Http\Middleware\EnforceSessionTimeouts;
 use App\Http\Middleware\EstablishFirmTenantContext;
+use App\Http\Middleware\EstablishPanelAuthGuardDefault;
 use App\Services\CanonicalUrlService;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
@@ -229,10 +231,12 @@ class FirmPanelProvider extends PanelProvider
             )
             ->middleware([
                 ConfigurePanelSessionCookie::class.':firm',
+                EstablishPanelAuthGuardDefault::class.':web',
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,
                 AuthenticateSession::class,
+                EnforceSessionTimeouts::class.':30,1440',
                 ShareErrorsFromSession::class,
                 PreventRequestForgery::class,
                 SubstituteBindings::class,

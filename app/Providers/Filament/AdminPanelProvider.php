@@ -6,7 +6,9 @@ use App\Filament\Auth\Pages\PlatformAdminLogin;
 use App\Filament\MultiFactor\AuditedAppAuthentication;
 use App\Filament\Pages\Dashboard;
 use App\Http\Middleware\ConfigurePanelSessionCookie;
+use App\Http\Middleware\EnforceSessionTimeouts;
 use App\Http\Middleware\EnsurePlatformAdminMfaIsEnrolledAndVerified;
+use App\Http\Middleware\EstablishPanelAuthGuardDefault;
 use App\Services\CanonicalUrlService;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
@@ -122,10 +124,12 @@ class AdminPanelProvider extends PanelProvider
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\Filament\Widgets')
             ->middleware([
                 ConfigurePanelSessionCookie::class.':admin',
+                EstablishPanelAuthGuardDefault::class.':platform_admin',
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,
                 AuthenticateSession::class,
+                EnforceSessionTimeouts::class.':15,480',
                 ShareErrorsFromSession::class,
                 PreventRequestForgery::class,
                 SubstituteBindings::class,
