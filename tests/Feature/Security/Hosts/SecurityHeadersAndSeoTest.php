@@ -49,15 +49,32 @@ class SecurityHeadersAndSeoTest extends TestCase
         $response->assertHeader('X-Robots-Tag', 'noindex, nofollow');
     }
 
-    // BP. MyAttorney prepared for separate identity — noindex until the
-    // real product exists, distinctly worded from the FirmsVault
-    // marketing page.
-    public function test_myattorney_placeholder_is_noindex_and_distinctly_worded(): void
+    // BP. MyAttorney: real public content exists as of Mission 2, but
+    // stays noindex by default — Mission 1C's own SAFE_TO_LAUNCH_
+    // MYATTORNEY_PUBLICLY = NO boundary means the checkpoint 12 SEO
+    // build (sitemap/structured data/canonical tags) does not itself
+    // flip real-world indexability; see config/hosts.php's own
+    // docblock for the config-gate this reads.
+    public function test_myattorney_host_is_noindex_by_default_and_distinctly_worded(): void
     {
         $response = $this->get($this->myAttorneyUrl('/'));
 
         $response->assertHeader('X-Robots-Tag', 'noindex, nofollow');
         $response->assertSee('MyAttorney', false);
+    }
+
+    // Mission 2 checkpoint 12: once an owner deliberately enables
+    // MYATTORNEY_PUBLIC_INDEXING_ENABLED in a real environment, the
+    // header must actually flip — proves the config gate is wired all
+    // the way through AddSearchIndexingHeader, not merely present in
+    // config/hosts.php with no effect.
+    public function test_myattorney_host_is_indexable_once_the_indexing_flag_is_enabled(): void
+    {
+        config(['hosts.myattorney_indexing_enabled' => true]);
+
+        $response = $this->get($this->myAttorneyUrl('/'));
+
+        $response->assertHeaderMissing('X-Robots-Tag');
     }
 
     public function test_baseline_security_headers_are_present_on_every_canonical_host(): void

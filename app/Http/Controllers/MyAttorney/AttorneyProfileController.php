@@ -6,7 +6,10 @@ namespace App\Http\Controllers\MyAttorney;
 
 use App\Http\Controllers\Controller;
 use App\Marketplace\Models\DirectoryAttorney;
+use App\Marketplace\Services\MarketplaceStructuredDataService;
 use App\Marketplace\ViewModels\PublicAttorneyProfile;
+use App\Services\CanonicalUrlService;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -18,7 +21,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class AttorneyProfileController extends Controller
 {
-    public function show(string $slug): View
+    public function show(string $slug, CanonicalUrlService $hosts, MarketplaceStructuredDataService $structuredData): View
     {
         $attorney = DirectoryAttorney::query()->where('slug', $slug)->first();
 
@@ -26,8 +29,21 @@ class AttorneyProfileController extends Controller
             throw new NotFoundHttpException;
         }
 
+        $profile = PublicAttorneyProfile::fromModel($attorney);
+        $canonicalUrl = $hosts->myAttorneyAttorneyUrl($profile->slug);
+        $description = $profile->biography !== null
+            ? Str::limit(strip_tags($profile->biography), 155)
+            : $profile->name.' — Attorney profile on MyAttorney by FirmsVault.';
+
         return view('myattorney.attorneys.show', [
-            'profile' => PublicAttorneyProfile::fromModel($attorney),
+            'profile' => $profile,
+            'canonicalUrl' => $canonicalUrl,
+            'og' => [
+                'title' => $profile->name.' | MyAttorney by FirmsVault',
+                'description' => $description,
+                'url' => $canonicalUrl,
+            ],
+            'structuredData' => $structuredData->forAttorney($profile),
         ]);
     }
 }

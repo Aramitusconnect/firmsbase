@@ -7,6 +7,27 @@
         <title>@yield('title', 'MyAttorney by FirmsVault')</title>
         <meta name="description" content="@yield('meta_description', 'Find legal help in Michigan. Search attorneys and law firms by practice area, location, and language.')">
 
+        {{-- Mission 2 (MyAttorney Marketplace Core), checkpoint 12.
+             $canonicalUrl/$og/$structuredData are only ever set by
+             FirmProfileController/AttorneyProfileController today —
+             every other page (home/search, correction report) simply
+             omits them, so these blocks render nothing there. --}}
+        @isset($canonicalUrl)
+            <link rel="canonical" href="{{ $canonicalUrl }}">
+        @endisset
+
+        @isset($og)
+            <meta property="og:type" content="website">
+            <meta property="og:site_name" content="MyAttorney by FirmsVault">
+            <meta property="og:title" content="{{ $og['title'] }}">
+            <meta property="og:description" content="{{ $og['description'] }}">
+            <meta property="og:url" content="{{ $og['url'] }}">
+        @endisset
+
+        @isset($structuredData)
+            <script type="application/ld+json">{!! json_encode($structuredData, JSON_UNESCAPED_SLASHES) !!}</script>
+        @endisset
+
         @if (file_exists(public_path('build/manifest.json')) || file_exists(public_path('hot')))
             @vite(['resources/css/app.css'])
         @endif

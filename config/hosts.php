@@ -42,4 +42,26 @@ return [
 
     'api_url' => env('API_URL', 'http://api.firmsvault.test'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | MyAttorney public search-engine indexing
+    |--------------------------------------------------------------------------
+    |
+    | Mission 2 (MyAttorney Marketplace Core), checkpoint 12. Mission 1C
+    | classified MyAttorney SAFE_TO_BUILD_MYATTORNEY = YES,
+    | SAFE_TO_LAUNCH_MYATTORNEY_PUBLICLY = NO — building the full SEO
+    | surface (sitemap, structured data, canonical tags) is in scope
+    | here, but actually letting search engines index the live site is a
+    | separate, owner-approved launch decision this checkpoint must not
+    | make unilaterally. AddSearchIndexingHeader reads this flag (via
+    | CanonicalUrlService::myAttorneyIndexingEnabled()) instead of
+    | unconditionally adding myAttorneyHost() to its indexable-hosts
+    | list — defaults OFF everywhere, including production, until an
+    | owner deliberately sets MYATTORNEY_PUBLIC_INDEXING_ENABLED=true in
+    | that environment's real configuration.
+    |
+    */
+
+    'myattorney_indexing_enabled' => (bool) env('MYATTORNEY_PUBLIC_INDEXING_ENABLED', false),
+
 ];

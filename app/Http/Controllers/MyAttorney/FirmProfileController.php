@@ -7,8 +7,10 @@ namespace App\Http\Controllers\MyAttorney;
 use App\Http\Controllers\Controller;
 use App\Marketplace\Enums\DirectoryFirmProfileLevel;
 use App\Marketplace\Models\DirectoryFirm;
+use App\Marketplace\Services\MarketplaceStructuredDataService;
 use App\Marketplace\ViewModels\PublicFirmProfile;
 use App\Services\CanonicalUrlService;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -26,7 +28,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class FirmProfileController extends Controller
 {
-    public function show(string $slug, CanonicalUrlService $hosts): View
+    public function show(string $slug, CanonicalUrlService $hosts, MarketplaceStructuredDataService $structuredData): View
     {
         $firm = DirectoryFirm::query()->where('slug', $slug)->first();
 
@@ -35,6 +37,10 @@ class FirmProfileController extends Controller
         }
 
         $profile = PublicFirmProfile::fromModel($firm);
+        $canonicalUrl = $hosts->myAttorneyFirmUrl($profile->slug);
+        $description = $profile->description !== null
+            ? Str::limit(strip_tags($profile->description), 155)
+            : $profile->displayName.' — Firm profile on MyAttorney by FirmsVault.';
 
         return view('myattorney.firms.show', [
             'profile' => $profile,
@@ -44,6 +50,13 @@ class FirmProfileController extends Controller
             'claimUrl' => $profile->profileLevel === DirectoryFirmProfileLevel::PublicListing
                 ? $hosts->firmAppUrl().'/myattorney-claim?firm='.urlencode($profile->slug)
                 : null,
+            'canonicalUrl' => $canonicalUrl,
+            'og' => [
+                'title' => $profile->displayName.' | MyAttorney by FirmsVault',
+                'description' => $description,
+                'url' => $canonicalUrl,
+            ],
+            'structuredData' => $structuredData->forFirm($profile),
         ]);
     }
 }

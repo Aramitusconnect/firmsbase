@@ -44,6 +44,37 @@ class CanonicalUrlService
         return rtrim((string) config('hosts.myattorney_url'), '/');
     }
 
+    /**
+     * The canonical public URL for a single Directory Firm profile
+     * page — the one place this composition (`{myAttorneyUrl}/firms/
+     * {slug}`) lives, so it never drifts from the real route defined
+     * in routes/web.php.
+     */
+    public function myAttorneyFirmUrl(string $slug): string
+    {
+        return $this->myAttorneyUrl().'/firms/'.$slug;
+    }
+
+    /**
+     * The canonical public URL for a single Directory Attorney profile
+     * page.
+     */
+    public function myAttorneyAttorneyUrl(string $slug): string
+    {
+        return $this->myAttorneyUrl().'/attorneys/'.$slug;
+    }
+
+    /**
+     * Mission 2 (MyAttorney Marketplace Core), checkpoint 12. See
+     * config/hosts.php's own "MyAttorney public search-engine
+     * indexing" block for the full section-95 rationale — defaults
+     * false everywhere until an owner deliberately flips it.
+     */
+    public function myAttorneyIndexingEnabled(): bool
+    {
+        return (bool) config('hosts.myattorney_indexing_enabled');
+    }
+
     public function apiUrl(): string
     {
         return rtrim((string) config('hosts.api_url'), '/');

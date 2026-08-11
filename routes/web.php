@@ -6,6 +6,8 @@ use App\Http\Controllers\MyAttorney\AttorneyProfileController;
 use App\Http\Controllers\MyAttorney\CorrectionRequestController;
 use App\Http\Controllers\MyAttorney\FirmProfileController;
 use App\Http\Controllers\MyAttorney\HomeController as MyAttorneyHomeController;
+use App\Http\Controllers\MyAttorney\SitemapController;
+use App\Http\Controllers\Seo\RobotsTxtController;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
 use App\Http\Middleware\ConfigurePanelSessionCookie;
 use App\Http\Middleware\EstablishClientPortalTenantContext;
@@ -15,6 +17,26 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 $hosts = app(CanonicalUrlService::class);
+
+/*
+|--------------------------------------------------------------------------
+| robots.txt — every canonical host
+|--------------------------------------------------------------------------
+|
+| Mission 2 (MyAttorney Marketplace Core), checkpoint 12. Deliberately
+| NOT wrapped in a Route::domain() group — RobotsTxtController itself
+| branches on the request's Host header, so this one registration
+| answers correctly for marketing/Firm/Client/Admin/API (none of which
+| have a catch-all route of their own to compete with it). The
+| MyAttorney host is the one exception: its own `/{any?}` catch-all
+| below is domain-scoped, and a domain-scoped route wins over this
+| domain-less one for the same request regardless of file order — so
+| MyAttorney additionally registers its own explicit `/robots.txt`
+| route (same controller) ahead of that catch-all, the same way its
+| sitemap routes already have to. Replaces the previously-static
+| public/robots.txt file, which could never vary by host.
+*/
+Route::get('/robots.txt', RobotsTxtController::class);
 
 /*
 |--------------------------------------------------------------------------
@@ -185,15 +207,32 @@ Route::domain($hosts->clientPortalHost())
 | (section 43: the public SEO slug and the internal opaque identifier
 | stay fully independent).
 |
-| Not yet indexable — AddSearchIndexingHeader still marks every
-| non-marketing host noindex; checkpoint 12 (SEO/sitemap) is where that
-| deliberately changes, alongside real sitemap/robots/structured-data
-| work landing together.
+| Checkpoint 12 (SEO/sitemap/structured data): sitemap.xml/sitemap-
+| pages.xml/sitemap-{firms,attorneys}-{page}.xml below, registered
+| BEFORE the catch-all so it never shadows them. Real search-engine
+| indexability itself stays config-gated
+| (CanonicalUrlService::myAttorneyIndexingEnabled(), default off — see
+| config/hosts.php) — building this surface is not the same decision
+| as publicly launching it (Mission 1C's SAFE_TO_LAUNCH_MYATTORNEY_
+| PUBLICLY = NO boundary).
 */
 Route::domain($hosts->myAttorneyHost())->group(function () {
     Route::get('/', [MyAttorneyHomeController::class, 'index'])->name('myattorney.home');
     Route::get('/firms/{slug}', [FirmProfileController::class, 'show'])->name('myattorney.firms.show');
     Route::get('/attorneys/{slug}', [AttorneyProfileController::class, 'show'])->name('myattorney.attorneys.show');
+
+    // The global robots.txt route above (no domain constraint) loses
+    // to this host's own catch-all below when both are candidate
+    // matches for the same request — Laravel resolves a domain-scoped
+    // route ahead of a domain-less one regardless of file order. An
+    // explicit route here, same controller, wins the same way the
+    // sitemap routes below already do.
+    Route::get('/robots.txt', RobotsTxtController::class);
+
+    Route::get('/sitemap.xml', [SitemapController::class, 'index'])->name('myattorney.sitemap.index');
+    Route::get('/sitemap-pages.xml', [SitemapController::class, 'pages'])->name('myattorney.sitemap.pages');
+    Route::get('/sitemap-firms-{page}.xml', [SitemapController::class, 'firms'])->where('page', '[0-9]+')->name('myattorney.sitemap.firms');
+    Route::get('/sitemap-attorneys-{page}.xml', [SitemapController::class, 'attorneys'])->where('page', '[0-9]+')->name('myattorney.sitemap.attorneys');
 
     Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:20,1'])->group(function () {
         Route::get('/firms/{slug}/report-correction', [CorrectionRequestController::class, 'create'])->name('myattorney.firms.report-correction.create');
