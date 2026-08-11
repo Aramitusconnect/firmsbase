@@ -117,8 +117,15 @@ Route::get('/pay/{uuid}', PublicPaymentPage::class)
 | "https://app.firmsvault.com/integrations/oauth/callback" added to
 | their allow-listed redirect URIs before real cutover — see this
 | mission's final report.
+|
+| Mission 1B (Extreme Security Hardening), section 14: throttle:20,1
+| added — OAuth initiation/callback had no rate limit at all before
+| this mission (a real gap section 14 explicitly names). 20/minute is
+| generous for a human-driven "connect this integration" flow while
+| still bounding automated abuse of the state/PKCE generation and
+| callback-validation paths.
 */
-Route::domain($hosts->firmAppHost())->middleware(['auth'])->prefix('integrations/oauth')->name('integrations.oauth.')->group(function () {
+Route::domain($hosts->firmAppHost())->middleware(['auth', 'throttle:20,1'])->prefix('integrations/oauth')->name('integrations.oauth.')->group(function () {
     Route::get('{firmIntegration}/initiate', [OAuthConnectionController::class, 'initiate'])->name('initiate');
     Route::get('callback', [OAuthConnectionController::class, 'callback'])->name('callback');
 });
@@ -134,9 +141,13 @@ Route::domain($hosts->firmAppHost())->middleware(['auth'])->prefix('integrations
 | ClientPortalPanelProvider's own docblock. Guard/middleware/controller
 | logic unchanged, including the Checkpoint 4 ApplyTenantDatabaseContext
 | middleware this route has always carried.
+|
+| Mission 1B (Extreme Security Hardening), section 14: throttle:10,1
+| added — this endpoint exchanges a Plaid Link public_token for a real
+| access token and had no rate limit at all before this mission.
 */
 Route::domain($hosts->clientPortalHost())
-    ->middleware(['auth:client', EstablishClientPortalTenantContext::class, ApplyTenantDatabaseContext::class])
+    ->middleware(['auth:client', EstablishClientPortalTenantContext::class, ApplyTenantDatabaseContext::class, 'throttle:10,1'])
     ->post('plaid/exchange', [PlaidExchangeController::class, 'exchange'])
     ->name('client-portal.plaid.exchange');
 

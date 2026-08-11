@@ -145,16 +145,32 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->multiFactorAuthentication(
                 [
-                    // Mission 1B (Extreme Security Hardening): WebAuthn/
-                    // passkeys are the preferred, phishing-resistant
-                    // factor — listed FIRST so it's the default choice
-                    // an admin sees, without removing or downgrading the
-                    // existing, working TOTP factor (still fully
-                    // required to be enrolled, still recoverable). An
-                    // admin who has enrolled both gets to choose which
-                    // to use at each login (Filament's own multi-provider
-                    // challenge behavior); TOTP is never silently treated
-                    // as phishing-resistant.
+                    // Mission 1B (Extreme Security Hardening), section 5
+                    // POLICY DECISION: "at least one enrolled factor,
+                    // WebAuthn preferred and listed first" — NOT
+                    // "WebAuthn is the only factor that satisfies
+                    // isRequired." A finalized decision, not a
+                    // placeholder: mandating WebAuthn-only was
+                    // considered and deliberately rejected for this
+                    // checkpoint, because this environment has no real
+                    // browser/authenticator available to validate the
+                    // WebAuthn browser-side JS integration against (see
+                    // WebAuthnAuthentication's own commit — the
+                    // cryptographic core is fully tested with real
+                    // signatures, the browser round-trip is not). Making
+                    // WebAuthn the sole satisfying factor while that
+                    // integration is unverified would risk exactly what
+                    // section 68's stop conditions warn against: "a
+                    // security control that would lock out existing
+                    // production users without recovery," for the
+                    // highest-security panel in the application. TOTP
+                    // stays a fully valid, independently-sufficient
+                    // factor — never silently treated as phishing-
+                    // resistant, but never downgraded to "recovery-
+                    // only" either. Revisit this decision (tighten to
+                    // WebAuthn-required for new/all admins) only after a
+                    // real browser validation pass confirms the
+                    // registration/challenge flow end to end.
                     WebAuthnAuthentication::make(),
                     AuditedAppAuthentication::make()->recoverable(),
                 ],
