@@ -753,3 +753,47 @@ variable "alb_health_check_matcher" {
     error_message = "alb_health_check_matcher must be an ALB-compatible HTTP code or range such as 200 or 200-399."
   }
 }
+
+# Mission 1B (Extreme Security Hardening), sections 15/39-42/49-50: each
+# of the following six flags gates one optional, cost/organizational-impact
+# control (module.waf, module.security_monitoring, module.backup) that the
+# security audit found had zero IaC representation in this repository.
+# Every flag defaults to false so applying this environment with no new
+# tfvars creates none of these resources — enabling any one of them is a
+# deliberate owner decision, not a side effect of this mission's code.
+
+variable "enable_waf" {
+  description = "Whether to create the WAFv2 Web ACL and associate it with the ALB (module.waf). Managed rule groups and rate-based rules default to COUNT mode even when this is true — see module.waf's managed_rule_action/rate_based_rule_action for the separate switch to BLOCK mode. Defaults to false (complete no-op)."
+  type        = bool
+  default     = false
+}
+
+variable "enable_cloudtrail" {
+  description = "Whether to create the multi-region CloudTrail trail and its S3 bucket (module.security_monitoring). Defaults to false (complete no-op)."
+  type        = bool
+  default     = false
+}
+
+variable "enable_guardduty" {
+  description = "Whether to create a GuardDuty detector for this account (module.security_monitoring). Defaults to false (complete no-op) — enabling GuardDuty has account-wide cost implications and should be an explicit owner decision."
+  type        = bool
+  default     = false
+}
+
+variable "enable_security_hub" {
+  description = "Whether to enable Security Hub for this account (module.security_monitoring). Defaults to false (complete no-op) — enabling Security Hub has account-wide cost implications and should be an explicit owner decision."
+  type        = bool
+  default     = false
+}
+
+variable "enable_iam_access_analyzer" {
+  description = "Whether to create an account-level IAM Access Analyzer (module.security_monitoring). Defaults to false (complete no-op)."
+  type        = bool
+  default     = false
+}
+
+variable "enable_backup_plan" {
+  description = "Whether to create the AWS Backup vault/plan/selection (module.backup). Selection targets resources by tag (see module.backup's backup_target_tag_key/value), since this repository's RDS instance predates this Terraform config and has no resource here to reference directly — the tag(s) must be applied to the target resource(s) out-of-band. Defaults to false (complete no-op)."
+  type        = bool
+  default     = false
+}

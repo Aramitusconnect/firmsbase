@@ -710,3 +710,53 @@ module "cloudwatch_alarms" {
 
   enable_custom_metric_alarms = var.enable_custom_metric_alarms
 }
+
+# Mission 1B (Extreme Security Hardening) additions below. Every module
+# in this section defaults to fully disabled (see each module's own
+# variables.tf) — applying this environment with no new tfvars supplied
+# creates NONE of these resources; they exist as reviewed, ready-to-adopt
+# infrastructure for an explicit, separate, later decision. See this
+# mission's own final report for the classification of each.
+
+module "waf" {
+  source = "../../modules/waf"
+
+  name_prefix = var.name_prefix
+  alb_arn     = module.alb.alb_arn
+
+  enabled = var.enable_waf
+
+  tags = {
+    Name = "${var.name_prefix}-waf"
+  }
+}
+
+module "security_monitoring" {
+  source = "../../modules/security_monitoring"
+
+  name_prefix    = var.name_prefix
+  aws_account_id = var.aws_account_id
+  kms_key_arn    = module.kms.key_arn
+
+  enable_cloudtrail          = var.enable_cloudtrail
+  enable_guardduty           = var.enable_guardduty
+  enable_security_hub        = var.enable_security_hub
+  enable_iam_access_analyzer = var.enable_iam_access_analyzer
+
+  tags = {
+    Name = "${var.name_prefix}-security-monitoring"
+  }
+}
+
+module "backup" {
+  source = "../../modules/backup"
+
+  name_prefix = var.name_prefix
+  kms_key_arn = module.kms.key_arn
+
+  enabled = var.enable_backup_plan
+
+  tags = {
+    Name = "${var.name_prefix}-backup"
+  }
+}
