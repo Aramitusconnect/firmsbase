@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Marketplace\Services;
 
 use App\Marketplace\Enums\MarketplaceBadge;
+use App\Marketplace\Enums\VerificationDimension;
 use App\Marketplace\Models\DirectoryAttorney;
 use App\Marketplace\Models\DirectoryFirm;
 
@@ -16,14 +17,18 @@ use App\Marketplace\Models\DirectoryFirm;
  * factual vocabulary (`App\Marketplace\Enums\MarketplaceBadge`) is
  * the only thing that can ever be shown.
  *
- * `FirmAuthorityVerified`/`AttorneyIdentityVerified` are deliberately
- * isolated to their own private methods, always `false` today — no
- * `directory_verifications` table exists until Mission 2 checkpoint 7.
- * Checkpoint 7 changes exactly these two methods, not every call site
- * that renders a badge.
+ * `FirmAuthorityVerified`/`AttorneyIdentityVerified` now read the real
+ * `directory_verifications` table (Mission 2 checkpoint 7) via
+ * MarketplaceVerificationService::isVerified() — never inferred from
+ * `is_claimed` alone (section 19: claiming and verification are
+ * distinct badges, deliberately not implying one another).
  */
 class MarketplaceBadgeService
 {
+    public function __construct(
+        private readonly MarketplaceVerificationService $verification = new MarketplaceVerificationService,
+    ) {}
+
     /**
      * @return array<int, MarketplaceBadge>
      */
@@ -35,7 +40,7 @@ class MarketplaceBadgeService
             $badges[] = MarketplaceBadge::FirmsVaultMember;
         }
 
-        if ($this->hasVerifiedFirmAuthority($firm)) {
+        if ($this->verification->isVerified($firm, VerificationDimension::FirmAuthority)) {
             $badges[] = MarketplaceBadge::FirmAuthorityVerified;
         }
 
@@ -49,26 +54,10 @@ class MarketplaceBadgeService
     {
         $badges = [];
 
-        if ($this->hasVerifiedAttorneyIdentity($attorney)) {
+        if ($this->verification->isVerified($attorney, VerificationDimension::AttorneyIdentity)) {
             $badges[] = MarketplaceBadge::AttorneyIdentityVerified;
         }
 
         return $badges;
-    }
-
-    /**
-     * Mission 2 checkpoint 7 (verification model) placeholder.
-     */
-    private function hasVerifiedFirmAuthority(DirectoryFirm $firm): bool
-    {
-        return false;
-    }
-
-    /**
-     * Mission 2 checkpoint 7 (verification model) placeholder.
-     */
-    private function hasVerifiedAttorneyIdentity(DirectoryAttorney $attorney): bool
-    {
-        return false;
     }
 }

@@ -135,7 +135,7 @@ class CapabilityAndBadgeModelTest extends TestCase
         $this->assertContains(MarketplaceBadge::FirmsVaultMember, $badges);
     }
 
-    public function test_firm_authority_verified_badge_never_appears_before_checkpoint_7(): void
+    public function test_firm_authority_verified_badge_never_appears_absent_a_real_verification_record(): void
     {
         foreach ([
             DirectoryFirm::factory()->unclaimed()->create(),
@@ -146,7 +146,7 @@ class CapabilityAndBadgeModelTest extends TestCase
         }
     }
 
-    public function test_attorney_identity_verified_badge_never_appears_before_checkpoint_7(): void
+    public function test_attorney_identity_verified_badge_never_appears_absent_a_real_verification_record(): void
     {
         $attorney = DirectoryAttorney::factory()->create();
 

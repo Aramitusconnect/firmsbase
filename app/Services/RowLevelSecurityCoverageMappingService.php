@@ -963,6 +963,11 @@ class RowLevelSecurityCoverageMappingService
         // See EXEMPT_TABLE_METADATA below and the migration's own
         // docblock.
         'directory_claims',
+        // Mission 2 checkpoint 7 addition — directory_verifications.
+        // No firm_id column at all (polymorphic verifiable_type/
+        // verifiable_id instead), same simple Global reasoning as
+        // every checkpoint 1-2 marketplace table.
+        'directory_verifications',
     ];
 
     /**
@@ -2010,13 +2015,19 @@ class RowLevelSecurityCoverageMappingService
             'notes' => 'The claim lifecycle table. firm_id is real and non-nullable but still not a scoping boundary here — see EXEMPT_TABLES\' own comment and '
                 .'database/migrations/2026_11_10_100013_create_directory_claims_table.php.',
         ],
+        'directory_verifications' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Multi-dimensional verification (Mission 2 checkpoint 7). No firm_id column — polymorphic verifiable_type/verifiable_id instead. See '
+                .'database/migrations/2026_11_10_100014_create_directory_verifications_table.php.',
+        ],
     ];
 
     /**
      * Reason, expected readers, and authorized writers for every one
-     * of the (now 50, after Mission 2's ten additions across
-     * checkpoints 1, 2, and 6 — this count was already stale at 44
-     * before this edit; verified programmatically, not copied forward)
+     * of the (now 51, after Mission 2's eleven additions across
+     * checkpoints 1, 2, 6, and 7 — this count was already stale at 44
+     * before an earlier edit; verified programmatically, not copied forward)
      * EXEMPT_TABLES entries. Readers/writers are expressed as human-readable
      * role/class descriptions, not a runtime-enforced allowlist — this
      * is documentation, mirroring how the rest of this registry is
@@ -2588,6 +2599,11 @@ class RowLevelSecurityCoverageMappingService
             'reason' => 'The claim lifecycle table (Mission 2 checkpoint 6). firm_id is real and non-nullable — the claimant\'s own tenant firm — but duplicate/conflicting-claim detection and platform-admin review both require reading across every claimant firm\'s claims for one global directory_firm_id, which a firm-scoped policy cannot express. A FirmUser\'s own access is instead enforced by MarketplaceClaimAccessPolicyService::ownsClaim(), comparing the claim\'s real firm_id against their own authenticated tenant context.',
             'expected_readers' => ['platform admins (marketplace claim review)', "a claimant FirmUser's own claims, via MarketplaceClaimAccessPolicyService", 'MarketplaceClaimService (duplicate/conflict detection across all claimant firms)'],
             'authorized_writers' => ['MarketplaceClaimService (the sole write path — initiate/approve/reject/revoke/expire)'],
+        ],
+        'directory_verifications' => [
+            'reason' => 'Multi-dimensional verification (Mission 2 checkpoint 7) — no firm_id column at all, ownership flows through the polymorphic verifiable_type/verifiable_id subject, itself already a Global marketplace table.',
+            'expected_readers' => ['MarketplaceBadgeService (FirmAuthorityVerified/AttorneyIdentityVerified badge resolution)', 'platform admins (marketplace verification review)'],
+            'authorized_writers' => ['MarketplaceVerificationService (the sole write path — verify/revoke/expireStale)'],
         ],
     ];
 
