@@ -6,6 +6,7 @@ namespace App\Filament\Firm\Resources\TrustAccountResource\Actions;
 
 use App\Enums\TrustAccountStatus;
 use App\Filament\Firm\Concerns\ScopesQueriesToActiveFirm;
+use App\Filament\Support\StepUp\StepUpAuthentication;
 use App\Models\TrustAccount;
 use App\Services\TrustAccessPolicyService;
 use App\Services\TrustAccountService;
@@ -18,6 +19,12 @@ use Filament\Support\Icons\Heroicon;
  * Visible for an Active or Suspended account (Closed is terminal — the
  * service itself has no "reopen" method, so Closed is a dead end by
  * design; this Action is simply hidden once already Closed).
+ *
+ * Mission 1B (Extreme Security Hardening), section 47: "destructive
+ * reconciliation changes" — this is exactly that (terminal, no reopen
+ * path) — now requires step-up authentication via
+ * StepUpAuthentication::protect(), same as any other protected
+ * operation.
  */
 class CloseTrustAccountAction extends Action
 {
@@ -35,7 +42,7 @@ class CloseTrustAccountAction extends Action
         $this->label('Close');
         $this->icon(Heroicon::OutlinedXCircle);
         $this->color('danger');
-        $this->requiresConfirmation();
+        StepUpAuthentication::protect($this, 'web');
         $this->modalDescription('Closes this trust account. This is terminal — there is no "reopen" path.');
 
         $this->visible(function (TrustAccount $record): bool {

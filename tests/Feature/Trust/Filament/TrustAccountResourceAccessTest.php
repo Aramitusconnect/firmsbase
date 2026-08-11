@@ -15,6 +15,7 @@ use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\TrustAccount;
 use App\Models\User;
+use App\Services\Security\StepUpAuthenticationService;
 use App\Services\TrustAccountService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -91,6 +92,14 @@ final class TrustAccountResourceAccessTest extends TestCase
         $suspended = $this->runWithFirmContext($firm, fn () => TrustAccount::query()->find($account->id));
         $this->assertSame(TrustAccountStatus::Suspended, $suspended->status);
 
+        // Mission 1B (Extreme Security Hardening), section 47:
+        // CloseTrustAccountAction now requires a recent step-up
+        // verification (see StepUpAuthenticationTest for that
+        // mechanism's own coverage) — marking it verified here proves
+        // this test's own concern (the action calls the real service)
+        // without re-testing step-up itself.
+        app(StepUpAuthenticationService::class)->markVerified('web');
+
         $this->runWithFirmContext($firm, function () use ($account): void {
             $test = Livewire::test(ListTrustAccounts::class);
             $test->callTableAction(CloseTrustAccountAction::getDefaultName(), $account);
@@ -98,6 +107,25 @@ final class TrustAccountResourceAccessTest extends TestCase
 
         $closed = $this->runWithFirmContext($firm, fn () => TrustAccount::query()->find($account->id));
         $this->assertSame(TrustAccountStatus::Closed, $closed->status);
+    }
+
+    public function test_close_trust_account_fails_without_a_recent_step_up_verification(): void
+    {
+        $firm = $this->makeTrustEligibleFirm();
+        $account = $this->runWithFirmContext($firm, fn () => app(TrustAccountService::class)->open($firm, 'Test Account'));
+        $this->actingAsRole($firm, FirmUserRole::Attorney);
+
+        // No StepUpAuthenticationService::markVerified() call — the
+        // action must require the step-up password field and refuse
+        // to close the account without it.
+        $this->runWithFirmContext($firm, function () use ($account): void {
+            $test = Livewire::test(ListTrustAccounts::class);
+            $test->callTableAction(CloseTrustAccountAction::getDefaultName(), $account);
+            $test->assertHasTableActionErrors();
+        });
+
+        $fresh = $this->runWithFirmContext($firm, fn () => TrustAccount::query()->find($account->id));
+        $this->assertSame(TrustAccountStatus::Active, $fresh->status, 'The account must remain open when step-up authentication is not satisfied.');
     }
 
     public function test_suspend_action_is_hidden_once_already_closed(): void
