@@ -5,11 +5,14 @@ namespace App\Services;
 use App\Enums\DocumentScanStatus;
 use App\Enums\DocumentStatus;
 use App\Enums\DomainEventType;
+use App\Enums\FirmUserStatus;
 use App\Enums\WebhookEventType;
 use App\Models\Client;
+use App\Models\ClientPortalUser;
 use App\Models\Document;
 use App\Models\DocumentRequestItem;
 use App\Models\Firm;
+use App\Models\FirmUser;
 use App\Models\Matter;
 use App\Models\TenantEncryptionKey;
 use App\Models\User;
@@ -21,10 +24,13 @@ use Illuminate\Support\Facades\DB;
  * DocumentSecurityService — the only place a Document row is created
  * or has its lifecycle status/scan outcome applied. Documents are
  * private by default and never exposed via a public URL (project
- * rule) — canAccess() is the explicit check any future signed-URL/
- * download endpoint must call first. A document may only reach
- * Approved while scan_status is Clean (project rule: virus scanning
- * must be enforced) — enforced here, not left to callers.
+ * rule) — canAccess() is the firm-boundary check; canBeDownloadedBy()
+ * (Mission 1C, section 17) is the finer-grained actor-scoped check —
+ * any future signed-URL/download endpoint must call the latter first,
+ * canAccess() alone is not sufficient to authorize a specific actor.
+ * A document may only reach Approved while scan_status is Clean
+ * (project rule: virus scanning must be enforced) — enforced here,
+ * not left to callers.
  *
  * Phase 14b addition: upload() fires document.uploaded exactly once
  * per successful creation. This method is NOT wrapped in an explicit
@@ -209,5 +215,53 @@ class DocumentSecurityService
     public function canAccess(Document $document, Firm $contextFirm): bool
     {
         return $document->firm_id === $contextFirm->id;
+    }
+
+    /**
+     * The actor-scoped download-authorization primitive — Mission 1C
+     * (Security Validation, Activation & Staging Proof), section 17:
+     * "prove the authorization primitive without building the full
+     * feature." canAccess() above only proves firm-boundary
+     * membership; it does NOT prove this specific actor may reach this
+     * specific document. A Paralegal in the right firm with no
+     * MatterAssignment for the document's matter would still pass
+     * canAccess() — a future download/signed-URL endpoint trusting
+     * canAccess() alone would reopen exactly the IDOR gap
+     * MatterAccessPolicyService/ClientPortalMatterAccessPolicyService
+     * were already built to close for matters elsewhere. This method
+     * composes those two proven, tested policies so the real boundary
+     * is correct from day one. Deliberately adds no route, controller,
+     * or storage-layer code — out of Mission 1C's own scope.
+     *
+     * A document with no matter_id (firm-level, never linked to a
+     * matter) is accessible to any active firm-staff member of the
+     * owning firm, but to no Client Portal user — Client Portal access
+     * is always via an explicit matter grant (project rule; see
+     * ClientPortalMatterAccessPolicyService's own docblock), and no
+     * equivalent matter-independent grant concept exists for a Client
+     * Portal user, so this method does not invent one.
+     */
+    public function canBeDownloadedBy(Document $document, User|ClientPortalUser $actor): bool
+    {
+        if ($actor instanceof ClientPortalUser) {
+            if ($document->matter_id === null) {
+                return false;
+            }
+
+            return app(ClientPortalMatterAccessPolicyService::class)->canAccessMatter($actor, $document->matter);
+        }
+
+        if ($document->matter_id !== null) {
+            return app(MatterAccessPolicyService::class)->canAccessMatter($actor, $document->matter);
+        }
+
+        return (new TenantContextService)->runWithFirmContext(
+            $document->firm_id,
+            fn () => FirmUser::query()
+                ->where('user_id', $actor->id)
+                ->where('firm_id', $document->firm_id)
+                ->where('status', FirmUserStatus::Active)
+                ->exists(),
+        );
     }
 }
