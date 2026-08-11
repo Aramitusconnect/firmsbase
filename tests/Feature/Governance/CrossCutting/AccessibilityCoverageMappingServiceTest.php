@@ -189,6 +189,26 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
         'public-payment-page.blade.php',
     ];
 
+    /**
+     * Mission 1B (Extreme Security Hardening) addition:
+     * `resources/views/filament/multi-factor/webauthn/register.blade.php`
+     * and `challenge.blade.php` — the WebAuthn registration/login-
+     * challenge screens (Platform Admin panel only). Reviewed and
+     * found accessible: status is conveyed through real visible `<p>`
+     * text content (never color alone — the `fi-color-*` classes are
+     * supplementary, not the only signal), the one interactive control
+     * is a real `<button type="button">Try again</button>` with a
+     * genuine visible text label (never icon-only, never a clickable
+     * `<div>`), and no bespoke/custom interactive markup exists (no
+     * custom dropdowns, modals, or keyboard traps) — the same bar this
+     * file's own convention already applies to every other allow-
+     * listed entry above.
+     */
+    private const WEBAUTHN_ALLOWED_BLADE_BASENAMES = [
+        'register.blade.php',
+        'challenge.blade.php',
+    ];
+
     public function test_no_blade_filament_livewire_frontend_or_browser_accessibility_files_exist(): void
     {
         $bladeFiles = [];
@@ -214,7 +234,8 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
             fn (string $path) => basename($path) !== 'welcome.blade.php'
                 && ! in_array(basename($path), self::CHECKPOINT_4_ALLOWED_BLADE_BASENAMES, true)
                 && ! in_array(basename($path), self::FIRM_WORKSPACE_QUICK_ADD_MENU_ALLOWED_BLADE_BASENAMES, true)
-                && ! in_array(basename($path), self::PAYMENT_LINK_QR_ROUTING_ALLOWED_BLADE_BASENAMES, true),
+                && ! in_array(basename($path), self::PAYMENT_LINK_QR_ROUTING_ALLOWED_BLADE_BASENAMES, true)
+                && ! in_array(basename($path), self::WEBAUTHN_ALLOWED_BLADE_BASENAMES, true),
         ));
 
         $this->assertEmpty($nonDefaultBladeFiles, 'Found unexpected Blade files: '.implode(', ', $nonDefaultBladeFiles));
