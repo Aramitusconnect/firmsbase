@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\MultiFactor;
 
 use App\Models\PlatformAdmin;
+use App\Notifications\PlatformAdminRecoveryCodeUsedNotification;
 use App\Services\PlatformAdminAuditEventRecorder;
 use Closure;
 use Filament\Actions\Action;
@@ -164,6 +165,7 @@ class AuditedAppAuthentication extends AppAuthentication
 
                         if (is_string($value) && $this->verifyRecoveryCode($value, $user)) {
                             $this->recordIfPlatformAdmin($user, 'mfa_recovery_code_used');
+                            $this->notifyIfPlatformAdmin($user);
 
                             return;
                         }
@@ -189,5 +191,20 @@ class AuditedAppAuthentication extends AppAuthentication
         }
 
         $this->auditRecorder->recordPlatformEvent($user, $eventType, self::CATEGORY);
+    }
+
+    /**
+     * Mission 1B (Extreme Security Hardening), section 8: user
+     * notification on recovery-code use — see
+     * PlatformAdminRecoveryCodeUsedNotification's own docblock for
+     * why this fires on every use, not just suspicious ones.
+     */
+    private function notifyIfPlatformAdmin(mixed $user): void
+    {
+        if (! $user instanceof PlatformAdmin) {
+            return;
+        }
+
+        $user->notify(new PlatformAdminRecoveryCodeUsedNotification);
     }
 }

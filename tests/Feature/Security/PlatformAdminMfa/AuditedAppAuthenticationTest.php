@@ -6,9 +6,11 @@ namespace Tests\Feature\Security\PlatformAdminMfa;
 
 use App\Filament\MultiFactor\AuditedAppAuthentication;
 use App\Models\PlatformAdmin;
+use App\Notifications\PlatformAdminRecoveryCodeUsedNotification;
 use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
 use ReflectionMethod;
 use Tests\TestCase;
 
@@ -95,6 +97,30 @@ class AuditedAppAuthenticationTest extends TestCase
 
         $this->invokeRecordIfPlatformAdmin($admin, 'mfa_recovery_code_verification_failed');
         $this->assertEventRecorded($admin, 'mfa_recovery_code_verification_failed');
+    }
+
+    public function test_using_a_recovery_code_notifies_the_admin(): void
+    {
+        Notification::fake();
+
+        $admin = PlatformAdmin::factory()->create();
+
+        $method = new ReflectionMethod(AuditedAppAuthentication::class, 'notifyIfPlatformAdmin');
+        $method->setAccessible(true);
+        $method->invoke($this->appAuthentication, $admin);
+
+        Notification::assertSentTo($admin, PlatformAdminRecoveryCodeUsedNotification::class);
+    }
+
+    public function test_a_non_platform_admin_actor_is_not_notified(): void
+    {
+        Notification::fake();
+
+        $method = new ReflectionMethod(AuditedAppAuthentication::class, 'notifyIfPlatformAdmin');
+        $method->setAccessible(true);
+        $method->invoke($this->appAuthentication, new \stdClass);
+
+        Notification::assertNothingSent();
     }
 
     public function test_non_platform_admin_actor_is_not_audited(): void
