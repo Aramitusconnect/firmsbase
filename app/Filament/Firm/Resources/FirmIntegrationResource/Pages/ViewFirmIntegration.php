@@ -16,6 +16,7 @@ use App\Integrations\Services\HealthStateService;
 use App\Integrations\Services\IntegrationAccessPolicyService;
 use App\Integrations\Services\IntegrationCredentialService;
 use App\Integrations\Services\ProviderConnectionService;
+use App\Integrations\Support\ProviderDisconnectDisclosure;
 use App\Services\IntegrationEntitlementPolicyService;
 use App\Services\TenantContextService;
 use Filament\Actions\Action;
@@ -445,7 +446,12 @@ class ViewFirmIntegration extends ViewRecord
             ->icon(Heroicon::OutlinedNoSymbol)
             ->color('danger')
             ->requiresConfirmation()
-            ->modalDescription('This revokes credentials and disables webhook routing for this connection. It cannot be undone from here — reconnecting starts a new connection.')
+            ->modalDescription(function (FirmIntegration $record): string {
+                $base = 'This revokes credentials and disables webhook routing for this connection. It cannot be undone from here — reconnecting starts a new connection.';
+                $disclosure = ProviderDisconnectDisclosure::forProvider($record->providerKey());
+
+                return $disclosure === null ? $base : "{$base} {$disclosure}";
+            })
             ->visible(function (FirmIntegration $record): bool {
                 $firmUser = Auth::user()?->activeFirmUser();
 

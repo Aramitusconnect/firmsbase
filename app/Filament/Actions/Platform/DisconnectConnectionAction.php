@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Filament\Actions\Platform;
 
 use App\Integrations\Enums\ConnectionStatus;
+use App\Integrations\Enums\ProviderKey;
+use App\Integrations\Support\ProviderDisconnectDisclosure;
 use App\Models\Firm;
 use App\Models\PlatformAdmin;
 use App\Services\PlatformFirmIntegrationBoundedAccessService;
@@ -71,11 +73,16 @@ class DisconnectConnectionAction extends Action
 
         $this->requiresConfirmation();
         $this->modalHeading('Disconnect Connection');
-        $this->modalDescription(
-            'This immediately disconnects the firm\'s live provider connection (attempting a best-effort remote '.
-            'revoke, then tearing down local credential material). This cannot be undone from this panel — '.
-            'reconnecting requires the firm\'s own users to complete a new OAuth authorization in the firm panel.'
-        );
+        $this->modalDescription(function (array $record): string {
+            $base = 'This immediately disconnects the firm\'s live provider connection (attempting a best-effort remote '.
+                'revoke, then tearing down local credential material). This cannot be undone from this panel — '.
+                'reconnecting requires the firm\'s own users to complete a new OAuth authorization in the firm panel.';
+
+            $providerKey = ProviderKey::tryFrom((string) ($record['provider_code'] ?? ''));
+            $disclosure = ProviderDisconnectDisclosure::forProvider($providerKey);
+
+            return $disclosure === null ? $base : "{$base} {$disclosure}";
+        });
         $this->modalSubmitActionLabel('Disconnect');
 
         // Already-disconnected connections have nothing left to do here
