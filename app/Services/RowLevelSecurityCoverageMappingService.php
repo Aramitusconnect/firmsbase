@@ -1467,6 +1467,16 @@ class RowLevelSecurityCoverageMappingService
             'ownership_path' => null,
             'notes' => 'Internal vendor/processor governance record; platform-wide, no firm_id.',
         ],
+        // Mission 1B (Extreme Security Hardening) addition —
+        // webauthn_credentials, same treatment as platform_roles
+        // immediately above the Checkpoint 7 block below: scoped to
+        // platform_admin_id, never firm_id, since PlatformAdmin is not
+        // a tenant-owned identity.
+        'webauthn_credentials' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Platform Admin WebAuthn/passkey credential; scoped to platform_admin_id, not firm_id.',
+        ],
         // Stage B Checkpoint 7 (FirmsBase Integration Platform mission,
         // "Inbound Webhook Security") additions — see
         // reviews/checkpoint-07/frozen-design-post-security-review.md

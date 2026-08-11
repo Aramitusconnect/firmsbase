@@ -104,8 +104,14 @@ class EnsurePlatformAdminMfaIsEnrolledAndVerified
             return $this->forceLogout($request);
         }
 
-        // Step 3: enrollment check.
-        if (blank($admin->two_factor_secret)) {
+        // Step 3: enrollment check. Mission 1B (Extreme Security
+        // Hardening) widened this from a TOTP-only check
+        // (blank(two_factor_secret)) to "TOTP OR WebAuthn" — an admin
+        // who has only ever enrolled a WebAuthn/passkey credential
+        // (the mission's own preferred, phishing-resistant factor) must
+        // not be treated as unenrolled and stuck redirecting to the
+        // set-up-required page forever.
+        if (blank($admin->two_factor_secret) && ! $admin->webauthnCredentials()->exists()) {
             if ($this->isExemptRoute($request, $panel)) {
                 return $next($request);
             }

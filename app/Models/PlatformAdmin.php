@@ -112,6 +112,15 @@ class PlatformAdmin extends Authenticatable implements FilamentUser, HasAppAuthe
             ->exists();
     }
 
+    /**
+     * Mission 1B (Extreme Security Hardening) — registered WebAuthn/
+     * passkey authenticators, the phishing-resistant MFA factor.
+     */
+    public function webauthnCredentials(): HasMany
+    {
+        return $this->hasMany(WebauthnCredential::class);
+    }
+
     public function canAccessPanel(Panel $panel): bool
     {
         return $this->is_active;

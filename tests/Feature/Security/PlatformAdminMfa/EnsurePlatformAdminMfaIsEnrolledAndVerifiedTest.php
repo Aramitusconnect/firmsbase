@@ -6,6 +6,7 @@ namespace Tests\Feature\Security\PlatformAdminMfa;
 
 use App\Enums\PlatformRoleCode;
 use App\Models\PlatformAdmin;
+use App\Models\WebauthnCredential;
 use App\Services\PlatformRoleService;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -91,6 +92,23 @@ class EnsurePlatformAdminMfaIsEnrolledAndVerifiedTest extends TestCase
             'two_factor_secret' => 'JBSWY3DPEHPK3PXP',
             'two_factor_confirmed_at' => now(),
         ]);
+
+        $response = $this->actingAs($admin, 'platform_admin')->get($this->protectedUrl());
+
+        $response->assertOk();
+    }
+
+    /**
+     * Mission 1B (Extreme Security Hardening) — step 3's enrollment
+     * check widened from TOTP-only to "TOTP OR WebAuthn". An admin who
+     * has ONLY ever registered a WebAuthn/passkey credential (never
+     * enrolled TOTP at all) must reach the resource, not be treated as
+     * unenrolled and redirected to the set-up-required page forever.
+     */
+    public function test_admin_enrolled_only_via_webauthn_reaches_the_resource(): void
+    {
+        $admin = $this->superAdmin(['two_factor_secret' => null, 'two_factor_confirmed_at' => null]);
+        WebauthnCredential::factory()->create(['platform_admin_id' => $admin->id]);
 
         $response = $this->actingAs($admin, 'platform_admin')->get($this->protectedUrl());
 

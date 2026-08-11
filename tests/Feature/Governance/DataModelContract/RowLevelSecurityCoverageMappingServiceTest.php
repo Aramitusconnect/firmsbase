@@ -860,7 +860,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Narrowly updated AGAIN by post-578ee98 audit remediation
         // (finding H1) — platform_notification_correlations and
         // platform_notification_suppressions, both Global — 61 -> 63.
-        $this->assertSame(63, $summary[TenantOwnershipClassification::Global->value]);
+        // Narrowly updated AGAIN by Mission 1B (Extreme Security
+        // Hardening) — webauthn_credentials, Global (see above,
+        // platform_admin_id-scoped, not firm_id) — 63 -> 64.
+        $this->assertSame(64, $summary[TenantOwnershipClassification::Global->value]);
         $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
         // 9 -> 10: client_portal_users' corrected System classification
         // (see the InheritedTenant/System comment above this method's
@@ -953,7 +956,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // matter_leverage_recommendations): 281 -> 283.
         // Mission 1 (canonical reconstruction) added one more System
         // table (platform_admin_password_reset_tokens): 283 -> 284.
-        $this->assertSame(284, array_sum($summary));
+        // Narrowly updated AGAIN by Mission 1B (Extreme Security
+        // Hardening) — webauthn_credentials (Global, see above) —
+        // 284 -> 285.
+        $this->assertSame(285, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

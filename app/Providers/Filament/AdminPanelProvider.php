@@ -4,6 +4,7 @@ namespace App\Providers\Filament;
 
 use App\Filament\Auth\Pages\PlatformAdminLogin;
 use App\Filament\MultiFactor\AuditedAppAuthentication;
+use App\Filament\MultiFactor\WebAuthn\WebAuthnAuthentication;
 use App\Filament\Pages\Dashboard;
 use App\Http\Middleware\ConfigurePanelSessionCookie;
 use App\Http\Middleware\EnforceSessionTimeouts;
@@ -141,7 +142,20 @@ class AdminPanelProvider extends PanelProvider
                 EnsurePlatformAdminMfaIsEnrolledAndVerified::class,
             ])
             ->multiFactorAuthentication(
-                [AuditedAppAuthentication::make()->recoverable()],
+                [
+                    // Mission 1B (Extreme Security Hardening): WebAuthn/
+                    // passkeys are the preferred, phishing-resistant
+                    // factor — listed FIRST so it's the default choice
+                    // an admin sees, without removing or downgrading the
+                    // existing, working TOTP factor (still fully
+                    // required to be enrolled, still recoverable). An
+                    // admin who has enrolled both gets to choose which
+                    // to use at each login (Filament's own multi-provider
+                    // challenge behavior); TOTP is never silently treated
+                    // as phishing-resistant.
+                    WebAuthnAuthentication::make(),
+                    AuditedAppAuthentication::make()->recoverable(),
+                ],
                 isRequired: true,
             );
     }
