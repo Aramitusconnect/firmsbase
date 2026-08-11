@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Http\Controllers\MyAttorney;
 
 use App\Http\Controllers\Controller;
+use App\Marketplace\Enums\DirectoryFirmProfileLevel;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\ViewModels\PublicFirmProfile;
+use App\Services\CanonicalUrlService;
 use Illuminate\View\View;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -24,7 +26,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class FirmProfileController extends Controller
 {
-    public function show(string $slug): View
+    public function show(string $slug, CanonicalUrlService $hosts): View
     {
         $firm = DirectoryFirm::query()->where('slug', $slug)->first();
 
@@ -32,8 +34,16 @@ class FirmProfileController extends Controller
             throw new NotFoundHttpException;
         }
 
+        $profile = PublicFirmProfile::fromModel($firm);
+
         return view('myattorney.firms.show', [
-            'profile' => PublicFirmProfile::fromModel($firm),
+            'profile' => $profile,
+            // Checkpoint 6: the claim entry point is the authenticated
+            // Firm app (app.firmsvault.com), never a MyAttorney-hosted
+            // form — section 60/63. Only shown for an unclaimed listing.
+            'claimUrl' => $profile->profileLevel === DirectoryFirmProfileLevel::PublicListing
+                ? $hosts->firmAppUrl().'/myattorney-claim?firm='.urlencode($profile->slug)
+                : null,
         ]);
     }
 }

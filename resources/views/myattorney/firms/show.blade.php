@@ -38,7 +38,12 @@
                     Visit Website
                 </a>
             @endif
-            {{-- "Claim This Profile" (checkpoint 6) and "Suggest a Correction" (checkpoint 8) actions land here once those routes exist. --}}
+            @if ($claimUrl)
+                <a href="{{ $claimUrl }}" class="rounded border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-800 hover:bg-blue-100 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-blue-600">
+                    Claim This Listing
+                </a>
+            @endif
+            {{-- "Suggest a Correction" (checkpoint 8) action lands here once that route exists. --}}
         </section>
 
         @if (count($profile->practiceAreaNames) > 0)

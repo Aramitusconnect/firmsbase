@@ -404,7 +404,11 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // directory_attorney_practice_areas, directory_firm_languages,
         // directory_attorney_languages, all Global exemptions, added
         // to EXEMPT_TABLES (44 -> 49).
-        $this->assertCount(49, $this->service->exemptTables());
+        // Narrowly updated AGAIN by Mission 2 checkpoint 6 —
+        // directory_claims, a Global exemption despite a real
+        // non-nullable firm_id (see EXEMPT_TABLE_METADATA's own
+        // reasoning), added to EXEMPT_TABLES (49 -> 50).
+        $this->assertCount(50, $this->service->exemptTables());
         // Native accounting journal (Phase A) added two more DirectTenant
         // tables (accounting_journal_entries, accounting_postings) — 147 -> 149.
         // Payment allocation splitting (Phase F) added one more DirectTenant
@@ -882,7 +886,9 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // directory_firm_practice_areas,
         // directory_attorney_practice_areas, directory_firm_languages,
         // directory_attorney_languages, all Global — 68 -> 73.
-        $this->assertSame(73, $summary[TenantOwnershipClassification::Global->value]);
+        // Narrowly updated AGAIN by Mission 2 checkpoint 6 —
+        // directory_claims, Global — 73 -> 74.
+        $this->assertSame(74, $summary[TenantOwnershipClassification::Global->value]);
         $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
         // 9 -> 10: client_portal_users' corrected System classification
         // (see the InheritedTenant/System comment above this method's
@@ -989,7 +995,9 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // directory_attorney_practice_areas, directory_firm_languages,
         // directory_attorney_languages (five new Global tables) —
         // 289 -> 294.
-        $this->assertSame(294, array_sum($summary));
+        // Narrowly updated AGAIN by Mission 2 checkpoint 6 —
+        // directory_claims (one new Global table) — 294 -> 295.
+        $this->assertSame(295, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

@@ -951,6 +951,18 @@ class RowLevelSecurityCoverageMappingService
         // any of them. See EXEMPT_TABLE_METADATA below.
         'languages', 'directory_firm_practice_areas', 'directory_attorney_practice_areas',
         'directory_firm_languages', 'directory_attorney_languages',
+        // Mission 2 (MyAttorney Marketplace Core) checkpoint 6 addition
+        // — directory_claims. Its firm_id is real and non-nullable (the
+        // claimant's own tenant firm — claiming requires an
+        // authenticated app.firmsvault.com session, section 60), unlike
+        // every other entry above, but still classified Global: a
+        // firm-scoped RLS policy would make duplicate/conflicting-claim
+        // detection and platform-admin review — both of which must read
+        // across every claimant firm's claims for one global
+        // directory_firm_id — impossible to express as a plain query.
+        // See EXEMPT_TABLE_METADATA below and the migration's own
+        // docblock.
+        'directory_claims',
     ];
 
     /**
@@ -1992,12 +2004,20 @@ class RowLevelSecurityCoverageMappingService
             'notes' => 'Attorney<->Language association pivot — no firm_id column. See '
                 .'database/migrations/2026_11_10_100010_create_directory_attorney_languages_table.php.',
         ],
+        'directory_claims' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'The claim lifecycle table. firm_id is real and non-nullable but still not a scoping boundary here — see EXEMPT_TABLES\' own comment and '
+                .'database/migrations/2026_11_10_100013_create_directory_claims_table.php.',
+        ],
     ];
 
     /**
      * Reason, expected readers, and authorized writers for every one
-     * of the (now 44, after Mission 2's four additions) EXEMPT_TABLES
-     * entries. Readers/writers are expressed as human-readable
+     * of the (now 50, after Mission 2's ten additions across
+     * checkpoints 1, 2, and 6 — this count was already stale at 44
+     * before this edit; verified programmatically, not copied forward)
+     * EXEMPT_TABLES entries. Readers/writers are expressed as human-readable
      * role/class descriptions, not a runtime-enforced allowlist — this
      * is documentation, mirroring how the rest of this registry is
      * declarative-only.
@@ -2563,6 +2583,11 @@ class RowLevelSecurityCoverageMappingService
             'reason' => 'Attorney<->Language association pivot. No firm_id column.',
             'expected_readers' => ['public MyAttorney marketplace visitors', 'MarketplaceSearchService (language filter)', 'platform admins'],
             'authorized_writers' => ['platform admins via the platform-admin panel', 'an authorized claimant FirmUser for attorneys at their own claimed listing', 'the marketplace CSV import pipeline'],
+        ],
+        'directory_claims' => [
+            'reason' => 'The claim lifecycle table (Mission 2 checkpoint 6). firm_id is real and non-nullable — the claimant\'s own tenant firm — but duplicate/conflicting-claim detection and platform-admin review both require reading across every claimant firm\'s claims for one global directory_firm_id, which a firm-scoped policy cannot express. A FirmUser\'s own access is instead enforced by MarketplaceClaimAccessPolicyService::ownsClaim(), comparing the claim\'s real firm_id against their own authenticated tenant context.',
+            'expected_readers' => ['platform admins (marketplace claim review)', "a claimant FirmUser's own claims, via MarketplaceClaimAccessPolicyService", 'MarketplaceClaimService (duplicate/conflict detection across all claimant firms)'],
+            'authorized_writers' => ['MarketplaceClaimService (the sole write path — initiate/approve/reject/revoke/expire)'],
         ],
     ];
 

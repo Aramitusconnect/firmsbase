@@ -103,7 +103,16 @@ class PublicFirmAttorneyProfileTest extends TestCase
         $response = $this->get($this->myAttorneyUrl('/firms/no-leak-firm'));
 
         $response->assertOk();
-        $response->assertDontSee((string) $firm->id, false);
+        // Word-boundary regex, not assertDontSee's raw substring check:
+        // $firm->id is an ordinary auto-increment integer whose actual
+        // value depends on how many rows every other test run before
+        // this one has inserted (RefreshDatabase rolls back rows but
+        // never resets the Postgres sequence) — a plain substring check
+        // has a real chance of a false failure merely because the id's
+        // digits happen to appear inside an unrelated, legitimately
+        // public number elsewhere on the page (e.g. the Faker-random
+        // phone number or founding year). \b anchors rule that out.
+        $this->assertDoesNotMatchRegularExpression('/\b'.preg_quote((string) $firm->id, '/').'\b/', $response->getContent());
         $response->assertDontSee($firm->uuid, false);
         $response->assertDontSee('internal-source-reference-marker-xyz', false);
     }
