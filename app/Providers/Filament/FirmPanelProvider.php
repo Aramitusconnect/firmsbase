@@ -6,6 +6,7 @@ use App\Filament\Firm\Livewire\FirmTopbar;
 use App\Filament\Firm\Pages\Auth\Login;
 use App\Filament\Firm\Pages\Auth\RequestPasswordReset;
 use App\Filament\Firm\Pages\Auth\ResetPassword;
+use App\Filament\MultiFactor\AuditedFirmUserAppAuthentication;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
 use App\Http\Middleware\ConfigurePanelSessionCookie;
 use App\Http\Middleware\EnforceSessionTimeouts;
@@ -13,7 +14,6 @@ use App\Http\Middleware\EnsureFirmUserMfaComplianceOrRedirectToEnrollment;
 use App\Http\Middleware\EstablishFirmTenantContext;
 use App\Http\Middleware\EstablishPanelAuthGuardDefault;
 use App\Services\CanonicalUrlService;
-use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -97,22 +97,24 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
  *    self-service MFA UI is built here, Filament's is reused as-is,
  *    exactly like the admin panel.
  *
- *  - `->multiFactorAuthentication([AppAuthentication::make()->
+ *  - `->multiFactorAuthentication([AuditedFirmUserAppAuthentication::make()->
  *    recoverable()], isRequired: false)`:
  *
- *    STOCK `Filament\Auth\MultiFactor\App\AppAuthentication`, NOT
- *    `App\Filament\MultiFactor\AuditedAppAuthentication`. That subclass
- *    exists specifically to hook `PlatformAdminAuditEventRecorder`
- *    audit-trail writes onto PlatformAdmin's own MFA lifecycle (see its
- *    own docblock) — its `recordIfPlatformAdmin()` hook is a no-op for
- *    anything that is not `instanceof PlatformAdmin`, so reusing it here
- *    would silently record nothing while implying (by class name alone)
- *    that firm-user MFA events are audited. They are not, today — that
- *    would be new, separate scope (a firm-user-scoped audit event
- *    category feeding `security_events`, not a platform-admin one), not
- *    a free byproduct of reusing this class. Using the stock, honest
- *    `AppAuthentication` avoids that misleading implication. TOTP is the
- *    only enabled provider (matches the admin panel's own choice, same
+ *    MISSION 1C (Security Validation, Activation & Staging Proof)
+ *    UPDATE: this used to be the STOCK `Filament\Auth\MultiFactor\App\
+ *    AppAuthentication`, deliberately not
+ *    `App\Filament\MultiFactor\AuditedAppAuthentication` — that
+ *    Platform-Admin-specific subclass's `recordIfPlatformAdmin()` hook
+ *    is a silent no-op for anything not `instanceof PlatformAdmin`, so
+ *    reusing it here would have recorded nothing while implying (by
+ *    class name alone) that firm-user MFA events are audited. Section
+ *    19 of that mission built the real thing instead:
+ *    `App\Filament\MultiFactor\AuditedFirmUserAppAuthentication` — a
+ *    firm-scoped sibling (see its own docblock), writing real,
+ *    append-only `security_events` rows via `FirmUserAuditEventRecorder`,
+ *    category `firm_user_mfa`, `firm_id` populated from the acting
+ *    user's own `activeFirmUser()->firm`. TOTP is the only enabled
+ *    provider (matches the admin panel's own choice, same
  *    "EmailAuthentication out of scope" reasoning), `recoverable()`
  *    enables the same 8-recovery-code mechanism already proven safe for
  *    the admin panel — no separate/custom recovery-code system is built.
@@ -226,7 +228,7 @@ class FirmPanelProvider extends PanelProvider
             ->passwordReset(requestAction: RequestPasswordReset::class, resetAction: ResetPassword::class)
             ->profile()
             ->multiFactorAuthentication(
-                [AppAuthentication::make()->recoverable()],
+                [AuditedFirmUserAppAuthentication::make()->recoverable()],
                 isRequired: false,
             )
             ->colors([
