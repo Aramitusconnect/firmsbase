@@ -53,7 +53,23 @@ FrankenPHP is configured to bind `:8080`, which unprivileged users can do withou
 
 ## Temp directory handling
 
-PHP's `sys_temp_dir` and Laravel's `storage_path('framework/cache/data')`/`storage_path('framework/sessions')` are the only "temp-ish" writes the framework itself performs (see [dependency audit](ec2-dependency-audit.md) §7), and both are redirected off local disk entirely once `CACHE_STORE`/`SESSION_DRIVER` point at Redis in staging/production. What remains on local disk is bounded, ephemeral, framework-internal, and requires nothing beyond "container-local ephemeral storage" — no EFS/persistent volume is mounted or needed. Nothing under `storage/` holds the only copy of business data (confirmed by the dependency audit: no application code currently writes real business files to any disk path at all).
+Laravel's own `storage_path('framework/cache/data')`/`storage_path('framework/sessions')` writes are redirected off local disk entirely once `CACHE_STORE`/`SESSION_DRIVER` point at Redis in staging/production. What remains on local disk under `storage/` is bounded, ephemeral, framework-internal, and requires nothing beyond "container-local ephemeral storage" — no EFS/persistent volume is mounted or needed. Nothing under `storage/` holds the only copy of business data (confirmed by the dependency audit: no application code currently writes real business files to any disk path at all).
+
+**Correction (Mission 1C, section 21 local proof — see
+[mission-1c-readonly-root-local-proof.md](../security/mission-1c-readonly-root-local-proof.md)):**
+the paragraph above previously also claimed PHP's own `sys_temp_dir`
+was "redirected off local disk" by the same `CACHE_STORE`/
+`SESSION_DRIVER` config — that is inaccurate. Those two env vars
+control Laravel's cache/session storage drivers only; they have no
+effect on PHP's built-in `upload_tmp_dir` (defaults to the OS `/tmp`),
+which every multipart file upload writes to at the SAPI level before
+application code runs. A real `docker run --read-only` proof against
+this image confirmed `/tmp` is genuinely NOT writable once
+`readonlyRootFilesystem` is on and only the six paths below are
+mounted — a real gap that would break file uploads, not yet exercised
+because `readonly_root_filesystem_enabled` still defaults to `false`.
+See the linked proof doc for the two credible fixes and why neither
+was applied speculatively in this mission.
 
 ## Health checks
 
