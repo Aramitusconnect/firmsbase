@@ -395,6 +395,8 @@ module "web" {
   deployment_maximum_percent         = var.web_deployment_maximum_percent
   tags                               = var.web_tags
 
+  readonly_root_filesystem = var.readonly_root_filesystem_enabled
+
   enable_autoscaling             = true
   autoscaling_min_capacity       = 2
   autoscaling_max_capacity       = 6
@@ -446,6 +448,8 @@ module "worker" {
   deployment_minimum_healthy_percent = var.worker_deployment_minimum_healthy_percent
   deployment_maximum_percent         = var.worker_deployment_maximum_percent
   tags                               = var.worker_tags
+
+  readonly_root_filesystem = var.readonly_root_filesystem_enabled
 
   # Live-adoption values (confirmed via aws ecs describe-services) — an
   # earlier, non-Terraform process set these true/TASK_DEFINITION on this
@@ -506,6 +510,8 @@ module "critical_worker" {
   deployment_maximum_percent         = var.critical_worker_deployment_maximum_percent
   tags                               = var.critical_worker_tags
 
+  readonly_root_filesystem = var.readonly_root_filesystem_enabled
+
   # Live-adoption values — see module.worker's identical override above
   # for rationale.
   enable_ecs_managed_tags = true
@@ -556,6 +562,8 @@ module "scheduler" {
   deployment_maximum_percent         = var.scheduler_deployment_maximum_percent
   tags                               = var.scheduler_tags
 
+  readonly_root_filesystem = var.readonly_root_filesystem_enabled
+
   # Live-adoption values — see module.worker's identical override above
   # for rationale.
   enable_ecs_managed_tags = true
@@ -601,6 +609,8 @@ module "migrate" {
   use_capacity_provider_strategy = false
   # Literal false — migrate is never behind the ALB.
   attach_target_group = false
+
+  readonly_root_filesystem = var.readonly_root_filesystem_enabled
 }
 
 module "maintenance" {
@@ -639,6 +649,8 @@ module "maintenance" {
   use_capacity_provider_strategy = false
   # Literal false — maintenance is never behind the ALB.
   attach_target_group = false
+
+  readonly_root_filesystem = var.readonly_root_filesystem_enabled
 }
 
 module "ses_consumer" {
@@ -680,6 +692,8 @@ module "ses_consumer" {
   attach_target_group = false
 
   enable_autoscaling = false # single long-polling consumer; SQS's own visibility timeout already prevents duplicate concurrent processing of one message.
+
+  readonly_root_filesystem = var.readonly_root_filesystem_enabled
 }
 
 module "cloudwatch_alarms" {

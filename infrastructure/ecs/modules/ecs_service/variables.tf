@@ -183,6 +183,12 @@ variable "enable_ecs_managed_tags" {
   default     = false
 }
 
+variable "readonly_root_filesystem" {
+  description = "Mission 1B (Extreme Security Hardening), section 32: read-only root filesystem, writable temp mounts only where necessary. Defaults to false, matching this module's existing readonlyRootFilesystem=false default (documented there as 'a documented hardening follow-up, not the staging default') — flipping this to true is a deliberate, later, per-environment decision, not a side effect of this mission's own code landing. When true, the container's root filesystem is read-only and the exact six writable leaf directories docs/ecs/container-architecture.md documents (storage/framework/{cache,sessions,testing,views}, storage/logs, bootstrap/cache) are each backed by their own empty Fargate-managed ephemeral volume via mountPoints — never a shared parent-directory mount, which would wipe out subdirectories the image already created via chown at build time."
+  type        = bool
+  default     = false
+}
+
 variable "propagate_tags" {
   description = "Whether/how tags propagate from the task definition or service to tasks — \"NONE\", \"SERVICE\", or \"TASK_DEFINITION\". Defaults to \"NONE\", matching the AWS API's own default and this staging environment's live \"web\" service. The other three live services here (worker/scheduler/critical-worker) currently run with this set to \"TASK_DEFINITION\" — every caller adopting an already-imported service must decide explicitly. See docs/ecs/state-adoption-plan.md."
   type        = string

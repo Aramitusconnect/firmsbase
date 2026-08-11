@@ -1,6 +1,22 @@
 locals {
   container_name = "app"
 
+  # Mission 1B (Extreme Security Hardening), section 32. Exact leaf
+  # directories per docs/ecs/container-architecture.md's own "Non-root
+  # execution, file permissions, writable directories" list — each
+  # becomes its own empty Fargate-managed ephemeral volume, never a
+  # shared parent-directory mount (which would wipe out the
+  # subdirectory structure the image's build-time chown already
+  # created at that path).
+  readonly_root_writable_paths = {
+    "storage-framework-cache"    = "storage/framework/cache"
+    "storage-framework-sessions" = "storage/framework/sessions"
+    "storage-framework-testing"  = "storage/framework/testing"
+    "storage-framework-views"    = "storage/framework/views"
+    "storage-logs"               = "storage/logs"
+    "bootstrap-cache"            = "bootstrap/cache"
+  }
+
   container_definition = {
     name      = local.container_name
     image     = var.image
@@ -40,8 +56,17 @@ locals {
     }
 
     # See docs/ecs/observability.md — logs go to stdout/stderr only, no
-    # in-container log file, so no mountPoints/volumes are needed here.
-    readonlyRootFilesystem = false # storage/{framework,logs} and bootstrap/cache must remain writable — see docs/ecs/container-architecture.md. A split read-only-root + tmpfs-mounted writable dirs is a documented hardening follow-up, not the staging default.
+    # in-container log file. mountPoints below exist ONLY to satisfy
+    # readonlyRootFilesystem, never for log output.
+    readonlyRootFilesystem = var.readonly_root_filesystem
+
+    mountPoints = var.readonly_root_filesystem ? [
+      for volume_name, relative_path in local.readonly_root_writable_paths : {
+        sourceVolume  = volume_name
+        containerPath = "/var/www/html/${relative_path}"
+        readOnly      = false
+      }
+    ] : []
   }
 }
 
@@ -57,6 +82,19 @@ resource "aws_ecs_task_definition" "this" {
   container_definitions = jsonencode([
     { for k, v in local.container_definition : k => v if v != null }
   ])
+
+  # Mission 1B (Extreme Security Hardening), section 32. One empty,
+  # Fargate-managed ephemeral volume per writable leaf directory — see
+  # local.readonly_root_writable_paths and this variable's own
+  # docblock for why these are never a single shared parent-directory
+  # mount. No-op (empty for_each) when readonly_root_filesystem is
+  # false, the default.
+  dynamic "volume" {
+    for_each = var.readonly_root_filesystem ? local.readonly_root_writable_paths : {}
+    content {
+      name = volume.key
+    }
+  }
 
   tags = var.tags
 }

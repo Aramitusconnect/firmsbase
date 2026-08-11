@@ -797,3 +797,17 @@ variable "enable_backup_plan" {
   type        = bool
   default     = false
 }
+
+# Mission 1B (Extreme Security Hardening), section 32: read-only root
+# filesystem, writable temp mounts only where necessary. Applied
+# uniformly to every ECS role (module.ecs_service's own
+# readonly_root_filesystem variable already defaults to false
+# independently — this environment-level flag exists so a single
+# tfvars change can opt every role in together, rather than requiring
+# per-module edits). Defaults to false (complete no-op, matching this
+# module's pre-existing readonlyRootFilesystem=false behavior).
+variable "readonly_root_filesystem_enabled" {
+  description = "Whether every ECS role's container runs with a read-only root filesystem plus empty ephemeral-volume mounts for its documented writable leaf directories (see modules/ecs_service's readonly_root_filesystem variable). Defaults to false (complete no-op)."
+  type        = bool
+  default     = false
+}
