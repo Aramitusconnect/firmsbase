@@ -29,6 +29,19 @@ use App\Marketplace\Models\DirectoryFirm;
  */
 class MarketplaceCapabilityService
 {
+    /**
+     * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 3 —
+     * MarketplaceCapability::SecureIntake granted ONLY at
+     * verified_member, deliberately above plain claimed_profile. The
+     * mission's own eligibility requirement distinguishes two separate
+     * denial categories — "unclaimed" and "non-capable" — which only
+     * makes sense if a claimed-but-not-yet-a-member Firm is itself a
+     * real, distinct "claimed but non-capable" state: claiming proves
+     * ownership, but Secure Intake (collecting and routing private
+     * prospect data) is gated behind the same verified-membership tier
+     * that already unlocks MemberBadge, not merely behind
+     * ClaimManagement/ProfileManagement's ownership-only bar.
+     */
     private const LEVEL_CAPABILITIES = [
         'public_listing' => [],
         'claimed_profile' => [
@@ -39,6 +52,7 @@ class MarketplaceCapabilityService
             MarketplaceCapability::ProfileManagement,
             MarketplaceCapability::ClaimManagement,
             MarketplaceCapability::MemberBadge,
+            MarketplaceCapability::SecureIntake,
         ],
     ];
 

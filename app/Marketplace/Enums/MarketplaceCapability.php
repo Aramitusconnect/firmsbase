@@ -14,23 +14,23 @@ namespace App\Marketplace\Enums;
  * directly at the call site.
  *
  * `ConsultationRequests`/`SecureIntake`/`Scheduling`/`LeadDelivery`
- * exist here as vocabulary only (section 18's own listed future
- * capabilities) — Mission 2 does not implement the behavior behind
- * them (section 65/94: no AI Intake, no consultation/scheduling/lead
- * workflow in this mission). `MarketplaceCapabilityService` never
- * grants these today; their presence in this enum is what lets Mission
- * 3 wire them in as a change to that one service, not a new enum or a
- * new scattered check.
+ * existed here as vocabulary only (section 18's own listed future
+ * capabilities) — Mission 2 did not implement the behavior behind
+ * them. Mission 3, checkpoint 3 is the first of these to actually be
+ * granted: `SecureIntake` is now wired into
+ * `MarketplaceCapabilityService::LEVEL_CAPABILITIES` (claimed_profile
+ * and verified_member). `ConsultationRequests`/`Scheduling`/
+ * `LeadDelivery` remain reserved-only, for later checkpoints.
  */
 enum MarketplaceCapability: string
 {
     case ProfileManagement = 'profile_management';
     case ClaimManagement = 'claim_management';
     case MemberBadge = 'member_badge';
-
-    // Reserved for Mission 3 — never granted by MarketplaceCapabilityService today.
-    case ConsultationRequests = 'consultation_requests';
     case SecureIntake = 'secure_intake';
+
+    // Still reserved — never granted by MarketplaceCapabilityService today.
+    case ConsultationRequests = 'consultation_requests';
     case Scheduling = 'scheduling';
     case LeadDelivery = 'lead_delivery';
 }

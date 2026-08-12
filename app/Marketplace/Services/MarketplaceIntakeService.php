@@ -6,6 +6,7 @@ namespace App\Marketplace\Services;
 
 use App\Enums\MarketplaceIntakeEventType;
 use App\Enums\MarketplaceIntakeStatus;
+use App\Marketplace\Exceptions\MarketplaceIntakeIneligibleException;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Models\MarketplaceIntake;
 use App\Marketplace\Models\MarketplaceIntakeEvent;
@@ -17,15 +18,20 @@ use Illuminate\Support\Facades\URL;
 
 /**
  * MarketplaceIntakeService — Mission 3 (MyAttorney Conversion + AI
- * Intake), checkpoints 1-2. The ONLY writer of
+ * Intake), checkpoints 1-3. The ONLY writer of
  * marketplace_intakes/marketplace_intake_events domain-model rows
  * (start + basic status transitions + event recording), plus the
  * secure resumable-link primitives (checkpoint 2: signed URL
- * generation, resume tracking, expiry). Mirrors PaymentRequestService's
+ * generation, resume tracking, expiry) and Firm eligibility gating
+ * (checkpoint 3: startForDirectoryFirm()). Mirrors PaymentRequestService's
  * own create()/recordEvent()/signedUrl() shape exactly.
  */
 class MarketplaceIntakeService
 {
+    public function __construct(
+        private readonly MarketplaceIntakeEligibilityService $eligibilityService = new MarketplaceIntakeEligibilityService,
+    ) {}
+
     /**
      * How long a fresh intake's resumable link stays valid by default
      * — mirrors PaymentRequestService::DEFAULT_EXPIRY_DAYS. A prospect
@@ -34,6 +40,35 @@ class MarketplaceIntakeService
      * indefinitely-valid public link.
      */
     private const DEFAULT_EXPIRY_DAYS = 30;
+
+    /**
+     * The ONLY entry point a genuinely public "Start Secure Intake"
+     * surface may call — checkpoint 3's Firm-eligibility gate. Every
+     * fact this method acts on (which canonical Firm, whether it's
+     * eligible) is re-derived server-side from $directoryFirm's own
+     * stored row; the caller supplies nothing the browser could have
+     * forged beyond which listing it's looking at (the slug that
+     * resolved to this $directoryFirm in the first place — resolving
+     * that slug is the caller's job, not this method's).
+     *
+     * @throws MarketplaceIntakeIneligibleException if the listing is
+     *                                              unclaimed, lacks the SecureIntake capability, is not publicly
+     *                                              Published, is not accepting_inquiries, or has no canonical
+     *                                              Firm at all — see MarketplaceIntakeEligibilityService for the
+     *                                              exact, ordered check list.
+     */
+    public function startForDirectoryFirm(DirectoryFirm $directoryFirm, ?PracticeArea $practiceArea = null): MarketplaceIntake
+    {
+        $eligibility = $this->eligibilityService->evaluate($directoryFirm);
+
+        if (! $eligibility->eligible) {
+            throw new MarketplaceIntakeIneligibleException($eligibility->reasonCode ?? 'ineligible');
+        }
+
+        $firm = Firm::query()->findOrFail($directoryFirm->firm_id);
+
+        return $this->start($firm, $directoryFirm, $practiceArea);
+    }
 
     public function start(
         Firm $firm,

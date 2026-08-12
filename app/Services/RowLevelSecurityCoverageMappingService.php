@@ -828,6 +828,11 @@ class RowLevelSecurityCoverageMappingService
         'platform_billing_events', 'platform_invoice_lines', 'usage_rollups',
         'practice_areas', 'matter_types', 'template_packs', 'template_pack_versions',
         'intake_templates',
+        // Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 3 —
+        // intake_template_questions, a pure child of intake_templates
+        // (no firm_id of its own), same Global classification as its
+        // parent. See EXEMPT_TABLE_METADATA below.
+        'intake_template_questions',
         // Wave 1A (Section 39A-4B) additions — see docblock above.
         'module_catalog', 'readiness_scorecard_components',
         // Stage B Checkpoint 2 (FirmsBase Integration Platform mission)
@@ -1403,6 +1408,11 @@ class RowLevelSecurityCoverageMappingService
             'classification' => TenantOwnershipClassification::Global,
             'ownership_path' => null,
             'notes' => 'Platform-wide reference catalog. See EXEMPT_TABLE_METADATA.',
+        ],
+        'intake_template_questions' => [
+            'classification' => TenantOwnershipClassification::Global,
+            'ownership_path' => null,
+            'notes' => 'Pure child of intake_templates, no firm_id of its own. See EXEMPT_TABLE_METADATA.',
         ],
         // The 2 Wave 1A EXEMPT_TABLES additions:
         'module_catalog' => [
@@ -2206,6 +2216,11 @@ class RowLevelSecurityCoverageMappingService
             'reason' => 'Platform-wide reference catalog shared by every firm; not firm-scoped data.',
             'expected_readers' => ['intake submission services'],
             'authorized_writers' => ['platform admins via the platform-admin panel'],
+        ],
+        'intake_template_questions' => [
+            'reason' => 'Pure child of intake_templates (Mission 3, checkpoint 3) — no firm_id column, same global scope as its parent.',
+            'expected_readers' => ['IntakeTemplateService'],
+            'authorized_writers' => ['IntakeTemplateService (platform admins/template authors)'],
         ],
         'module_catalog' => [
             'reason' => 'Global installable-module reference catalog (approved decision — see the migration\'s own doc comment); addressed by module_code, never firm-scoped. Confirmed by direct migration inspection to carry no firm_id or any other firm-referencing column (database/migrations/2026_07_04_300001_create_module_catalog_table.php).',

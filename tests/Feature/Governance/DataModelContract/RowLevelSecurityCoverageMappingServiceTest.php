@@ -420,7 +420,11 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Narrowly updated AGAIN by Mission 2 checkpoint 9 —
         // directory_import_batches and directory_import_rows, both
         // Global, added to EXEMPT_TABLES (53 -> 55).
-        $this->assertCount(56, $this->service->exemptTables());
+        // Narrowly updated AGAIN by Mission 3 (MyAttorney Conversion +
+        // AI Intake), checkpoint 3 — intake_template_questions, Global
+        // (pure child of the already-exempt intake_templates), added
+        // to EXEMPT_TABLES (56 -> 57).
+        $this->assertCount(57, $this->service->exemptTables());
         // Native accounting journal (Phase A) added two more DirectTenant
         // tables (accounting_journal_entries, accounting_postings) — 147 -> 149.
         // Payment allocation splitting (Phase F) added one more DirectTenant
@@ -914,7 +918,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Narrowly updated AGAIN by Mission 2 checkpoint 9 —
         // directory_import_batches and directory_import_rows, both
         // Global — 77 -> 79.
-        $this->assertSame(80, $summary[TenantOwnershipClassification::Global->value]);
+        // Narrowly updated AGAIN by Mission 3 (MyAttorney Conversion +
+        // AI Intake), checkpoint 3 — intake_template_questions, Global
+        // — 80 -> 81.
+        $this->assertSame(81, $summary[TenantOwnershipClassification::Global->value]);
         $this->assertSame(4, $summary[TenantOwnershipClassification::Audit->value]);
         // 9 -> 10: client_portal_users' corrected System classification
         // (see the InheritedTenant/System comment above this method's
@@ -1036,7 +1043,10 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // marketplace_intake_events (two new DirectTenant tables,
         // already reflected in the DirectTenant assertion above) —
         // 301 -> 303.
-        $this->assertSame(303, array_sum($summary));
+        // Narrowly updated AGAIN by Mission 3, checkpoint 3 —
+        // intake_template_questions (one new Global table, already
+        // reflected in the Global assertion above) — 303 -> 304.
+        $this->assertSame(304, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

@@ -66,11 +66,18 @@ class CapabilityAndBadgeModelTest extends TestCase
         $this->assertContains(MarketplaceCapability::MemberBadge, $granted);
     }
 
-    public function test_mission_3_reserved_capabilities_are_never_granted_at_any_profile_level(): void
+    /**
+     * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 3
+     * legitimately activated SecureIntake (granted only at
+     * verified_member — see MarketplaceCapabilityService's own
+     * docblock) — it is no longer reserved-only, so it moved out of
+     * this list into its own assertion below.
+     * ConsultationRequests/Scheduling/LeadDelivery remain reserved.
+     */
+    public function test_still_reserved_mission_3_capabilities_are_never_granted_at_any_profile_level(): void
     {
         $reserved = [
             MarketplaceCapability::ConsultationRequests,
-            MarketplaceCapability::SecureIntake,
             MarketplaceCapability::Scheduling,
             MarketplaceCapability::LeadDelivery,
         ];
@@ -82,9 +89,16 @@ class CapabilityAndBadgeModelTest extends TestCase
         ] as $firm) {
             $granted = $this->capabilities->capabilitiesFor($firm);
             foreach ($reserved as $capability) {
-                $this->assertNotContains($capability, $granted, "{$capability->value} must never be granted in Mission 2, regardless of profile level.");
+                $this->assertNotContains($capability, $granted, "{$capability->value} must still never be granted.");
             }
         }
+    }
+
+    public function test_secure_intake_is_granted_only_at_verified_member(): void
+    {
+        $this->assertNotContains(MarketplaceCapability::SecureIntake, $this->capabilities->capabilitiesFor(DirectoryFirm::factory()->unclaimed()->create()));
+        $this->assertNotContains(MarketplaceCapability::SecureIntake, $this->capabilities->capabilitiesFor(DirectoryFirm::factory()->claimed()->create()));
+        $this->assertContains(MarketplaceCapability::SecureIntake, $this->capabilities->capabilitiesFor(DirectoryFirm::factory()->member()->create()));
     }
 
     public function test_has_helper_matches_capabilities_for(): void
@@ -105,7 +119,13 @@ class CapabilityAndBadgeModelTest extends TestCase
             DirectoryFirmProfileLevel::VerifiedMember,
             $this->capabilities->profileLevelGrantingCapability(MarketplaceCapability::MemberBadge)
         );
-        $this->assertNull($this->capabilities->profileLevelGrantingCapability(MarketplaceCapability::SecureIntake));
+        // Mission 3, checkpoint 3 activated SecureIntake at verified_member
+        // — no longer null (that was Mission 2's reserved-vocabulary state).
+        $this->assertSame(
+            DirectoryFirmProfileLevel::VerifiedMember,
+            $this->capabilities->profileLevelGrantingCapability(MarketplaceCapability::SecureIntake)
+        );
+        $this->assertNull($this->capabilities->profileLevelGrantingCapability(MarketplaceCapability::ConsultationRequests));
     }
 
     public function test_an_unclaimed_firm_shows_only_the_public_listing_badge(): void

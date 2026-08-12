@@ -6,6 +6,7 @@ namespace Tests\Feature\Marketplace\Intake;
 
 use App\Enums\MarketplaceIntakeEventType;
 use App\Enums\MarketplaceIntakeStatus;
+use App\Marketplace\Exceptions\MarketplaceIntakeIneligibleException;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Services\MarketplaceIntakeService;
 use App\Models\Firm;
@@ -267,5 +268,77 @@ class MarketplaceIntakeServiceTest extends TestCase
         $this->runWithFirmContext($firm, fn () => $intake->update(['expires_at' => null]));
 
         $this->assertTrue($this->runWithFirmContext($firm, fn () => $intake->fresh())->isResumable());
+    }
+
+    public function test_start_for_directory_firm_creates_an_intake_for_an_eligible_listing(): void
+    {
+        $firm = Firm::factory()->create();
+        $directoryFirm = DirectoryFirm::factory()->member()->create(['firm_id' => $firm->id, 'accepting_inquiries' => true]);
+
+        $intake = $this->service->startForDirectoryFirm($directoryFirm);
+
+        $this->assertSame(MarketplaceIntakeStatus::Started, $intake->status);
+        $this->assertSame($firm->id, $intake->firm_id);
+        $this->assertSame($directoryFirm->id, $intake->directory_firm_id);
+    }
+
+    public function test_start_for_directory_firm_rejects_an_unclaimed_listing(): void
+    {
+        $directoryFirm = DirectoryFirm::factory()->unclaimed()->create(['accepting_inquiries' => true]);
+
+        $this->expectException(MarketplaceIntakeIneligibleException::class);
+
+        $this->service->startForDirectoryFirm($directoryFirm);
+    }
+
+    public function test_start_for_directory_firm_rejects_a_claimed_but_non_capable_listing(): void
+    {
+        $firm = Firm::factory()->create();
+        $directoryFirm = DirectoryFirm::factory()->claimed()->create(['firm_id' => $firm->id, 'accepting_inquiries' => true]);
+
+        try {
+            $this->service->startForDirectoryFirm($directoryFirm);
+            $this->fail('Expected MarketplaceIntakeIneligibleException.');
+        } catch (MarketplaceIntakeIneligibleException $e) {
+            $this->assertSame('not_capable', $e->reasonCode);
+        }
+    }
+
+    public function test_start_for_directory_firm_rejects_an_unpublished_listing(): void
+    {
+        $firm = Firm::factory()->create();
+        $directoryFirm = DirectoryFirm::factory()->member()->suspended()->create(['firm_id' => $firm->id, 'accepting_inquiries' => true]);
+
+        $this->expectException(MarketplaceIntakeIneligibleException::class);
+
+        $this->service->startForDirectoryFirm($directoryFirm);
+    }
+
+    public function test_start_for_directory_firm_rejects_a_listing_not_accepting_inquiries(): void
+    {
+        $firm = Firm::factory()->create();
+        $directoryFirm = DirectoryFirm::factory()->member()->create(['firm_id' => $firm->id, 'accepting_inquiries' => false]);
+
+        $this->expectException(MarketplaceIntakeIneligibleException::class);
+
+        $this->service->startForDirectoryFirm($directoryFirm);
+    }
+
+    public function test_start_for_directory_firm_binds_the_intake_to_the_directory_firms_own_canonical_firm_only(): void
+    {
+        // The Firm binding comes ENTIRELY from $directoryFirm->firm_id
+        // — startForDirectoryFirm() takes no separate firm parameter a
+        // caller could pass a mismatched value for, so there is no
+        // request-payload surface that could ever redirect an intake
+        // to a different Firm than the one the visitor is actually
+        // looking at.
+        $realFirm = Firm::factory()->create();
+        $otherFirm = Firm::factory()->create();
+        $directoryFirm = DirectoryFirm::factory()->member()->create(['firm_id' => $realFirm->id, 'accepting_inquiries' => true]);
+
+        $intake = $this->service->startForDirectoryFirm($directoryFirm);
+
+        $this->assertSame($realFirm->id, $intake->firm_id);
+        $this->assertNotSame($otherFirm->id, $intake->firm_id);
     }
 }
