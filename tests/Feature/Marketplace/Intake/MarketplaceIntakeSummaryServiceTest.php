@@ -13,7 +13,11 @@ use App\Models\AiUsageEvent;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\User;
+use App\Services\AiModeResolutionService;
+use App\Services\AiPolicySettingService;
+use App\Services\AiProviderAdapterInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Mockery;
 use Tests\Feature\Ai\Concerns\SetsUpAiEntitledFirm;
 use Tests\TestCase;
 
@@ -112,6 +116,27 @@ class MarketplaceIntakeSummaryServiceTest extends TestCase
         // own instructionText/documentDerivedText — this proves the
         // transcript marker never reached the prompt at all.
         $this->assertStringNotContainsString('SECRET_TRANSCRIPT_MARKER', $result->ai_summary);
+    }
+
+    // ---------------------------------------------------------------
+    // Mission 3, checkpoint 15 (adversarial audit) — the platform AI
+    // kill switch must block BEFORE any provider call, not only be
+    // observed after the fact via AiUsageRecorderService's own
+    // post-hoc check.
+    // ---------------------------------------------------------------
+
+    public function test_generate_never_calls_the_provider_when_the_platform_kill_switch_is_engaged(): void
+    {
+        [$firm, $intake, $user] = $this->setUpIntakeWithAnswers();
+        app(AiPolicySettingService::class)->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, false);
+
+        $provider = Mockery::mock(AiProviderAdapterInterface::class);
+        $provider->shouldNotReceive('generate');
+        $this->app->instance(AiProviderAdapterInterface::class, $provider);
+
+        $this->expectException(\RuntimeException::class);
+
+        $this->service()->generate($firm, $intake, $user);
     }
 
     public function test_generate_with_no_structured_answers_still_succeeds(): void

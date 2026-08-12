@@ -10,9 +10,11 @@ use App\Marketplace\Models\MarketplaceIntake;
 use App\Models\Firm;
 use App\Models\IntakeTemplateQuestion;
 use App\Models\User;
+use App\Services\AiModeResolutionService;
 use App\Services\AiProviderAdapterInterface;
 use App\Services\AiUsageRecorderService;
 use App\Services\IntakeTemplateService;
+use App\Services\PromptInjectionResistanceService;
 use App\Services\TenantContextService;
 use App\ValueObjects\AiPromptRequest;
 
@@ -39,6 +41,18 @@ use App\ValueObjects\AiPromptRequest;
  * same rule every other AI call site in this codebase follows (see
  * AiPromptRequest's own docblock) — so nothing a prospect typed during
  * intake can ever be interpreted as an instruction to this call.
+ * PromptInjectionResistanceService::evaluate() runs the same defense-
+ * in-depth detection/audit pass MarketplaceIssueClassifierService uses
+ * — structured_data is visitor-controlled, so this call site earns
+ * the same layer.
+ *
+ * Mission 3, checkpoint 15 (adversarial audit) fix: the platform AI
+ * kill switch is now checked via AiModeResolutionService::
+ * assertEnabled() BEFORE the provider call below, not only via
+ * AiUsageRecorderService::record()'s own post-hoc check — the earlier
+ * ordering meant a real (non-fake) provider would already have been
+ * invoked with the prospect's intake data before the kill switch's
+ * effect was ever observed.
  */
 class MarketplaceIntakeSummaryService
 {
@@ -47,6 +61,8 @@ class MarketplaceIntakeSummaryService
     public function __construct(
         private readonly AiProviderAdapterInterface $provider,
         private readonly AiUsageRecorderService $usageRecorder,
+        private readonly AiModeResolutionService $modeResolution,
+        private readonly PromptInjectionResistanceService $promptInjectionResistance,
         private readonly IntakeTemplateService $templateService = new IntakeTemplateService,
         private readonly TenantContextService $tenantContext = new TenantContextService,
     ) {}
@@ -60,6 +76,7 @@ class MarketplaceIntakeSummaryService
     public function generate(Firm $firm, MarketplaceIntake $intake, User $user): MarketplaceIntake
     {
         $this->assertBelongsToFirm($firm, $intake);
+        $this->modeResolution->assertEnabled($firm);
 
         $digest = $this->tenantContext->runWithFirmContext($firm, fn () => $this->buildAnswerDigest($intake));
 
@@ -71,6 +88,8 @@ class MarketplaceIntakeSummaryService
             documentDerivedText: $digest,
             matterIds: [],
         );
+
+        $this->promptInjectionResistance->evaluate($request);
 
         $response = $this->provider->generate($request);
 

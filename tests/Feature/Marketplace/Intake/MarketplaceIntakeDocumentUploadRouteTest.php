@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Marketplace\Intake;
 
+use App\Enums\DocumentScanStatus;
+use App\Enums\DocumentStatus;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Models\MarketplaceIntake;
+use App\Marketplace\Services\MarketplaceIntakeDocumentService;
 use App\Marketplace\Services\MarketplaceIntakeService;
 use App\Models\Document;
 use App\Models\Firm;
@@ -95,6 +98,50 @@ class MarketplaceIntakeDocumentUploadRouteTest extends TestCase
 
         $count = $this->runWithFirmContext($firm, fn () => Document::query()->where('marketplace_intake_id', $intake->id)->count());
         $this->assertSame(0, $count);
+    }
+
+    // ---------------------------------------------------------------
+    // Mission 3, checkpoint 15 (adversarial audit) — oversized/infected
+    // files through the real public HTTP endpoint, not only the
+    // service-layer MarketplaceIntakeDocumentServiceTest.
+    // ---------------------------------------------------------------
+
+    public function test_an_oversized_file_is_rejected_without_creating_a_document(): void
+    {
+        [$firm, $intake] = $this->eligibleIntake();
+        // The controller's own validation rule is 'max:25600' (KB) —
+        // 26000 KB exceeds it.
+        $file = UploadedFile::fake()->create('contract.pdf', 26000, 'application/pdf');
+
+        $response = $this->post($this->myAttorneyUrl('/intake/'.$intake->uuid.'/documents'), ['file' => $file]);
+
+        $response->assertSessionHasErrors('file');
+        $count = $this->runWithFirmContext($firm, fn () => Document::query()->where('marketplace_intake_id', $intake->id)->count());
+        $this->assertSame(0, $count);
+    }
+
+    public function test_an_infected_file_is_quarantined_end_to_end_through_the_public_route(): void
+    {
+        [$firm, $intake] = $this->eligibleIntake();
+        // FakeVirusScanner flags any storage path containing "infected"
+        // — MarketplaceIntakeDocumentService::upload() builds the
+        // storage path from the original filename, so this filename
+        // alone is enough to trigger it through the real pipeline.
+        $file = UploadedFile::fake()->create('infected-eicar-test.pdf', 10, 'application/pdf');
+
+        $response = $this->post($this->myAttorneyUrl('/intake/'.$intake->uuid.'/documents'), ['file' => $file]);
+
+        $response->assertRedirect();
+
+        $document = $this->runWithFirmContext($firm, fn () => Document::query()->where('marketplace_intake_id', $intake->id)->sole());
+        $this->assertSame(DocumentScanStatus::Infected, $document->scan_status);
+        $this->assertSame(DocumentStatus::Rejected, $document->status);
+
+        $usable = $this->runWithFirmContext(
+            $firm,
+            fn () => app(MarketplaceIntakeDocumentService::class)->usableDocumentsForFirmReview($firm, $intake->fresh()),
+        );
+        $this->assertTrue($usable->isEmpty(), 'An infected document must never be usable for Firm review.');
     }
 
     public function test_repeated_uploads_past_the_throttle_limit_are_rejected(): void

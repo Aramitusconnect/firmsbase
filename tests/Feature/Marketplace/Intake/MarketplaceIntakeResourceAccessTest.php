@@ -238,6 +238,50 @@ final class MarketplaceIntakeResourceAccessTest extends TestCase
         });
     }
 
+    public function test_accept_action_forced_while_conflict_review_is_required_still_refuses_server_side(): void
+    {
+        // Mission 3, checkpoint 15 (adversarial audit). visible() is a
+        // UI nicety, not the security boundary — this proves the
+        // action's own action() closure (which calls
+        // MarketplaceIntakeService::markAccepted(), itself refusing
+        // any status other than Submitted/UnderReview) refuses even
+        // when called directly, bypassing the hidden button.
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $intake = $this->freshIntake($firm);
+        $submitted = app(MarketplaceIntakeService::class)->markSubmitted($firm, $intake);
+        $underReview = app(MarketplaceIntakeService::class)->markUnderReview($firm, $submitted);
+        $flagged = app(MarketplaceIntakeService::class)->markConflictReviewRequired($firm, $underReview);
+
+        $this->runWithFirmContext($firm, function () use ($flagged): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $flagged->getRouteKey()]);
+            $test->mountAction(AcceptIntakeAction::getDefaultName());
+            $test->callMountedAction();
+        });
+
+        $fresh = $this->runWithFirmContext($firm, fn () => $flagged->fresh());
+        $this->assertSame(MarketplaceIntakeStatus::ConflictReviewRequired, $fresh->status, 'Forcing the hidden Accept action must never bypass the conflict-review gate.');
+    }
+
+    public function test_accept_action_forced_by_a_receptionist_still_refuses_server_side(): void
+    {
+        // Mission 3, checkpoint 15 (adversarial audit) — role ceiling
+        // enforced inside action(), not only via visible().
+        $firm = Firm::factory()->create();
+        $intake = $this->freshIntake($firm);
+        $submitted = app(MarketplaceIntakeService::class)->markSubmitted($firm, $intake);
+
+        $this->actingAsRole($firm, FirmUserRole::Receptionist);
+        $this->runWithFirmContext($firm, function () use ($submitted): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $submitted->getRouteKey()]);
+            $test->mountAction(AcceptIntakeAction::getDefaultName());
+            $test->callMountedAction();
+        });
+
+        $fresh = $this->runWithFirmContext($firm, fn () => $submitted->fresh());
+        $this->assertSame(MarketplaceIntakeStatus::Submitted, $fresh->status, 'Forcing the hidden Accept action as a Receptionist must never bypass the role ceiling.');
+    }
+
     public function test_accept_action_transitions_the_status_via_the_real_service(): void
     {
         $firm = Firm::factory()->create();
@@ -332,6 +376,31 @@ final class MarketplaceIntakeResourceAccessTest extends TestCase
             $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $accepted->getRouteKey()]);
             $test->assertActionVisible(ConvertIntakeAction::getDefaultName());
         });
+    }
+
+    public function test_convert_action_forced_by_a_receptionist_still_refuses_server_side(): void
+    {
+        // Mission 3, checkpoint 15 (adversarial audit). visible() hides
+        // the button, but the real boundary is action()'s own re-check
+        // of ClientCrmAccessPolicyService::canConvertLead() — proves a
+        // forced call (bypassing the hidden button entirely) creates
+        // no Matter and leaves the intake untouched.
+        $firm = Firm::factory()->create();
+        $practiceArea = PracticeArea::factory()->create();
+        $matterType = MatterType::factory()->forPracticeArea($practiceArea)->create();
+        $this->actingAsRole($firm, FirmUserRole::Receptionist);
+        $accepted = $this->acceptedIntakeWithPracticeArea($firm, $practiceArea);
+
+        $this->runWithFirmContext($firm, function () use ($accepted, $matterType): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $accepted->getRouteKey()]);
+            $test->mountAction(ConvertIntakeAction::getDefaultName());
+            $test->setActionData(['matter_type_id' => $matterType->id]);
+            $test->callMountedAction();
+        });
+
+        $fresh = $this->runWithFirmContext($firm, fn () => $accepted->fresh());
+        $this->assertSame(MarketplaceIntakeStatus::Accepted, $fresh->status, 'Forcing the hidden Convert action as a Receptionist must never bypass the role ceiling.');
+        $this->assertSame(0, $this->runWithFirmContext($firm, fn () => Matter::query()->where('firm_id', $firm->id)->count()));
     }
 
     public function test_convert_action_is_hidden_unless_the_intake_is_accepted(): void
