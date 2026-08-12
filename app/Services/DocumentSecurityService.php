@@ -219,6 +219,35 @@ class DocumentSecurityService
     }
 
     /**
+     * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 11.
+     * Re-links a document uploaded during a MyAttorney intake (before
+     * any Client/Matter existed) to the Client/Matter that conversion
+     * just created — mirrors linkToRequestItem()'s own shape exactly
+     * (never overwrites an existing link, never crosses a firm
+     * boundary). Only ConvertMarketplaceProspectService calls this,
+     * and only for documents that already passed
+     * MarketplaceIntakeDocumentService::usableDocumentsForFirmReview()'s
+     * own scan-clean filter — an infected/pending document is never
+     * eligible to be linked here.
+     */
+    public function linkToMatterAndClient(Document $document, Matter $matter, Client $client): Document
+    {
+        if ($document->matter_id !== null || $document->client_id !== null) {
+            throw new \RuntimeException('This document is already linked to a matter or client.');
+        }
+
+        return (new TenantContextService)->runWithFirmContext($document->firm_id, function () use ($document, $matter, $client) {
+            if ((int) $matter->firm_id !== (int) $document->firm_id || (int) $client->firm_id !== (int) $document->firm_id) {
+                throw new \RuntimeException('This matter/client does not belong to this document\'s firm.');
+            }
+
+            $document->update(['matter_id' => $matter->id, 'client_id' => $client->id]);
+
+            return $document->fresh();
+        });
+    }
+
+    /**
      * The explicit private-access check. Documents are never exposed
      * via a public URL; any future signed-URL/download endpoint must
      * call this first (project rule).

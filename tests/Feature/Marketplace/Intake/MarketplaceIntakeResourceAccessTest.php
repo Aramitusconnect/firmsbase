@@ -9,6 +9,7 @@ use App\Enums\MarketplaceIntakeStatus;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\AcceptIntakeAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\ClearIntakeConflictReviewAction;
+use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\ConvertIntakeAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\DeclineIntakeAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\MarkUnderReviewAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\RunIntakeConflictCheckAction;
@@ -19,6 +20,9 @@ use App\Marketplace\Models\MarketplaceIntake;
 use App\Marketplace\Services\MarketplaceIntakeService;
 use App\Models\Firm;
 use App\Models\FirmUser;
+use App\Models\Matter;
+use App\Models\MatterType;
+use App\Models\PracticeArea;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -291,5 +295,79 @@ final class MarketplaceIntakeResourceAccessTest extends TestCase
         $fresh = $this->runWithFirmContext($firm, fn () => $submitted->fresh());
         $this->assertSame(MarketplaceIntakeStatus::Declined, $fresh->status);
         $this->assertSame('Outside our practice areas.', $fresh->decline_reason);
+    }
+
+    // ---------------------------------------------------------------
+    // Mission 3, checkpoint 11 — ConvertIntakeAction
+    // ---------------------------------------------------------------
+
+    private function acceptedIntakeWithPracticeArea(Firm $firm, PracticeArea $practiceArea): MarketplaceIntake
+    {
+        $directoryFirm = $this->runWithFirmContext($firm, fn () => DirectoryFirm::factory()->member()->create(['firm_id' => $firm->id, 'accepting_inquiries' => true]));
+        $intake = app(MarketplaceIntakeService::class)->startForDirectoryFirm($directoryFirm, $practiceArea);
+        $this->runWithFirmContext($firm, fn () => $intake->update([
+            'prospect_name' => 'Jordan Prospect',
+            'prospect_email' => 'jordan@example.com',
+            'prospect_phone' => '555-0100',
+        ]));
+        $submitted = app(MarketplaceIntakeService::class)->markSubmitted($firm, $intake);
+
+        return app(MarketplaceIntakeService::class)->markAccepted($firm, $submitted);
+    }
+
+    public function test_convert_action_is_hidden_for_a_receptionist_but_visible_for_a_paralegal(): void
+    {
+        $firm = Firm::factory()->create();
+        $practiceArea = PracticeArea::factory()->create();
+
+        $this->actingAsRole($firm, FirmUserRole::Receptionist);
+        $accepted = $this->acceptedIntakeWithPracticeArea($firm, $practiceArea);
+        $this->runWithFirmContext($firm, function () use ($accepted): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $accepted->getRouteKey()]);
+            $test->assertActionHidden(ConvertIntakeAction::getDefaultName());
+        });
+
+        $this->actingAsRole($firm, FirmUserRole::Paralegal);
+        $this->runWithFirmContext($firm, function () use ($accepted): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $accepted->getRouteKey()]);
+            $test->assertActionVisible(ConvertIntakeAction::getDefaultName());
+        });
+    }
+
+    public function test_convert_action_is_hidden_unless_the_intake_is_accepted(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $intake = $this->freshIntake($firm);
+        $submitted = app(MarketplaceIntakeService::class)->markSubmitted($firm, $intake);
+
+        $this->runWithFirmContext($firm, function () use ($submitted): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $submitted->getRouteKey()]);
+            $test->assertActionHidden(ConvertIntakeAction::getDefaultName());
+        });
+    }
+
+    public function test_convert_action_creates_a_matter_and_transitions_the_intake_via_the_real_service(): void
+    {
+        $firm = Firm::factory()->create();
+        $practiceArea = PracticeArea::factory()->create();
+        $matterType = MatterType::factory()->forPracticeArea($practiceArea)->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $accepted = $this->acceptedIntakeWithPracticeArea($firm, $practiceArea);
+
+        $this->runWithFirmContext($firm, function () use ($accepted, $matterType): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $accepted->getRouteKey()]);
+            $test->mountAction(ConvertIntakeAction::getDefaultName());
+            $test->setActionData(['matter_type_id' => $matterType->id]);
+            $test->callMountedAction();
+            $test->assertHasNoActionErrors();
+        });
+
+        $fresh = $this->runWithFirmContext($firm, fn () => $accepted->fresh());
+        $this->assertSame(MarketplaceIntakeStatus::Converted, $fresh->status);
+
+        $matter = $this->runWithFirmContext($firm, fn () => Matter::query()->where('firm_id', $firm->id)->sole());
+        $this->assertSame($matterType->id, $matter->matter_type_id);
+        $this->assertSame($fresh->converted_client_id, $matter->client_id);
     }
 }

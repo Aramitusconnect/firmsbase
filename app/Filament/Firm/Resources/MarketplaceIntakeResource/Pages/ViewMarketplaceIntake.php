@@ -8,6 +8,7 @@ use App\Enums\MarketplaceIntakeStatus;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\AcceptIntakeAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\ClearIntakeConflictReviewAction;
+use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\ConvertIntakeAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\DeclineIntakeAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\GenerateAiSummaryAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\MarkUnderReviewAction;
@@ -51,6 +52,7 @@ class ViewMarketplaceIntake extends ViewRecord
             ClearIntakeConflictReviewAction::make(),
             AcceptIntakeAction::make(),
             DeclineIntakeAction::make(),
+            ConvertIntakeAction::make(),
             GenerateAiSummaryAction::make(),
         ];
     }

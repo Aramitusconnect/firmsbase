@@ -10,8 +10,10 @@ use App\Marketplace\Exceptions\MarketplaceIntakeIneligibleException;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Models\MarketplaceIntake;
 use App\Marketplace\Models\MarketplaceIntakeEvent;
+use App\Models\Client;
 use App\Models\Document;
 use App\Models\Firm;
+use App\Models\FirmLead;
 use App\Models\FirmUser;
 use App\Models\PracticeArea;
 use App\Services\IntakeTemplateService;
@@ -329,6 +331,41 @@ class MarketplaceIntakeService
             ]);
 
             $this->recordEvent($firm, $intake, MarketplaceIntakeEventType::Declined, actor: $actor);
+
+            return $intake->fresh();
+        });
+    }
+
+    /**
+     * Mission 3, checkpoint 11. The sole writer of
+     * converted_firm_lead_id/converted_client_id/converted_at (per
+     * this model's own long-standing docblock rule) — only
+     * ConvertMarketplaceProspectService calls this, after the real
+     * FirmLead/Client/Matter chain it orchestrates has already been
+     * created via the existing canonical LeadConversionService/
+     * MatterCreationService. This method itself creates nothing — it
+     * only records the intake's own terminal transition.
+     */
+    public function markConverted(Firm $firm, MarketplaceIntake $intake, FirmLead $firmLead, Client $client, ?FirmUser $actor = null): MarketplaceIntake
+    {
+        $this->assertBelongsToFirm($firm, $intake);
+
+        if ($intake->status !== MarketplaceIntakeStatus::Accepted) {
+            throw new \RuntimeException('Only an Accepted intake can be converted.');
+        }
+
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake, $firmLead, $client, $actor) {
+            $intake->update([
+                'status' => MarketplaceIntakeStatus::Converted,
+                'converted_firm_lead_id' => $firmLead->id,
+                'converted_client_id' => $client->id,
+                'converted_at' => now(),
+            ]);
+
+            $this->recordEvent($firm, $intake, MarketplaceIntakeEventType::Converted, actor: $actor, metadata: [
+                'firm_lead_id' => $firmLead->id,
+                'client_id' => $client->id,
+            ]);
 
             return $intake->fresh();
         });
