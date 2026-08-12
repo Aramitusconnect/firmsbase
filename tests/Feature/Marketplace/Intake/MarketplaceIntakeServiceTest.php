@@ -6,8 +6,10 @@ namespace Tests\Feature\Marketplace\Intake;
 
 use App\Enums\MarketplaceIntakeEventType;
 use App\Enums\MarketplaceIntakeStatus;
+use App\Marketplace\Enums\MarketplaceAnalyticsEventType;
 use App\Marketplace\Exceptions\MarketplaceIntakeIneligibleException;
 use App\Marketplace\Models\DirectoryFirm;
+use App\Marketplace\Models\MarketplaceAnalyticsEvent;
 use App\Marketplace\Services\MarketplaceIntakeService;
 use App\Models\Client;
 use App\Models\Firm;
@@ -495,5 +497,98 @@ class MarketplaceIntakeServiceTest extends TestCase
         $this->expectException(\RuntimeException::class);
 
         $this->service->markAccepted($otherFirm, $submitted);
+    }
+
+    // ---------------------------------------------------------------
+    // Mission 3, checkpoint 14 — analytics wiring + purgeExpiredPii()
+    // ---------------------------------------------------------------
+
+    public function test_every_funnel_transition_records_an_analytics_event(): void
+    {
+        $firm = Firm::factory()->create();
+
+        $intake = $this->service->start($firm);
+        $submitted = $this->service->markSubmitted($firm, $intake);
+        $accepted = $this->service->markAccepted($firm, $submitted);
+
+        $otherFirm = Firm::factory()->create();
+        $declinedIntake = $this->service->start($otherFirm);
+        $declinedSubmitted = $this->service->markSubmitted($otherFirm, $declinedIntake);
+        $this->service->markDeclined($otherFirm, $declinedSubmitted, 'Outside our practice areas.');
+
+        $types = MarketplaceAnalyticsEvent::query()->pluck('event_type')->all();
+
+        $this->assertContains(MarketplaceAnalyticsEventType::IntakeStarted, $types);
+        $this->assertContains(MarketplaceAnalyticsEventType::IntakeSubmitted, $types);
+        $this->assertContains(MarketplaceAnalyticsEventType::IntakeAccepted, $types);
+        $this->assertContains(MarketplaceAnalyticsEventType::IntakeDeclined, $types);
+    }
+
+    public function test_purge_expired_pii_scrubs_identity_fields_on_a_declined_intake(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+        $this->runWithFirmContext($firm, fn () => $intake->update([
+            'prospect_name' => 'Jordan Prospect',
+            'prospect_email' => 'jordan@example.com',
+            'prospect_phone' => '555-0100',
+            'structured_data' => ['opposing_parties' => 'Someone'],
+        ]));
+        $submitted = $this->service->markSubmitted($firm, $intake);
+        $declined = $this->service->markDeclined($firm, $submitted, 'Outside our practice areas.');
+
+        $purged = $this->service->purgeExpiredPii($firm, $declined);
+
+        $this->assertNull($purged->prospect_name);
+        $this->assertNull($purged->prospect_email);
+        $this->assertNull($purged->prospect_phone);
+        $this->assertNull($purged->structured_data);
+        $this->assertNotNull($purged->purged_at);
+
+        // Decline reason and status are Firm-internal governance data,
+        // not prospect PII — never scrubbed.
+        $this->assertSame('Outside our practice areas.', $purged->decline_reason);
+        $this->assertSame(MarketplaceIntakeStatus::Declined, $purged->status);
+
+        $events = $this->runWithFirmContext($firm, fn () => $intake->events()->pluck('event_type')->all());
+        $this->assertContains(MarketplaceIntakeEventType::Purged, $events);
+    }
+
+    public function test_purge_expired_pii_is_idempotent(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+        $submitted = $this->service->markSubmitted($firm, $intake);
+        $declined = $this->service->markDeclined($firm, $submitted, 'Too early.');
+
+        $first = $this->service->purgeExpiredPii($firm, $declined);
+        $second = $this->service->purgeExpiredPii($firm, $first);
+
+        $this->assertSame($first->purged_at->toDateTimeString(), $second->purged_at->toDateTimeString());
+    }
+
+    public function test_purge_expired_pii_rejects_a_non_terminal_intake(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+
+        $this->expectException(\RuntimeException::class);
+
+        $this->service->purgeExpiredPii($firm, $intake);
+    }
+
+    public function test_purge_expired_pii_rejects_a_converted_intake(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+        $submitted = $this->service->markSubmitted($firm, $intake);
+        $accepted = $this->service->markAccepted($firm, $submitted);
+        $lead = $this->runWithFirmContext($firm, fn () => FirmLead::factory()->forFirm($firm)->create());
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
+        $converted = $this->service->markConverted($firm, $accepted, $lead, $client);
+
+        $this->expectException(\RuntimeException::class);
+
+        $this->service->purgeExpiredPii($firm, $converted);
     }
 }

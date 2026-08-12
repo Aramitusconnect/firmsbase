@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Marketplace\Analytics;
 
+use App\Marketplace\Enums\MarketplaceAnalyticsEventType;
 use App\Marketplace\Models\DirectoryAttorney;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Models\MarketplaceAnalyticsEvent;
@@ -109,5 +110,29 @@ class MarketplaceAnalyticsReportingServiceTest extends TestCase
 
         $this->assertArrayNotHasKey('id', $rows->first());
         $this->assertArrayNotHasKey('subject_id', $rows->first());
+    }
+
+    public function test_total_intake_funnel_counts_are_independent_per_stage(): void
+    {
+        $since = Carbon::now()->subDays(7);
+
+        MarketplaceAnalyticsEvent::factory()->count(5)->create(['event_type' => MarketplaceAnalyticsEventType::IntakeStarted, 'subject_type' => null, 'subject_id' => null, 'occurred_at' => now()]);
+        MarketplaceAnalyticsEvent::factory()->count(4)->create(['event_type' => MarketplaceAnalyticsEventType::IntakeSubmitted, 'subject_type' => null, 'subject_id' => null, 'occurred_at' => now()]);
+        MarketplaceAnalyticsEvent::factory()->count(3)->create(['event_type' => MarketplaceAnalyticsEventType::IntakeAccepted, 'subject_type' => null, 'subject_id' => null, 'occurred_at' => now()]);
+        MarketplaceAnalyticsEvent::factory()->count(1)->create(['event_type' => MarketplaceAnalyticsEventType::IntakeDeclined, 'subject_type' => null, 'subject_id' => null, 'occurred_at' => now()]);
+        MarketplaceAnalyticsEvent::factory()->count(2)->create(['event_type' => MarketplaceAnalyticsEventType::IntakeConverted, 'subject_type' => null, 'subject_id' => null, 'occurred_at' => now()]);
+
+        $this->assertSame(5, $this->reporting->totalIntakesStartedSince($since));
+        $this->assertSame(4, $this->reporting->totalIntakesSubmittedSince($since));
+        $this->assertSame(3, $this->reporting->totalIntakesAcceptedSince($since));
+        $this->assertSame(1, $this->reporting->totalIntakesDeclinedSince($since));
+        $this->assertSame(2, $this->reporting->totalIntakesConvertedSince($since));
+    }
+
+    public function test_intake_funnel_counts_exclude_events_before_the_window(): void
+    {
+        MarketplaceAnalyticsEvent::factory()->create(['event_type' => MarketplaceAnalyticsEventType::IntakeStarted, 'subject_type' => null, 'subject_id' => null, 'occurred_at' => now()->subDays(40)]);
+
+        $this->assertSame(0, $this->reporting->totalIntakesStartedSince(Carbon::now()->subDays(30)));
     }
 }

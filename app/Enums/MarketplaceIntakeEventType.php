@@ -58,4 +58,14 @@ enum MarketplaceIntakeEventType: string
      * can proceed.
      */
     case ConflictReviewCleared = 'conflict_review_cleared';
+
+    /**
+     * Mission 3, checkpoint 14 — a terminal, never-converted intake
+     * (Declined/Abandoned/Expired) had its prospect PII scrubbed by the
+     * intake-retention sweep. The row itself and this audit trail are
+     * deliberately preserved (only the identifying content is removed)
+     * — a purged intake's own event log stays inspectable, it just no
+     * longer names anyone.
+     */
+    case Purged = 'purged';
 }

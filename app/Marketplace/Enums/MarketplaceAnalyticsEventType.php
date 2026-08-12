@@ -18,4 +18,19 @@ enum MarketplaceAnalyticsEventType: string
     case FirmProfileViewed = 'firm_profile_viewed';
     case AttorneyProfileViewed = 'attorney_profile_viewed';
     case SearchPerformed = 'search_performed';
+
+    /**
+     * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 14. The
+     * intake funnel's own aggregate-only stage counters — matches this
+     * enum's own established privacy bar (no prospect name/email/
+     * phone/structured_data, ever). subject is the intake's own
+     * DirectoryFirm when known, letting the same top-viewed-firms-style
+     * query answer "which firms get the most MyAttorney traffic"
+     * without adding a new query shape.
+     */
+    case IntakeStarted = 'intake_started';
+    case IntakeSubmitted = 'intake_submitted';
+    case IntakeAccepted = 'intake_accepted';
+    case IntakeDeclined = 'intake_declined';
+    case IntakeConverted = 'intake_converted';
 }

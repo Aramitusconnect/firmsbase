@@ -42,6 +42,42 @@ class MarketplaceAnalyticsReportingService
     }
 
     /**
+     * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 14.
+     */
+    public function totalIntakesStartedSince(Carbon $since): int
+    {
+        return $this->countByEventType(MarketplaceAnalyticsEventType::IntakeStarted, $since);
+    }
+
+    public function totalIntakesSubmittedSince(Carbon $since): int
+    {
+        return $this->countByEventType(MarketplaceAnalyticsEventType::IntakeSubmitted, $since);
+    }
+
+    public function totalIntakesAcceptedSince(Carbon $since): int
+    {
+        return $this->countByEventType(MarketplaceAnalyticsEventType::IntakeAccepted, $since);
+    }
+
+    public function totalIntakesDeclinedSince(Carbon $since): int
+    {
+        return $this->countByEventType(MarketplaceAnalyticsEventType::IntakeDeclined, $since);
+    }
+
+    public function totalIntakesConvertedSince(Carbon $since): int
+    {
+        return $this->countByEventType(MarketplaceAnalyticsEventType::IntakeConverted, $since);
+    }
+
+    private function countByEventType(MarketplaceAnalyticsEventType $type, Carbon $since): int
+    {
+        return MarketplaceAnalyticsEvent::query()
+            ->where('event_type', $type)
+            ->where('occurred_at', '>=', $since)
+            ->count();
+    }
+
+    /**
      * @return Collection<int, array{firm: DirectoryFirm, views: int}>
      */
     public function topViewedFirms(Carbon $since, int $limit = 10): Collection

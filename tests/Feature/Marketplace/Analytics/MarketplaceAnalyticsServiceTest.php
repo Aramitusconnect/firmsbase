@@ -9,8 +9,10 @@ use App\Marketplace\Enums\MarketplaceAnalyticsEventType;
 use App\Marketplace\Models\DirectoryAttorney;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Models\MarketplaceAnalyticsEvent;
+use App\Marketplace\Models\MarketplaceIntake;
 use App\Marketplace\Services\MarketplaceAnalyticsService;
 use App\Marketplace\ViewModels\SearchCriteria;
+use App\Models\Firm;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -105,6 +107,57 @@ class MarketplaceAnalyticsServiceTest extends TestCase
 
         $event = MarketplaceAnalyticsEvent::query()->sole();
         $this->assertNull($event->dimensions);
+    }
+
+    public function test_records_intake_funnel_stage_events_against_the_intakes_own_directory_firm(): void
+    {
+        $firm = Firm::factory()->create();
+        $directoryFirm = $this->runWithFirmContext($firm, fn () => DirectoryFirm::factory()->create(['firm_id' => $firm->id]));
+        $intake = $this->runWithFirmContext($firm, fn () => MarketplaceIntake::factory()->create([
+            'firm_id' => $firm->id,
+            'directory_firm_id' => $directoryFirm->id,
+        ]));
+
+        $this->analytics->recordIntakeStarted($intake);
+        $this->analytics->recordIntakeSubmitted($intake);
+        $this->analytics->recordIntakeAccepted($intake);
+        $this->analytics->recordIntakeDeclined($intake);
+        $this->analytics->recordIntakeConverted($intake);
+
+        $events = MarketplaceAnalyticsEvent::query()->get();
+        $this->assertCount(5, $events);
+
+        $expectedTypes = [
+            MarketplaceAnalyticsEventType::IntakeStarted,
+            MarketplaceAnalyticsEventType::IntakeSubmitted,
+            MarketplaceAnalyticsEventType::IntakeAccepted,
+            MarketplaceAnalyticsEventType::IntakeDeclined,
+            MarketplaceAnalyticsEventType::IntakeConverted,
+        ];
+        $this->assertEqualsCanonicalizing($expectedTypes, $events->pluck('event_type')->all());
+
+        foreach ($events as $event) {
+            $this->assertSame(DirectoryFirm::class, $event->subject_type);
+            $this->assertSame($directoryFirm->id, $event->subject_id);
+            $this->assertNull($event->dimensions);
+        }
+    }
+
+    public function test_intake_events_never_carry_prospect_pii(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->runWithFirmContext($firm, fn () => MarketplaceIntake::factory()->create([
+            'firm_id' => $firm->id,
+            'prospect_name' => 'A Specific Prospect Name',
+            'prospect_email' => 'prospect@example.com',
+        ]));
+
+        $this->analytics->recordIntakeStarted($intake);
+
+        $event = MarketplaceAnalyticsEvent::query()->sole();
+        $payload = json_encode($event->toArray());
+        $this->assertStringNotContainsString('A Specific Prospect Name', $payload);
+        $this->assertStringNotContainsString('prospect@example.com', $payload);
     }
 
     public function test_no_event_column_ever_stores_an_ip_address_session_id_or_actor(): void

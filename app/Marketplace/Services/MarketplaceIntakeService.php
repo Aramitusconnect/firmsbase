@@ -85,7 +85,7 @@ class MarketplaceIntakeService
             throw new \RuntimeException('This directory listing does not belong to this firm.');
         }
 
-        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $directoryFirm, $practiceArea) {
+        $intake = (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $directoryFirm, $practiceArea) {
             $template = $this->templateService->templateForPracticeArea($practiceArea);
 
             $intake = MarketplaceIntake::create([
@@ -101,6 +101,10 @@ class MarketplaceIntakeService
 
             return $intake;
         });
+
+        app(MarketplaceAnalyticsService::class)->recordIntakeStarted($intake);
+
+        return $intake;
     }
 
     /**
@@ -197,7 +201,7 @@ class MarketplaceIntakeService
             throw new \RuntimeException('Only a Started/InProgress intake can be submitted.');
         }
 
-        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake, $communicationsConsent, $portalConsent) {
+        $updated = (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake, $communicationsConsent, $portalConsent) {
             $intake->update([
                 'status' => MarketplaceIntakeStatus::Submitted,
                 'submitted_at' => now(),
@@ -212,6 +216,10 @@ class MarketplaceIntakeService
 
             return $intake->fresh();
         });
+
+        app(MarketplaceAnalyticsService::class)->recordIntakeSubmitted($updated);
+
+        return $updated;
     }
 
     public function markUnderReview(Firm $firm, MarketplaceIntake $intake, ?FirmUser $actor = null): MarketplaceIntake
@@ -322,6 +330,8 @@ class MarketplaceIntakeService
             return $intake->fresh();
         });
 
+        app(MarketplaceAnalyticsService::class)->recordIntakeAccepted($updated);
+
         // Mission 3, checkpoint 13. Deferred to afterCommit() and never
         // allowed to throw — a transactional email failing to send must
         // never appear to fail (or actually roll back) the Firm's own
@@ -375,6 +385,8 @@ class MarketplaceIntakeService
             return $intake->fresh();
         });
 
+        app(MarketplaceAnalyticsService::class)->recordIntakeDeclined($updated);
+
         // Mission 3, checkpoint 13. See markAccepted()'s own comment —
         // same afterCommit()/never-throws contract.
         DB::afterCommit(function () use ($firm, $updated) {
@@ -406,7 +418,7 @@ class MarketplaceIntakeService
             throw new \RuntimeException('Only an Accepted intake can be converted.');
         }
 
-        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake, $firmLead, $client, $actor) {
+        $updated = (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake, $firmLead, $client, $actor) {
             $intake->update([
                 'status' => MarketplaceIntakeStatus::Converted,
                 'converted_firm_lead_id' => $firmLead->id,
@@ -421,6 +433,10 @@ class MarketplaceIntakeService
 
             return $intake->fresh();
         });
+
+        app(MarketplaceAnalyticsService::class)->recordIntakeConverted($updated);
+
+        return $updated;
     }
 
     public function abandonExpired(Firm $firm, MarketplaceIntake $intake): MarketplaceIntake
@@ -438,6 +454,47 @@ class MarketplaceIntakeService
             ]);
 
             $this->recordEvent($firm, $intake, MarketplaceIntakeEventType::Abandoned);
+
+            return $intake->fresh();
+        });
+    }
+
+    /**
+     * Mission 3, checkpoint 14. The ONLY place prospect PII is scrubbed
+     * from a terminal, never-converted intake row — called by
+     * SweepMarketplaceIntakeRetentionCommand, never directly by a
+     * controller/AI surface. Deliberately refuses a Converted intake:
+     * its identity fields now legitimately live on the resulting
+     * Client, governed by that record's own separate retention regime,
+     * not this one. The MarketplaceIntakeEvent audit trail is
+     * deliberately preserved — this removes identifying content, not
+     * the fact that an intake happened. Idempotent: calling this again
+     * on an already-purged intake is a no-op.
+     */
+    public function purgeExpiredPii(Firm $firm, MarketplaceIntake $intake): MarketplaceIntake
+    {
+        $this->assertBelongsToFirm($firm, $intake);
+
+        if ($intake->purged_at !== null) {
+            return $intake;
+        }
+
+        if (! in_array($intake->status, [MarketplaceIntakeStatus::Declined, MarketplaceIntakeStatus::Abandoned, MarketplaceIntakeStatus::Expired], true)) {
+            throw new \RuntimeException('Only a terminal, never-converted intake (Declined/Abandoned/Expired) may be purged.');
+        }
+
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake) {
+            $intake->update([
+                'prospect_name' => null,
+                'prospect_email' => null,
+                'prospect_phone' => null,
+                'structured_data' => null,
+                'conversation_transcript' => null,
+                'ai_summary' => null,
+                'purged_at' => now(),
+            ]);
+
+            $this->recordEvent($firm, $intake, MarketplaceIntakeEventType::Purged);
 
             return $intake->fresh();
         });

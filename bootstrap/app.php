@@ -239,6 +239,15 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('marketplace:analytics:prune')
             ->daily()
             ->withoutOverlapping();
+
+        // Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 14
+        // — the "abandoned-intake retention sweep" the
+        // marketplace_intakes create-table migration's own docblock
+        // already reserved this checkpoint for. Daily, matching every
+        // other day-granularity retention sweep's own cadence.
+        $schedule->command('marketplace:intakes:retention:sweep')
+            ->daily()
+            ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware): void {
         // Trust the AWS ALB in front of this container for exactly the

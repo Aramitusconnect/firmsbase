@@ -8,6 +8,7 @@ use App\Marketplace\Enums\MarketplaceAnalyticsEventType;
 use App\Marketplace\Models\DirectoryAttorney;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Models\MarketplaceAnalyticsEvent;
+use App\Marketplace\Models\MarketplaceIntake;
 use App\Marketplace\ViewModels\SearchCriteria;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Log;
@@ -60,6 +61,41 @@ class MarketplaceAnalyticsService
         ], fn ($value) => $value !== null);
 
         $this->record(MarketplaceAnalyticsEventType::SearchPerformed, null, $dimensions !== [] ? $dimensions : null);
+    }
+
+    /**
+     * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 14.
+     * Five funnel-stage counters, one per method to keep each call site
+     * a single, obvious line (mirrors deadline_approaching/
+     * deadline_missed's own "separate event per distinct fact" house
+     * style rather than one method with a $stage parameter). subject
+     * is the intake's own DirectoryFirm when known — never the intake
+     * itself (MarketplaceIntake is not a public marketplace entity;
+     * only its owning listing is).
+     */
+    public function recordIntakeStarted(MarketplaceIntake $intake): void
+    {
+        $this->record(MarketplaceAnalyticsEventType::IntakeStarted, $intake->directoryFirm);
+    }
+
+    public function recordIntakeSubmitted(MarketplaceIntake $intake): void
+    {
+        $this->record(MarketplaceAnalyticsEventType::IntakeSubmitted, $intake->directoryFirm);
+    }
+
+    public function recordIntakeAccepted(MarketplaceIntake $intake): void
+    {
+        $this->record(MarketplaceAnalyticsEventType::IntakeAccepted, $intake->directoryFirm);
+    }
+
+    public function recordIntakeDeclined(MarketplaceIntake $intake): void
+    {
+        $this->record(MarketplaceAnalyticsEventType::IntakeDeclined, $intake->directoryFirm);
+    }
+
+    public function recordIntakeConverted(MarketplaceIntake $intake): void
+    {
+        $this->record(MarketplaceAnalyticsEventType::IntakeConverted, $intake->directoryFirm);
     }
 
     /**
