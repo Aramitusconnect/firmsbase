@@ -9,7 +9,9 @@ use App\Enums\MarketplaceIntakeStatus;
 use App\Marketplace\Exceptions\MarketplaceIntakeIneligibleException;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Services\MarketplaceIntakeService;
+use App\Models\Client;
 use App\Models\Firm;
+use App\Models\FirmLead;
 use App\Models\FirmUser;
 use App\Models\PracticeArea;
 use App\Services\TenantContextService;
@@ -340,5 +342,125 @@ class MarketplaceIntakeServiceTest extends TestCase
 
         $this->assertSame($realFirm->id, $intake->firm_id);
         $this->assertNotSame($otherFirm->id, $intake->firm_id);
+    }
+
+    // ---------------------------------------------------------------
+    // Mission 3, checkpoint 10 — markAccepted() / markDeclined()
+    // ---------------------------------------------------------------
+
+    public function test_mark_accepted_transitions_from_submitted_and_sets_accepted_at(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+        $submitted = $this->service->markSubmitted($firm, $intake);
+
+        $accepted = $this->service->markAccepted($firm, $submitted);
+
+        $this->assertSame(MarketplaceIntakeStatus::Accepted, $accepted->status);
+        $this->assertNotNull($accepted->accepted_at);
+
+        $events = $this->runWithFirmContext($firm, fn () => $intake->events()->pluck('event_type')->all());
+        $this->assertContains(MarketplaceIntakeEventType::Accepted, $events);
+    }
+
+    public function test_mark_accepted_transitions_from_under_review(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+        $submitted = $this->service->markSubmitted($firm, $intake);
+        $underReview = $this->service->markUnderReview($firm, $submitted);
+
+        $accepted = $this->service->markAccepted($firm, $underReview);
+
+        $this->assertSame(MarketplaceIntakeStatus::Accepted, $accepted->status);
+    }
+
+    public function test_mark_accepted_rejects_a_conflict_review_required_intake(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+        $submitted = $this->service->markSubmitted($firm, $intake);
+        $underReview = $this->service->markUnderReview($firm, $submitted);
+        $flagged = $this->service->markConflictReviewRequired($firm, $underReview, possibleMatchCount: 1);
+
+        $this->expectException(\RuntimeException::class);
+
+        $this->service->markAccepted($firm, $flagged);
+    }
+
+    public function test_mark_accepted_never_creates_a_firm_lead_client_or_matter(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+        $submitted = $this->service->markSubmitted($firm, $intake);
+
+        $this->service->markAccepted($firm, $submitted);
+
+        $leadCount = $this->runWithFirmContext($firm, fn () => FirmLead::query()->count());
+        $clientCount = $this->runWithFirmContext($firm, fn () => Client::query()->count());
+        $this->assertSame(0, $leadCount);
+        $this->assertSame(0, $clientCount);
+    }
+
+    public function test_mark_declined_transitions_from_submitted_and_stores_the_reason(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+        $submitted = $this->service->markSubmitted($firm, $intake);
+
+        $declined = $this->service->markDeclined($firm, $submitted, 'Outside our practice areas.');
+
+        $this->assertSame(MarketplaceIntakeStatus::Declined, $declined->status);
+        $this->assertNotNull($declined->declined_at);
+        $this->assertSame('Outside our practice areas.', $declined->decline_reason);
+
+        $events = $this->runWithFirmContext($firm, fn () => $intake->events()->pluck('event_type')->all());
+        $this->assertContains(MarketplaceIntakeEventType::Declined, $events);
+    }
+
+    public function test_mark_declined_is_allowed_from_conflict_review_required(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+        $submitted = $this->service->markSubmitted($firm, $intake);
+        $underReview = $this->service->markUnderReview($firm, $submitted);
+        $flagged = $this->service->markConflictReviewRequired($firm, $underReview, possibleMatchCount: 1);
+
+        $declined = $this->service->markDeclined($firm, $flagged, 'Real conflict of interest found.');
+
+        $this->assertSame(MarketplaceIntakeStatus::Declined, $declined->status);
+    }
+
+    public function test_mark_declined_requires_a_non_empty_reason(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+        $submitted = $this->service->markSubmitted($firm, $intake);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->service->markDeclined($firm, $submitted, '   ');
+    }
+
+    public function test_mark_declined_rejects_an_intake_not_pending_review(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+
+        $this->expectException(\RuntimeException::class);
+
+        $this->service->markDeclined($firm, $intake, 'Too early.');
+    }
+
+    public function test_mark_accepted_rejects_an_intake_belonging_to_a_different_firm(): void
+    {
+        $firm = Firm::factory()->create();
+        $otherFirm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+        $submitted = $this->service->markSubmitted($firm, $intake);
+
+        $this->expectException(\RuntimeException::class);
+
+        $this->service->markAccepted($otherFirm, $submitted);
     }
 }

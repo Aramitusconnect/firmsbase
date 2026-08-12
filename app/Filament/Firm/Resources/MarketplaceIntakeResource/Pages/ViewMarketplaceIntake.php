@@ -6,7 +6,9 @@ namespace App\Filament\Firm\Resources\MarketplaceIntakeResource\Pages;
 
 use App\Enums\MarketplaceIntakeStatus;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource;
+use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\AcceptIntakeAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\ClearIntakeConflictReviewAction;
+use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\DeclineIntakeAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\GenerateAiSummaryAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\MarkUnderReviewAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\RunIntakeConflictCheckAction;
@@ -47,6 +49,8 @@ class ViewMarketplaceIntake extends ViewRecord
             MarkUnderReviewAction::make(),
             RunIntakeConflictCheckAction::make(),
             ClearIntakeConflictReviewAction::make(),
+            AcceptIntakeAction::make(),
+            DeclineIntakeAction::make(),
             GenerateAiSummaryAction::make(),
         ];
     }

@@ -259,6 +259,81 @@ class MarketplaceIntakeService
         });
     }
 
+    /**
+     * Mission 3, checkpoint 10 — the Firm's own commitment to proceed
+     * toward a consultation with this prospect. Deliberately allowed
+     * ONLY from Submitted/UnderReview, never from
+     * ConflictReviewRequired — the browser/AI/a reviewer must never be
+     * able to bypass an unresolved conflict flag by accepting straight
+     * through it; clearConflictReview() must run first (mirrors the
+     * state machine's own documented "(ConflictReviewRequired ->)
+     * Accepted" shape, where the parenthetical only resolves back to
+     * UnderReview before Accepted becomes reachable).
+     *
+     * Sets accepted_at and records Accepted — nothing more. No
+     * FirmLead/Client/Matter/Consultation row is ever created here;
+     * converted_firm_lead_id/converted_client_id/converted_at are set
+     * ONLY by ConvertMarketplaceProspectService (checkpoint 11, per
+     * this model's own docblock) — accepting a prospect is not the
+     * same act as converting one.
+     */
+    public function markAccepted(Firm $firm, MarketplaceIntake $intake, ?FirmUser $actor = null): MarketplaceIntake
+    {
+        $this->assertBelongsToFirm($firm, $intake);
+
+        if (! in_array($intake->status, [MarketplaceIntakeStatus::Submitted, MarketplaceIntakeStatus::UnderReview], true)) {
+            throw new \RuntimeException('Only a Submitted or UnderReview intake can be accepted — clear any pending conflict review first.');
+        }
+
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake, $actor) {
+            $intake->update([
+                'status' => MarketplaceIntakeStatus::Accepted,
+                'accepted_at' => now(),
+            ]);
+
+            $this->recordEvent($firm, $intake, MarketplaceIntakeEventType::Accepted, actor: $actor);
+
+            return $intake->fresh();
+        });
+    }
+
+    /**
+     * Mission 3, checkpoint 10. Unlike markAccepted(), Decline is
+     * allowed from ANY pending-Firm-review state including
+     * ConflictReviewRequired — a Firm may always decline a prospect
+     * regardless of whether a possible conflict was ever resolved
+     * (declining never risks acting on an unresolved conflict the way
+     * accepting would). $reason is required, free text — matches this
+     * codebase's established convention for "why did this not
+     * proceed" fields (Payment::rejection_reason,
+     * Opportunity::lost_reason, DirectoryClaim::rejection_reason) —
+     * never a closed enum.
+     */
+    public function markDeclined(Firm $firm, MarketplaceIntake $intake, string $reason, ?FirmUser $actor = null): MarketplaceIntake
+    {
+        $this->assertBelongsToFirm($firm, $intake);
+
+        if (trim($reason) === '') {
+            throw new \InvalidArgumentException('A decline reason is required.');
+        }
+
+        if (! $intake->status->isPendingFirmReview()) {
+            throw new \RuntimeException('Only an intake pending Firm review can be declined.');
+        }
+
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake, $reason, $actor) {
+            $intake->update([
+                'status' => MarketplaceIntakeStatus::Declined,
+                'declined_at' => now(),
+                'decline_reason' => trim($reason),
+            ]);
+
+            $this->recordEvent($firm, $intake, MarketplaceIntakeEventType::Declined, actor: $actor);
+
+            return $intake->fresh();
+        });
+    }
+
     public function abandonExpired(Firm $firm, MarketplaceIntake $intake): MarketplaceIntake
     {
         $this->assertBelongsToFirm($firm, $intake);

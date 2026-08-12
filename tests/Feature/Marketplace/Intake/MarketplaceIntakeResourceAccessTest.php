@@ -7,7 +7,9 @@ namespace Tests\Feature\Marketplace\Intake;
 use App\Enums\FirmUserRole;
 use App\Enums\MarketplaceIntakeStatus;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource;
+use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\AcceptIntakeAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\ClearIntakeConflictReviewAction;
+use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\DeclineIntakeAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\MarkUnderReviewAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\RunIntakeConflictCheckAction;
 use App\Filament\Firm\Resources\MarketplaceIntakeResource\Pages\ListMarketplaceIntakes;
@@ -192,5 +194,102 @@ final class MarketplaceIntakeResourceAccessTest extends TestCase
             $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $flagged->getRouteKey()]);
             $test->assertActionVisible(ClearIntakeConflictReviewAction::getDefaultName());
         });
+    }
+
+    // ---------------------------------------------------------------
+    // Mission 3, checkpoint 10 — Accept / Decline
+    // ---------------------------------------------------------------
+
+    public function test_accept_action_is_hidden_for_a_receptionist_but_visible_for_a_paralegal(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->freshIntake($firm);
+        $submitted = app(MarketplaceIntakeService::class)->markSubmitted($firm, $intake);
+
+        $this->actingAsRole($firm, FirmUserRole::Receptionist);
+        $this->runWithFirmContext($firm, function () use ($submitted): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $submitted->getRouteKey()]);
+            $test->assertActionHidden(AcceptIntakeAction::getDefaultName());
+        });
+
+        $this->actingAsRole($firm, FirmUserRole::Paralegal);
+        $this->runWithFirmContext($firm, function () use ($submitted): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $submitted->getRouteKey()]);
+            $test->assertActionVisible(AcceptIntakeAction::getDefaultName());
+        });
+    }
+
+    public function test_accept_action_is_hidden_while_conflict_review_is_required(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $intake = $this->freshIntake($firm);
+        $submitted = app(MarketplaceIntakeService::class)->markSubmitted($firm, $intake);
+        $underReview = app(MarketplaceIntakeService::class)->markUnderReview($firm, $submitted);
+        $flagged = app(MarketplaceIntakeService::class)->markConflictReviewRequired($firm, $underReview);
+
+        $this->runWithFirmContext($firm, function () use ($flagged): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $flagged->getRouteKey()]);
+            $test->assertActionHidden(AcceptIntakeAction::getDefaultName());
+        });
+    }
+
+    public function test_accept_action_transitions_the_status_via_the_real_service(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $intake = $this->freshIntake($firm);
+        $submitted = app(MarketplaceIntakeService::class)->markSubmitted($firm, $intake);
+
+        $this->runWithFirmContext($firm, function () use ($submitted): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $submitted->getRouteKey()]);
+            $test->callAction(AcceptIntakeAction::getDefaultName());
+        });
+
+        $fresh = $this->runWithFirmContext($firm, fn () => $submitted->fresh());
+        $this->assertSame(MarketplaceIntakeStatus::Accepted, $fresh->status);
+    }
+
+    public function test_decline_action_is_visible_even_during_conflict_review_required(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $intake = $this->freshIntake($firm);
+        $submitted = app(MarketplaceIntakeService::class)->markSubmitted($firm, $intake);
+        $underReview = app(MarketplaceIntakeService::class)->markUnderReview($firm, $submitted);
+        $flagged = app(MarketplaceIntakeService::class)->markConflictReviewRequired($firm, $underReview);
+
+        $this->runWithFirmContext($firm, function () use ($flagged): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $flagged->getRouteKey()]);
+            $test->assertActionVisible(DeclineIntakeAction::getDefaultName());
+        });
+    }
+
+    public function test_decline_action_requires_a_reason_and_transitions_via_the_real_service(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $intake = $this->freshIntake($firm);
+        $submitted = app(MarketplaceIntakeService::class)->markSubmitted($firm, $intake);
+
+        $this->runWithFirmContext($firm, function () use ($submitted): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $submitted->getRouteKey()]);
+            $test->mountAction(DeclineIntakeAction::getDefaultName());
+            $test->setActionData(['decline_reason' => '']);
+            $test->callMountedAction();
+            $test->assertHasActionErrors(['decline_reason']);
+        });
+
+        $this->runWithFirmContext($firm, function () use ($submitted): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $submitted->getRouteKey()]);
+            $test->mountAction(DeclineIntakeAction::getDefaultName());
+            $test->setActionData(['decline_reason' => 'Outside our practice areas.']);
+            $test->callMountedAction();
+            $test->assertHasNoActionErrors();
+        });
+
+        $fresh = $this->runWithFirmContext($firm, fn () => $submitted->fresh());
+        $this->assertSame(MarketplaceIntakeStatus::Declined, $fresh->status);
+        $this->assertSame('Outside our practice areas.', $fresh->decline_reason);
     }
 }
