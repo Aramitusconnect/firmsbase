@@ -7,6 +7,7 @@ use App\Http\Controllers\MyAttorney\CorrectionRequestController;
 use App\Http\Controllers\MyAttorney\FirmProfileController;
 use App\Http\Controllers\MyAttorney\HomeController as MyAttorneyHomeController;
 use App\Http\Controllers\MyAttorney\MarketplaceIntakeDocumentController;
+use App\Http\Controllers\MyAttorney\MarketplaceIntakeStartController;
 use App\Http\Controllers\MyAttorney\SitemapController;
 use App\Http\Controllers\Seo\RobotsTxtController;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
@@ -257,6 +258,17 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
     Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:20,1'])->group(function () {
         Route::get('/firms/{slug}/report-correction', [CorrectionRequestController::class, 'create'])->name('myattorney.firms.report-correction.create');
         Route::post('/firms/{slug}/report-correction', [CorrectionRequestController::class, 'store'])->middleware('throttle:5,1')->name('myattorney.firms.report-correction.store');
+    });
+
+    // Mission 3A (MyAttorney Launch-Flow Closure) — the "Start Secure
+    // Intake" entry point on a Firm's public profile. Same throttle
+    // tightness as report-correction's own store action (a real,
+    // state-creating action, not a read) — mirrors that route's own
+    // session-cookie + throttle shape exactly. Redirects to the
+    // signed resumable-link page below on success; never itself
+    // reachable via 'signed' since the visitor holds no link yet.
+    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:5,1'])->group(function () {
+        Route::post('/firms/{slug}/start-intake', [MarketplaceIntakeStartController::class, 'store'])->name('myattorney.firms.start-intake');
     });
 
     // Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 2 —

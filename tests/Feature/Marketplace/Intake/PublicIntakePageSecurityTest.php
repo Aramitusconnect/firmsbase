@@ -39,7 +39,12 @@ class PublicIntakePageSecurityTest extends TestCase
         $response = $this->get($url);
 
         $response->assertOk();
-        $response->assertSee('saved and ready to continue', false);
+        // Mission 3A (MyAttorney Launch-Flow Closure) — a fresh,
+        // never-touched intake lands on the disclosure step first, the
+        // real wizard's own entry point (superseding this checkpoint
+        // 2 test's original "saved and ready to continue" placeholder
+        // assertion, which only ever covered the resume/status shell).
+        $response->assertSee('Before you begin', false);
     }
 
     public function test_the_bare_route_with_no_signature_at_all_is_rejected(): void

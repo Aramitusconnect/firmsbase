@@ -11,6 +11,12 @@
             </div>
         @endif
 
+        @if (session('intake_unavailable'))
+            <div class="mb-6 rounded border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800" role="status">
+                This firm is not currently accepting secure intake requests. Please contact the firm directly.
+            </div>
+        @endif
+
         <header class="mb-6">
             <div class="flex flex-wrap items-center gap-2">
                 <h1 class="text-2xl font-bold text-gray-900">{{ $profile->displayName }}</h1>
@@ -34,6 +40,14 @@
         @endif
 
         <section class="mb-8 flex flex-wrap gap-3" aria-label="Contact and links">
+            @if ($profile->acceptingInquiries && in_array(\App\Marketplace\Enums\MarketplaceCapability::SecureIntake, $profile->capabilities, true))
+                <form method="POST" action="{{ route('myattorney.firms.start-intake', $profile->slug) }}">
+                    @csrf
+                    <button type="submit" class="rounded border border-blue-600 bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-blue-600">
+                        Start Secure Intake
+                    </button>
+                </form>
+            @endif
             @if ($profile->phone)
                 <a href="tel:{{ $profile->phone }}" class="rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-blue-600">
                     Call {{ $profile->phone }}

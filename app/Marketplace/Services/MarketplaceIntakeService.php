@@ -176,6 +176,35 @@ class MarketplaceIntakeService
     }
 
     /**
+     * Mission 3A (MyAttorney Launch-Flow Closure). Completes this
+     * model's own long-documented Started -> InProgress -> Submitted
+     * lifecycle (see MarketplaceIntakeStatus's own docblock) — no
+     * caller before this closure mission ever transitioned a Started
+     * intake to InProgress, since the public answer-collection surface
+     * this transition belongs to did not exist yet. Called by the
+     * public intake wizard once, the moment a visitor saves their
+     * first answer (deterministic or AI-assisted — both funnel through
+     * MarketplaceIntakeAnswerService::saveAnswers()). Idempotent: a
+     * no-op once already InProgress or beyond.
+     */
+    public function markInProgress(Firm $firm, MarketplaceIntake $intake): MarketplaceIntake
+    {
+        $this->assertBelongsToFirm($firm, $intake);
+
+        if ($intake->status !== MarketplaceIntakeStatus::Started) {
+            return $intake;
+        }
+
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake) {
+            $intake->update(['status' => MarketplaceIntakeStatus::InProgress]);
+
+            $this->recordEvent($firm, $intake, MarketplaceIntakeEventType::AnswersUpdated);
+
+            return $intake->fresh();
+        });
+    }
+
+    /**
      * Mission 3, checkpoint 13. $communicationsConsent/$portalConsent
      * are the prospect's own affirmative choices at their own final
      * submission step — never fabricated on their behalf later. Both
