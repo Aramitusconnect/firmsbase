@@ -25,6 +25,20 @@ enum AiUsageActionType: string
     case ClientFacingContent = 'client_facing_content';
 
     /**
+     * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 5 —
+     * classifying a pre-Firm prospect's described issue into a
+     * practice area code. Deliberately NOT high-risk: it never
+     * produces client-facing content, legal advice, or anything a
+     * human must approve before use — see MarketplaceCapability and
+     * this mission's own "AI may only classify pre-Firm issue category
+     * into a practice area, never rank/diagnose/advise" boundary.
+     * Structured (AiPromptRequest::responseSchemaKey =
+     * 'practice_area_classification'), never free-text for this
+     * action type.
+     */
+    case IntakeClassification = 'intake_classification';
+
+    /**
      * The six action types that are always high-risk and always
      * require approval before use (Master Plan §22 acceptance
      * criteria; project rules 15/16/19/20). This list is intentionally

@@ -25,9 +25,24 @@ class FakeAiProviderAdapter implements AiProviderAdapterInterface
 {
     private const TOOL_TRIGGER = 'REQUEST_TOOL:';
 
-    public function __construct(private readonly PromptInjectionResistanceService $promptInjectionResistance)
-    {
-    }
+    /**
+     * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 5.
+     * Deterministic, fixed per schema key (never derived from
+     * instructionText/documentDerivedText content) - a fake adapter's
+     * job is a stable contract shape, not simulated classification
+     * accuracy. An unrecognized schema key produces no structured
+     * output at all (this fake only knows the keys registered below).
+     *
+     * @var array<string, array<string, mixed>>
+     */
+    private const FAKE_STRUCTURED_RESPONSES = [
+        'practice_area_classification' => [
+            'practice_area_code' => 'general',
+            'confidence' => 'medium',
+        ],
+    ];
+
+    public function __construct(private readonly PromptInjectionResistanceService $promptInjectionResistance) {}
 
     public function generate(AiPromptRequest $request): AiProviderResponse
     {
@@ -62,11 +77,16 @@ class FakeAiProviderAdapter implements AiProviderAdapterInterface
             }
         }
 
+        $structuredOutput = $request->responseSchemaKey !== null
+            ? (self::FAKE_STRUCTURED_RESPONSES[$request->responseSchemaKey] ?? null)
+            : null;
+
         return new AiProviderResponse(
             outputText: $outputText,
             tokensIn: $tokensIn,
             tokensOut: $tokensOut,
             requestedToolActions: $requestedToolActions,
+            structuredOutput: $structuredOutput,
         );
     }
 }
