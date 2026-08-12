@@ -29,6 +29,31 @@
         <div class="actions">
             <button type="button" wire:click="acknowledgeDisclosure" class="btn">Start Secure Intake</button>
         </div>
+    @elseif (! $identityCaptured)
+        <h1>{{ $firmDisplayName }}</h1>
+        <h2>Your contact information</h2>
+        <p class="muted">{{ $firmDisplayName }} will use this to follow up with you about your request.</p>
+
+        @if (isset($validationErrors['identity']))
+            <div class="notice error" role="alert">{{ $validationErrors['identity'] }}</div>
+        @endif
+
+        <div class="field">
+            <label for="identity-name">Full name</label>
+            <input type="text" id="identity-name" wire:model="identityName" autocomplete="name">
+        </div>
+        <div class="field">
+            <label for="identity-email">Email</label>
+            <input type="email" id="identity-email" wire:model="identityEmail" autocomplete="email">
+        </div>
+        <div class="field">
+            <label for="identity-phone">Phone (optional)</label>
+            <input type="tel" id="identity-phone" wire:model="identityPhone" autocomplete="tel">
+        </div>
+
+        <div class="actions">
+            <button type="button" wire:click="saveIdentity" wire:loading.attr="disabled" wire:target="saveIdentity" class="btn">Continue</button>
+        </div>
     @else
         <h1>{{ $firmDisplayName }}</h1>
 

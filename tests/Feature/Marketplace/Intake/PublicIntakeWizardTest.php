@@ -75,6 +75,23 @@ class PublicIntakeWizardTest extends TestCase
         return [$firm, $directoryFirm, $intake];
     }
 
+    /**
+     * Advances a freshly-mounted component through disclosure AND the
+     * identity-capture step (Mission 3A's own closure of a real,
+     * previously-latent gap: no caller anywhere in Mission 3 ever
+     * wrote prospect_name/prospect_email, which
+     * ConvertMarketplaceProspectService's own FirmLead::create() call
+     * hard-requires) so tests below can focus on the deterministic/AI
+     * question flow itself.
+     */
+    private function completeDisclosureAndIdentity($component, string $name = 'Jordan Prospect', string $email = 'prospect@example.com')
+    {
+        return $component->call('acknowledgeDisclosure')
+            ->set('identityName', $name)
+            ->set('identityEmail', $email)
+            ->call('saveIdentity');
+    }
+
     // -----------------------------------------------------------------
     // Route reachability
     // -----------------------------------------------------------------
@@ -125,6 +142,12 @@ class PublicIntakeWizardTest extends TestCase
 
         $component->call('acknowledgeDisclosure')
             ->assertSet('disclosureAcknowledged', true)
+            ->assertSet('identityCaptured', false);
+
+        $component->set('identityName', 'Jordan Prospect')
+            ->set('identityEmail', 'prospect@example.com')
+            ->call('saveIdentity')
+            ->assertSet('identityCaptured', true)
             ->assertSet('questionCode', 'legal_issue');
 
         $component->set('answerValue', 'Contract dispute with a vendor.')
@@ -159,8 +182,7 @@ class PublicIntakeWizardTest extends TestCase
         [$firm, , $intake] = $this->deterministicIntake();
         $uuid = $intake->uuid;
 
-        $component = Livewire::test(PublicIntakePage::class, ['uuid' => $uuid])
-            ->call('acknowledgeDisclosure')
+        $component = $this->completeDisclosureAndIdentity(Livewire::test(PublicIntakePage::class, ['uuid' => $uuid]))
             ->set('answerValue', 'Contract dispute with a vendor.')
             ->call('saveAnswer')
             ->set('answerValue', 'NY')
@@ -196,6 +218,8 @@ class PublicIntakeWizardTest extends TestCase
         // independent of the wizard's own forward-only navigation.
         $this->runWithFirmContext($firm, fn () => $intake->update([
             'status' => MarketplaceIntakeStatus::InProgress,
+            'prospect_name' => 'Jordan Prospect',
+            'prospect_email' => 'prospect@example.com',
             'structured_data' => ['legal_issue' => '', 'state' => 'NY'],
         ]));
 
@@ -214,6 +238,8 @@ class PublicIntakeWizardTest extends TestCase
         [$firm, , $intake] = $this->deterministicIntake();
         $this->runWithFirmContext($firm, fn () => $intake->update([
             'status' => MarketplaceIntakeStatus::InProgress,
+            'prospect_name' => 'Jordan Prospect',
+            'prospect_email' => 'prospect@example.com',
             'structured_data' => ['legal_issue' => 'Contract dispute.', 'state' => 'NY'],
         ]));
 
@@ -238,8 +264,7 @@ class PublicIntakeWizardTest extends TestCase
     {
         [$firm, , $intake] = $this->deterministicIntake();
 
-        Livewire::test(PublicIntakePage::class, ['uuid' => $intake->uuid])
-            ->call('acknowledgeDisclosure')
+        $this->completeDisclosureAndIdentity(Livewire::test(PublicIntakePage::class, ['uuid' => $intake->uuid]))
             ->set('answerValue', 'Contract dispute with a vendor.')
             ->call('saveAnswer');
 
@@ -259,6 +284,8 @@ class PublicIntakeWizardTest extends TestCase
         [$firm, , $intake] = $this->deterministicIntake();
         $this->runWithFirmContext($firm, fn () => $intake->update([
             'status' => MarketplaceIntakeStatus::InProgress,
+            'prospect_name' => 'Jordan Prospect',
+            'prospect_email' => 'prospect@example.com',
             'structured_data' => ['legal_issue' => 'Contract dispute.', 'state' => 'NY', 'notes' => 'None'],
         ]));
 
@@ -299,8 +326,7 @@ class PublicIntakeWizardTest extends TestCase
     {
         [$firm, , $intake] = $this->aiAssistedIntake();
 
-        $component = Livewire::test(PublicIntakePage::class, ['uuid' => $intake->uuid])
-            ->call('acknowledgeDisclosure')
+        $component = $this->completeDisclosureAndIdentity(Livewire::test(PublicIntakePage::class, ['uuid' => $intake->uuid]))
             ->set('chatMessage', 'This is a contract dispute with my landlord.')
             ->call('sendChatMessage');
 
@@ -318,10 +344,9 @@ class PublicIntakeWizardTest extends TestCase
     {
         [$firm, , $intake] = $this->deterministicIntake();
 
-        $component = Livewire::test(PublicIntakePage::class, ['uuid' => $intake->uuid])
-            ->assertSet('aiAssistAvailable', false)
-            ->call('acknowledgeDisclosure')
-            ->set('answerValue', 'Contract dispute with a vendor.')
+        $component = $this->completeDisclosureAndIdentity(
+            Livewire::test(PublicIntakePage::class, ['uuid' => $intake->uuid])->assertSet('aiAssistAvailable', false)
+        )->set('answerValue', 'Contract dispute with a vendor.')
             ->call('saveAnswer')
             ->set('answerValue', 'NY')
             ->call('saveAnswer')
@@ -345,8 +370,7 @@ class PublicIntakeWizardTest extends TestCase
         [$firmA, , $intakeA] = $this->deterministicIntake();
         [$firmB, , $intakeB] = $this->deterministicIntake();
 
-        Livewire::test(PublicIntakePage::class, ['uuid' => $intakeA->uuid])
-            ->call('acknowledgeDisclosure')
+        $this->completeDisclosureAndIdentity(Livewire::test(PublicIntakePage::class, ['uuid' => $intakeA->uuid]))
             ->set('answerValue', 'Intake A answer.')
             ->call('saveAnswer');
 

@@ -79,6 +79,14 @@ class PublicIntakePage extends Component
 
     public bool $disclosureAcknowledged = false;
 
+    public bool $identityCaptured = false;
+
+    public string $identityName = '';
+
+    public string $identityEmail = '';
+
+    public string $identityPhone = '';
+
     public bool $aiAssistAvailable = false;
 
     public ?string $questionCode = null;
@@ -167,6 +175,47 @@ class PublicIntakePage extends Component
     public function acknowledgeDisclosure(): void
     {
         $this->disclosureAcknowledged = true;
+    }
+
+    /**
+     * Mission 3A — closes a gap this checkpoint's own build surfaced:
+     * no caller anywhere in Mission 3 ever wrote prospect_name/
+     * prospect_email, which ConvertMarketplaceProspectService's own
+     * FirmLead::create() call hard-requires (firm_leads.name is NOT
+     * NULL). Deliberately separate from the template question
+     * mechanism — these are identity fields, never structured_data,
+     * matching ConvertMarketplaceProspectService's own documented
+     * distinction. Shown once, right after disclosure; a returning
+     * visitor who already supplied identity skips it automatically
+     * (identityCaptured is derived from the row itself, not UI-only
+     * state, unlike disclosureAcknowledged).
+     */
+    public function saveIdentity(): void
+    {
+        $intake = $this->requireEditableIntake();
+
+        if ($intake === null) {
+            return;
+        }
+
+        $name = trim($this->identityName);
+        $email = trim($this->identityEmail);
+
+        if ($name === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            $this->validationErrors = ['identity' => 'Please enter your name and a valid email address.'];
+
+            return;
+        }
+
+        app(MarketplaceIntakeService::class)->saveProspectIdentity($intake->firm, $intake, $name, $email, $this->identityPhone);
+
+        $this->validationErrors = [];
+
+        $fresh = $this->resolveFreshIntake();
+
+        if ($fresh !== null) {
+            $this->refreshWizardState($fresh);
+        }
     }
 
     public function saveAnswer(): void
@@ -323,6 +372,17 @@ class PublicIntakePage extends Component
             return;
         }
 
+        if ($intake->prospect_name === null || $intake->prospect_email === null) {
+            // Fail closed server-side too, not just via the wizard's
+            // own forward-only step ordering — a forged/replayed
+            // submitIntake() call must never reach markSubmitted()
+            // without the identity fields ConvertMarketplaceProspectService's
+            // own FirmLead::create() call hard-requires later.
+            $this->validationErrors = ['_general' => 'Please provide your contact information before submitting.'];
+
+            return;
+        }
+
         $firm = $intake->firm;
         $template = $intake->intakeTemplate;
         $answers = $intake->structured_data ?? [];
@@ -414,6 +474,7 @@ class PublicIntakePage extends Component
     private function refreshWizardState(MarketplaceIntake $intake): void
     {
         $this->editable = $intake->status->isEditableByProspect();
+        $this->identityCaptured = $intake->prospect_name !== null && $intake->prospect_email !== null;
 
         if (! $this->editable) {
             $this->reviewing = false;
@@ -423,11 +484,26 @@ class PublicIntakePage extends Component
         }
 
         $firm = $intake->firm;
+
+        // Independent of identity capture — the chat-assist
+        // availability flag and the document-upload summary are both
+        // meaningful to show on the identity step's own surrounding
+        // page chrome (and cheap to compute), so they're never gated
+        // behind identityCaptured the way question/review state is
+        // below.
+        $this->documentSummary = app(MarketplaceIntakeDocumentService::class)->visitorSummary($firm, $intake);
+        $this->aiAssistAvailable = (new TenantContextService)->runWithFirmContextWithoutTransaction(
+            $firm,
+            fn () => (bool) ($firm->aiSettings?->intake_ai_assist_enabled ?? false),
+        );
+
+        if (! $this->identityCaptured) {
+            return;
+        }
+
         $answerService = app(MarketplaceIntakeAnswerService::class);
         $templateService = app(IntakeTemplateService::class);
         $template = $intake->intakeTemplate;
-
-        $this->documentSummary = app(MarketplaceIntakeDocumentService::class)->visitorSummary($firm, $intake);
 
         if ($template === null) {
             $this->questionCode = null;
@@ -436,11 +512,6 @@ class PublicIntakePage extends Component
 
             return;
         }
-
-        $this->aiAssistAvailable = (new TenantContextService)->runWithFirmContextWithoutTransaction(
-            $firm,
-            fn () => (bool) ($firm->aiSettings?->intake_ai_assist_enabled ?? false),
-        );
 
         $answers = $intake->structured_data ?? [];
         $this->populateProgress($templateService, $template, $answers);

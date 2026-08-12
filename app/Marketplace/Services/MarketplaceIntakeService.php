@@ -176,6 +176,56 @@ class MarketplaceIntakeService
     }
 
     /**
+     * Mission 3A (MyAttorney Launch-Flow Closure). Closes a gap the
+     * public answer-collection wizard's own build surfaced: no caller
+     * anywhere in Mission 3's 16 checkpoints ever wrote prospect_name/
+     * prospect_email/prospect_phone — the ONLY place they were
+     * referenced was purgeExpiredPii()'s own nulling-out. Without them,
+     * ConvertMarketplaceProspectService::convert()'s own FirmLead::create()
+     * call fails outright (firm_leads.name is NOT NULL) — a real,
+     * previously-latent blocker on the mission's own required end-to-
+     * end flow, not a hypothetical.
+     *
+     * Deliberately a SEPARATE method from
+     * MarketplaceIntakeAnswerService::saveAnswers() — these are
+     * identity fields, never structured_data, matching
+     * ConvertMarketplaceProspectService's own long-standing docblock
+     * distinction ("identity fields only, never structured_data, which
+     * holds question-specific answers, not identity fields"). Only
+     * editable while the intake itself is still editable by the
+     * prospect — mirrors saveAnswers()'s own implicit assumption (it
+     * never checks status itself, but every caller only ever invokes
+     * it from the Started/InProgress wizard).
+     *
+     * @throws \InvalidArgumentException if name or email is blank
+     */
+    public function saveProspectIdentity(Firm $firm, MarketplaceIntake $intake, string $name, string $email, ?string $phone = null): MarketplaceIntake
+    {
+        $this->assertBelongsToFirm($firm, $intake);
+
+        $name = trim($name);
+        $email = trim($email);
+
+        if ($name === '' || $email === '') {
+            throw new \InvalidArgumentException('Name and email are required.');
+        }
+
+        if (! $intake->status->isEditableByProspect()) {
+            throw new \RuntimeException('Only a Started/InProgress intake can have its prospect identity updated.');
+        }
+
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($intake, $name, $email, $phone) {
+            $intake->update([
+                'prospect_name' => $name,
+                'prospect_email' => $email,
+                'prospect_phone' => $phone !== null && trim($phone) !== '' ? trim($phone) : null,
+            ]);
+
+            return $intake->fresh();
+        });
+    }
+
+    /**
      * Mission 3A (MyAttorney Launch-Flow Closure). Completes this
      * model's own long-documented Started -> InProgress -> Submitted
      * lifecycle (see MarketplaceIntakeStatus's own docblock) — no
