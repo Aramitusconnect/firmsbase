@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\DocumentScanStatus;
 use App\Enums\DocumentStatus;
+use App\Marketplace\Models\MarketplaceIntake;
 use App\Models\Concerns\BelongsToTenant;
 use App\Models\Concerns\HasPublicUuid;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -21,13 +22,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class Document extends Model
 {
-    use HasFactory, HasPublicUuid, BelongsToTenant;
+    use BelongsToTenant, HasFactory, HasPublicUuid;
 
     protected $fillable = [
         'firm_id',
         'matter_id',
         'client_id',
         'document_request_item_id',
+        'marketplace_intake_id',
         'status',
         'scan_status',
         'scan_result_detail',
@@ -77,6 +79,11 @@ class Document extends Model
     public function documentRequestItem(): BelongsTo
     {
         return $this->belongsTo(DocumentRequestItem::class);
+    }
+
+    public function marketplaceIntake(): BelongsTo
+    {
+        return $this->belongsTo(MarketplaceIntake::class);
     }
 
     public function encryptionKey(): BelongsTo

@@ -6,6 +6,7 @@ use App\Http\Controllers\MyAttorney\AttorneyProfileController;
 use App\Http\Controllers\MyAttorney\CorrectionRequestController;
 use App\Http\Controllers\MyAttorney\FirmProfileController;
 use App\Http\Controllers\MyAttorney\HomeController as MyAttorneyHomeController;
+use App\Http\Controllers\MyAttorney\MarketplaceIntakeDocumentController;
 use App\Http\Controllers\MyAttorney\SitemapController;
 use App\Http\Controllers\Seo\RobotsTxtController;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
@@ -273,6 +274,21 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
         Route::get('/intake/{uuid}', PublicIntakePage::class)
             ->where('uuid', '[0-9a-fA-F-]{36}')
             ->name('public.marketplace-intakes.show');
+    });
+
+    // Mission 3, checkpoint 7 — the document-upload action for an
+    // already-resolved intake. Deliberately NOT under 'signed': the
+    // visitor already proved possession of the resumable link by
+    // loading the GET route above (which establishes the myattorney
+    // panel session cookie); this POST is a same-session follow-up
+    // action, exactly like the correction-request store route below
+    // is a follow-up to its own GET. throttle:10,1 — tighter than the
+    // read-only resume page, looser than a single-shot form
+    // submission, since a legitimate visitor may attach several files.
+    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:10,1'])->group(function () {
+        Route::post('/intake/{uuid}/documents', [MarketplaceIntakeDocumentController::class, 'store'])
+            ->where('uuid', '[0-9a-fA-F-]{36}')
+            ->name('public.marketplace-intakes.documents.store');
     });
 
     Route::get('/{any?}', function () {

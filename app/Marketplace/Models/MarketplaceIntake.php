@@ -8,6 +8,7 @@ use App\Enums\MarketplaceIntakeStatus;
 use App\Models\Client;
 use App\Models\Concerns\BelongsToTenant;
 use App\Models\Concerns\HasPublicUuid;
+use App\Models\Document;
 use App\Models\Firm;
 use App\Models\FirmLead;
 use App\Models\IntakeTemplate;
@@ -115,6 +116,11 @@ class MarketplaceIntake extends Model
     public function events(): HasMany
     {
         return $this->hasMany(MarketplaceIntakeEvent::class);
+    }
+
+    public function documents(): HasMany
+    {
+        return $this->hasMany(Document::class);
     }
 
     public function isConverted(): bool

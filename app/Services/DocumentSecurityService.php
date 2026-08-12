@@ -7,6 +7,7 @@ use App\Enums\DocumentStatus;
 use App\Enums\DomainEventType;
 use App\Enums\FirmUserStatus;
 use App\Enums\WebhookEventType;
+use App\Marketplace\Models\MarketplaceIntake;
 use App\Models\Client;
 use App\Models\ClientPortalUser;
 use App\Models\Document;
@@ -49,6 +50,14 @@ class DocumentSecurityService
         private DomainEventRecorderService $domainEvents,
     ) {}
 
+    /**
+     * $intake — Mission 3, checkpoint 7 — a trailing, nullable,
+     * backward-compatible addition. When set, this upload came from a
+     * MyAttorney intake session, not a Firm-authenticated user (see
+     * MarketplaceIntakeDocumentService, the only caller that passes
+     * it). $uploadedBy stays null for every intake upload — the
+     * visitor has no User row yet.
+     */
     public function upload(
         Firm $firm,
         string $originalFilename,
@@ -62,6 +71,7 @@ class DocumentSecurityService
         ?DocumentRequestItem $requestItem = null,
         ?User $uploadedBy = null,
         ?TenantEncryptionKey $encryptionKey = null,
+        ?MarketplaceIntake $intake = null,
     ): Document {
         $this->uploadPolicy->assertUploadIsAllowed($originalFilename, $sizeBytes);
 
@@ -75,13 +85,14 @@ class DocumentSecurityService
         // transaction" behavior this method's own docblock documents.
         $document = (new TenantContextService)->runWithFirmContext($firm, function () use (
             $firm, $matter, $client, $requestItem, $storageDisk, $storagePath, $originalFilename,
-            $mimeType, $sizeBytes, $fileHash, $encryptionKey, $uploadedBy,
+            $mimeType, $sizeBytes, $fileHash, $encryptionKey, $uploadedBy, $intake,
         ) {
             $document = Document::create([
                 'firm_id' => $firm->id,
                 'matter_id' => $matter?->id,
                 'client_id' => $client?->id,
                 'document_request_item_id' => $requestItem?->id,
+                'marketplace_intake_id' => $intake?->id,
                 'status' => DocumentStatus::Uploaded,
                 'scan_status' => DocumentScanStatus::Pending,
                 'storage_disk' => $storageDisk,

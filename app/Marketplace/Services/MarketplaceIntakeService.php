@@ -10,6 +10,7 @@ use App\Marketplace\Exceptions\MarketplaceIntakeIneligibleException;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Models\MarketplaceIntake;
 use App\Marketplace\Models\MarketplaceIntakeEvent;
+use App\Models\Document;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\PracticeArea;
@@ -225,6 +226,27 @@ class MarketplaceIntakeService
 
             return $intake->fresh();
         });
+    }
+
+    /**
+     * Mission 3, checkpoint 7 — the ONLY way a document_uploaded event
+     * reaches marketplace_intake_events, preserving this class's own
+     * "sole writer" invariant rather than letting
+     * MarketplaceIntakeDocumentService write MarketplaceIntakeEvent
+     * rows directly. Never mutates status — a document upload does not
+     * itself advance the intake's own lifecycle.
+     */
+    public function recordDocumentUploaded(Firm $firm, MarketplaceIntake $intake, Document $document, ?string $ipAddress = null): MarketplaceIntakeEvent
+    {
+        $this->assertBelongsToFirm($firm, $intake);
+
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => $this->recordEvent(
+            $firm,
+            $intake,
+            MarketplaceIntakeEventType::DocumentUploaded,
+            metadata: ['document_id' => $document->id],
+            ipAddress: $ipAddress,
+        ));
     }
 
     private function assertBelongsToFirm(Firm $firm, MarketplaceIntake $intake): void

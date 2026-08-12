@@ -25,4 +25,15 @@ enum MarketplaceIntakeEventType: string
     case Converted = 'converted';
     case Abandoned = 'abandoned';
     case Expired = 'expired';
+
+    /**
+     * Mission 3, checkpoint 7 — a file was accepted for scanning
+     * against this intake. Deliberately recorded at UPLOAD time, not
+     * once the scan clears — the audit trail must reflect that a
+     * visitor attempted an upload even if it is later rejected as
+     * infected; document.metadata only ever carries the document_id,
+     * never a filename or scan result (never log raw sensitive
+     * content in an audit event).
+     */
+    case DocumentUploaded = 'document_uploaded';
 }
