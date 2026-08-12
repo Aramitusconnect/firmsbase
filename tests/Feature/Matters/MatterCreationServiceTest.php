@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Matters;
 
+use App\Enums\DomainEventType;
 use App\Enums\FirmUserRole;
 use App\Enums\FirmUserStatus;
 use App\Enums\MatterStatus;
 use App\Models\Client;
+use App\Models\DomainEvent;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\Matter;
@@ -172,6 +174,27 @@ final class MatterCreationServiceTest extends TestCase
         $this->expectExceptionMessage('does not exist');
 
         app(MatterCreationService::class)->create($firm, $client, $practiceArea->id, 999999);
+    }
+
+    public function test_create_emits_a_matter_created_domain_event(): void
+    {
+        $firm = Firm::factory()->create();
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
+        $practiceArea = PracticeArea::factory()->create();
+        $matterType = MatterType::factory()->forPracticeArea($practiceArea)->create();
+
+        $matter = app(MatterCreationService::class)->create($firm, $client, $practiceArea->id, $matterType->id);
+
+        $event = $this->runWithFirmContext($firm, fn () => DomainEvent::query()
+            ->where('firm_id', $firm->id)
+            ->where('event_type', DomainEventType::MatterCreated)
+            ->sole());
+
+        $this->assertSame($matter->getMorphClass(), $event->subject_type);
+        $this->assertSame($matter->id, $event->subject_id);
+        $this->assertSame($matter->id, $event->payload_json['matter']['id']);
+        $this->assertSame($client->id, $event->payload_json['matter']['client_id']);
+        $this->assertSame(MatterStatus::Draft->value, $event->payload_json['matter']['status']);
     }
 
     public function test_create_method_signature_requires_client_practice_area_and_matter_type(): void

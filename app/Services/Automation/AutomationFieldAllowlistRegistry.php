@@ -75,6 +75,13 @@ final class AutomationFieldAllowlistRegistry
             'signature_request.id', 'signature_request.title',
             'matter.id', 'matter.client_id', 'matter.assigned_attorney_id',
         ],
+        'client_created' => [
+            'client.id',
+        ],
+        'matter_created' => [
+            'matter.id', 'matter.client_id', 'matter.assigned_attorney_id', 'matter.status',
+            'matter.primary_practice_area_id', 'matter.matter_type_id',
+        ],
     ];
 
     /**

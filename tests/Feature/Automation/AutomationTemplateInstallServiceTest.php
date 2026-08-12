@@ -51,6 +51,17 @@ class AutomationTemplateInstallServiceTest extends TestCase
         $this->assertSame(DomainEventType::InvoiceOverdue, $rule->event_type);
     }
 
+    public function test_installing_the_matter_created_review_task_template_creates_a_rule_on_matter_created(): void
+    {
+        $firm = Firm::factory()->create();
+        $owner = $this->runWithFirmContext($firm, fn () => FirmUser::factory()->forFirm($firm)->create(['role' => FirmUserRole::FirmOwner]));
+
+        $rule = $this->service->install($firm, $owner, 'matter_created_review_task');
+
+        $this->assertSame(DomainEventType::MatterCreated, $rule->event_type);
+        $this->assertSame('role:firm_owner', $rule->actions_json[0]['config']['assigned_to']);
+    }
+
     public function test_installing_an_unknown_template_throws(): void
     {
         $firm = Firm::factory()->create();

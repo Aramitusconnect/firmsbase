@@ -6,6 +6,7 @@ namespace Tests\Feature\Marketplace\Intake;
 
 use App\Enums\DocumentScanStatus;
 use App\Enums\DocumentStatus;
+use App\Enums\DomainEventType;
 use App\Enums\FirmUserRole;
 use App\Enums\FirmUserStatus;
 use App\Enums\MarketplaceIntakeEventType;
@@ -17,6 +18,7 @@ use App\Marketplace\Services\ConvertMarketplaceProspectService;
 use App\Marketplace\Services\MarketplaceIntakeService;
 use App\Models\Client;
 use App\Models\Document;
+use App\Models\DomainEvent;
 use App\Models\Firm;
 use App\Models\FirmLead;
 use App\Models\FirmUser;
@@ -236,6 +238,31 @@ class ConvertMarketplaceProspectServiceTest extends TestCase
         $this->app->instance(WebhookEventRecorderService::class, $recorder);
 
         $this->service->convert($firm, $intake, $matterType->id);
+    }
+
+    public function test_convert_emits_client_created_and_matter_created_domain_events(): void
+    {
+        $firm = Firm::factory()->create();
+        $practiceArea = PracticeArea::factory()->create();
+        $matterType = MatterType::factory()->forPracticeArea($practiceArea)->create();
+        $intake = $this->acceptedIntake($firm, $practiceArea);
+
+        $matter = $this->service->convert($firm, $intake, $matterType->id);
+
+        $this->runWithFirmContext($firm, function () use ($firm, $matter) {
+            $clientCreated = DomainEvent::query()
+                ->where('firm_id', $firm->id)
+                ->where('event_type', DomainEventType::ClientCreated)
+                ->sole();
+            $this->assertSame($matter->client_id, $clientCreated->payload_json['client']['id']);
+
+            $matterCreated = DomainEvent::query()
+                ->where('firm_id', $firm->id)
+                ->where('event_type', DomainEventType::MatterCreated)
+                ->sole();
+            $this->assertSame($matter->id, $matterCreated->payload_json['matter']['id']);
+            $this->assertSame($matter->client_id, $matterCreated->payload_json['matter']['client_id']);
+        });
     }
 
     public function test_convert_assigns_the_given_attorney(): void

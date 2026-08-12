@@ -221,6 +221,31 @@ final class AutomationTemplateCatalog
                     ]],
                 ],
             ],
+
+            // Mission 3 (MyAttorney Conversion + AI Intake), checkpoint
+            // 12. The earliest automation can react to a new matter —
+            // before matter_opened_next_task/new_matter_onboarding_documents
+            // (both keyed on MatterOpened, which requires a clear
+            // conflict check first — this mission's own top-line rule
+            // forbids automation from bypassing that gate). Assigned to
+            // the Firm Owner rather than 'matter_assigned_attorney'
+            // because a matter is very often created without an
+            // attorney assigned yet (e.g. a MyAttorney conversion,
+            // where assignment is optional at conversion time) — the
+            // Firm Owner is the one recipient guaranteed to exist.
+            'matter_created_review_task' => [
+                'name' => 'New matter created — review task',
+                'description' => 'Creates a review task for the Firm Owner when a new matter is created, so it can be checked for readiness (conflict check, attorney assignment) before opening.',
+                'event_type' => DomainEventType::MatterCreated,
+                'conditions' => [],
+                'actions' => [
+                    ['action_type' => AutomationActionType::CreateTask->value, 'config' => [
+                        'title' => 'Review new matter',
+                        'assigned_to' => 'role:firm_owner',
+                        'due_in_days' => 2,
+                    ]],
+                ],
+            ],
         ];
     }
 

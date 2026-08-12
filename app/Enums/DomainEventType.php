@@ -144,4 +144,33 @@ enum DomainEventType: string
      * SignatureRequest is matter-linked.
      */
     case SignatureRequestCompleted = 'signature_request_completed';
+
+    /**
+     * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 12.
+     * Emitted at LeadConversionService::convert()'s own existing
+     * completion point — the exact same real mutation already wired to
+     * WebhookEventType::ClientCreated and the 'client_created' timeline
+     * event, as a parallel, independent emission (the webhook is
+     * entitlement-gated per firm; this is not). LeadConversionService is
+     * the ONLY place a Client is ever created from a FirmLead, so this
+     * fires for every lead conversion, not only MyAttorney-originated
+     * ones — closing a confirmed, previously-silent gap (no domain
+     * event existed for client creation at all before this checkpoint).
+     */
+    case ClientCreated = 'client_created';
+
+    /**
+     * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 12.
+     * Emitted at MatterCreationService::create()'s own existing
+     * completion point — the ONLY general-purpose "create a matter"
+     * service in this codebase. Fires for every matter creation, not
+     * only MyAttorney-originated ones — closing a confirmed, previously
+     * -silent gap (MatterCreationService fired no webhook, no domain
+     * event, and no timeline entry before this checkpoint). Distinct
+     * from MatterOpened: a matter created via this service always
+     * starts in Draft (MatterCreationService's own hard rule) — this
+     * event is the earliest automation can react to a new matter,
+     * before any conflict check has run or the matter has opened.
+     */
+    case MatterCreated = 'matter_created';
 }

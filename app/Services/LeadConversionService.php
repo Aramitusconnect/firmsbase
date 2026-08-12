@@ -2,12 +2,14 @@
 
 namespace App\Services;
 
+use App\Enums\DomainEventType;
 use App\Enums\FirmLeadStatus;
 use App\Enums\WebhookEventType;
 use App\Models\Client;
 use App\Models\Consultation;
 use App\Models\FirmLead;
 use App\Models\User;
+use App\Services\Automation\DomainEventRecorderService;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -23,18 +25,30 @@ use Illuminate\Support\Facades\DB;
  * anything here throws. The isConverted() guard at the top of convert()
  * already prevents converting the same lead twice, so this can never
  * double-fire for one lead (Phase 14b rule 10).
+ *
+ * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 12: also
+ * emits DomainEventType::ClientCreated INSIDE the same
+ * runWithFirmContext()/transaction as the Client row itself (unlike the
+ * webhook above, never deferred to afterCommit — if this insert fails
+ * the whole conversion must roll back, matching every other
+ * DomainEventRecorderService call site's convention). This was a
+ * confirmed, previously-silent gap: before this checkpoint,
+ * LeadConversionService fired no domain event at all, so no Zero-Click
+ * automation could ever react to a new client — for every conversion
+ * through this service, not only MyAttorney-originated ones.
  */
 class LeadConversionService
 {
-    public function __construct(private TimelineEventRecorder $timeline)
-    {
-    }
+    public function __construct(
+        private TimelineEventRecorder $timeline,
+        private DomainEventRecorderService $domainEvents = new DomainEventRecorderService,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $clientAttributes  Client fields
-     *   (display_name, legal_name, email, phone, preferred_language,
-     *   preferred_timezone, ...) — firm_id and created_by are set here,
-     *   not by the caller.
+     *                                                  (display_name, legal_name, email, phone, preferred_language,
+     *                                                  preferred_timezone, ...) — firm_id and created_by are set here,
+     *                                                  not by the caller.
      *
      * @throws \RuntimeException if the lead was already converted
      */
@@ -48,7 +62,7 @@ class LeadConversionService
             throw new \RuntimeException('This lead has already been converted.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($lead->firm_id, function () use ($lead, $clientAttributes, $actor, $consultation) {
+        return (new TenantContextService)->runWithFirmContext($lead->firm_id, function () use ($lead, $clientAttributes, $actor, $consultation) {
             $client = Client::create(array_merge([
                 'firm_id' => $lead->firm_id,
                 'created_by' => $actor?->id,
@@ -66,6 +80,10 @@ class LeadConversionService
 
             $this->timeline->record($lead->firm, 'lead_converted', $lead, $actor, ['client_id' => $client->id]);
             $this->timeline->record($lead->firm, 'client_created', $client, $actor);
+
+            $this->domainEvents->record($lead->firm, DomainEventType::ClientCreated, [
+                'client' => ['id' => $client->id],
+            ], subject: $client);
 
             DB::afterCommit(function () use ($lead, $client) {
                 try {

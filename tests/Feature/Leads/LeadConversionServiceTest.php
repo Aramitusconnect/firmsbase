@@ -2,12 +2,16 @@
 
 namespace Tests\Feature\Leads;
 
+use App\Enums\DomainEventType;
 use App\Enums\FirmLeadStatus;
+use App\Models\Client;
 use App\Models\Consultation;
+use App\Models\DomainEvent;
 use App\Models\Firm;
 use App\Models\FirmLead;
 use App\Models\User;
 use App\Services\LeadConversionService;
+use App\Services\TimelineEventRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -20,7 +24,7 @@ class LeadConversionServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new LeadConversionService(new \App\Services\TimelineEventRecorder());
+        $this->service = new LeadConversionService(new TimelineEventRecorder);
     }
 
     public function test_convert_creates_client_and_marks_lead_converted(): void
@@ -101,10 +105,32 @@ class LeadConversionServiceTest extends TestCase
 
             $this->assertDatabaseHas('timeline_events', [
                 'firm_id' => $lead->firm_id,
-                'subject_type' => \App\Models\Client::class,
+                'subject_type' => Client::class,
                 'subject_id' => $client->id,
                 'event_type' => 'client_created',
             ]);
         });
+    }
+
+    public function test_convert_emits_a_client_created_domain_event(): void
+    {
+        $firm = Firm::factory()->create();
+        $lead = FirmLead::factory()->forFirm($firm)->create();
+
+        $client = $this->service->convert($lead, ['display_name' => 'Jane Doe']);
+
+        // domain_events has permanent FORCE ROW LEVEL SECURITY — convert()
+        // clears its own tenant context in a finally block before
+        // returning, so this post-call read needs explicit tenant
+        // context re-established (same pattern as this file's other
+        // post-call assertions).
+        $event = $this->runWithFirmContext($firm, fn () => DomainEvent::query()
+            ->where('firm_id', $firm->id)
+            ->where('event_type', DomainEventType::ClientCreated)
+            ->sole());
+
+        $this->assertSame($client->getMorphClass(), $event->subject_type);
+        $this->assertSame($client->id, $event->subject_id);
+        $this->assertSame($client->id, $event->payload_json['client']['id']);
     }
 }

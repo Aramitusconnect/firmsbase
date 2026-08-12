@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\DomainEventType;
 use App\Enums\FirmUserStatus;
 use App\Enums\MatterStatus;
 use App\Models\Client;
@@ -12,6 +13,7 @@ use App\Models\FirmUser;
 use App\Models\Matter;
 use App\Models\MatterAssignment;
 use App\Models\MatterType;
+use App\Services\Automation\DomainEventRecorderService;
 use InvalidArgumentException;
 use RuntimeException;
 
@@ -56,9 +58,21 @@ use RuntimeException;
  * *Service in this codebase (LeadConversionService, ManualPaymentService,
  * etc.): application-layer domain services stay UI-agnostic, the
  * *AccessPolicyService classes own the role ceiling.
+ *
+ * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 12: emits
+ * DomainEventType::MatterCreated inside the same runWithFirmContext()
+ * as the Matter row itself. This was a confirmed, previously-silent
+ * gap: before this checkpoint, create() fired no webhook, no domain
+ * event, and no timeline entry at all — no Zero-Click automation could
+ * ever react to a newly created (Draft) matter, for every caller of
+ * this service, not only MyAttorney-originated conversions.
  */
 class MatterCreationService
 {
+    public function __construct(
+        private DomainEventRecorderService $domainEvents = new DomainEventRecorderService,
+    ) {}
+
     /**
      * @param  array<int, int>|null  $assignedStaffUserIds  Optional user_ids to attach as active MatterAssignment rows (staffing, separate from the single responsible/assigned attorney).
      */
@@ -110,6 +124,17 @@ class MatterCreationService
                     'assigned_at' => now(),
                 ]);
             }
+
+            $this->domainEvents->record($firm, DomainEventType::MatterCreated, [
+                'matter' => [
+                    'id' => $matter->id,
+                    'client_id' => $matter->client_id,
+                    'assigned_attorney_id' => $matter->assigned_attorney_id,
+                    'status' => $matter->status->value,
+                    'primary_practice_area_id' => $matter->primary_practice_area_id,
+                    'matter_type_id' => $matter->matter_type_id,
+                ],
+            ], subject: $matter);
 
             return $matter->fresh();
         });
