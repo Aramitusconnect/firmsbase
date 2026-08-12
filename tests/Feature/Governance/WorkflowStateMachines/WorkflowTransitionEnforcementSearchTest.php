@@ -132,11 +132,28 @@ class WorkflowTransitionEnforcementSearchTest extends TestCase
         // DirectoryAttorneyFirmRelationshipState, etc.) are in this
         // test's WORKFLOW_ENUMS catalog either -- a distinct, later
         // mission's own domain, out of this test's scope by construction.
+        // Narrowly updated AGAIN by Mission 3 (MyAttorney Conversion +
+        // AI Intake), checkpoint 2 -- resources/views/layouts/public-intake.blade.php
+        // and resources/views/livewire/marketplace/public-intake-page.blade.php
+        // are a reviewed, narrow exception of the same shape as
+        // layouts/public.blade.php above: pure read-only status
+        // display (no PHP logic beyond conditionals over already-
+        // resolved MarketplaceIntake fields), no reference to any of
+        // the 14 workflow-state-machine enums above, and no status
+        // write of any kind -- the page's own real logic (mount(),
+        // resume tracking, expiry transitions) all lives in
+        // PublicIntakePage.php/MarketplaceIntakeService.php under
+        // app/. MarketplaceIntakeStatus is not in this test's
+        // WORKFLOW_ENUMS catalog either -- Mission 3's own domain, out
+        // of this test's scope by construction, matching Mission 2's
+        // own marketplace-lifecycle-enum exclusion reasoning above.
         $bladeFiles = glob(resource_path('views/**/*.blade.php')) ?: [];
         $bladeFiles = array_values(array_filter(
             $bladeFiles,
             fn (string $path) => $path !== resource_path('views/filament-client-portal/plaid-link.blade.php')
                 && $path !== resource_path('views/layouts/public.blade.php')
+                && $path !== resource_path('views/layouts/public-intake.blade.php')
+                && $path !== resource_path('views/livewire/marketplace/public-intake-page.blade.php')
                 && ! str_starts_with($path, resource_path('views/myattorney/'))
         ));
         $this->assertEmpty($bladeFiles, 'No Blade views should exist that could write workflow status directly.');

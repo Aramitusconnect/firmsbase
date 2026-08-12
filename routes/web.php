@@ -11,6 +11,7 @@ use App\Http\Controllers\Seo\RobotsTxtController;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
 use App\Http\Middleware\ConfigurePanelSessionCookie;
 use App\Http\Middleware\EstablishClientPortalTenantContext;
+use App\Livewire\Marketplace\PublicIntakePage;
 use App\Livewire\PaymentRequests\PublicPaymentPage;
 use App\Services\CanonicalUrlService;
 use Illuminate\Http\Request;
@@ -255,6 +256,23 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
     Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:20,1'])->group(function () {
         Route::get('/firms/{slug}/report-correction', [CorrectionRequestController::class, 'create'])->name('myattorney.firms.report-correction.create');
         Route::post('/firms/{slug}/report-correction', [CorrectionRequestController::class, 'store'])->middleware('throttle:5,1')->name('myattorney.firms.report-correction.store');
+    });
+
+    // Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 2 —
+    // the one public, unauthenticated page a prospect's resumable
+    // intake link resolves to. 'signed' verifies the uuid/expiry
+    // Laravel itself embedded in the URL (see
+    // MarketplaceIntakeService::signedUrl()); ConfigurePanelSessionCookie
+    // establishes the isolated myattorney-panel session cookie the
+    // same way the correction-request form above does, since later
+    // checkpoints' multi-step answer-collection UI will need a real
+    // session. throttle:30,1 mirrors payment_requests' own public link
+    // page — generous enough for a legitimate prospect returning to
+    // finish an intake, not a volumetric-abuse allowance.
+    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'signed', 'throttle:30,1'])->group(function () {
+        Route::get('/intake/{uuid}', PublicIntakePage::class)
+            ->where('uuid', '[0-9a-fA-F-]{36}')
+            ->name('public.marketplace-intakes.show');
     });
 
     Route::get('/{any?}', function () {

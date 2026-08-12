@@ -13,19 +13,28 @@ use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\PracticeArea;
 use App\Services\TenantContextService;
+use Illuminate\Support\Facades\URL;
 
 /**
  * MarketplaceIntakeService — Mission 3 (MyAttorney Conversion + AI
- * Intake), checkpoint 1. The ONLY writer of
- * marketplace_intakes/marketplace_intake_events domain-model rows at
- * this checkpoint (start + basic status transitions + event
- * recording). Deliberately does NOT yet include the public-facing
- * signed-URL/session/throttling layer — that is checkpoint 2's own
- * scope ("secure session/resume architecture"). Mirrors
- * PaymentRequestService's own create()/recordEvent() shape exactly.
+ * Intake), checkpoints 1-2. The ONLY writer of
+ * marketplace_intakes/marketplace_intake_events domain-model rows
+ * (start + basic status transitions + event recording), plus the
+ * secure resumable-link primitives (checkpoint 2: signed URL
+ * generation, resume tracking, expiry). Mirrors PaymentRequestService's
+ * own create()/recordEvent()/signedUrl() shape exactly.
  */
 class MarketplaceIntakeService
 {
+    /**
+     * How long a fresh intake's resumable link stays valid by default
+     * — mirrors PaymentRequestService::DEFAULT_EXPIRY_DAYS. A prospect
+     * who has not finished (or a Firm that has not yet reviewed) an
+     * intake within this window must start over rather than trust an
+     * indefinitely-valid public link.
+     */
+    private const DEFAULT_EXPIRY_DAYS = 30;
+
     public function start(
         Firm $firm,
         ?DirectoryFirm $directoryFirm = null,
@@ -41,12 +50,26 @@ class MarketplaceIntakeService
                 'directory_firm_id' => $directoryFirm?->id,
                 'practice_area_id' => $practiceArea?->id,
                 'status' => MarketplaceIntakeStatus::Started,
+                'expires_at' => now()->addDays(self::DEFAULT_EXPIRY_DAYS),
             ]);
 
             $this->recordEvent($firm, $intake, MarketplaceIntakeEventType::Started);
 
             return $intake;
         });
+    }
+
+    /**
+     * The ONLY identifier ever placed in the public resumable intake
+     * URL — mirrors PaymentRequestService::signedUrl() exactly. The
+     * signature carries nothing but the opaque uuid; every other fact
+     * about the intake is read server-side from the row itself.
+     */
+    public function signedUrl(MarketplaceIntake $intake): string
+    {
+        $expiration = $intake->expires_at ?? now()->addDays(self::DEFAULT_EXPIRY_DAYS);
+
+        return URL::temporarySignedRoute('public.marketplace-intakes.show', $expiration, ['uuid' => $intake->uuid]);
     }
 
     /**
@@ -60,6 +83,48 @@ class MarketplaceIntakeService
             $uuid,
             fn () => MarketplaceIntake::query()->where('uuid', $uuid)->first(),
         );
+    }
+
+    /**
+     * Called on every genuine page load of the resumable link — mirrors
+     * PaymentRequestService::recordLinkAccessed() exactly. Never
+     * mutates status; a resumed intake stays wherever its own state
+     * machine already had it.
+     */
+    public function recordLinkResumed(Firm $firm, MarketplaceIntake $intake, ?string $ipAddress): void
+    {
+        (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake, $ipAddress) {
+            $intake->update(['last_resumed_at' => now()]);
+
+            $this->recordEvent($firm, $intake, MarketplaceIntakeEventType::LinkResumed, ipAddress: $ipAddress);
+        });
+    }
+
+    /**
+     * A non-terminal intake whose expires_at has passed transitions to
+     * Expired the next time anything tries to act on it — never
+     * silently treated as still-open. Idempotent: calling this again
+     * on an already-Expired intake is a no-op.
+     */
+    public function markExpired(Firm $firm, MarketplaceIntake $intake): MarketplaceIntake
+    {
+        $this->assertBelongsToFirm($firm, $intake);
+
+        if ($intake->status === MarketplaceIntakeStatus::Expired) {
+            return $intake;
+        }
+
+        if ($intake->status->isTerminal()) {
+            throw new \RuntimeException('Only a non-terminal intake can expire.');
+        }
+
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake) {
+            $intake->update(['status' => MarketplaceIntakeStatus::Expired]);
+
+            $this->recordEvent($firm, $intake, MarketplaceIntakeEventType::Expired);
+
+            return $intake->fresh();
+        });
     }
 
     public function markSubmitted(Firm $firm, MarketplaceIntake $intake): MarketplaceIntake

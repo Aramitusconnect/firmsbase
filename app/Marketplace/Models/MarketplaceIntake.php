@@ -110,4 +110,18 @@ class MarketplaceIntake extends Model
     {
         return $this->status === MarketplaceIntakeStatus::Converted && ! is_null($this->converted_client_id);
     }
+
+    /**
+     * Whether the prospect's own resumable link should still work.
+     * Mirrors PaymentRequest::isPayable()'s "check both status AND
+     * expiry, never trust one alone" shape.
+     */
+    public function isResumable(): bool
+    {
+        if ($this->status->isTerminal()) {
+            return false;
+        }
+
+        return $this->expires_at === null || $this->expires_at->isFuture();
+    }
 }

@@ -246,6 +246,29 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
         'report-correction.blade.php',
     ];
 
+    /**
+     * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 2
+     * addition: `resources/views/layouts/public-intake.blade.php` and
+     * `resources/views/livewire/marketplace/public-intake-page.blade.php`
+     * — the resumable-intake-link surface's first public,
+     * unauthenticated screen (routes/web.php's
+     * public.marketplace-intakes.show route). A dedicated layout
+     * rather than reusing layouts/public.blade.php only because the
+     * latter's `<title>` is hardcoded "— Payment"; the two are
+     * otherwise identical in structure. Reviewed and found accessible:
+     * a real `<h1>` heading, status messages (`.notice.success`/
+     * `.notice.info`) that convey their meaning through visible text
+     * content — never color alone, and no bespoke/custom interactive
+     * markup at all (this checkpoint renders a read-only status shell
+     * only — no form, no button, no input; the answer-collection UI
+     * lands in checkpoint 3 and will need its own accessibility
+     * review at that point).
+     */
+    private const MARKETPLACE_INTAKE_SESSION_RESUME_ALLOWED_BLADE_BASENAMES = [
+        'public-intake.blade.php',
+        'public-intake-page.blade.php',
+    ];
+
     public function test_no_blade_filament_livewire_frontend_or_browser_accessibility_files_exist(): void
     {
         $bladeFiles = [];
@@ -273,7 +296,8 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
                 && ! in_array(basename($path), self::FIRM_WORKSPACE_QUICK_ADD_MENU_ALLOWED_BLADE_BASENAMES, true)
                 && ! in_array(basename($path), self::PAYMENT_LINK_QR_ROUTING_ALLOWED_BLADE_BASENAMES, true)
                 && ! in_array(basename($path), self::WEBAUTHN_ALLOWED_BLADE_BASENAMES, true)
-                && ! in_array(basename($path), self::MYATTORNEY_MARKETPLACE_ALLOWED_BLADE_BASENAMES, true),
+                && ! in_array(basename($path), self::MYATTORNEY_MARKETPLACE_ALLOWED_BLADE_BASENAMES, true)
+                && ! in_array(basename($path), self::MARKETPLACE_INTAKE_SESSION_RESUME_ALLOWED_BLADE_BASENAMES, true),
         ));
 
         $this->assertEmpty($nonDefaultBladeFiles, 'Found unexpected Blade files: '.implode(', ', $nonDefaultBladeFiles));

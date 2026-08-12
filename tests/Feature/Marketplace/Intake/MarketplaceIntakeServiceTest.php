@@ -17,10 +17,12 @@ use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
- * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 1 —
+ * Mission 3 (MyAttorney Conversion + AI Intake), checkpoints 1-2 —
  * MarketplaceIntakeService domain-model behavior: creation, the basic
- * status-transition guards, and event recording. The full public
- * resumable-link/session layer is checkpoint 2's own scope.
+ * status-transition guards, event recording, and the resumable-link
+ * primitives (signed URL, resume tracking, expiry). Public-route-level
+ * security (signature tampering, throttling) is proven separately in
+ * PublicIntakePageSecurityTest.
  */
 class MarketplaceIntakeServiceTest extends TestCase
 {
@@ -164,5 +166,106 @@ class MarketplaceIntakeServiceTest extends TestCase
         $this->expectException(\RuntimeException::class);
 
         $this->service->abandonExpired($firm, $abandoned);
+    }
+
+    public function test_start_sets_a_default_thirty_day_expiry(): void
+    {
+        $firm = Firm::factory()->create();
+
+        $intake = $this->service->start($firm);
+
+        $this->assertNotNull($intake->expires_at);
+        $this->assertTrue($intake->expires_at->isFuture());
+        $this->assertEqualsWithDelta(30, now()->diffInDays($intake->expires_at), 1);
+    }
+
+    public function test_signed_url_contains_the_intakes_own_uuid(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+
+        $url = $this->service->signedUrl($intake);
+
+        $this->assertStringContainsString('/intake/'.$intake->uuid, $url);
+        $this->assertStringContainsString('signature=', $url);
+    }
+
+    public function test_record_link_resumed_updates_last_resumed_at_and_records_an_event(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+
+        $this->service->recordLinkResumed($firm, $intake, '203.0.113.10');
+
+        $fresh = $this->runWithFirmContext($firm, fn () => $intake->fresh());
+        $this->assertNotNull($fresh->last_resumed_at);
+
+        $events = $this->runWithFirmContext($firm, fn () => $intake->events()->pluck('event_type')->all());
+        $this->assertContains(MarketplaceIntakeEventType::LinkResumed, $events);
+    }
+
+    public function test_record_link_resumed_never_changes_status(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+
+        $this->service->recordLinkResumed($firm, $intake, null);
+
+        $fresh = $this->runWithFirmContext($firm, fn () => $intake->fresh());
+        $this->assertSame(MarketplaceIntakeStatus::Started, $fresh->status);
+    }
+
+    public function test_mark_expired_transitions_a_non_terminal_intake(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+
+        $expired = $this->service->markExpired($firm, $intake);
+
+        $this->assertSame(MarketplaceIntakeStatus::Expired, $expired->status);
+
+        $events = $this->runWithFirmContext($firm, fn () => $intake->events()->pluck('event_type')->all());
+        $this->assertContains(MarketplaceIntakeEventType::Expired, $events);
+    }
+
+    public function test_mark_expired_is_idempotent(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+        $expired = $this->service->markExpired($firm, $intake);
+
+        $again = $this->service->markExpired($firm, $expired);
+
+        $this->assertSame(MarketplaceIntakeStatus::Expired, $again->status);
+    }
+
+    public function test_mark_expired_rejects_an_already_declined_intake(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+        $this->service->markSubmitted($firm, $intake);
+        $declined = $this->runWithFirmContext($firm, fn () => tap($intake->fresh())->update(['status' => MarketplaceIntakeStatus::Declined, 'declined_at' => now()]));
+
+        $this->expectException(\RuntimeException::class);
+
+        $this->service->markExpired($firm, $declined);
+    }
+
+    public function test_is_resumable_is_false_once_expires_at_has_passed(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+        $this->runWithFirmContext($firm, fn () => $intake->update(['expires_at' => now()->subMinute()]));
+
+        $this->assertFalse($this->runWithFirmContext($firm, fn () => $intake->fresh())->isResumable());
+    }
+
+    public function test_is_resumable_is_true_with_no_expiry_set(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+        $this->runWithFirmContext($firm, fn () => $intake->update(['expires_at' => null]));
+
+        $this->assertTrue($this->runWithFirmContext($firm, fn () => $intake->fresh())->isResumable());
     }
 }
