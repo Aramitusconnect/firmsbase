@@ -18,6 +18,7 @@ use App\Models\FirmUser;
 use App\Models\PracticeArea;
 use App\Services\IntakeTemplateService;
 use App\Services\TenantContextService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
 
 /**
@@ -170,21 +171,44 @@ class MarketplaceIntakeService
         });
     }
 
-    public function markSubmitted(Firm $firm, MarketplaceIntake $intake): MarketplaceIntake
-    {
+    /**
+     * Mission 3, checkpoint 13. $communicationsConsent/$portalConsent
+     * are the prospect's own affirmative choices at their own final
+     * submission step — never fabricated on their behalf later. Both
+     * default false (opt-in only, matching this project's own
+     * established consent philosophy — see ConsentService's own
+     * docblock) so every pre-checkpoint-13 caller of this method
+     * remains valid unchanged. Recorded here as timestamps rather than
+     * real ConsentService rows because no Client exists yet at
+     * submission time (ConsentService::capture() requires a client_id);
+     * ConvertMarketplaceProspectService (checkpoint 11 + this
+     * checkpoint's own extension) translates a granted timestamp into a
+     * real, channel-scoped consent record once the Client is created.
+     */
+    public function markSubmitted(
+        Firm $firm,
+        MarketplaceIntake $intake,
+        bool $communicationsConsent = false,
+        bool $portalConsent = false,
+    ): MarketplaceIntake {
         $this->assertBelongsToFirm($firm, $intake);
 
         if (! $intake->status->isEditableByProspect()) {
             throw new \RuntimeException('Only a Started/InProgress intake can be submitted.');
         }
 
-        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake, $communicationsConsent, $portalConsent) {
             $intake->update([
                 'status' => MarketplaceIntakeStatus::Submitted,
                 'submitted_at' => now(),
+                'communications_consent_at' => $communicationsConsent ? now() : null,
+                'portal_consent_at' => $portalConsent ? now() : null,
             ]);
 
-            $this->recordEvent($firm, $intake, MarketplaceIntakeEventType::Submitted);
+            $this->recordEvent($firm, $intake, MarketplaceIntakeEventType::Submitted, metadata: [
+                'communications_consent' => $communicationsConsent,
+                'portal_consent' => $portalConsent,
+            ]);
 
             return $intake->fresh();
         });
@@ -287,7 +311,7 @@ class MarketplaceIntakeService
             throw new \RuntimeException('Only a Submitted or UnderReview intake can be accepted — clear any pending conflict review first.');
         }
 
-        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake, $actor) {
+        $updated = (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake, $actor) {
             $intake->update([
                 'status' => MarketplaceIntakeStatus::Accepted,
                 'accepted_at' => now(),
@@ -297,6 +321,22 @@ class MarketplaceIntakeService
 
             return $intake->fresh();
         });
+
+        // Mission 3, checkpoint 13. Deferred to afterCommit() and never
+        // allowed to throw — a transactional email failing to send must
+        // never appear to fail (or actually roll back) the Firm's own
+        // Accept decision, which has already been durably recorded
+        // above (mirrors DocumentSecurityService::upload()'s own
+        // webhook-emission pattern).
+        DB::afterCommit(function () use ($firm, $updated) {
+            try {
+                app(MarketplaceProspectNotificationService::class)->notifyAccepted($firm, $updated);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        });
+
+        return $updated;
     }
 
     /**
@@ -323,7 +363,7 @@ class MarketplaceIntakeService
             throw new \RuntimeException('Only an intake pending Firm review can be declined.');
         }
 
-        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake, $reason, $actor) {
+        $updated = (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake, $reason, $actor) {
             $intake->update([
                 'status' => MarketplaceIntakeStatus::Declined,
                 'declined_at' => now(),
@@ -334,6 +374,18 @@ class MarketplaceIntakeService
 
             return $intake->fresh();
         });
+
+        // Mission 3, checkpoint 13. See markAccepted()'s own comment —
+        // same afterCommit()/never-throws contract.
+        DB::afterCommit(function () use ($firm, $updated) {
+            try {
+                app(MarketplaceProspectNotificationService::class)->notifyDeclined($firm, $updated);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        });
+
+        return $updated;
     }
 
     /**

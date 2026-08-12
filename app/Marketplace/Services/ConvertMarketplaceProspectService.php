@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Marketplace\Services;
 
+use App\Enums\ConsentChannel;
 use App\Enums\FirmLeadStatus;
 use App\Enums\MarketplaceIntakeStatus;
 use App\Enums\WebhookEventType;
@@ -12,6 +13,8 @@ use App\Models\Firm;
 use App\Models\FirmLead;
 use App\Models\FirmUser;
 use App\Models\Matter;
+use App\Services\ClientPortalService;
+use App\Services\ConsentService;
 use App\Services\DocumentSecurityService;
 use App\Services\LeadConversionService;
 use App\Services\MatterCreationService;
@@ -53,13 +56,36 @@ use Illuminate\Support\Facades\DB;
  * many matter types), matching MatterCreationService's own required,
  * non-defaulted parameter design. A Firm reviewer picks it explicitly
  * at conversion time.
+ *
+ * Checkpoint 13 ("Client Portal handoff + notifications/consent")
+ * addition: translates the prospect's own submission-time consent
+ * (never fabricated by the Firm reviewer performing this conversion)
+ * into real ConsentService records and, if portal consent was
+ * granted, marks the new Client Invited via ClientPortalService.
+ * Deliberately does NOT send a portal-invitation email — no
+ * accept-invitation page exists anywhere in this app for ANY client
+ * (a confirmed, pre-existing gap unrelated to this mission, out of
+ * this checkpoint's own scope to build).
  */
 class ConvertMarketplaceProspectService
 {
+    /**
+     * Mission 3, checkpoint 13 — the consent-text version this
+     * conversion attributes to every ConsentService::capture() call it
+     * makes. A single, versioned constant (never a per-call literal)
+     * so a future change to the intake's own consent copy has one
+     * place to bump, matching ConsentService's own $consentTextVersion
+     * contract (an auditable record of exactly what the prospect
+     * agreed to, not just that they agreed to something).
+     */
+    private const CONSENT_TEXT_VERSION = 'myattorney-intake-consent-v1';
+
     public function __construct(
         private readonly LeadConversionService $leadConversion,
         private readonly MatterCreationService $matterCreation,
         private readonly DocumentSecurityService $documentSecurity,
+        private readonly ConsentService $consentService,
+        private readonly ClientPortalService $clientPortal,
         private readonly MarketplaceIntakeDocumentService $intakeDocuments = new MarketplaceIntakeDocumentService,
         private readonly MarketplaceIntakeService $intakeService = new MarketplaceIntakeService,
         private readonly TenantContextService $tenantContext = new TenantContextService,
@@ -118,6 +144,48 @@ class ConvertMarketplaceProspectService
             'preferred_language' => 'en',
             'preferred_timezone' => null,
         ], $actor?->user);
+
+        // Step 2.5 (checkpoint 13): translate the prospect's OWN
+        // submission-time consent (MarketplaceIntakeService::
+        // markSubmitted()'s own communicationsConsent/portalConsent
+        // params — never fabricated on their behalf by the Firm
+        // reviewer performing this conversion) into real, channel-
+        // scoped ConsentService records now that a real Client finally
+        // exists. Deliberately NOT wrapped in try/catch, unlike the
+        // webhook emission below — a real consent record is a
+        // first-class part of the handoff, not a best-effort side
+        // notification, and must fail the whole conversion loudly if
+        // it cannot be recorded rather than silently proceeding without
+        // it (fail-closed).
+        if ($intake->communications_consent_at !== null) {
+            $this->consentService->capture(
+                $firm,
+                $client->id,
+                ConsentChannel::Email,
+                self::CONSENT_TEXT_VERSION,
+                actor: $actor?->user,
+                capturedVia: 'myattorney_intake_submission',
+            );
+        }
+
+        if ($intake->portal_consent_at !== null) {
+            $this->consentService->capture(
+                $firm,
+                $client->id,
+                ConsentChannel::Portal,
+                self::CONSENT_TEXT_VERSION,
+                actor: $actor?->user,
+                capturedVia: 'myattorney_intake_submission',
+            );
+
+            // Only marks portal_status=Invited/generates the invitation
+            // token — ClientPortalService::invite() itself sends no
+            // email (confirmed pre-existing gap: no accept-invitation
+            // page exists anywhere in this app for ANY client, not only
+            // MyAttorney-converted ones — out of this checkpoint's own
+            // scope to build; flagged for the mission's final report).
+            $this->clientPortal->invite($client);
+        }
 
         // Step 3: the ONLY general-purpose "create a matter" service.
         // Always leaves the new Matter in Draft — opening (and its own

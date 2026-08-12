@@ -101,6 +101,39 @@ class MarketplaceIntakeServiceTest extends TestCase
         $this->assertContains(MarketplaceIntakeEventType::Submitted, $events);
     }
 
+    public function test_mark_submitted_records_consent_only_when_explicitly_granted(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+
+        $submitted = $this->service->markSubmitted($firm, $intake, communicationsConsent: true, portalConsent: false);
+
+        $this->assertNotNull($submitted->communications_consent_at);
+        $this->assertNull($submitted->portal_consent_at);
+    }
+
+    public function test_mark_submitted_defaults_to_no_consent(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+
+        $submitted = $this->service->markSubmitted($firm, $intake);
+
+        $this->assertNull($submitted->communications_consent_at);
+        $this->assertNull($submitted->portal_consent_at);
+    }
+
+    public function test_mark_submitted_can_record_both_consents(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->service->start($firm);
+
+        $submitted = $this->service->markSubmitted($firm, $intake, communicationsConsent: true, portalConsent: true);
+
+        $this->assertNotNull($submitted->communications_consent_at);
+        $this->assertNotNull($submitted->portal_consent_at);
+    }
+
     public function test_mark_submitted_rejects_an_already_submitted_intake(): void
     {
         $firm = Firm::factory()->create();

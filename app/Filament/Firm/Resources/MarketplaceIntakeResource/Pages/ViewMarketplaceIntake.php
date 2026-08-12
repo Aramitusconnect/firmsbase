@@ -73,6 +73,8 @@ class ViewMarketplaceIntake extends ViewRecord
                     TextEntry::make('ai_assisted')->label('AI-Assisted Intake')->formatStateUsing(fn (bool $state): string => $state ? 'Yes' : 'No'),
                     TextEntry::make('submitted_at')->dateTime()->placeholder('Not yet submitted'),
                     TextEntry::make('under_review_at')->label('Under Review Since')->dateTime()->placeholder('—'),
+                    TextEntry::make('communications_consent_at')->label('Consented to Email Updates')->dateTime()->placeholder('Not granted'),
+                    TextEntry::make('portal_consent_at')->label('Consented to Client Portal')->dateTime()->placeholder('Not granted'),
                 ]),
 
             Section::make('Intake Answers')

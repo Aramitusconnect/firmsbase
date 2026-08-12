@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Marketplace\Intake;
 
+use App\Enums\ClientPortalStatus;
+use App\Enums\ConsentChannel;
 use App\Enums\DocumentScanStatus;
 use App\Enums\DocumentStatus;
 use App\Enums\DomainEventType;
@@ -25,6 +27,7 @@ use App\Models\FirmUser;
 use App\Models\Matter;
 use App\Models\MatterType;
 use App\Models\PracticeArea;
+use App\Services\ConsentService;
 use App\Services\WebhookEventRecorderService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
@@ -52,8 +55,12 @@ class ConvertMarketplaceProspectServiceTest extends TestCase
         $this->intakeService = new MarketplaceIntakeService;
     }
 
-    private function acceptedIntake(Firm $firm, ?PracticeArea $practiceArea = null): MarketplaceIntake
-    {
+    private function acceptedIntake(
+        Firm $firm,
+        ?PracticeArea $practiceArea = null,
+        bool $communicationsConsent = false,
+        bool $portalConsent = false,
+    ): MarketplaceIntake {
         $practiceArea ??= PracticeArea::factory()->create();
 
         $intake = $this->intakeService->start($firm);
@@ -64,7 +71,7 @@ class ConvertMarketplaceProspectServiceTest extends TestCase
             'prospect_phone' => '555-0100',
         ]));
 
-        $submitted = $this->intakeService->markSubmitted($firm, $intake);
+        $submitted = $this->intakeService->markSubmitted($firm, $intake, $communicationsConsent, $portalConsent);
 
         return $this->intakeService->markAccepted($firm, $submitted);
     }
@@ -263,6 +270,64 @@ class ConvertMarketplaceProspectServiceTest extends TestCase
             $this->assertSame($matter->id, $matterCreated->payload_json['matter']['id']);
             $this->assertSame($matter->client_id, $matterCreated->payload_json['matter']['client_id']);
         });
+    }
+
+    public function test_convert_captures_email_consent_when_granted_at_submission(): void
+    {
+        $firm = Firm::factory()->create();
+        $practiceArea = PracticeArea::factory()->create();
+        $matterType = MatterType::factory()->forPracticeArea($practiceArea)->create();
+        $intake = $this->acceptedIntake($firm, $practiceArea, communicationsConsent: true, portalConsent: false);
+
+        $matter = $this->service->convert($firm, $intake, $matterType->id);
+
+        $this->runWithFirmContext($firm, function () use ($firm, $matter) {
+            $this->assertTrue(app(ConsentService::class)->isGranted($firm, $matter->client_id, ConsentChannel::Email));
+            $this->assertFalse(app(ConsentService::class)->isGranted($firm, $matter->client_id, ConsentChannel::Portal));
+        });
+    }
+
+    public function test_convert_captures_no_consent_when_none_was_granted(): void
+    {
+        $firm = Firm::factory()->create();
+        $practiceArea = PracticeArea::factory()->create();
+        $matterType = MatterType::factory()->forPracticeArea($practiceArea)->create();
+        $intake = $this->acceptedIntake($firm, $practiceArea);
+
+        $matter = $this->service->convert($firm, $intake, $matterType->id);
+
+        $this->runWithFirmContext($firm, function () use ($firm, $matter) {
+            $this->assertFalse(app(ConsentService::class)->isGranted($firm, $matter->client_id, ConsentChannel::Email));
+            $this->assertFalse(app(ConsentService::class)->isGranted($firm, $matter->client_id, ConsentChannel::Portal));
+        });
+    }
+
+    public function test_convert_invites_the_client_to_the_portal_when_portal_consent_was_granted(): void
+    {
+        $firm = Firm::factory()->create();
+        $practiceArea = PracticeArea::factory()->create();
+        $matterType = MatterType::factory()->forPracticeArea($practiceArea)->create();
+        $intake = $this->acceptedIntake($firm, $practiceArea, communicationsConsent: true, portalConsent: true);
+
+        $matter = $this->service->convert($firm, $intake, $matterType->id);
+
+        $client = $this->runWithFirmContext($firm, fn () => Client::query()->findOrFail($matter->client_id));
+        $this->assertSame(ClientPortalStatus::Invited, $client->portal_status);
+        $this->assertNotNull($client->portal_invitation_token);
+    }
+
+    public function test_convert_never_invites_the_client_to_the_portal_without_portal_consent(): void
+    {
+        $firm = Firm::factory()->create();
+        $practiceArea = PracticeArea::factory()->create();
+        $matterType = MatterType::factory()->forPracticeArea($practiceArea)->create();
+        $intake = $this->acceptedIntake($firm, $practiceArea, communicationsConsent: true, portalConsent: false);
+
+        $matter = $this->service->convert($firm, $intake, $matterType->id);
+
+        $client = $this->runWithFirmContext($firm, fn () => Client::query()->findOrFail($matter->client_id));
+        $this->assertSame(ClientPortalStatus::NotInvited, $client->portal_status);
+        $this->assertNull($client->portal_invitation_token);
     }
 
     public function test_convert_assigns_the_given_attorney(): void
