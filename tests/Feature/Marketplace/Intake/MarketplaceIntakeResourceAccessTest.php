@@ -1,0 +1,196 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature\Marketplace\Intake;
+
+use App\Enums\FirmUserRole;
+use App\Enums\MarketplaceIntakeStatus;
+use App\Filament\Firm\Resources\MarketplaceIntakeResource;
+use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\ClearIntakeConflictReviewAction;
+use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\MarkUnderReviewAction;
+use App\Filament\Firm\Resources\MarketplaceIntakeResource\Actions\RunIntakeConflictCheckAction;
+use App\Filament\Firm\Resources\MarketplaceIntakeResource\Pages\ListMarketplaceIntakes;
+use App\Filament\Firm\Resources\MarketplaceIntakeResource\Pages\ViewMarketplaceIntake;
+use App\Marketplace\Models\DirectoryFirm;
+use App\Marketplace\Models\MarketplaceIntake;
+use App\Marketplace\Services\MarketplaceIntakeService;
+use App\Models\Firm;
+use App\Models\FirmUser;
+use App\Models\User;
+use Filament\Facades\Filament;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Livewire;
+use Tests\TestCase;
+
+/**
+ * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 9 — the
+ * first Firm-authenticated UI this mission has built. Proves role
+ * ceilings (reused from ClientCrmAccessPolicyService), cross-firm
+ * isolation, and that the review-transition actions only ever appear
+ * for the status they're valid in.
+ */
+final class MarketplaceIntakeResourceAccessTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Filament::setCurrentPanel(Filament::getPanel('firm'));
+    }
+
+    private function actingAsRole(Firm $firm, FirmUserRole $role): FirmUser
+    {
+        $firmUser = $this->runWithFirmContext(
+            $firm,
+            fn () => FirmUser::factory()->forFirm($firm)->forUser(User::factory()->create())->role($role)->create()
+        );
+
+        $this->actingAs($firmUser->user);
+
+        return $firmUser;
+    }
+
+    private function freshIntake(Firm $firm): MarketplaceIntake
+    {
+        $directoryFirm = $this->runWithFirmContext($firm, fn () => DirectoryFirm::factory()->member()->create(['firm_id' => $firm->id, 'accepting_inquiries' => true]));
+
+        return app(MarketplaceIntakeService::class)->startForDirectoryFirm($directoryFirm);
+    }
+
+    public function test_every_role_can_view_the_resource(): void
+    {
+        foreach (FirmUserRole::cases() as $role) {
+            $firm = Firm::factory()->create();
+            $this->actingAsRole($firm, $role);
+
+            $this->assertTrue(MarketplaceIntakeResource::canAccess(), "canAccess() failed for role {$role->value}");
+        }
+    }
+
+    public function test_the_resource_has_no_create_page(): void
+    {
+        $pages = MarketplaceIntakeResource::getPages();
+
+        $this->assertArrayNotHasKey('create', $pages, 'A MarketplaceIntake must never be Firm-created — it is always visitor-created via the public intake flow.');
+    }
+
+    public function test_list_page_shows_only_this_firms_intakes(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $this->actingAsRole($firmA, FirmUserRole::FirmOwner);
+        $intakeA = $this->freshIntake($firmA);
+        $intakeB = $this->freshIntake($firmB);
+
+        $test = $this->runWithFirmContext($firmA, fn () => Livewire::test(ListMarketplaceIntakes::class));
+
+        $test->assertSuccessful();
+        $test->assertCanSeeTableRecords([$intakeA]);
+        $test->assertCanNotSeeTableRecords([$intakeB]);
+    }
+
+    public function test_direct_url_guess_of_another_firms_intake_never_succeeds(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $this->actingAsRole($firmA, FirmUserRole::FirmOwner);
+        $intakeB = $this->freshIntake($firmB);
+
+        $response = $this->runWithFirmContext($firmA, fn () => $this->get(MarketplaceIntakeResource::getUrl('view', ['record' => $intakeB])));
+
+        $response->assertNotFound();
+    }
+
+    public function test_mark_under_review_action_is_visible_only_for_a_submitted_intake(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::Paralegal);
+        $intake = $this->freshIntake($firm);
+        $submitted = app(MarketplaceIntakeService::class)->markSubmitted($firm, $intake);
+
+        $this->runWithFirmContext($firm, function () use ($submitted): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $submitted->getRouteKey()]);
+            $test->assertActionVisible(MarkUnderReviewAction::getDefaultName());
+        });
+    }
+
+    public function test_mark_under_review_action_is_hidden_for_a_started_intake(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::Paralegal);
+        $intake = $this->freshIntake($firm);
+
+        $this->runWithFirmContext($firm, function () use ($intake): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $intake->getRouteKey()]);
+            $test->assertActionHidden(MarkUnderReviewAction::getDefaultName());
+        });
+    }
+
+    public function test_mark_under_review_action_is_hidden_for_billing_staff(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::BillingStaff);
+        $intake = $this->freshIntake($firm);
+        $submitted = app(MarketplaceIntakeService::class)->markSubmitted($firm, $intake);
+
+        $this->runWithFirmContext($firm, function () use ($submitted): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $submitted->getRouteKey()]);
+            $test->assertActionHidden(MarkUnderReviewAction::getDefaultName());
+        });
+    }
+
+    public function test_mark_under_review_action_transitions_the_status_via_the_real_service(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $intake = $this->freshIntake($firm);
+        $submitted = app(MarketplaceIntakeService::class)->markSubmitted($firm, $intake);
+
+        $this->runWithFirmContext($firm, function () use ($submitted): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $submitted->getRouteKey()]);
+            $test->callAction(MarkUnderReviewAction::getDefaultName());
+        });
+
+        $fresh = $this->runWithFirmContext($firm, fn () => $submitted->fresh());
+        $this->assertSame(MarketplaceIntakeStatus::UnderReview, $fresh->status);
+    }
+
+    public function test_run_conflict_check_action_is_visible_only_when_under_review(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $intake = $this->freshIntake($firm);
+        $submitted = app(MarketplaceIntakeService::class)->markSubmitted($firm, $intake);
+        $underReview = app(MarketplaceIntakeService::class)->markUnderReview($firm, $submitted);
+
+        $this->runWithFirmContext($firm, function () use ($underReview): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $underReview->getRouteKey()]);
+            $test->assertActionVisible(RunIntakeConflictCheckAction::getDefaultName());
+            $test->assertActionHidden(ClearIntakeConflictReviewAction::getDefaultName());
+        });
+    }
+
+    public function test_clear_conflict_review_action_is_hidden_for_a_paralegal_but_visible_for_a_firm_owner(): void
+    {
+        $firm = Firm::factory()->create();
+        $intake = $this->freshIntake($firm);
+        $submitted = app(MarketplaceIntakeService::class)->markSubmitted($firm, $intake);
+        $underReview = app(MarketplaceIntakeService::class)->markUnderReview($firm, $submitted);
+        $flagged = app(MarketplaceIntakeService::class)->markConflictReviewRequired($firm, $underReview);
+
+        $this->actingAsRole($firm, FirmUserRole::Paralegal);
+        $this->runWithFirmContext($firm, function () use ($flagged): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $flagged->getRouteKey()]);
+            $test->assertActionHidden(ClearIntakeConflictReviewAction::getDefaultName());
+        });
+
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $this->runWithFirmContext($firm, function () use ($flagged): void {
+            $test = Livewire::test(ViewMarketplaceIntake::class, ['record' => $flagged->getRouteKey()]);
+            $test->assertActionVisible(ClearIntakeConflictReviewAction::getDefaultName());
+        });
+    }
+}

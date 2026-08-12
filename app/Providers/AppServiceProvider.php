@@ -4,9 +4,11 @@ namespace App\Providers;
 
 use App\Enums\FirmUserStatus;
 use App\Http\Middleware\EstablishFirmTenantContextForLivewireUpdate;
+use App\Marketplace\Models\MarketplaceIntake;
 use App\Models\PlatformAdmin;
 use App\Models\SecurityEvent;
 use App\Models\User;
+use App\Policies\MarketplaceIntakePolicy;
 use App\Services\AiProviderAdapterInterface;
 use App\Services\FakeAiProviderAdapter;
 use App\Services\Security\AccountLoginThrottleService;
@@ -23,6 +25,7 @@ use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Livewire\Livewire;
@@ -201,6 +204,14 @@ class AppServiceProvider extends ServiceProvider
         $this->registerAuthenticationAuditLogging();
         $this->registerLivewireUpdateRoute();
         $this->registerFirmOwnerInvitationAcceptance();
+
+        // Mission 3, checkpoint 9 — MarketplaceIntake lives in
+        // App\Marketplace\Models, not App\Models, so Laravel's default
+        // policy auto-discovery never finds MarketplaceIntakePolicy on
+        // its own (mirrors FirmIntegration's own explicit
+        // Gate::policy() registration in IntegrationServiceProvider,
+        // for the same non-standard-namespace reason).
+        Gate::policy(MarketplaceIntake::class, MarketplaceIntakePolicy::class);
     }
 
     /**
