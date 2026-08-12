@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\AiProvider;
 use App\Models\Concerns\BelongsToTenant;
 use App\Models\Concerns\HasPublicUuid;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -16,7 +17,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class FirmAiSettings extends Model
 {
-    use HasFactory, HasPublicUuid, BelongsToTenant;
+    use BelongsToTenant, HasFactory, HasPublicUuid;
 
     protected $table = 'firm_ai_settings';
 
@@ -31,6 +32,7 @@ class FirmAiSettings extends Model
         'client_data_context_enabled',
         'high_risk_requires_approval',
         'full_content_logging_enabled',
+        'intake_ai_assist_enabled',
     ];
 
     protected $attributes = [
@@ -39,6 +41,7 @@ class FirmAiSettings extends Model
         'client_data_context_enabled' => false,
         'high_risk_requires_approval' => true,
         'full_content_logging_enabled' => false,
+        'intake_ai_assist_enabled' => false,
     ];
 
     protected function casts(): array
@@ -53,6 +56,7 @@ class FirmAiSettings extends Model
             'client_data_context_enabled' => 'boolean',
             'high_risk_requires_approval' => 'boolean',
             'full_content_logging_enabled' => 'boolean',
+            'intake_ai_assist_enabled' => 'boolean',
         ];
     }
 
@@ -61,7 +65,7 @@ class FirmAiSettings extends Model
         return $this->belongsTo(Firm::class);
     }
 
-    public function allowsProvider(\App\Enums\AiProvider $provider): bool
+    public function allowsProvider(AiProvider $provider): bool
     {
         if (empty($this->allowed_providers_json)) {
             return false;

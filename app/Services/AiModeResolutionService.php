@@ -23,25 +23,54 @@ use App\ValueObjects\AiAccessDecision;
  * Active firm_ai_provider_keys row for the requested provider (project
  * rule: firm-owned mode requires an active encrypted firm provider
  * key).
+ *
+ * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 4 — a
+ * genuine PLATFORM-LEVEL kill switch, independent of any single
+ * firm's mode/entitlement/keys and independent of MyAttorney itself
+ * (this class is the one gate every AI consumer in the whole
+ * codebase already goes through, not a MyAttorney-specific check).
+ * Backed by the ai_policy_settings row keyed
+ * PLATFORM_KILL_SWITCH_KEY, via the already-existing (previously
+ * unenforced — confirmed by AiPolicySettingService's own docblock: no
+ * service call site read from it before this) AiPolicySettingService.
+ * Checked FIRST, before per-firm entitlement/mode, so a platform
+ * admin can halt every AI call in the system in one write regardless
+ * of any firm's own configuration. Absent row (null) or an explicit
+ * true both mean "not killed" — the default, non-breaking state for
+ * every firm/test that predates this setting; only an explicit
+ * `false` engages the kill switch.
  */
 class AiModeResolutionService
 {
-    public function __construct(private readonly AiEntitlementPolicyService $entitlementPolicy)
-    {
-    }
+    public const PLATFORM_KILL_SWITCH_KEY = 'platform_ai_enabled';
+
+    public function __construct(
+        private readonly AiEntitlementPolicyService $entitlementPolicy,
+        private readonly AiPolicySettingService $policySettings = new AiPolicySettingService,
+    ) {}
 
     public function resolve(Firm $firm): AiMode
     {
         return $firm->firmSettings?->ai_mode ?? AiMode::Disabled;
     }
 
+    public function platformKillSwitchEngaged(): bool
+    {
+        return $this->policySettings->get(self::PLATFORM_KILL_SWITCH_KEY) === false;
+    }
+
     /**
-     * Base gate: entitlement enabled AND mode is not Disabled. Does
-     * NOT check provider-key availability — see evaluateProviderAccess()
-     * for the firm_owned-specific check.
+     * Base gate: platform kill switch not engaged, entitlement
+     * enabled, AND mode is not Disabled. Does NOT check
+     * provider-key availability — see evaluateProviderAccess() for
+     * the firm_owned-specific check.
      */
     public function evaluate(Firm $firm): AiAccessDecision
     {
+        if ($this->platformKillSwitchEngaged()) {
+            return AiAccessDecision::deny('AI is currently disabled platform-wide.');
+        }
+
         $entitlementDecision = $this->entitlementPolicy->evaluate($firm);
 
         if (! $entitlementDecision->allowed) {

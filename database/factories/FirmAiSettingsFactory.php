@@ -26,6 +26,7 @@ class FirmAiSettingsFactory extends Factory
             'client_data_context_enabled' => false,
             'high_risk_requires_approval' => true,
             'full_content_logging_enabled' => false,
+            'intake_ai_assist_enabled' => false,
         ];
     }
 
