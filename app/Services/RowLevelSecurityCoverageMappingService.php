@@ -555,6 +555,18 @@ class RowLevelSecurityCoverageMappingService
         // — see TenantContextService::withPaymentRequestSelfLookupContext().
         // Neither was ever in MISSING_PREPARED_TABLES.
         'payment_requests', 'payment_request_events',
+        // marketplace_intakes, marketplace_intake_events (Mission 3,
+        // MyAttorney Conversion + AI Intake, checkpoint 1) — each
+        // prepared and forced together with its own table-creation
+        // migration:
+        // 2026_11_12_100003_prepare_row_level_security_and_force_rls_on_marketplace_intakes_table.php,
+        // 2026_11_12_100004_prepare_row_level_security_and_force_rls_on_marketplace_intake_events_table.php.
+        // marketplace_intakes additionally carries the
+        // marketplace_intakes_self_lookup FOR SELECT-only policy
+        // (2026_11_12_100005_add_self_lookup_clause_to_marketplace_intakes_rls_policy.php)
+        // — see TenantContextService::withMarketplaceIntakeSelfLookupContext().
+        // Neither was ever in MISSING_PREPARED_TABLES.
+        'marketplace_intakes', 'marketplace_intake_events',
         // payment_pending_allocations (Mixed-Invoice Revenue Allocation
         // pass) — prepared and forced together:
         // 2026_11_02_100003_prepare_row_level_security_and_force_rls_on_payment_pending_allocations_table.php.

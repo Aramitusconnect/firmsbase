@@ -98,6 +98,17 @@ class TenantContextService
      */
     private const PAYMENT_REQUEST_SELF_LOOKUP_SESSION_SETTING_NAME = 'app.current_payment_request_uuid';
 
+    /**
+     * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 1 — the
+     * same RLS bootstrap problem as PAYMENT_REQUEST_SELF_LOOKUP above,
+     * for a genuinely anonymous prospect resuming their own
+     * marketplace_intakes row via a resumable intake link. Set ONLY
+     * from the already-resolved uuid the caller itself supplies (the
+     * route parameter, never trusted further than that) — see
+     * withMarketplaceIntakeSelfLookupContext() below.
+     */
+    private const MARKETPLACE_INTAKE_SELF_LOOKUP_SESSION_SETTING_NAME = 'app.current_marketplace_intake_uuid';
+
     public function setFirmContext(Firm|int|string $firm): void
     {
         (new TenantContextResolver)->activateForFirm($this->resolveFirm($firm));
@@ -402,6 +413,30 @@ class TenantContextService
             });
         } finally {
             DB::select('select set_config(?, ?, ?)', [self::PAYMENT_REQUEST_SELF_LOOKUP_SESSION_SETTING_NAME, '', $this->isLocalScoped()]);
+        }
+    }
+
+    /**
+     * Sets the app.current_marketplace_intake_uuid session setting the
+     * marketplace_intakes_self_lookup RLS policy reads, runs the
+     * callback, and always clears it afterward. Never touches
+     * app.current_firm_id or PHP-memory firm context. $uuid must be a
+     * value the caller already has independently (the public route's
+     * own uuid parameter) — this method grants no more than "find the
+     * one marketplace_intakes row with this exact uuid," never a
+     * listing or any other table. Mirrors
+     * withPaymentRequestSelfLookupContext() exactly.
+     */
+    public function withMarketplaceIntakeSelfLookupContext(string $uuid, callable $callback): mixed
+    {
+        try {
+            return DB::transaction(function () use ($uuid, $callback) {
+                DB::select('select set_config(?, ?, ?)', [self::MARKETPLACE_INTAKE_SELF_LOOKUP_SESSION_SETTING_NAME, $uuid, $this->isLocalScoped()]);
+
+                return $callback();
+            });
+        } finally {
+            DB::select('select set_config(?, ?, ?)', [self::MARKETPLACE_INTAKE_SELF_LOOKUP_SESSION_SETTING_NAME, '', $this->isLocalScoped()]);
         }
     }
 
