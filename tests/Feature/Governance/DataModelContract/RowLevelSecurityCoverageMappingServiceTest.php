@@ -308,7 +308,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 1
         // added two more DirectTenant tables (marketplace_intakes,
         // marketplace_intake_events) — 167 -> 169.
-        $this->assertCount(169, $this->service->preparedTables());
+        $this->assertCount(170, $this->service->preparedTables());
         $this->assertCount(0, $this->service->missingPreparedTables());
         // 22 original exemptions + the Wave 1A (Section 39A-4B)
         // additions (module_catalog, readiness_scorecard_components) = 24.
@@ -442,7 +442,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 1
         // added two more DirectTenant tables (marketplace_intakes,
         // marketplace_intake_events) — 167 -> 169.
-        $this->assertCount(169, $this->service->tenantOwnedTables());
+        $this->assertCount(170, $this->service->tenantOwnedTables());
         $forceMigrationFiles = glob(
             database_path('migrations/*_force_rls_on_*_table.php')
         ) ?: [];
@@ -803,7 +803,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 1
         // added two more DirectTenant tables (marketplace_intakes,
         // marketplace_intake_events) — 167 -> 169.
-        $this->assertSame(169, $summary[TenantOwnershipClassification::DirectTenant->value]);
+        $this->assertSame(170, $summary[TenantOwnershipClassification::DirectTenant->value]);
         $this->assertSame(24, $summary[TenantOwnershipClassification::InheritedTenant->value]);
         $this->assertSame(3, $summary[TenantOwnershipClassification::Pivot->value]);
         $this->assertSame(10, $summary[TenantOwnershipClassification::Hybrid->value]);
@@ -1046,7 +1046,7 @@ class RowLevelSecurityCoverageMappingServiceTest extends TestCase
         // Narrowly updated AGAIN by Mission 3, checkpoint 3 —
         // intake_template_questions (one new Global table, already
         // reflected in the Global assertion above) — 303 -> 304.
-        $this->assertSame(304, array_sum($summary));
+        $this->assertSame(305, array_sum($summary));
     }
 
     public function test_every_direct_tenant_inherited_hybrid_and_pivot_table_has_a_non_null_ownership_path(): void

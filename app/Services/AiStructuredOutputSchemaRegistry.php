@@ -39,6 +39,18 @@ final class AiStructuredOutputSchemaRegistry
             'practice_area_code' => 'string',
             'confidence' => 'string',
         ],
+        // Mission 3, checkpoint 6 -- a single conversational-intake
+        // field-extraction turn. question_code must be an existing
+        // IntakeTemplateQuestion.question_code on the intake's own
+        // attached template; extracted_value is always a raw string
+        // here (IntakeTemplateService::validateResponses() is the
+        // ONLY place that further checks it against the target
+        // question's real type/options) -- this schema enforces
+        // shape only, never field-specific validity.
+        'intake_field_extraction' => [
+            'question_code' => 'string',
+            'extracted_value' => 'string',
+        ],
     ];
 
     /**

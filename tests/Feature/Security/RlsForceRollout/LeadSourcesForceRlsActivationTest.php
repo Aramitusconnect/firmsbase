@@ -264,7 +264,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
             // FORCE-activated together with their own table-creation
             // migrations — additive only, no existing assertion removed
             // or weakened.
-            'marketplace_intakes', 'marketplace_intake_events',
+            'marketplace_intakes', 'marketplace_intake_events', 'marketplace_ai_usage_events',
         ];
 
         $rows = DB::select(
@@ -363,7 +363,7 @@ class LeadSourcesForceRlsActivationTest extends TestCase
             // FORCE-activated together with their own table-creation
             // migrations — additive only, no existing assertion removed
             // or weakened.
-            'marketplace_intakes', 'marketplace_intake_events',
+            'marketplace_intakes', 'marketplace_intake_events', 'marketplace_ai_usage_events',
         ];
 
         // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is

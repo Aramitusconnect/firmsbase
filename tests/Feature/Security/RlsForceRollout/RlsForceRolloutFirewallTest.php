@@ -720,6 +720,12 @@ class RlsForceRolloutFirewallTest extends TestCase
             // clients and firm_users here — additive only, no existing
             // assertion removed or weakened.
             'marketplace_intakes', 'marketplace_intake_events',
+            // Narrowly updated by Mission 3 (MyAttorney Conversion + AI
+            // Intake), checkpoint 6 -- marketplace_ai_usage_events, a
+            // new table prepared and FORCE-activated in its own
+            // table-creation migration -- additive only, no existing
+            // assertion removed or weakened.
+            'marketplace_ai_usage_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

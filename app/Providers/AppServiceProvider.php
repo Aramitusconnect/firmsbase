@@ -7,6 +7,8 @@ use App\Http\Middleware\EstablishFirmTenantContextForLivewireUpdate;
 use App\Models\PlatformAdmin;
 use App\Models\SecurityEvent;
 use App\Models\User;
+use App\Services\AiProviderAdapterInterface;
+use App\Services\FakeAiProviderAdapter;
 use App\Services\Security\AccountLoginThrottleService;
 use App\Services\Stripe\FakeStripeGateway;
 use App\Services\Stripe\PaymentGatewaySimulationPolicyService;
@@ -144,6 +146,20 @@ class AppServiceProvider extends ServiceProvider
             socket: (string) config('services.clamav.socket'),
             timeoutSeconds: (float) config('services.clamav.timeout_seconds', 10),
         ));
+
+        // Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 6
+        // fix: AiProviderAdapterInterface (introduced checkpoint 5) had
+        // NO container binding at all — every prior caller constructed
+        // FakeAiProviderAdapter directly (tests) or never resolved the
+        // interface at all (no production service depended on it yet).
+        // MarketplaceIssueClassifierService and
+        // MarketplaceIntakeConversationalAssistantService are the first
+        // production code paths that need to resolve this from the
+        // container, so this is the same kind of missing-wiring fix as
+        // the VirusScanner binding above, not a new decision — the
+        // interface's own docblock already states "Phase 15 registers
+        // ONLY FakeAiProviderAdapter against this interface."
+        $this->app->bind(AiProviderAdapterInterface::class, FakeAiProviderAdapter::class);
     }
 
     /**

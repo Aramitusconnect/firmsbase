@@ -567,6 +567,14 @@ class RowLevelSecurityCoverageMappingService
         // — see TenantContextService::withMarketplaceIntakeSelfLookupContext().
         // Neither was ever in MISSING_PREPARED_TABLES.
         'marketplace_intakes', 'marketplace_intake_events',
+        // marketplace_ai_usage_events (Mission 3, checkpoint 6) --
+        // prepared and forced together with its own table-creation
+        // migration:
+        // 2026_11_15_100002_prepare_row_level_security_and_force_rls_on_marketplace_ai_usage_events_table.php.
+        // Nullable firm_id, RLS shape copied byte-for-byte from
+        // security_events' own read/write policy pair -- see that
+        // migration's own docblock. Never in MISSING_PREPARED_TABLES.
+        'marketplace_ai_usage_events',
         // payment_pending_allocations (Mixed-Invoice Revenue Allocation
         // pass) — prepared and forced together:
         // 2026_11_02_100003_prepare_row_level_security_and_force_rls_on_payment_pending_allocations_table.php.
@@ -833,6 +841,13 @@ class RowLevelSecurityCoverageMappingService
         // (no firm_id of its own), same Global classification as its
         // parent. See EXEMPT_TABLE_METADATA below.
         'intake_template_questions',
+        // NOTE: marketplace_ai_usage_events (checkpoint 6) is NOT
+        // listed here -- despite its nullable firm_id, it is
+        // registered in PREPARED_TABLES below instead, mirroring
+        // security_events' own DirectTenant classification (nullable
+        // firm_id still means real per-firm RLS scoping when firm_id
+        // IS set -- classification tracks "has real RLS scoping," not
+        // "firm_id is non-nullable").
         // Wave 1A (Section 39A-4B) additions — see docblock above.
         'module_catalog', 'readiness_scorecard_components',
         // Stage B Checkpoint 2 (FirmsBase Integration Platform mission)

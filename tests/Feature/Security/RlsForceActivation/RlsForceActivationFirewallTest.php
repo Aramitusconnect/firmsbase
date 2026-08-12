@@ -254,7 +254,7 @@ class RlsForceActivationFirewallTest extends TestCase
             // migrations — this test's own scope (39A-3A) only asserts
             // clients here — additive only, no existing assertion
             // removed or weakened.
-            'marketplace_intakes', 'marketplace_intake_events',
+            'marketplace_intakes', 'marketplace_intake_events', 'marketplace_ai_usage_events',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

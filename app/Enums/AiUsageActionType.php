@@ -39,6 +39,20 @@ enum AiUsageActionType: string
     case IntakeClassification = 'intake_classification';
 
     /**
+     * Mission 3, checkpoint 6 -- extracting a single approved intake
+     * field's value out of a prospect's free-text conversational
+     * answer, during the Firm-scoped AI-assisted intake. Deliberately
+     * NOT high-risk (same reasoning as IntakeClassification) and
+     * deliberately narrow: it never invents a question, never fills
+     * more than the one field the caller asked about, and the
+     * extracted value is validated through IntakeTemplateService's
+     * own schema before it is ever trusted -- the AI conversation
+     * itself is never the source of truth. Structured
+     * (responseSchemaKey = 'intake_field_extraction').
+     */
+    case IntakeFieldExtraction = 'intake_field_extraction';
+
+    /**
      * The six action types that are always high-risk and always
      * require approval before use (Master Plan §22 acceptance
      * criteria; project rules 15/16/19/20). This list is intentionally

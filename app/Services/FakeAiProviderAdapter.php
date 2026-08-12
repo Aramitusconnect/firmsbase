@@ -26,6 +26,15 @@ class FakeAiProviderAdapter implements AiProviderAdapterInterface
     private const TOOL_TRIGGER = 'REQUEST_TOOL:';
 
     /**
+     * Mission 3, checkpoint 6 -- the marker
+     * MarketplaceIntakeConversationalAssistantService embeds in
+     * instructionText (a system-constructed string, never visitor
+     * content) to name which question_code a field-extraction turn
+     * targets. Mirrors TOOL_TRIGGER's own shape exactly.
+     */
+    private const EXTRACT_FIELD_TRIGGER = 'EXTRACT_FIELD:';
+
+    /**
      * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 5.
      * Deterministic, fixed per schema key (never derived from
      * instructionText/documentDerivedText content) - a fake adapter's
@@ -77,9 +86,7 @@ class FakeAiProviderAdapter implements AiProviderAdapterInterface
             }
         }
 
-        $structuredOutput = $request->responseSchemaKey !== null
-            ? (self::FAKE_STRUCTURED_RESPONSES[$request->responseSchemaKey] ?? null)
-            : null;
+        $structuredOutput = $this->structuredOutputFor($request);
 
         return new AiProviderResponse(
             outputText: $outputText,
@@ -88,5 +95,46 @@ class FakeAiProviderAdapter implements AiProviderAdapterInterface
             requestedToolActions: $requestedToolActions,
             structuredOutput: $structuredOutput,
         );
+    }
+
+    /**
+     * intake_field_extraction is handled separately from the static
+     * FAKE_STRUCTURED_RESPONSES table because its shape is genuinely
+     * dynamic per-call (which question_code is being targeted) —
+     * still fully deterministic (same request -> same output), and
+     * still never derives ANY behavior from documentDerivedText's
+     * content: that field is only ever copied verbatim into
+     * extracted_value, never interpreted, matching this class's own
+     * structural prompt-injection guarantee. question_code comes
+     * exclusively from instructionText, which the caller (never the
+     * visitor) constructs.
+     */
+    private function structuredOutputFor(AiPromptRequest $request): ?array
+    {
+        if ($request->responseSchemaKey === null) {
+            return null;
+        }
+
+        if ($request->responseSchemaKey === 'intake_field_extraction') {
+            if (! str_contains($request->instructionText, self::EXTRACT_FIELD_TRIGGER)) {
+                return null;
+            }
+
+            $questionCode = trim(strtok(substr(
+                $request->instructionText,
+                strpos($request->instructionText, self::EXTRACT_FIELD_TRIGGER) + strlen(self::EXTRACT_FIELD_TRIGGER)
+            ), "\n"));
+
+            if ($questionCode === '') {
+                return null;
+            }
+
+            return [
+                'question_code' => $questionCode,
+                'extracted_value' => trim((string) $request->documentDerivedText),
+            ];
+        }
+
+        return self::FAKE_STRUCTURED_RESPONSES[$request->responseSchemaKey] ?? null;
     }
 }

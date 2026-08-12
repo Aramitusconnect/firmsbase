@@ -10,6 +10,7 @@ use App\Models\Concerns\BelongsToTenant;
 use App\Models\Concerns\HasPublicUuid;
 use App\Models\Firm;
 use App\Models\FirmLead;
+use App\Models\IntakeTemplate;
 use App\Models\PracticeArea;
 use Database\Factories\MarketplaceIntakeFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -37,11 +38,14 @@ class MarketplaceIntake extends Model
         'firm_id',
         'directory_firm_id',
         'practice_area_id',
+        'intake_template_id',
         'status',
         'prospect_name',
         'prospect_email',
         'prospect_phone',
         'structured_data',
+        'conversation_transcript',
+        'ai_assisted',
         'submitted_at',
         'under_review_at',
         'accepted_at',
@@ -60,6 +64,8 @@ class MarketplaceIntake extends Model
         return [
             'status' => MarketplaceIntakeStatus::class,
             'structured_data' => 'array',
+            'conversation_transcript' => 'array',
+            'ai_assisted' => 'boolean',
             'submitted_at' => 'datetime',
             'under_review_at' => 'datetime',
             'accepted_at' => 'datetime',
@@ -89,6 +95,11 @@ class MarketplaceIntake extends Model
     public function practiceArea(): BelongsTo
     {
         return $this->belongsTo(PracticeArea::class);
+    }
+
+    public function intakeTemplate(): BelongsTo
+    {
+        return $this->belongsTo(IntakeTemplate::class);
     }
 
     public function convertedFirmLead(): BelongsTo

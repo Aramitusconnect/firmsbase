@@ -13,6 +13,7 @@ use App\Marketplace\Models\MarketplaceIntakeEvent;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\PracticeArea;
+use App\Services\IntakeTemplateService;
 use App\Services\TenantContextService;
 use Illuminate\Support\Facades\URL;
 
@@ -30,6 +31,7 @@ class MarketplaceIntakeService
 {
     public function __construct(
         private readonly MarketplaceIntakeEligibilityService $eligibilityService = new MarketplaceIntakeEligibilityService,
+        private readonly IntakeTemplateService $templateService = new IntakeTemplateService,
     ) {}
 
     /**
@@ -80,10 +82,13 @@ class MarketplaceIntakeService
         }
 
         return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $directoryFirm, $practiceArea) {
+            $template = $this->templateService->templateForPracticeArea($practiceArea);
+
             $intake = MarketplaceIntake::create([
                 'firm_id' => $firm->id,
                 'directory_firm_id' => $directoryFirm?->id,
                 'practice_area_id' => $practiceArea?->id,
+                'intake_template_id' => $template?->id,
                 'status' => MarketplaceIntakeStatus::Started,
                 'expires_at' => now()->addDays(self::DEFAULT_EXPIRY_DAYS),
             ]);

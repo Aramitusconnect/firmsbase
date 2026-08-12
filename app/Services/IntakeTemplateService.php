@@ -163,6 +163,17 @@ class IntakeTemplateService
         return $errors;
     }
 
+    /**
+     * Mission 3, checkpoint 6 — public so MarketplaceIntakeAnswerService
+     * can determine "what's the next thing to ask" using the exact
+     * same conditional-logic source of truth validateResponses() uses,
+     * rather than re-implementing it.
+     */
+    public function isQuestionApplicable(IntakeTemplateQuestion $question, array $responses): bool
+    {
+        return ! $this->isConditionallyHidden($question, $responses);
+    }
+
     private function isConditionallyHidden(IntakeTemplateQuestion $question, array $responses): bool
     {
         if (! $question->isConditional()) {

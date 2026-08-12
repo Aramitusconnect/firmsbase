@@ -462,7 +462,7 @@ class RlsContextRolloutFirewallTest extends TestCase
             // FORCE-activated together with their own table-creation
             // migrations — additive only, no existing assertion
             // removed or weakened.
-            'marketplace_intakes', 'marketplace_intake_events',
+            'marketplace_intakes', 'marketplace_intake_events', 'marketplace_ai_usage_events',
         ];
 
         // security_events is the final checkpoint in this arc: every
