@@ -6,7 +6,9 @@ use App\Enums\ClientPortalStatus;
 use App\Enums\ConsentChannel;
 use App\Models\Client;
 use App\Models\ClientPortalUser;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 
 /**
@@ -26,6 +28,18 @@ use Illuminate\Support\Str;
  */
 class ClientPortalService
 {
+    /**
+     * Mission 3A (MyAttorney Launch-Flow Closure) — how long an
+     * invitation's signed link stays cryptographically valid. Mirrors
+     * MarketplaceIntakeService::DEFAULT_EXPIRY_DAYS' own precedent of
+     * relying on Laravel's own temporarySignedRoute() expiration
+     * rather than a separate DB column — a real invitation link that
+     * has gone stale must fail closed at the signature-verification
+     * layer, before any application code (or the token-based RLS
+     * self-lookup policy) ever runs.
+     */
+    private const INVITATION_LINK_EXPIRY_DAYS = 14;
+
     public function __construct(private ConsentService $consentService) {}
 
     /**
@@ -33,7 +47,7 @@ class ClientPortalService
      */
     public function invite(Client $client): Client
     {
-        return (new TenantContextService)->runWithFirmContext($client->firm_id, function () use ($client) {
+        $updated = (new TenantContextService)->runWithFirmContext($client->firm_id, function () use ($client) {
             // Section 39A-3L, Checkpoint 11 — moved inside this same
             // runWithFirmContext() wrap: communication_consents is now
             // FORCE-RLS protected, so this isGranted() read must share
@@ -45,6 +59,13 @@ class ClientPortalService
                 );
             }
 
+            // Always regenerates a fresh token, even for an
+            // already-Invited client — this IS the resend/revoke
+            // mechanism: a previously-issued link's own token no
+            // longer matches any row once this update() commits, so
+            // the clients_portal_invitation_self_lookup RLS policy
+            // stops resolving it (identical single-use-token shape to
+            // acceptInvitation()'s own token-clearing on success).
             $client->update([
                 'portal_status' => ClientPortalStatus::Invited,
                 'portal_invitation_token' => (string) Str::uuid7(),
@@ -53,15 +74,82 @@ class ClientPortalService
 
             return $client->fresh();
         });
+
+        // Mission 3A — the ONE behavioral addition to invite() this
+        // closure mission makes: an invitation that changes no status/
+        // token behavior but, for the first time, actually reaches the
+        // client's inbox. Deferred to afterCommit() and never allowed
+        // to throw — a transactional email failing to send must never
+        // roll back (or appear to fail) the Firm's own already-durably-
+        // recorded invite decision, mirroring
+        // MarketplaceIntakeService::markAccepted()'s own established
+        // pattern.
+        DB::afterCommit(function () use ($updated) {
+            try {
+                app(ClientPortalInvitationNotificationService::class)->notifyInvited($updated, $this->invitationUrl($updated));
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        });
+
+        return $updated;
     }
 
     /**
-     * @throws \RuntimeException if the token does not match
+     * The ONLY identifier ever placed in the public invitation-accept
+     * URL — mirrors MarketplaceIntakeService::signedUrl() exactly. The
+     * signature carries nothing but the opaque, single-use
+     * portal_invitation_token; every other fact about the invitation
+     * (which Client, which Firm) is read server-side via the token-
+     * scoped RLS self-lookup once the link is opened, never trusted
+     * from the URL itself beyond that one token.
+     */
+    public function invitationUrl(Client $client): string
+    {
+        if (empty($client->portal_invitation_token)) {
+            throw new \RuntimeException('This client has no active portal invitation token.');
+        }
+
+        return URL::temporarySignedRoute(
+            'client-portal.invitation.accept',
+            now()->addDays(self::INVITATION_LINK_EXPIRY_DAYS),
+            ['token' => $client->portal_invitation_token],
+        );
+    }
+
+    /**
+     * Resolves a clients row from nothing but its own
+     * portal_invitation_token — a genuinely unauthenticated visitor
+     * holds no firm context and no numeric Client id. Mirrors
+     * MarketplaceIntakeService::resolveByUuid() exactly. Returns null
+     * (never throws) for an unknown, expired-and-rotated, or
+     * already-consumed token — the RLS policy itself makes those three
+     * cases indistinguishable from "not found," which is the intended
+     * anti-enumeration behavior.
+     */
+    public function resolveByInvitationToken(string $token): ?Client
+    {
+        return (new TenantContextService)->withClientPortalInvitationSelfLookupContext(
+            $token,
+            fn () => Client::query()->where('portal_invitation_token', $token)->first(),
+        );
+    }
+
+    /**
+     * @throws \RuntimeException if the token does not match, or the
+     *                           client is not currently in the Invited state (e.g. the Firm
+     *                           has since called disable() on a still-pending invitation —
+     *                           a stale link must never be able to reactivate portal access
+     *                           the Firm has explicitly revoked)
      */
     public function acceptInvitation(Client $client, string $token): Client
     {
         if (empty($client->portal_invitation_token) || ! hash_equals($client->portal_invitation_token, $token)) {
             throw new \RuntimeException('Invalid or expired portal invitation token.');
+        }
+
+        if ($client->portal_status !== ClientPortalStatus::Invited) {
+            throw new \RuntimeException('This invitation is no longer active.');
         }
 
         return (new TenantContextService)->runWithFirmContext($client->firm_id, function () use ($client) {

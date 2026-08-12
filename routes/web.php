@@ -13,6 +13,7 @@ use App\Http\Controllers\Seo\RobotsTxtController;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
 use App\Http\Middleware\ConfigurePanelSessionCookie;
 use App\Http\Middleware\EstablishClientPortalTenantContext;
+use App\Livewire\ClientPortal\AcceptInvitationPage;
 use App\Livewire\Marketplace\PublicIntakePage;
 use App\Livewire\PaymentRequests\PublicPaymentPage;
 use App\Services\CanonicalUrlService;
@@ -180,6 +181,27 @@ Route::domain($hosts->clientPortalHost())
     ->middleware(['auth:client', EstablishClientPortalTenantContext::class, ApplyTenantDatabaseContext::class, 'throttle:10,1'])
     ->post('plaid/exchange', [PlaidExchangeController::class, 'exchange'])
     ->name('client-portal.plaid.exchange');
+
+/*
+|--------------------------------------------------------------------------
+| Client Portal invitation acceptance — Client Portal host
+|--------------------------------------------------------------------------
+|
+| Mission 3A (MyAttorney Launch-Flow Closure). The one public,
+| unauthenticated page a Client Portal invitation link resolves to —
+| mirrors public.marketplace-intakes.show's own architecture exactly:
+| 'signed' verifies the token/expiry Laravel itself embedded in the URL
+| (see ClientPortalService::invitationUrl()), ConfigurePanelSessionCookie
+| establishes the SAME session cookie name the client-portal panel
+| itself uses, so a successful login here carries into the panel's own
+| subsequent authenticated requests. throttle:20,1 mirrors the intake
+| resume page's own generous-but-bounded allowance.
+*/
+Route::domain($hosts->clientPortalHost())
+    ->middleware([ConfigurePanelSessionCookie::class.':client', 'signed', 'throttle:20,1'])
+    ->get('accept-invitation/{token}', AcceptInvitationPage::class)
+    ->where('token', '[0-9a-fA-F-]{36}')
+    ->name('client-portal.invitation.accept');
 
 /*
 |--------------------------------------------------------------------------

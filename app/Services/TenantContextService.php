@@ -109,6 +109,17 @@ class TenantContextService
      */
     private const MARKETPLACE_INTAKE_SELF_LOOKUP_SESSION_SETTING_NAME = 'app.current_marketplace_intake_uuid';
 
+    /**
+     * Mission 3A (MyAttorney Launch-Flow Closure) — the same RLS
+     * bootstrap problem as MARKETPLACE_INTAKE_SELF_LOOKUP above, for a
+     * genuinely unauthenticated visitor accepting their own Client
+     * Portal invitation via a signed link. Set ONLY from the
+     * already-resolved portal_invitation_token the caller itself
+     * supplies (the route parameter, never trusted further than that)
+     * — see withClientPortalInvitationSelfLookupContext() below.
+     */
+    private const CLIENT_PORTAL_INVITATION_SELF_LOOKUP_SESSION_SETTING_NAME = 'app.current_client_portal_invitation_token';
+
     public function setFirmContext(Firm|int|string $firm): void
     {
         (new TenantContextResolver)->activateForFirm($this->resolveFirm($firm));
@@ -437,6 +448,31 @@ class TenantContextService
             });
         } finally {
             DB::select('select set_config(?, ?, ?)', [self::MARKETPLACE_INTAKE_SELF_LOOKUP_SESSION_SETTING_NAME, '', $this->isLocalScoped()]);
+        }
+    }
+
+    /**
+     * Sets the app.current_client_portal_invitation_token session
+     * setting the clients_portal_invitation_self_lookup RLS policy
+     * reads, runs the callback, and always clears it afterward. Never
+     * touches app.current_firm_id or PHP-memory firm context. $token
+     * must be a value the caller already has independently (the
+     * public route's own token parameter) — this method grants no
+     * more than "find the one clients row with this exact,
+     * not-yet-consumed invitation token," never a listing or any
+     * other table. Mirrors withMarketplaceIntakeSelfLookupContext()
+     * exactly.
+     */
+    public function withClientPortalInvitationSelfLookupContext(string $token, callable $callback): mixed
+    {
+        try {
+            return DB::transaction(function () use ($token, $callback) {
+                DB::select('select set_config(?, ?, ?)', [self::CLIENT_PORTAL_INVITATION_SELF_LOOKUP_SESSION_SETTING_NAME, $token, $this->isLocalScoped()]);
+
+                return $callback();
+            });
+        } finally {
+            DB::select('select set_config(?, ?, ?)', [self::CLIENT_PORTAL_INVITATION_SELF_LOOKUP_SESSION_SETTING_NAME, '', $this->isLocalScoped()]);
         }
     }
 
