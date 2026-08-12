@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Marketplace\Services;
 
 use App\Enums\ConsentChannel;
-use App\Enums\FirmLeadStatus;
 use App\Enums\MarketplaceIntakeStatus;
 use App\Enums\WebhookEventType;
 use App\Marketplace\Models\MarketplaceIntake;
@@ -123,14 +122,20 @@ class ConvertMarketplaceProspectService
         // structured_data, which holds question-specific answers, not
         // identity fields). Always creates a new row; this service
         // does not attempt lead deduplication (a genuinely separate
-        // concern, out of this checkpoint's scope).
+        // concern, out of this checkpoint's scope). status is
+        // deliberately NEVER set explicitly here — same as
+        // CreateFirmLead's own "+Add Lead" page — the model's own
+        // firm_leads.status DB default (FirmLeadStatus::New) applies,
+        // matching WorkflowTransitionEnforcementSearchTest's own
+        // project-wide rule that every direct status-enum write for a
+        // catalog workflow must live inside app/Services, never
+        // app/Marketplace/Services.
         $firmLead = $this->tenantContext->runWithFirmContext($firm, fn () => FirmLead::create([
             'firm_id' => $firm->id,
             'practice_area_interest_id' => $practiceAreaId,
             'name' => $intake->prospect_name,
             'email' => $intake->prospect_email,
             'phone' => $intake->prospect_phone,
-            'status' => FirmLeadStatus::New,
         ]));
 
         // Step 2: the ONLY path a FirmLead ever becomes a Client —

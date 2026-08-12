@@ -270,6 +270,14 @@ class SecretPatternScanTest extends TestCase
             // platform-Global, no-firm_id table with no PII of any
             // kind (see that table's own migration docblock).
             'PruneMarketplaceAnalyticsEventsCommand.php',
+            // Mission 3 (MyAttorney Conversion + AI Intake), checkpoint
+            // 14 added SweepMarketplaceIntakeRetentionCommand —
+            // reviewed and safe: creates no demo/placeholder/synthetic
+            // data at all. It only scrubs identity PII fields (via the
+            // existing MarketplaceIntakeService::purgeExpiredPii()) on
+            // real, already-existing, terminal rows past the configured
+            // retention window — never inserts a new row.
+            'SweepMarketplaceIntakeRetentionCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

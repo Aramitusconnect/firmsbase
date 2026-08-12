@@ -228,6 +228,12 @@ class QueueConsoleTenantContextTest extends TestCase
             // identical review note (platform-Global, no-RLS,
             // no-firm_id table; no tenant table ever touched).
             'PruneMarketplaceAnalyticsEventsCommand.php',
+            // Mission 3 (MyAttorney Conversion + AI Intake), checkpoint
+            // 14 added SweepMarketplaceIntakeRetentionCommand —
+            // reviewed and safe: see QueueConsoleContextRolloutTest's
+            // own identical review note (per-firm sweep, same shape as
+            // SweepDocumentRequestRemindersCommand above).
+            'SweepMarketplaceIntakeRetentionCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

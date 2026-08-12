@@ -273,6 +273,20 @@ class QueueConsoleContextRolloutTest extends TestCase
             // BYPASSRLS, no superuser role, no set_config manipulation
             // of any RLS-relevant session variable.
             'PruneMarketplaceAnalyticsEventsCommand.php',
+            // Mission 3 (MyAttorney Conversion + AI Intake), checkpoint
+            // 14 added SweepMarketplaceIntakeRetentionCommand
+            // (marketplace:intakes:retention:sweep) — reviewed and
+            // safe: the SAME per-firm sweep shape as
+            // SweepDocumentRequestRemindersCommand above. It enumerates
+            // only the non-RLS `firms` table (activation_status =
+            // Activated), then wraps each firm's ENTIRE candidate
+            // evaluation AND purge in a single
+            // TenantContextService::runWithFirmContext($firm, ...)
+            // call — no raw SQL, no BYPASSRLS, no superuser role, no
+            // set_config manipulation of any RLS-relevant session
+            // variable. Calls only the existing, unmodified
+            // MarketplaceIntakeService::purgeExpiredPii().
+            'SweepMarketplaceIntakeRetentionCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

@@ -829,7 +829,23 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Pages'.DIRECTORY_SEPARATOR.'PlatformMarketplaceAnalyticsPage.php',
         ];
 
-        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles, $mission1bExtremeSecurityHardeningAllowedRelativeFiles, $mission1cSecurityValidationActivationAllowedRelativeFiles, $mission2MarketplaceSuperAdminControlsAllowedRelativeFiles, $mission2MarketplaceAnalyticsAllowedRelativeFiles);
+        // Mission 3 (MyAttorney Conversion + AI Intake) checkpoint 14
+        // (privacy/retention/analytics + SuperAdmin AI oversight) added
+        // a third Admin-panel page — PlatformAiOversightPage — plus its
+        // one mutating action, ToggleAiKillSwitchAction, gated by
+        // PlatformStaffAccessPolicyService::canAccessAiPolicySettings()/
+        // canManageAiPolicySettings(). Same shape as
+        // PlatformMarketplaceAnalyticsPage above: read-only aggregate
+        // MyAttorney intake-funnel counts + the platform AI kill-switch
+        // toggle, no Integration-domain reference. Caught by this
+        // mission's own final full fresh-DB regression gate, not by
+        // any earlier narrower sweep.
+        $mission3AiOversightAllowedRelativeFiles = [
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformAiOversightPage.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ToggleAiKillSwitchAction.php',
+        ];
+
+        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles, $mission1bExtremeSecurityHardeningAllowedRelativeFiles, $mission1cSecurityValidationActivationAllowedRelativeFiles, $mission2MarketplaceSuperAdminControlsAllowedRelativeFiles, $mission2MarketplaceAnalyticsAllowedRelativeFiles, $mission3AiOversightAllowedRelativeFiles);
 
         $unauthorizedNonFirmFilamentFiles = [];
 
