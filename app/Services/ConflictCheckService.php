@@ -7,9 +7,9 @@ use App\Enums\ConflictCheckRunStatus;
 use App\Enums\ConflictCheckScope;
 use App\Enums\ConflictScope;
 use App\Models\Client;
-use App\Models\Contact;
 use App\Models\ConflictCheckResult;
 use App\Models\ConflictCheckRun;
+use App\Models\Contact;
 use App\Models\Firm;
 use App\Models\Matter;
 use App\Models\MatterParty;
@@ -39,15 +39,13 @@ use Illuminate\Support\Facades\DB;
  */
 class ConflictCheckService
 {
-    public function __construct(private TimelineEventRecorder $timeline)
-    {
-    }
+    public function __construct(private TimelineEventRecorder $timeline) {}
 
     /**
      * @param  array<int, string>  $searchTerms  names/emails/phones to match
      * @param  array<int, string>  $freeTextNames  opposing-party names with
-     *   no full party record yet (project rule: must still be captured
-     *   and included in the gate)
+     *                                             no full party record yet (project rule: must still be captured
+     *                                             and included in the gate)
      */
     public function run(
         Matter $matter,
@@ -61,7 +59,7 @@ class ConflictCheckService
             ? $this->siblingFirmIds($firm)
             : [$firm->id];
 
-        $tenantContext = new TenantContextService();
+        $tenantContext = new TenantContextService;
 
         return DB::transaction(function () use ($matter, $firm, $scope, $firmIds, $searchTerms, $freeTextNames, $actor, $tenantContext) {
             // conflict_check_runs has permanent FORCE ROW LEVEL SECURITY
@@ -169,6 +167,41 @@ class ConflictCheckService
         );
     }
 
+    /**
+     * Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 8 — a
+     * read-only, non-persisting search for MyAttorney intake-stage
+     * conflict signals, used by MarketplaceIntakeConflictCheckService.
+     * At intake time there is no Matter yet to attach a real
+     * ConflictCheckRun to (conflict_check_runs.matter_id is NOT NULL,
+     * and conversion to a real Matter is a later checkpoint) — this
+     * reuses the exact same term-matching search run() uses against
+     * Clients/Contacts/Parties/MatterParties, but returns raw matches
+     * instead of persisting a ConflictCheckRun/ConflictCheckResult row.
+     * The authoritative, persisted conflict check still only ever
+     * happens against a real Matter, later, via run() — this method
+     * exists to decide whether a Firm needs to review before accepting
+     * the intake, not to make that decision for them.
+     *
+     * @param  array<int, string>  $names
+     * @return Collection<int, array{type: string, id: int, value: string}>
+     */
+    public function searchForPossibleMatches(Firm $firm, array $names): Collection
+    {
+        if ($names === []) {
+            return collect();
+        }
+
+        $scope = $this->resolveScope($firm);
+        $firmIds = $scope === ConflictCheckScope::Organization
+            ? $this->siblingFirmIds($firm)
+            : [$firm->id];
+
+        return $this->searchClients($firmIds, $names)
+            ->concat($this->searchContacts($firmIds, $names))
+            ->concat($this->searchParties($firmIds, $names))
+            ->concat($this->searchMatterParties($firmIds, $names));
+    }
+
     private function resolveScope(Firm $firm): ConflictCheckScope
     {
         $organization = $firm->organization;
@@ -209,7 +242,7 @@ class ConflictCheckService
      */
     private function searchClients(array $firmIds, array $terms): Collection
     {
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         return collect($firmIds)->flatMap(fn (int $firmId) => $service->runWithFirmContext(
             $firmId,
@@ -229,7 +262,7 @@ class ConflictCheckService
      */
     private function searchContacts(array $firmIds, array $terms): Collection
     {
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         return collect($firmIds)->flatMap(fn (int $firmId) => $service->runWithFirmContext(
             $firmId,
@@ -247,7 +280,7 @@ class ConflictCheckService
      */
     private function searchParties(array $firmIds, array $terms): Collection
     {
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         return collect($firmIds)->flatMap(fn (int $firmId) => $service->runWithFirmContext(
             $firmId,
@@ -280,15 +313,15 @@ class ConflictCheckService
      * already-context-wrapped $parties collection via an in-PHP
      * [$partyId => $partyName] map.
      */
-    private function searchMatterParties(array $firmIds, array $terms, int $excludeMatterId): Collection
+    private function searchMatterParties(array $firmIds, array $terms, ?int $excludeMatterId = null): Collection
     {
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $matterIds = collect($firmIds)->flatMap(fn (int $firmId) => $service->runWithFirmContext(
             $firmId,
             fn () => Matter::withoutTenantScope()
                 ->where('firm_id', $firmId)
-                ->where('id', '!=', $excludeMatterId)
+                ->when($excludeMatterId !== null, fn ($q) => $q->where('id', '!=', $excludeMatterId))
                 ->pluck('id')
         ));
 

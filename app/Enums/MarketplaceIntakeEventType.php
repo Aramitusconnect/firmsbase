@@ -19,7 +19,6 @@ enum MarketplaceIntakeEventType: string
     case AnswersUpdated = 'answers_updated';
     case Submitted = 'submitted';
     case MarkedUnderReview = 'marked_under_review';
-    case ConflictReviewRequired = 'conflict_review_required';
     case Accepted = 'accepted';
     case Declined = 'declined';
     case Converted = 'converted';
@@ -36,4 +35,27 @@ enum MarketplaceIntakeEventType: string
      * content in an audit event).
      */
     case DocumentUploaded = 'document_uploaded';
+
+    /**
+     * Mission 3, checkpoint 8 — a Firm-triggered conflict evaluation
+     * against this intake's own captured opposing-party names found at
+     * least one possible match against the firm's existing clients/
+     * contacts/parties/matter parties. Metadata carries only
+     * possible_match_count — never the matched entity's name/type/id,
+     * which is confidential existing-client data a marketplace_intake_events
+     * row must never leak (this event type has no distinct visibility
+     * boundary from every other intake event, so it must stay generic).
+     */
+    case ConflictReviewRequired = 'conflict_review_required';
+
+    /**
+     * Mission 3, checkpoint 8 — a Firm reviewer has manually confirmed
+     * the flagged possible matches are not a real conflict (or resolved
+     * them by whatever means, outside this codebase's own scope — no
+     * ConflictCheckResult exists yet to resolve at intake time, since
+     * no Party/Matter rows exist yet either) and returned the intake to
+     * UnderReview so the normal accept/decline workflow (checkpoint 10)
+     * can proceed.
+     */
+    case ConflictReviewCleared = 'conflict_review_cleared';
 }

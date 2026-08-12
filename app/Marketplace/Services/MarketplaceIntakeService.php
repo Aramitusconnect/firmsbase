@@ -208,6 +208,57 @@ class MarketplaceIntakeService
         });
     }
 
+    /**
+     * Mission 3, checkpoint 8. Only MarketplaceIntakeConflictCheckService
+     * calls this — never directly from a controller/AI surface — since
+     * it is the outcome of a real search, not a bare user action.
+     * $possibleMatchCount is metadata only, never the matched entity's
+     * own name/type/id (confidential existing-client data).
+     */
+    public function markConflictReviewRequired(Firm $firm, MarketplaceIntake $intake, ?FirmUser $actor = null, int $possibleMatchCount = 0): MarketplaceIntake
+    {
+        $this->assertBelongsToFirm($firm, $intake);
+
+        if ($intake->status !== MarketplaceIntakeStatus::UnderReview) {
+            throw new \RuntimeException('Only an UnderReview intake can require conflict review.');
+        }
+
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake, $actor, $possibleMatchCount) {
+            $intake->update(['status' => MarketplaceIntakeStatus::ConflictReviewRequired]);
+
+            $this->recordEvent($firm, $intake, MarketplaceIntakeEventType::ConflictReviewRequired, actor: $actor, metadata: ['possible_match_count' => $possibleMatchCount]);
+
+            return $intake->fresh();
+        });
+    }
+
+    /**
+     * A Firm reviewer (FirmOwner/Attorney — same actor set
+     * ClientCrmAccessPolicyService::canResolveConflictResult() already
+     * requires for the Matter-level equivalent) has manually confirmed
+     * the flagged possible matches are not a real conflict, and the
+     * intake returns to UnderReview so the normal accept/decline
+     * workflow (checkpoint 10) can proceed. Never automatic — mirrors
+     * ConflictCheckService::resolveResult()'s own "only a human may set
+     * a terminal outcome" rule.
+     */
+    public function clearConflictReview(Firm $firm, MarketplaceIntake $intake, ?FirmUser $actor = null): MarketplaceIntake
+    {
+        $this->assertBelongsToFirm($firm, $intake);
+
+        if ($intake->status !== MarketplaceIntakeStatus::ConflictReviewRequired) {
+            throw new \RuntimeException('Only a ConflictReviewRequired intake can be cleared back to review.');
+        }
+
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $intake, $actor) {
+            $intake->update(['status' => MarketplaceIntakeStatus::UnderReview]);
+
+            $this->recordEvent($firm, $intake, MarketplaceIntakeEventType::ConflictReviewCleared, actor: $actor);
+
+            return $intake->fresh();
+        });
+    }
+
     public function abandonExpired(Firm $firm, MarketplaceIntake $intake): MarketplaceIntake
     {
         $this->assertBelongsToFirm($firm, $intake);
