@@ -193,7 +193,7 @@ Route::domain($hosts->clientPortalHost())
 | 'signed' verifies the token/expiry Laravel itself embedded in the URL
 | (see ClientPortalService::invitationUrl()), ConfigurePanelSessionCookie
 | establishes the SAME session cookie name the client-portal panel
-| itself uses, so a successful login here carries into the panel's own
+| itself uses, so a successful sign-in here carries into the panel's own
 | subsequent authenticated requests. throttle:20,1 mirrors the intake
 | resume page's own generous-but-bounded allowance.
 */

@@ -269,6 +269,22 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
         'public-intake-page.blade.php',
     ];
 
+    /**
+     * Mission 3A (MyAttorney Launch-Flow Closure), checkpoint 2
+     * addition: `resources/views/livewire/client-portal/accept-invitation-page.blade.php`
+     * — the Client Portal's own first public, unauthenticated screen
+     * (routes/web.php's client-portal.invitation.accept route,
+     * App\Livewire\ClientPortal\AcceptInvitationPage), reusing
+     * layouts/public-intake.blade.php (already reviewed above) rather
+     * than a new layout. Reviewed and found accessible: a real `<h1>`
+     * heading, `<label for="...">`-associated password inputs, a
+     * `.notice.error` status message that conveys its meaning through
+     * visible text content — never color alone.
+     */
+    private const CLIENT_PORTAL_INVITATION_ACCEPTANCE_ALLOWED_BLADE_BASENAMES = [
+        'accept-invitation-page.blade.php',
+    ];
+
     public function test_no_blade_filament_livewire_frontend_or_browser_accessibility_files_exist(): void
     {
         $bladeFiles = [];
@@ -297,7 +313,8 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
                 && ! in_array(basename($path), self::PAYMENT_LINK_QR_ROUTING_ALLOWED_BLADE_BASENAMES, true)
                 && ! in_array(basename($path), self::WEBAUTHN_ALLOWED_BLADE_BASENAMES, true)
                 && ! in_array(basename($path), self::MYATTORNEY_MARKETPLACE_ALLOWED_BLADE_BASENAMES, true)
-                && ! in_array(basename($path), self::MARKETPLACE_INTAKE_SESSION_RESUME_ALLOWED_BLADE_BASENAMES, true),
+                && ! in_array(basename($path), self::MARKETPLACE_INTAKE_SESSION_RESUME_ALLOWED_BLADE_BASENAMES, true)
+                && ! in_array(basename($path), self::CLIENT_PORTAL_INVITATION_ACCEPTANCE_ALLOWED_BLADE_BASENAMES, true),
         ));
 
         $this->assertEmpty($nonDefaultBladeFiles, 'Found unexpected Blade files: '.implode(', ', $nonDefaultBladeFiles));

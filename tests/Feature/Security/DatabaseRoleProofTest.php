@@ -86,7 +86,12 @@ class DatabaseRoleProofTest extends TestCase
      *     financial evidence add-on"), a separate, additive, FOR SELECT-only
      *     self-lookup policy (2026_09_24_180006_add_self_lookup_clause_to_
      *     clients_rls_policy.php, byte-for-byte the same shape/reasoning as
-     *     firm_users_self_lookup below) — "clients_self_lookup".
+     *     firm_users_self_lookup below) — "clients_self_lookup" — PLUS, as
+     *     of Mission 3A (MyAttorney Launch-Flow Closure) checkpoint 2, a
+     *     THIRD, separate, additive, FOR SELECT-only self-lookup policy
+     *     keyed by portal_invitation_token instead of a numeric id
+     *     (2026_11_20_100001_add_portal_invitation_self_lookup_clause_to_
+     *     clients_rls_policy.php) — "clients_portal_invitation_self_lookup".
      *   - timeline_events: the same single-policy shape clients used to
      *     have (before Checkpoint 4) —
      *     its own FORCE migration (2026_08_25_930033_force_rls_on_
@@ -121,7 +126,14 @@ class DatabaseRoleProofTest extends TestCase
         // (2026_09_24_180006_add_self_lookup_clause_to_clients_rls_policy.php,
         // mirroring the pre-existing firm_users_self_lookup precedent below)
         // -- additive only, no existing assertion removed or weakened.
-        'clients' => ['clients_self_lookup', 'clients_tenant_isolation'],
+        // Narrowly updated AGAIN by Mission 3A (MyAttorney Launch-Flow
+        // Closure), checkpoint 2 -- a THIRD, separate, FOR SELECT-only
+        // policy, `clients_portal_invitation_self_lookup`
+        // (2026_11_20_100001_add_portal_invitation_self_lookup_clause_to_clients_rls_policy.php),
+        // resolving by portal_invitation_token for a genuinely
+        // unauthenticated visitor holding only a fresh invitation link
+        // -- again additive only.
+        'clients' => ['clients_portal_invitation_self_lookup', 'clients_self_lookup', 'clients_tenant_isolation'],
         'timeline_events' => ['timeline_events_tenant_isolation'],
         'firm_users' => ['firm_users_self_lookup', 'firm_users_tenant_isolation'],
         'security_events' => ['security_events_platform_write', 'security_events_tenant_isolation'],
