@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Filament\Actions\Platform\ApproveDirectoryClaimAction;
+use App\Filament\Actions\Platform\MarkClaimUnderReviewAction;
 use App\Filament\Actions\Platform\RejectDirectoryClaimAction;
+use App\Filament\Actions\Platform\RequireClaimEvidenceAction;
 use App\Filament\Actions\Platform\RevokeDirectoryClaimAction;
 use App\Filament\Resources\DirectoryClaimResource\Pages\ListDirectoryClaims;
 use App\Filament\Resources\DirectoryClaimResource\Pages\ViewDirectoryClaim;
@@ -60,8 +62,10 @@ class DirectoryClaimResource extends Resource
     {
         return $table
             ->columns([
+                TextColumn::make('id')->label('Claim ID')->sortable()->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('directoryFirm.display_name')->label('Listing')->searchable(),
                 TextColumn::make('firm.legal_name')->label('Claimant Firm')->searchable(),
+                TextColumn::make('claimant.user.name')->label('Claimant')->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('state')
                     ->badge()
                     ->formatStateUsing(fn (ClaimState $state): string => Str::headline($state->value))
@@ -72,19 +76,23 @@ class DirectoryClaimResource extends Resource
                         default => 'gray',
                     })
                     ->sortable(),
-                TextColumn::make('submitted_at')->dateTime()->sortable(),
-                TextColumn::make('decided_at')->dateTime()->sortable(),
+                TextColumn::make('submitted_at')->label('Age')->since()->sortable(),
+                TextColumn::make('updated_at')->label('Last updated')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('decided_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
                 SelectFilter::make('state')
                     ->options(collect(ClaimState::cases())->mapWithKeys(fn (ClaimState $s) => [$s->value => Str::headline($s->value)])->all()),
             ])
             ->recordActions([
+                MarkClaimUnderReviewAction::make(),
+                RequireClaimEvidenceAction::make(),
                 ApproveDirectoryClaimAction::make(),
                 RejectDirectoryClaimAction::make(),
                 RevokeDirectoryClaimAction::make(),
             ])
-            ->emptyStateHeading('No claims found')
+            ->emptyStateHeading('No claims to show')
+            ->emptyStateDescription('No ownership claims match the current filters, or the queue is fully caught up.')
             ->defaultSort('submitted_at', 'desc')
             ->paginated([25, 50, 100]);
     }

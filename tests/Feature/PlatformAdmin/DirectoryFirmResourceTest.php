@@ -136,6 +136,29 @@ final class DirectoryFirmResourceTest extends TestCase
         $viewResponse->assertSee('Acme Legal');
     }
 
+    /**
+     * MYAT10 polish pass — the list table gained an explicit Verified
+     * column (mirroring DirectoryAttorneyResource's own) so a
+     * SuperAdmin can distinguish Claimed/Verified/Member without
+     * opening every record.
+     */
+    public function test_list_table_verified_column_reflects_real_firm_authority_verification_state(): void
+    {
+        $verifiedFirm = DirectoryFirm::factory()->create();
+        DirectoryVerification::factory()
+            ->forVerifiable($verifiedFirm, VerificationDimension::FirmAuthority)
+            ->verified()
+            ->create();
+        $unverifiedFirm = DirectoryFirm::factory()->create();
+
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+        $test = Livewire::test(ListDirectoryFirms::class);
+
+        $test->assertTableColumnStateSet('is_verified', true, $verifiedFirm);
+        $test->assertTableColumnStateSet('is_verified', false, $unverifiedFirm);
+    }
+
     // --- Publish ---
 
     public function test_publish_action_is_visible_only_when_not_already_published_and_transitions_state(): void

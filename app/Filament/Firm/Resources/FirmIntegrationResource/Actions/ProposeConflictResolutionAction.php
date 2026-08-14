@@ -171,7 +171,7 @@ class ProposeConflictResolutionAction extends Action
     public static function outcomeOptions(): array
     {
         return [
-            ConflictStatus::ResolvedLocalWins->value => 'Keep the FirmsBase (local) version',
+            ConflictStatus::ResolvedLocalWins->value => 'Keep the FirmsVault (local) version',
             ConflictStatus::ResolvedRemoteWins->value => 'Keep the provider (external) version',
             ConflictStatus::ResolvedMerged->value => 'Merged',
             ConflictStatus::Ignored->value => 'Ignore this conflict',

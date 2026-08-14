@@ -12,6 +12,7 @@ use App\Models\PlatformAdmin;
 use App\Services\PlatformRoleService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
@@ -94,5 +95,91 @@ final class PlatformMarketplaceAnalyticsPageTest extends TestCase
         $response->assertOk();
         $response->assertSee('Profile views: 1', false);
         $response->assertSee('Analytics Dashboard Firm', false);
+    }
+
+    /**
+     * SuperAdmin console professionalization mission (MYAT7): the
+     * rewritten page adds a live 7/30/90/Custom date-range filter (same
+     * pattern as PlatformMarketplaceOverviewPage), previous-period
+     * comparison, directory-performance breakdowns, demand-vs-supply
+     * search intelligence, and an explicit gaps section.
+     */
+    public function test_range_filter_narrows_the_summary_counts(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        MarketplaceAnalyticsEvent::factory()->searchPerformed()->create(['occurred_at' => now()->subDays(2)]);
+        MarketplaceAnalyticsEvent::factory()->searchPerformed()->create(['occurred_at' => now()->subDays(45)]);
+
+        $test = Livewire::test(PlatformMarketplaceAnalyticsPage::class);
+        $test->assertSee('Searches performed: 1', false);
+
+        $test->set('data.range', '90');
+        $test->assertSee('Searches performed: 2', false);
+    }
+
+    public function test_summary_shows_a_previous_period_comparison(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        MarketplaceAnalyticsEvent::factory()->searchPerformed()->create(['occurred_at' => now()->subDays(2)]);
+        MarketplaceAnalyticsEvent::factory()->count(4)->searchPerformed()->create(['occurred_at' => now()->subDays(35)]);
+
+        $response = $this->get(PlatformMarketplaceAnalyticsPage::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('Searches performed: 1', false);
+        $response->assertSee('vs. prior period', false);
+    }
+
+    public function test_directory_performance_breaks_down_views_by_claim_member_and_accepting_status(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $claimedFirm = DirectoryFirm::factory()->create(['is_claimed' => true, 'is_marketplace_member' => true, 'accepting_inquiries' => true]);
+        $unclaimedFirm = DirectoryFirm::factory()->create(['is_claimed' => false, 'is_marketplace_member' => false, 'accepting_inquiries' => false]);
+        MarketplaceAnalyticsEvent::factory()->firmProfileViewed()->create(['subject_id' => $claimedFirm->id, 'occurred_at' => now()]);
+        MarketplaceAnalyticsEvent::factory()->firmProfileViewed()->create(['subject_id' => $unclaimedFirm->id, 'occurred_at' => now()]);
+
+        $response = $this->get(PlatformMarketplaceAnalyticsPage::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('Claimed firm views: 1', false);
+        $response->assertSee('Unclaimed firm views: 1', false);
+        $response->assertSee('FirmsVault member views: 1', false);
+        $response->assertSee('Non-member views: 1', false);
+        $response->assertSee('Accepting-inquiries views: 1', false);
+        $response->assertSee('Not-accepting views: 1', false);
+    }
+
+    public function test_search_intelligence_flags_a_practice_area_with_no_published_supply(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        MarketplaceAnalyticsEvent::factory()->searchPerformed(['practice_area_slug' => 'unmet-demand-area'])->create(['occurred_at' => now()]);
+
+        $response = $this->get(PlatformMarketplaceAnalyticsPage::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('unmet-demand-area — 1 search(es), 0 published firm(s) — ⚠ no published firms offer this', false);
+    }
+
+    public function test_gaps_section_discloses_structurally_unavailable_metrics(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $response = $this->get(PlatformMarketplaceAnalyticsPage::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('Search-to-profile click-through rate: not available', false);
+        $response->assertSee('Zero-result search rate: not available', false);
+        $response->assertSee('Top free-text search terms: not available', false);
+        $response->assertSee('Search reformulations: not available', false);
+        $response->assertSee('Average time to conversion: not available', false);
     }
 }

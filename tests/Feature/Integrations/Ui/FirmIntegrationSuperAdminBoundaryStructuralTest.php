@@ -845,7 +845,44 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ToggleAiKillSwitchAction.php',
         ];
 
-        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles, $mission1bExtremeSecurityHardeningAllowedRelativeFiles, $mission1cSecurityValidationActivationAllowedRelativeFiles, $mission2MarketplaceSuperAdminControlsAllowedRelativeFiles, $mission2MarketplaceAnalyticsAllowedRelativeFiles, $mission3AiOversightAllowedRelativeFiles);
+        // MyAttorney SuperAdmin console professionalization mission
+        // (MYAT1-6): upgraded the read-only marketplace governance
+        // surface above into a real operational console — a new
+        // Marketplace Overview page, the FIRST Create/Edit pages this
+        // panel has ever had (DirectoryFirmResource, the new
+        // DirectoryAttorneyResource), and ~11 new domain-service-backed
+        // Actions for the attorney/claim/correction/import workflows.
+        // All gated by the same PlatformStaffAccessPolicyService
+        // marketplace-governance/analytics checks as the arrays above,
+        // no Integration-domain reference. Missed by this file's own
+        // regression gate during MYAT1-6 itself (only caught here, by
+        // MYAT8's own affected-suite sweep) — a real, now-closed gap in
+        // that earlier work, not a new violation.
+        $myattorneySuperAdminConsoleUpgradeAllowedRelativeFiles = [
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformMarketplaceOverviewPage.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryFirmResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'CreateDirectoryFirm.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryFirmResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'EditDirectoryFirm.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryAttorneyResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryAttorneyResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'CreateDirectoryAttorney.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryAttorneyResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'EditDirectoryAttorney.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryAttorneyResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListDirectoryAttorneys.php',
+            'Resources'.DIRECTORY_SEPARATOR.'DirectoryAttorneyResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewDirectoryAttorney.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'PublishDirectoryAttorneyAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'UnpublishDirectoryAttorneyAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ArchiveDirectoryAttorneyAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'VerifyDirectoryAttorneyAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RevokeDirectoryAttorneyVerificationAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'AssociateDirectoryAttorneyWithFirmAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'MarkClaimUnderReviewAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RequireClaimEvidenceAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'MarkCorrectionUnderReviewAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'CreateInternalCorrectionRequestAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'UploadDirectoryImportBatchAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'DownloadImportBatchErrorCsvAction.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformMarketplaceSettingsPage.php',
+        ];
+
+        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles, $mission1bExtremeSecurityHardeningAllowedRelativeFiles, $mission1cSecurityValidationActivationAllowedRelativeFiles, $mission2MarketplaceSuperAdminControlsAllowedRelativeFiles, $mission2MarketplaceAnalyticsAllowedRelativeFiles, $mission3AiOversightAllowedRelativeFiles, $myattorneySuperAdminConsoleUpgradeAllowedRelativeFiles);
 
         $unauthorizedNonFirmFilamentFiles = [];
 

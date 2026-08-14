@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Pages;
 
 use App\Filament\Actions\Platform\ToggleAiKillSwitchAction;
+use App\Marketplace\Services\MarketplaceAiUsageReportingService;
 use App\Marketplace\Services\MarketplaceAnalyticsReportingService;
 use App\Models\PlatformAdmin;
 use App\Services\AiModeResolutionService;
@@ -13,10 +14,12 @@ use BackedEnum;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Text;
+use Filament\Schemas\Components\UnorderedList;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 
 /**
  * PlatformAiOversightPage — Mission 3 (MyAttorney Conversion + AI
@@ -48,11 +51,29 @@ use Illuminate\Support\Facades\Auth;
  * to silently invert. This page adds the missing lever; a human still
  * decides whether to pull it.
  *
- * Firm-level AI spend/usage (ai_usage_events) is deliberately NOT
- * shown here — that table is FORCE RLS/tenant-owned, and a correct
- * cross-tenant aggregate read needs its own reviewed reporting
- * mechanism this checkpoint does not build (a known, disclosed gap,
- * not a silent omission).
+ * Firm-level in-matter AI spend/usage (ai_usage_events) is
+ * deliberately NOT shown here — that table is FORCE RLS/tenant-owned
+ * with no cross-tenant escape hatch at all, and a correct cross-tenant
+ * aggregate read needs its own reviewed reporting mechanism this
+ * checkpoint does not build (a known, disclosed gap, not a silent
+ * omission).
+ *
+ * SuperAdmin console professionalization mission (MYAT8, section 10):
+ * adds a genuinely available "MyAttorney AI Usage" section (calls,
+ * tokens, provider/model mix) sourced from marketplace_ai_usage_events
+ * via MarketplaceAiUsageReportingService — see that class's own
+ * docblock for exactly why this is legitimately readable here
+ * (RLS-scoped to firm_id IS NULL rows only, i.e. pre-Firm/pre-
+ * conversion usage, never a firm's own in-matter activity) — plus an
+ * explicit "Not Currently Available" section documenting the three
+ * genuine architectural gaps this mission's own discovery pass found
+ * (AI call failure/latency tracking, firm-level in-matter AI
+ * inspection, and a cross-tenant human-oversight/AI-approval audit
+ * trail) rather than fabricating any of them. Closing those three for
+ * real would each require a new migration/table or a new
+ * cross-tenant-safe reporting mechanism — out of scope per this
+ * mission's own Section 26 (no casual database changes; STOP and
+ * report instead of building around it).
  */
 class PlatformAiOversightPage extends Page
 {
@@ -95,10 +116,13 @@ class PlatformAiOversightPage extends Page
     {
         $since = Carbon::now()->subDays(self::WINDOW_DAYS);
         $reporting = app(MarketplaceAnalyticsReportingService::class);
+        $aiUsageReporting = app(MarketplaceAiUsageReportingService::class);
 
         return $schema->components([
             $this->killSwitchSection(),
             $this->funnelSection($reporting, $since),
+            $this->aiUsageSection($aiUsageReporting, $since),
+            $this->notAvailableSection(),
         ]);
     }
 
@@ -135,6 +159,49 @@ class PlatformAiOversightPage extends Page
                 Text::make("Converted: {$converted}"),
                 Text::make("Conversion rate (started → converted): {$conversionRate}%"),
             ]);
+    }
+
+    private function aiUsageSection(MarketplaceAiUsageReportingService $reporting, Carbon $since): Section
+    {
+        $calls = $reporting->callsSince($since);
+        $tokens = $reporting->tokensSince($since);
+        $byProvider = $reporting->byProviderSince($since);
+        $byModel = $reporting->byModelSince($since);
+
+        return Section::make("MyAttorney AI Usage — Last {$this->windowLabel()}")
+            ->description(
+                'Pre-Firm/pre-conversion MyAttorney AI calls only (classification, conversational intake). '.
+                'A firm\'s own in-matter AI activity is tenant-isolated and cannot be aggregated here — see '.
+                '"Not Currently Available" below.'
+            )
+            ->schema([
+                Text::make("Calls: {$calls}"),
+                Text::make("Tokens in: {$tokens['in']}"),
+                Text::make("Tokens out: {$tokens['out']}"),
+                UnorderedList::make(
+                    $byProvider->isEmpty()
+                        ? ['No AI calls recorded in this window.']
+                        : $byProvider->map(fn (array $row): string => Str::headline($row['provider'])." — {$row['calls']} call(s)")->all()
+                )->columnSpanFull(),
+                UnorderedList::make(
+                    $byModel->isEmpty()
+                        ? ['No AI calls recorded in this window.']
+                        : $byModel->map(fn (array $row): string => "{$row['model']} — {$row['calls']} call(s)")->all()
+                )->columnSpanFull(),
+            ])
+            ->columns(3);
+    }
+
+    private function notAvailableSection(): Section
+    {
+        return Section::make('Not Currently Available')
+            ->description('Documented rather than estimated — these would each require a new migration or cross-tenant-safe reporting mechanism this mission does not build.')
+            ->schema([
+                Text::make('AI call failure rate / latency: not available — no success/failure, error, or timing column exists on any AI usage table.'),
+                Text::make('Firm-level in-matter AI inspection: not available — ai_usage_events (in-matter AI activity) is FORCE RLS with no cross-tenant escape hatch; only pre-Firm/pre-conversion usage is visible here.'),
+                Text::make('Cross-tenant human-oversight audit trail: not available — AiApprovalWorkflowService\'s AI-proposed/human-approved records (ai_approval_requests) are firm-scoped with no SuperAdmin-visible aggregate.'),
+            ])
+            ->collapsed();
     }
 
     private function windowLabel(): string

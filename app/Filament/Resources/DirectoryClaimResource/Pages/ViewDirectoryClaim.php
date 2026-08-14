@@ -5,16 +5,34 @@ declare(strict_types=1);
 namespace App\Filament\Resources\DirectoryClaimResource\Pages;
 
 use App\Filament\Actions\Platform\ApproveDirectoryClaimAction;
+use App\Filament\Actions\Platform\MarkClaimUnderReviewAction;
 use App\Filament\Actions\Platform\RejectDirectoryClaimAction;
+use App\Filament\Actions\Platform\RequireClaimEvidenceAction;
 use App\Filament\Actions\Platform\RevokeDirectoryClaimAction;
 use App\Filament\Resources\DirectoryClaimResource;
 use App\Marketplace\Enums\ClaimState;
+use App\Marketplace\Models\DirectoryClaim;
+use App\Services\CanonicalUrlService;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Str;
 
+/**
+ * ViewDirectoryClaim — MyAttorney SuperAdmin console professionalization
+ * mission (MYAT4). Upgraded from a flat field list into a real review
+ * workspace (Listing / Claimant / Evidence / Decision History), per
+ * this mission's own spec section 6A, using data that already exists
+ * on DirectoryClaim/DirectoryFirm/FirmUser — no new schema.
+ *
+ * "Evidence" is honestly text-only (claim_basis submitted by the
+ * claimant, reviewer_notes recorded via Request More Information) —
+ * this mission's own discovery pass confirmed there is deliberately no
+ * file-upload evidence column on directory_claims (see that table's
+ * migration docblock), so this section does not fabricate a document
+ * list that doesn't exist.
+ */
 class ViewDirectoryClaim extends ViewRecord
 {
     protected static string $resource = DirectoryClaimResource::class;
@@ -22,6 +40,8 @@ class ViewDirectoryClaim extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            MarkClaimUnderReviewAction::make(),
+            RequireClaimEvidenceAction::make(),
             ApproveDirectoryClaimAction::make(),
             RejectDirectoryClaimAction::make(),
             RevokeDirectoryClaimAction::make(),
@@ -31,19 +51,46 @@ class ViewDirectoryClaim extends ViewRecord
     public function infolist(Schema $schema): Schema
     {
         return $schema->components([
-            Section::make('Claim')
+            Section::make('Listing')
                 ->columns(2)
                 ->schema([
-                    TextEntry::make('directoryFirm.display_name')->label('Listing'),
-                    TextEntry::make('firm.legal_name')->label('Claimant Firm'),
-                    TextEntry::make('claimant.user.name')->label('Submitted By'),
+                    TextEntry::make('directoryFirm.display_name')->label('Firm/Listing'),
+                    TextEntry::make('directoryFirm.phone')->label('Phone')->placeholder('—'),
+                    TextEntry::make('directoryFirm.website')->label('Website')->placeholder('—'),
+                    TextEntry::make('directoryFirm.source_type')
+                        ->label('Source/Provenance')
+                        ->formatStateUsing(fn ($state) => $state !== null ? Str::headline($state->value) : '—'),
+                    TextEntry::make('public_profile')
+                        ->label('Public Profile')
+                        ->state(fn (DirectoryClaim $record) => app(CanonicalUrlService::class)->myAttorneyFirmUrl($record->directoryFirm->slug))
+                        ->url(fn (DirectoryClaim $record) => app(CanonicalUrlService::class)->myAttorneyFirmUrl($record->directoryFirm->slug))
+                        ->openUrlInNewTab(),
+                ]),
+            Section::make('Claimant')
+                ->columns(2)
+                ->schema([
+                    TextEntry::make('claimant.user.name')->label('Claimant Name')->placeholder('—'),
+                    TextEntry::make('claimant.user.email')->label('Claimant Email')->placeholder('—'),
+                    TextEntry::make('firm.legal_name')->label('Claiming Firm'),
+                    TextEntry::make('claimant.role')
+                        ->label('Role/Relationship')
+                        ->formatStateUsing(fn ($state) => $state !== null ? Str::headline($state->value) : '—'),
+                ]),
+            Section::make('Evidence')
+                ->schema([
+                    TextEntry::make('claim_basis')->label('Claim Basis (submitted by claimant)')->columnSpanFull()->placeholder('None provided.'),
+                    TextEntry::make('reviewer_notes')->label('Reviewer Notes / Information Requested')->columnSpanFull()->placeholder('—'),
+                ]),
+            Section::make('Decision History')
+                ->columns(2)
+                ->schema([
                     TextEntry::make('state')->badge()->formatStateUsing(fn (ClaimState $state) => Str::headline($state->value)),
-                    TextEntry::make('claim_basis')->label('Claim Basis')->columnSpanFull(),
                     TextEntry::make('submitted_at')->dateTime(),
-                    TextEntry::make('decided_at')->dateTime(),
-                    TextEntry::make('rejection_reason')->label('Rejection Reason'),
-                    TextEntry::make('revocation_reason')->label('Revocation Reason'),
-                    TextEntry::make('conflictsWith.id')->label('Conflicts With Claim #'),
+                    TextEntry::make('decided_at')->dateTime()->placeholder('Not yet decided'),
+                    TextEntry::make('decidedBy.name')->label('Decided By')->placeholder('—'),
+                    TextEntry::make('rejection_reason')->label('Rejection Reason')->placeholder('—'),
+                    TextEntry::make('revocation_reason')->label('Revocation Reason')->placeholder('—'),
+                    TextEntry::make('conflictsWith.id')->label('Conflicts With Claim #')->placeholder('—'),
                 ]),
         ]);
     }

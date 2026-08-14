@@ -6,6 +6,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Actions\Platform\ApplyImportBatchAction;
 use App\Filament\Actions\Platform\ConfirmImportSourceRightsAction;
+use App\Filament\Actions\Platform\DownloadImportBatchErrorCsvAction;
 use App\Filament\Resources\DirectoryImportBatchResource\Pages\ListDirectoryImportBatches;
 use App\Filament\Resources\DirectoryImportBatchResource\Pages\ViewDirectoryImportBatch;
 use App\Marketplace\Enums\DirectoryImportBatchStatus;
@@ -62,6 +63,8 @@ class DirectoryImportBatchResource extends Resource
         return $table
             ->columns([
                 TextColumn::make('original_filename')->label('File')->searchable(),
+                TextColumn::make('source')->label('Source')->state(fn () => 'CSV Upload')->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('createdBy.name')->label('Uploaded By')->placeholder('—')->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('status')
                     ->badge()
                     ->formatStateUsing(fn (DirectoryImportBatchStatus $state): string => Str::headline($state->value))
@@ -75,9 +78,17 @@ class DirectoryImportBatchResource extends Resource
                 IconColumn::make('source_rights_confirmed')->label('Source Rights Confirmed')->boolean(),
                 TextColumn::make('total_rows')->label('Total'),
                 TextColumn::make('valid_rows')->label('Valid'),
-                TextColumn::make('duplicate_rows')->label('Duplicates'),
-                TextColumn::make('applied_rows')->label('Applied'),
+                TextColumn::make('invalid_rows')->label('Invalid')->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('duplicate_rows')->label('Duplicates')->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('applied_rows')->label('Applied')->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('skipped_rows')->label('Skipped')->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('created_at')->label('Uploaded')->dateTime()->sortable(),
+                TextColumn::make('updated_at')
+                    ->label('Completed')
+                    ->dateTime()
+                    ->placeholder('—')
+                    ->state(fn (DirectoryImportBatch $record) => $record->status === DirectoryImportBatchStatus::Applied ? $record->updated_at : null)
+                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
                 SelectFilter::make('status')
@@ -86,8 +97,10 @@ class DirectoryImportBatchResource extends Resource
             ->recordActions([
                 ConfirmImportSourceRightsAction::make(),
                 ApplyImportBatchAction::make(),
+                DownloadImportBatchErrorCsvAction::make(),
             ])
-            ->emptyStateHeading('No import batches found')
+            ->emptyStateHeading('No import batches yet')
+            ->emptyStateDescription('Import directory data to get started.')
             ->defaultSort('created_at', 'desc')
             ->paginated([25, 50, 100]);
     }
