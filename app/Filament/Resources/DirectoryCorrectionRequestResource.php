@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Filament\Actions\Platform\ApproveCorrectionRequestAction;
+use App\Filament\Actions\Platform\MarkCorrectionUnderReviewAction;
 use App\Filament\Actions\Platform\RejectCorrectionRequestAction;
 use App\Filament\Actions\Platform\ResolveCorrectionRequestAction;
 use App\Filament\Resources\DirectoryCorrectionRequestResource\Pages\ListDirectoryCorrectionRequests;
@@ -62,9 +63,10 @@ class DirectoryCorrectionRequestResource extends Resource
     {
         return $table
             ->columns([
+                TextColumn::make('id')->label('Request ID')->sortable()->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('directoryFirm.display_name')->label('Listing')->searchable(),
                 TextColumn::make('correction_type')
-                    ->label('Type')
+                    ->label('Category')
                     ->formatStateUsing(fn (CorrectionType $state): string => $state->label())
                     ->badge(),
                 TextColumn::make('state')
@@ -78,7 +80,8 @@ class DirectoryCorrectionRequestResource extends Resource
                     })
                     ->sortable(),
                 TextColumn::make('reporter_name')->label('Reporter')->placeholder('Anonymous'),
-                TextColumn::make('created_at')->label('Reported')->dateTime()->sortable(),
+                TextColumn::make('created_at')->label('Age')->since()->sortable(),
+                TextColumn::make('updated_at')->label('Last updated')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
                 SelectFilter::make('state')
@@ -88,11 +91,13 @@ class DirectoryCorrectionRequestResource extends Resource
                     ->options(collect(CorrectionType::cases())->mapWithKeys(fn (CorrectionType $t) => [$t->value => $t->label()])->all()),
             ])
             ->recordActions([
+                MarkCorrectionUnderReviewAction::make(),
                 ApproveCorrectionRequestAction::make(),
                 RejectCorrectionRequestAction::make(),
                 ResolveCorrectionRequestAction::make(),
             ])
-            ->emptyStateHeading('No correction requests found')
+            ->emptyStateHeading('No pending correction requests')
+            ->emptyStateDescription('All correction/removal requests have been reviewed.')
             ->defaultSort('created_at', 'desc')
             ->paginated([25, 50, 100]);
     }
