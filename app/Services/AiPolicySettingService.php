@@ -73,9 +73,13 @@ class AiPolicySettingService
      * Create-or-update ("upsert") the row for $key. When $actor is
      * supplied, records a `security_events` platform-level audit row
      * (see this class's own docblock for why updated_by itself stays
-     * null rather than receiving the PlatformAdmin's id).
+     * null rather than receiving the PlatformAdmin's id). $reason is
+     * optional (most callers, e.g. EditAiPolicySettingValueAction,
+     * have none) and — when supplied — is folded into that same audit
+     * row's metadata rather than opening a second write path; added
+     * for ToggleAiKillSwitchAction (MYAT8), which requires one.
      */
-    public function set(string $key, mixed $value, ?PlatformAdmin $actor = null): AiPolicySetting
+    public function set(string $key, mixed $value, ?PlatformAdmin $actor = null, ?string $reason = null): AiPolicySetting
     {
         if (trim($key) === '') {
             throw new \InvalidArgumentException('An AI policy setting key is required.');
@@ -99,10 +103,11 @@ class AiPolicySettingService
                 $actor,
                 $existing ? 'ai_policy_setting_updated' : 'ai_policy_setting_created',
                 self::AUDIT_CATEGORY,
-                [
+                array_filter([
                     'ai_policy_setting_id' => $fresh->id,
                     'key' => $fresh->key,
-                ],
+                    'reason' => $reason,
+                ], fn ($value) => $value !== null),
             );
         }
 

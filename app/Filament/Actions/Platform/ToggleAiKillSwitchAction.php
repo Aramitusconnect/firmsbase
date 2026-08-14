@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Filament\Actions\Platform;
 
+use App\Filament\Support\StepUp\StepUpAuthentication;
 use App\Models\PlatformAdmin;
 use App\Services\AiModeResolutionService;
 use App\Services\AiPolicySettingService;
 use App\Services\PlatformStaffAccessPolicyService;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Auth;
@@ -36,6 +38,16 @@ use Illuminate\Support\Facades\Auth;
  * adds the missing lever, it does not flip anything on its own.
  * Every use is confirmed and audited via AiPolicySettingService's own
  * security_events write.
+ *
+ * SuperAdmin console professionalization mission (MYAT8, section
+ * 10E): strengthened with the two things a platform-wide kill switch
+ * genuinely needs beyond a confirmation modal — a required reason
+ * (folded into the same security_events row via
+ * AiPolicySettingService::set()'s new optional $reason parameter, not
+ * a second audit write) and step-up re-authentication via
+ * StepUpAuthentication::mergeInto(), the same reusable mechanism
+ * VerifyFirmAuthorityAction/EnterSupportAccessSessionAction/etc.
+ * already use for other high-impact platform actions.
  */
 class ToggleAiKillSwitchAction extends Action
 {
@@ -56,7 +68,6 @@ class ToggleAiKillSwitchAction extends Action
             : Heroicon::OutlinedStopCircle);
         $this->color(fn (): string => app(AiModeResolutionService::class)->platformKillSwitchEngaged() ? 'success' : 'danger');
 
-        $this->requiresConfirmation();
         $this->modalHeading('Change platform AI availability');
         $this->modalDescription(
             'This is the single platform-wide gate every AI call in the system goes through, checked before any '.
@@ -64,8 +75,14 @@ class ToggleAiKillSwitchAction extends Action
             'configuration; enabling it does not itself launch or promote anything — firm-level opt-in and '.
             'entitlement gates still apply on top of this.'
         );
+        StepUpAuthentication::mergeInto($this, [
+            Textarea::make('reason')
+                ->label('Reason for this change')
+                ->rows(2)
+                ->required(),
+        ], 'platform_admin');
 
-        $this->action(function (AiModeResolutionService $aiMode, AiPolicySettingService $settingService, PlatformStaffAccessPolicyService $accessPolicy): void {
+        $this->action(function (array $data, AiModeResolutionService $aiMode, AiPolicySettingService $settingService, PlatformStaffAccessPolicyService $accessPolicy): void {
             $admin = Auth::guard('platform_admin')->user();
 
             if (! $admin instanceof PlatformAdmin) {
@@ -89,7 +106,7 @@ class ToggleAiKillSwitchAction extends Action
             }
 
             $currentlyEngaged = $aiMode->platformKillSwitchEngaged();
-            $settingService->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, $currentlyEngaged, $admin);
+            $settingService->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, $currentlyEngaged, $admin, $data['reason'] ?? null);
 
             Notification::make()
                 ->title($currentlyEngaged ? 'Platform AI enabled' : 'Platform AI disabled')

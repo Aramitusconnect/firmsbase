@@ -118,4 +118,43 @@ final class AiPolicySettingServiceTest extends TestCase
 
         $this->assertCount(1, $rows);
     }
+
+    /**
+     * SuperAdmin console professionalization mission (MYAT8, section
+     * 10E): the optional $reason parameter added for
+     * ToggleAiKillSwitchAction folds into the SAME audit row rather
+     * than opening a second write path.
+     */
+    public function test_set_with_a_reason_folds_it_into_the_same_audit_row(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+
+        $this->service->set('reason_key', ['enabled' => true], $admin, 'Confirmed provider outage.');
+
+        $row = app(TenantContextService::class)->runWithoutFirmContext(
+            fn () => DB::table('security_events')
+                ->where('event_type', 'ai_policy_setting_created')
+                ->first()
+        );
+
+        $this->assertNotNull($row);
+        $metadata = json_decode($row->metadata, true);
+        $this->assertSame('Confirmed provider outage.', $metadata['reason']);
+    }
+
+    public function test_set_without_a_reason_omits_it_from_the_audit_row(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+
+        $this->service->set('no_reason_key', ['enabled' => true], $admin);
+
+        $row = app(TenantContextService::class)->runWithoutFirmContext(
+            fn () => DB::table('security_events')
+                ->where('event_type', 'ai_policy_setting_created')
+                ->first()
+        );
+
+        $metadata = json_decode($row->metadata, true);
+        $this->assertArrayNotHasKey('reason', $metadata);
+    }
 }
