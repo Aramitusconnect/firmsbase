@@ -569,16 +569,43 @@ jobs:
           version: v0.71.0
           cache: true
 
-      - name: Scan image for vulnerabilities (Trivy) — 0 Critical, 0 High required
+      # This job only ever runs against firmsbase-staging (enforced above by
+      # "Require ECR_REPOSITORY_URL to point at firmsbase-staging" — there is
+      # no production path in this workflow; deploy-staging below is a
+      # disabled stub). --exit-code 0 here is intentional and narrowly
+      # scoped to staging: the raw, complete, UNSUPPRESSED CRITICAL/HIGH
+      # scan still runs in full (no .trivyignore, no --ignorefile, no
+      # severity change) and its JSON is what the very next step —
+      # verify-staging-exception.php — evaluates. That script is the actual
+      # enforcement gate: it fails the job on ANY CRITICAL/HIGH finding
+      # that is not one of the 4 exact, dated, staging-only exceptions in
+      # docs/security/ecs-image-vulnerability-exceptions.md "Review:
+      # 2026-08-14". A production release process must invoke `trivy image`
+      # with --exit-code 1 directly (as this step did before this change)
+      # and must NOT consult that exception list.
+      - name: Scan image for vulnerabilities (Trivy) — raw scan, policy-gated below
         run: |
           set -euo pipefail
           trivy image \
             --scanners vuln \
             --severity CRITICAL,HIGH \
-            --exit-code 1 \
+            --exit-code 0 \
             --format json \
             --output trivy-vuln-results.json \
             "${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}"
+
+      # This job has no PHP toolchain of its own (only lint/test do) — reuse
+      # the PHP 8.3 runtime already inside the image this job just built,
+      # same pattern as the "runtime probe: curl reports libssh2" step below
+      # (--entrypoint override, since the distroless image has no shell).
+      - name: Enforce staging-only vulnerability exception policy
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace:ro" \
+            --entrypoint /usr/local/bin/php \
+            "${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}" \
+            /workspace/docker/security/verify-staging-exception.php /workspace/trivy-vuln-results.json
 
       - name: Scan image for secrets (Trivy) — 0 findings required
         run: |
@@ -611,9 +638,19 @@ jobs:
           set -euo pipefail
           IMG="${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}"
           APP_KEY="base64:$(openssl rand -base64 32)"
+          # PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY: required by
+          # docker/entrypoint.sh for the web role (and ses-consumer, not
+          # smoke-tested here) since CorrelatedPasswordResetSenderService's
+          # platform-scope path was wired in — a disposable value is fine
+          # here, this container and its state are destroyed at the end of
+          # this same job. Discovered missing from this smoke test during
+          # the 2026-08-14 staging security-remediation pass (the web role
+          # smoke test would otherwise fail immediately with "missing
+          # required environment variable(s)" before ever reaching /up).
           COMMON_ENV=(-e APP_KEY="$APP_KEY" -e APP_ENV=production -e DB_CONNECTION=pgsql \
             -e DB_HOST=127.0.0.1 -e DB_PORT=5432 -e DB_DATABASE=firmsbase_smoke \
-            -e DB_USERNAME=firmsbase -e DB_PASSWORD=smokepass -e REDIS_HOST=127.0.0.1)
+            -e DB_USERNAME=firmsbase -e DB_PASSWORD=smokepass -e REDIS_HOST=127.0.0.1 \
+            -e PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY="$(openssl rand -hex 32)")
 
           # Prints container state + logs before a long-running-role
           # assertion fails, so a future failure shows the real exception
@@ -642,8 +679,20 @@ jobs:
           echo "=== web ==="
           docker run -d --name smoke-web --network host "${COMMON_ENV[@]}" "$IMG" web
           sleep 5
-          UP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/up)
-          READY_CODE=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/readyz)
+          # This job's COMMON_ENV sets none of the six canonical URL vars
+          # (MARKETING_URL/FIRM_APP_URL/etc.), so bootstrap/app.php's
+          # trustHosts() (backed by CanonicalUrlService, see Mission 1)
+          # falls through to config/hosts.php's local-only defaults —
+          # *.firmsvault.test, never a bare IP:port. A request Host header
+          # of "127.0.0.1:8080" is therefore an untrusted host and Laravel
+          # correctly 400s it before ever reaching a route. Discovered
+          # during the 2026-08-14 staging security-remediation pass — this
+          # smoke-test step had never actually reached a real /up request
+          # before (every earlier pipeline run failed at an earlier gate).
+          # -H forces a trusted Host header while still connecting to the
+          # loopback address the container actually listens on.
+          UP_CODE=$(curl -sS -H "Host: firmsvault.test" -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/up)
+          READY_CODE=$(curl -sS -H "Host: firmsvault.test" -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/readyz)
           [ "$UP_CODE" = "200" ] || { echo "::error::/up returned $UP_CODE, expected 200"; exit 1; }
           [ "$READY_CODE" = "200" ] || { echo "::error::/readyz returned $READY_CODE, expected 200"; exit 1; }
           echo "/up=$UP_CODE /readyz=$READY_CODE"

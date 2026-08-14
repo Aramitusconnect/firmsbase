@@ -35,13 +35,25 @@
 
 ARG PHP_VERSION=8.3
 ARG FRANKENPHP_BASE_TAG=1-php8.3-trixie
-# Pulled and inspected live against Docker Hub during this remediation pass
-# (`docker pull dunglas/frankenphp:1-php8.3-trixie` +
-# `docker inspect --format '{{index .RepoDigests 0}}'`) — the current
-# published linux/amd64 image for this exact tag at that time. Re-verify and
-# re-pin deliberately on each future remediation pass rather than floating
-# silently.
-ARG FRANKENPHP_BASE_DIGEST=sha256:233a2d64466d697d2cb60bb951c73e23d7f6a614295072ae1001b8dc46efa4e2
+# Re-pinned 2026-08-14 (staging security-remediation pass — see
+# docs/security/ecs-image-vulnerability-exceptions.md "Review: 2026-08-14"):
+# FrankenPHP v1.12.4 -> v1.12.7. Verified live against Docker Hub
+# (`docker buildx imagetools inspect dunglas/frankenphp:1-php8.3-trixie`,
+# then confirmed by pulling this exact digest and running
+# `frankenphp version` inside it: "FrankenPHP v1.12.7 PHP 8.3.33 Caddy
+# v2.11.4"). This is the multi-arch INDEX digest (matches this ARG's
+# existing convention — `docker pull`+`docker inspect` on a bare tag
+# records the index digest, not a per-platform child manifest digest),
+# so `FROM ...@${FRANKENPHP_BASE_DIGEST}` still resolves the correct
+# platform automatically. The linux/amd64 child manifest digest this
+# index currently resolves to is
+# sha256:b013ee6716706167000066a4bc32084c6e42606cff4fbb1dc6e408f2541d687b
+# (recorded here for cross-reference with Trivy/ECR scan findings, which
+# attach to the child digest, not the index — same distinction the
+# exceptions doc's "Deployment identity" section already documents for
+# the application image itself). Re-verify and re-pin deliberately on
+# each future remediation pass rather than floating silently.
+ARG FRANKENPHP_BASE_DIGEST=sha256:501e0ba1608cd1e1b3377562c7f58ed3d2e83d5dca726979b6633ce2792f355c
 # Vite 8 / laravel-vite-plugin 3.1 / @tailwindcss/oxide require Node >=20.19
 # (see package.json "engines" and docs/ecs/ec2-dependency-audit.md).
 ARG NODE_VERSION=20-bookworm-slim
