@@ -79,8 +79,8 @@ class DirectoryImportBatchResource extends Resource
                 TextColumn::make('total_rows')->label('Total'),
                 TextColumn::make('valid_rows')->label('Valid'),
                 TextColumn::make('invalid_rows')->label('Invalid')->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('duplicate_rows')->label('Duplicates'),
-                TextColumn::make('applied_rows')->label('Applied'),
+                TextColumn::make('duplicate_rows')->label('Duplicates')->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('applied_rows')->label('Applied')->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('skipped_rows')->label('Skipped')->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('created_at')->label('Uploaded')->dateTime()->sortable(),
                 TextColumn::make('updated_at')

@@ -91,8 +91,8 @@ class DirectoryClaimResource extends Resource
                 RejectDirectoryClaimAction::make(),
                 RevokeDirectoryClaimAction::make(),
             ])
-            ->emptyStateHeading('No pending claims')
-            ->emptyStateDescription('All ownership claims have been reviewed.')
+            ->emptyStateHeading('No claims to show')
+            ->emptyStateDescription('No ownership claims match the current filters, or the queue is fully caught up.')
             ->defaultSort('submitted_at', 'desc')
             ->paginated([25, 50, 100]);
     }

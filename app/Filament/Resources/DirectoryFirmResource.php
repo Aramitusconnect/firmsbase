@@ -16,7 +16,10 @@ use App\Filament\Resources\DirectoryFirmResource\Pages\ViewDirectoryFirm;
 use App\Marketplace\Enums\ConsultationMode;
 use App\Marketplace\Enums\DataProvenanceSourceType;
 use App\Marketplace\Enums\DirectoryPublicationState;
+use App\Marketplace\Enums\VerificationDimension;
+use App\Marketplace\Enums\VerificationState;
 use App\Marketplace\Models\DirectoryFirm;
+use App\Marketplace\Models\DirectoryVerification;
 use App\Marketplace\Services\MarketplaceImportDuplicateDetectionService;
 use App\Models\Language;
 use App\Models\PlatformAdmin;
@@ -194,7 +197,7 @@ class DirectoryFirmResource extends Resource
                         ->default(DirectoryPublicationState::Draft->value)
                         ->required()
                         ->native(false)
-                        ->helperText('Suspend/Remove/Archive are separate moderation actions from the View page, not available here.'),
+                        ->helperText('Suspend/Remove are separate moderation actions from the View page, not available here.'),
                     Placeholder::make('source_info')
                         ->label('Source')
                         ->content(fn (?DirectoryFirm $record) => $record !== null
@@ -220,8 +223,24 @@ class DirectoryFirmResource extends Resource
                         DirectoryPublicationState::Removed, DirectoryPublicationState::Archived => 'danger',
                     })
                     ->sortable(),
-                IconColumn::make('is_claimed')->label('Claimed')->boolean(),
-                IconColumn::make('is_marketplace_member')->label('Member')->boolean(),
+                IconColumn::make('is_claimed')
+                    ->label('Claimed')
+                    ->boolean()
+                    ->tooltip('Whether a firm representative has claimed ownership of this listing — distinct from Verified (evidence-reviewed authority) and Member (paid FirmsVault membership).'),
+                IconColumn::make('is_verified')
+                    ->label('Verified')
+                    ->boolean()
+                    ->state(fn (DirectoryFirm $record): bool => DirectoryVerification::query()
+                        ->where('verifiable_type', DirectoryFirm::class)
+                        ->where('verifiable_id', $record->id)
+                        ->where('dimension', VerificationDimension::FirmAuthority->value)
+                        ->where('state', VerificationState::Verified->value)
+                        ->exists())
+                    ->tooltip('Whether a SuperAdmin has reviewed evidence and verified this firm\'s authority — distinct from Claimed (self-asserted ownership) and Member (paid FirmsVault membership).'),
+                IconColumn::make('is_marketplace_member')
+                    ->label('Member')
+                    ->boolean()
+                    ->tooltip('Whether this firm has an active paid FirmsVault membership — distinct from Claimed (self-asserted ownership) and Verified (evidence-reviewed authority).'),
                 IconColumn::make('accepting_inquiries')->label('Accepting inquiries')->boolean()->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('completeness_score')->label('Completeness')->sortable(),
                 TextColumn::make('offices.city')->label('City')->listWithLineBreaks()->limit(1)->toggleable(isToggledHiddenByDefault: true),

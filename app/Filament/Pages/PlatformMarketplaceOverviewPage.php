@@ -206,9 +206,12 @@ class PlatformMarketplaceOverviewPage extends Page implements HasSchemas
                 Text::make(fn (): string => 'Total attorneys: '.DirectoryAttorney::query()->count()),
                 Text::make(fn (): string => 'Published firms: '.DirectoryFirm::query()->where('publication_state', DirectoryPublicationState::Published)->count()),
                 Text::make(fn (): string => 'Published attorneys: '.DirectoryAttorney::query()->where('publication_state', DirectoryPublicationState::Published)->count()),
-                Text::make(fn (): string => 'Claimed firms: '.DirectoryFirm::query()->where('is_claimed', true)->count()),
-                Text::make(fn (): string => 'Verified firms: '.$verifiedFirmCount),
-                Text::make(fn (): string => 'FirmsVault members: '.DirectoryFirm::query()->where('is_marketplace_member', true)->count()),
+                Text::make(fn (): string => 'Claimed firms: '.DirectoryFirm::query()->where('is_claimed', true)->count())
+                    ->tooltip('A firm representative has claimed ownership of the listing — distinct from Verified (evidence-reviewed authority) and FirmsVault Member (paid membership).'),
+                Text::make(fn (): string => 'Verified firms: '.$verifiedFirmCount)
+                    ->tooltip('A SuperAdmin has reviewed evidence and verified the firm\'s authority — distinct from Claimed (self-asserted ownership) and FirmsVault Member (paid membership).'),
+                Text::make(fn (): string => 'FirmsVault members: '.DirectoryFirm::query()->where('is_marketplace_member', true)->count())
+                    ->tooltip('The firm has an active paid FirmsVault membership — distinct from Claimed (self-asserted ownership) and Verified (evidence-reviewed authority).'),
                 Text::make(fn (): string => 'Firms accepting inquiries: '.DirectoryFirm::query()->where('accepting_inquiries', true)->count()),
             ])
             ->columns(2);

@@ -96,8 +96,8 @@ class DirectoryCorrectionRequestResource extends Resource
                 RejectCorrectionRequestAction::make(),
                 ResolveCorrectionRequestAction::make(),
             ])
-            ->emptyStateHeading('No pending correction requests')
-            ->emptyStateDescription('All correction/removal requests have been reviewed.')
+            ->emptyStateHeading('No correction requests to show')
+            ->emptyStateDescription('No correction/removal requests match the current filters, or the queue is fully caught up.')
             ->defaultSort('created_at', 'desc')
             ->paginated([25, 50, 100]);
     }

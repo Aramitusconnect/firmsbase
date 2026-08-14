@@ -191,7 +191,8 @@ class DirectoryAttorneyResource extends Resource
                         ->where('verifiable_id', $record->id)
                         ->whereIn('dimension', [VerificationDimension::AttorneyIdentity->value, VerificationDimension::AttorneyLicense->value])
                         ->where('state', VerificationState::Verified->value)
-                        ->exists()),
+                        ->exists())
+                    ->tooltip('Whether a SuperAdmin has reviewed evidence and verified this attorney\'s identity or license.'),
                 TextColumn::make('source_type')
                     ->label('Source')
                     ->formatStateUsing(fn (DataProvenanceSourceType $state): string => Str::headline($state->value))
