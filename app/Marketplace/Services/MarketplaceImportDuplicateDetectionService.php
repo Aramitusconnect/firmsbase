@@ -21,6 +21,15 @@ use App\Marketplace\Models\DirectoryImportRow;
  * re-architecture). A match NEVER auto-merges — the row is marked
  * Duplicate with the candidate recorded, and stays that way until an
  * admin explicitly decides via MarketplaceImportApplyService.
+ *
+ * matchForMappedData() was extracted (SuperAdmin console
+ * professionalization mission, MYAT2) so DirectoryFirmResource's manual
+ * "Add Firm" form can reuse the exact same matching logic as a live
+ * duplicate warning, instead of re-implementing it against a
+ * DirectoryImportRow the manual-entry path doesn't have. detectRow()'s
+ * own behavior (including its side effect of updating the row) is
+ * unchanged — it now just delegates the matching itself to the new
+ * method.
  */
 class MarketplaceImportDuplicateDetectionService
 {
@@ -44,33 +53,52 @@ class MarketplaceImportDuplicateDetectionService
 
     public function detectRow(DirectoryImportRow $row): ?DirectoryFirm
     {
-        $data = $row->mapped_data ?? [];
+        $match = $this->matchForMappedData($row->mapped_data ?? []);
 
+        if ($match !== null) {
+            $row->update(['status' => DirectoryImportRowStatus::Duplicate, 'duplicate_of_directory_firm_id' => $match->id]);
+        }
+
+        return $match;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data  Same shape as a
+     *                                      DirectoryImportRow's mapped_data: name_normalized/phone/website.
+     */
+    public function matchForMappedData(array $data, ?int $ignoreDirectoryFirmId = null): ?DirectoryFirm
+    {
         $match = null;
 
         if (! empty($data['name_normalized'])) {
-            $match = DirectoryFirm::query()->where('name_normalized', $data['name_normalized'])->first();
+            $match = DirectoryFirm::query()
+                ->where('name_normalized', $data['name_normalized'])
+                ->when($ignoreDirectoryFirmId !== null, fn ($query) => $query->whereKeyNot($ignoreDirectoryFirmId))
+                ->first();
         }
 
         if ($match === null && ! empty($data['phone'])) {
-            $match = DirectoryFirm::query()->where('phone', $data['phone'])->first();
+            $match = DirectoryFirm::query()
+                ->where('phone', $data['phone'])
+                ->when($ignoreDirectoryFirmId !== null, fn ($query) => $query->whereKeyNot($ignoreDirectoryFirmId))
+                ->first();
         }
 
         // Disclosed limitation: no normalized website-domain column
         // exists to index against, so this signal loads every website-
         // having row and compares in PHP — acceptable for V1's
         // Michigan-scoped catalog size (a SuperAdmin-run, occasional
-        // batch import, not a hot path), not a design meant to scale
-        // to a large multi-state catalog unchanged.
+        // batch import / manual entry, not a hot path), not a design
+        // meant to scale to a large multi-state catalog unchanged.
         if ($match === null && ! empty($data['website'])) {
             $domain = $this->domainOf($data['website']);
             if ($domain !== null) {
-                $match = DirectoryFirm::query()->whereNotNull('website')->get()->first(fn (DirectoryFirm $firm) => $this->domainOf($firm->website) === $domain);
+                $match = DirectoryFirm::query()
+                    ->whereNotNull('website')
+                    ->when($ignoreDirectoryFirmId !== null, fn ($query) => $query->whereKeyNot($ignoreDirectoryFirmId))
+                    ->get()
+                    ->first(fn (DirectoryFirm $firm) => $this->domainOf($firm->website) === $domain);
             }
-        }
-
-        if ($match !== null) {
-            $row->update(['status' => DirectoryImportRowStatus::Duplicate, 'duplicate_of_directory_firm_id' => $match->id]);
         }
 
         return $match;

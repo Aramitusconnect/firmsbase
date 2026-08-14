@@ -15,12 +15,16 @@ use App\Filament\Resources\DirectoryFirmResource;
 use App\Marketplace\Enums\DirectoryPublicationState;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Services\MarketplaceBadgeService;
+use App\Services\CanonicalUrlService;
+use Filament\Actions\Action;
+use Filament\Actions\EditAction;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Str;
 
 /**
@@ -40,6 +44,13 @@ class ViewDirectoryFirm extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('viewPublicProfile')
+                ->label('View Public Profile')
+                ->icon(Heroicon::OutlinedArrowTopRightOnSquare)
+                ->url(fn (DirectoryFirm $record): string => app(CanonicalUrlService::class)->myAttorneyFirmUrl($record->slug))
+                ->openUrlInNewTab()
+                ->visible(fn (DirectoryFirm $record): bool => $record->isPubliclyVisible()),
+            EditAction::make(),
             PublishDirectoryFirmAction::make(),
             SuspendDirectoryFirmAction::make(),
             ActivateMarketplaceMembershipAction::make(),
@@ -68,6 +79,26 @@ class ViewDirectoryFirm extends ViewRecord
                     TextEntry::make('completeness_score')->label('Completeness'),
                     TextEntry::make('source_type')->label('Source')->formatStateUsing(fn ($state) => Str::headline($state->value)),
                     TextEntry::make('description')->columnSpanFull(),
+                ]),
+            Section::make('Primary Office')
+                ->columns(2)
+                ->schema([
+                    TextEntry::make('primary_office_address')
+                        ->label('Address')
+                        ->state(function (DirectoryFirm $record): string {
+                            $office = $record->offices()->where('is_primary', true)->first();
+
+                            if ($office === null) {
+                                return '—';
+                            }
+
+                            return collect([$office->address_line1, $office->address_line2, $office->city, $office->state, $office->postal_code, $office->country])
+                                ->filter()
+                                ->implode(', ');
+                        }),
+                    TextEntry::make('primary_office_phone')
+                        ->label('Office Phone')
+                        ->state(fn (DirectoryFirm $record) => $record->offices()->where('is_primary', true)->value('phone') ?? '—'),
                 ]),
             Section::make('Status')
                 ->columns(2)

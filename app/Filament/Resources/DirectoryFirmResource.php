@@ -9,20 +9,36 @@ use App\Filament\Actions\Platform\DeactivateMarketplaceMembershipAction;
 use App\Filament\Actions\Platform\PublishDirectoryFirmAction;
 use App\Filament\Actions\Platform\RemoveDirectoryFirmAction;
 use App\Filament\Actions\Platform\SuspendDirectoryFirmAction;
+use App\Filament\Resources\DirectoryFirmResource\Pages\CreateDirectoryFirm;
+use App\Filament\Resources\DirectoryFirmResource\Pages\EditDirectoryFirm;
 use App\Filament\Resources\DirectoryFirmResource\Pages\ListDirectoryFirms;
 use App\Filament\Resources\DirectoryFirmResource\Pages\ViewDirectoryFirm;
+use App\Marketplace\Enums\ConsultationMode;
+use App\Marketplace\Enums\DataProvenanceSourceType;
 use App\Marketplace\Enums\DirectoryPublicationState;
 use App\Marketplace\Models\DirectoryFirm;
+use App\Marketplace\Services\MarketplaceImportDuplicateDetectionService;
+use App\Models\Language;
 use App\Models\PlatformAdmin;
+use App\Models\PracticeArea;
 use App\Services\PlatformStaffAccessPolicyService;
 use BackedEnum;
+use Filament\Forms\Components\CheckboxList;
+use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 
@@ -68,12 +84,132 @@ class DirectoryFirmResource extends Resource
         return app(PlatformStaffAccessPolicyService::class)->canManageMarketplaceGovernance($admin)->allowed;
     }
 
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->withCount('attorneyRelationships');
+    }
+
+    /**
+     * No DirectoryFirm Policy class exists (this resource has never
+     * needed one — see canViewAny()'s own docblock on why marketplace
+     * governance is a single-role-split gate). Filament's default
+     * canCreate()/canEdit() fall through to a Policy/Gate lookup that
+     * would either throw or silently default-allow for a policy-less
+     * model — both wrong here. Explicit overrides mirroring
+     * canViewAny() exactly, so Create/Edit are gated identically to
+     * List/View rather than relying on that fallback.
+     */
+    public static function canCreate(): bool
+    {
+        return static::canViewAny();
+    }
+
+    public static function canEdit($record): bool
+    {
+        return static::canViewAny();
+    }
+
+    public static function form(Schema $schema): Schema
+    {
+        return $schema->components([
+            Section::make('Listing Details')
+                ->columns(2)
+                ->schema([
+                    TextInput::make('display_name')->label('Firm Name')->required()->maxLength(255)->live(onBlur: true),
+                    TextInput::make('slug')->maxLength(255)->helperText('Leave blank to auto-generate from the firm name.'),
+                    TextInput::make('legal_name')->label('Legal Name')->maxLength(255)->helperText('Leave blank to use the firm name.'),
+                    TextInput::make('phone')->tel()->maxLength(255)->live(onBlur: true),
+                    TextInput::make('website')->url()->maxLength(255)->live(onBlur: true),
+                    TextInput::make('public_email')->label('Public Email')->email()->maxLength(255),
+                    TextInput::make('founding_year')->numeric()->minValue(1800)->maxValue((int) date('Y')),
+                    Toggle::make('accepting_inquiries')->label('Accepting new inquiries')->default(true),
+                ]),
+            Placeholder::make('duplicate_warning')
+                ->hiddenLabel()
+                ->content(function (callable $get, ?DirectoryFirm $record): string {
+                    $data = [
+                        'name_normalized' => Str::lower((string) ($get('display_name') ?? '')),
+                        'phone' => $get('phone'),
+                        'website' => $get('website'),
+                    ];
+
+                    if (blank($data['name_normalized']) && blank($data['phone']) && blank($data['website'])) {
+                        return '';
+                    }
+
+                    $match = app(MarketplaceImportDuplicateDetectionService::class)
+                        ->matchForMappedData($data, $record?->id);
+
+                    return $match !== null
+                        ? "⚠ Possible duplicate: an existing listing \"{$match->display_name}\" (slug: {$match->slug}) matches on name, phone, or website."
+                        : '';
+                })
+                ->visible(fn (callable $get): bool => filled($get('display_name')) || filled($get('phone')) || filled($get('website'))),
+            Section::make('Description')
+                ->schema([
+                    Textarea::make('description')->rows(4)->maxLength(2000),
+                ]),
+            Section::make('Primary Office Address')
+                ->columns(2)
+                ->schema([
+                    TextInput::make('address_line1')->label('Address Line 1')->maxLength(255),
+                    TextInput::make('address_line2')->label('Address Line 2')->maxLength(255),
+                    TextInput::make('city')->maxLength(255),
+                    TextInput::make('state')->maxLength(255),
+                    TextInput::make('postal_code')->label('ZIP / Postal Code')->maxLength(20),
+                    TextInput::make('country')->maxLength(2)->default('US')->helperText('2-letter country code.'),
+                ]),
+            Section::make('Consultation Modes')
+                ->schema([
+                    CheckboxList::make('consultation_modes')
+                        ->hiddenLabel()
+                        ->options(array_combine(
+                            array_map(fn (ConsultationMode $m) => $m->value, ConsultationMode::cases()),
+                            ['In Person', 'Phone', 'Video'],
+                        )),
+                ]),
+            Section::make('Practice Areas & Languages')
+                ->columns(2)
+                ->schema([
+                    Select::make('practice_area_ids')
+                        ->label('Practice Areas')
+                        ->multiple()
+                        ->options(fn () => PracticeArea::query()->where('is_marketplace_visible', true)->orderBy('sort_order')->pluck('name', 'id')->all())
+                        ->default(fn (?DirectoryFirm $record) => $record?->practiceAreas()->pluck('practice_areas.id')->all() ?? []),
+                    Select::make('language_ids')
+                        ->label('Languages')
+                        ->multiple()
+                        ->options(fn () => Language::query()->where('is_active', true)->orderBy('name')->pluck('name', 'id')->all())
+                        ->default(fn (?DirectoryFirm $record) => $record?->languages()->pluck('languages.id')->all() ?? []),
+                ]),
+            Section::make('Publication')
+                ->columns(2)
+                ->schema([
+                    Select::make('publication_state')
+                        ->label('Publication Status')
+                        ->options([
+                            DirectoryPublicationState::Draft->value => 'Draft',
+                            DirectoryPublicationState::Published->value => 'Published',
+                        ])
+                        ->default(DirectoryPublicationState::Draft->value)
+                        ->required()
+                        ->native(false)
+                        ->helperText('Suspend/Remove/Archive are separate moderation actions from the View page, not available here.'),
+                    Placeholder::make('source_info')
+                        ->label('Source')
+                        ->content(fn (?DirectoryFirm $record) => $record !== null
+                            ? Str::headline($record->source_type->value).' — cannot be changed here.'
+                            : Str::headline(DataProvenanceSourceType::AdminEntered->value).' (every record created through this form is stamped this way).'),
+                ]),
+        ]);
+    }
+
     public static function table(Table $table): Table
     {
         return $table
             ->columns([
                 TextColumn::make('display_name')->label('Firm')->searchable()->sortable(),
-                TextColumn::make('slug')->searchable(),
+                TextColumn::make('slug')->searchable()->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('publication_state')
                     ->badge()
                     ->formatStateUsing(fn (DirectoryPublicationState $state): string => Str::headline($state->value))
@@ -86,8 +222,18 @@ class DirectoryFirmResource extends Resource
                     ->sortable(),
                 IconColumn::make('is_claimed')->label('Claimed')->boolean(),
                 IconColumn::make('is_marketplace_member')->label('Member')->boolean(),
-                IconColumn::make('accepting_inquiries')->label('Accepting inquiries')->boolean(),
+                IconColumn::make('accepting_inquiries')->label('Accepting inquiries')->boolean()->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('completeness_score')->label('Completeness')->sortable(),
+                TextColumn::make('offices.city')->label('City')->listWithLineBreaks()->limit(1)->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('offices.state')->label('State')->listWithLineBreaks()->limit(1)->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('practiceAreas.name')->label('Practice Areas')->listWithLineBreaks()->limit(2)->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('attorney_relationships_count')->label('Attorneys')->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('source_type')
+                    ->label('Source')
+                    ->formatStateUsing(fn (DataProvenanceSourceType $state): string => Str::headline($state->value))
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('last_verified_at')->label('Last verified')->dateTime()->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('updated_at')->label('Last updated')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('created_at')->label('Created')->dateTime()->sortable(),
             ])
             ->filters([
@@ -95,6 +241,26 @@ class DirectoryFirmResource extends Resource
                     ->options(collect(DirectoryPublicationState::cases())->mapWithKeys(fn (DirectoryPublicationState $s) => [$s->value => Str::headline($s->value)])->all()),
                 TernaryFilter::make('is_claimed'),
                 TernaryFilter::make('is_marketplace_member')->label('Member'),
+                TernaryFilter::make('accepting_inquiries')->label('Accepting inquiries'),
+                SelectFilter::make('offices')
+                    ->label('State')
+                    ->relationship('offices', 'state')
+                    ->searchable(),
+                SelectFilter::make('practiceAreas')
+                    ->label('Practice Area')
+                    ->relationship('practiceAreas', 'name')
+                    ->searchable(),
+                SelectFilter::make('source_type')
+                    ->label('Source')
+                    ->options(collect(DataProvenanceSourceType::cases())->mapWithKeys(fn (DataProvenanceSourceType $s) => [$s->value => Str::headline($s->value)])->all()),
+                SelectFilter::make('completeness')
+                    ->label('Completeness')
+                    ->options(['low' => 'Below 60', 'high' => '60 or above'])
+                    ->query(fn ($query, array $data) => match ($data['value'] ?? null) {
+                        'low' => $query->where('completeness_score', '<', 60),
+                        'high' => $query->where('completeness_score', '>=', 60),
+                        default => $query,
+                    }),
             ])
             ->recordActions([
                 PublishDirectoryFirmAction::make(),
@@ -103,7 +269,8 @@ class DirectoryFirmResource extends Resource
                 DeactivateMarketplaceMembershipAction::make(),
                 RemoveDirectoryFirmAction::make(),
             ])
-            ->emptyStateHeading('No directory firms found')
+            ->emptyStateHeading('No directory firms yet')
+            ->emptyStateDescription('Import directory data or create a firm manually.')
             ->defaultSort('display_name')
             ->paginated([25, 50, 100]);
     }
@@ -112,7 +279,9 @@ class DirectoryFirmResource extends Resource
     {
         return [
             'index' => ListDirectoryFirms::route('/'),
+            'create' => CreateDirectoryFirm::route('/create'),
             'view' => ViewDirectoryFirm::route('/{record}'),
+            'edit' => EditDirectoryFirm::route('/{record}/edit'),
         ];
     }
 }
