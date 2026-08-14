@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Enums\FirmUserStatus;
+use App\Http\Middleware\ConfigurePanelContextForHost;
 use App\Http\Middleware\EstablishFirmTenantContextForLivewireUpdate;
 use App\Marketplace\Models\MarketplaceIntake;
 use App\Models\PlatformAdmin;
@@ -277,7 +278,7 @@ class AppServiceProvider extends ServiceProvider
     private function registerLivewireUpdateRoute(): void
     {
         Livewire::setUpdateRoute(fn ($handle) => Route::post('/livewire/update', $handle)
-            ->middleware(['web', EstablishFirmTenantContextForLivewireUpdate::class])
+            ->middleware(['web', ConfigurePanelContextForHost::class, EstablishFirmTenantContextForLivewireUpdate::class])
             ->name('livewire.update'));
     }
 

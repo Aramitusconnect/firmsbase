@@ -3,6 +3,7 @@
 use App\Http\Controllers\ReadinessController;
 use App\Http\Middleware\AddSearchIndexingHeader;
 use App\Http\Middleware\AddSecurityHeaders;
+use App\Http\Middleware\ConfigurePanelContextForHost;
 use App\Http\Middleware\ConfigurePanelSessionCookie;
 use App\Services\CanonicalUrlService;
 use Illuminate\Console\Scheduling\Schedule;
@@ -358,6 +359,21 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->prependToPriorityList(
             before: StartSession::class,
             prepend: ConfigurePanelSessionCookie::class,
+        );
+
+        // 2026-08-14 staging QA blocker fix — Admin/Firm/Client login
+        // redirect loop. POST /livewire/update (Livewire's own
+        // self-registered, host-unconstrained endpoint — see
+        // AppServiceProvider::register()'s Livewire::setUpdateRoute()
+        // override) is where every panel's real login form submission
+        // and every myattorney Livewire component's interaction actually
+        // lands, so it needs the same before-StartSession guarantee as
+        // ConfigurePanelSessionCookie above — see
+        // ConfigurePanelContextForHost's own docblock for the full
+        // root-cause trail.
+        $middleware->prependToPriorityList(
+            before: StartSession::class,
+            prepend: ConfigurePanelContextForHost::class,
         );
 
         // Checkpoint 4 ("Plaid financial evidence add-on") test-gate fix.
