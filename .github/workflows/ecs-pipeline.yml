@@ -647,10 +647,25 @@ jobs:
           # the 2026-08-14 staging security-remediation pass (the web role
           # smoke test would otherwise fail immediately with "missing
           # required environment variable(s)" before ever reaching /up).
+          # The six canonical URL vars mirror what every real staging task
+          # definition (worker/critical-worker/scheduler/web) has set since
+          # the 2026-08-14 staging security-remediation pass — without them
+          # here, this smoke test would keep exercising config/hosts.php's
+          # local-only *.firmsvault.test fallback instead of the actual
+          # strict-TrustHosts configuration staging runs under, which is
+          # exactly the mismatch that let the ALB health-check Host-header
+          # incompatibility (see docker/web/Caddyfile's @alb_health matcher)
+          # go undetected until a real ECS deployment hit it.
           COMMON_ENV=(-e APP_KEY="$APP_KEY" -e APP_ENV=production -e DB_CONNECTION=pgsql \
             -e DB_HOST=127.0.0.1 -e DB_PORT=5432 -e DB_DATABASE=firmsbase_smoke \
             -e DB_USERNAME=firmsbase -e DB_PASSWORD=smokepass -e REDIS_HOST=127.0.0.1 \
-            -e PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY="$(openssl rand -hex 32)")
+            -e PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY="$(openssl rand -hex 32)" \
+            -e MARKETING_URL="https://staging.firmsvault.com" \
+            -e FIRM_APP_URL="https://app.staging.firmsvault.com" \
+            -e CLIENT_PORTAL_URL="https://client.staging.firmsvault.com" \
+            -e ADMIN_URL="https://admin.staging.firmsvault.com" \
+            -e MYATTORNEY_URL="https://myattorney.staging.firmsvault.com" \
+            -e API_URL="https://api.staging.firmsvault.com")
 
           # Prints container state + logs before a long-running-role
           # assertion fails, so a future failure shows the real exception
@@ -679,23 +694,53 @@ jobs:
           echo "=== web ==="
           docker run -d --name smoke-web --network host "${COMMON_ENV[@]}" "$IMG" web
           sleep 5
-          # This job's COMMON_ENV sets none of the six canonical URL vars
-          # (MARKETING_URL/FIRM_APP_URL/etc.), so bootstrap/app.php's
-          # trustHosts() (backed by CanonicalUrlService, see Mission 1)
-          # falls through to config/hosts.php's local-only defaults —
-          # *.firmsvault.test, never a bare IP:port. A request Host header
-          # of "127.0.0.1:8080" is therefore an untrusted host and Laravel
-          # correctly 400s it before ever reaching a route. Discovered
-          # during the 2026-08-14 staging security-remediation pass — this
-          # smoke-test step had never actually reached a real /up request
-          # before (every earlier pipeline run failed at an earlier gate).
-          # -H forces a trusted Host header while still connecting to the
-          # loopback address the container actually listens on.
-          UP_CODE=$(curl -sS -H "Host: firmsvault.test" -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/up)
-          READY_CODE=$(curl -sS -H "Host: firmsvault.test" -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/readyz)
+          # -H forces a trusted canonical Host header while still connecting
+          # to the loopback address the container actually listens on.
+          UP_CODE=$(curl -sS -H "Host: staging.firmsvault.com" -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/up)
+          READY_CODE=$(curl -sS -H "Host: staging.firmsvault.com" -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/readyz)
           [ "$UP_CODE" = "200" ] || { echo "::error::/up returned $UP_CODE, expected 200"; exit 1; }
           [ "$READY_CODE" = "200" ] || { echo "::error::/readyz returned $READY_CODE, expected 200"; exit 1; }
           echo "/up=$UP_CODE /readyz=$READY_CODE"
+
+          # All six canonical staging hosts must resolve /up successfully —
+          # confirms docker/web/Caddyfile's @alb_health matcher didn't
+          # accidentally interfere with normal canonical-host traffic.
+          for HOST in staging.firmsvault.com app.staging.firmsvault.com client.staging.firmsvault.com \
+                      admin.staging.firmsvault.com myattorney.staging.firmsvault.com api.staging.firmsvault.com; do
+            CODE=$(curl -sS -H "Host: $HOST" -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/up)
+            [ "$CODE" = "200" ] || { echo "::error::/up via Host=$HOST returned $CODE, expected 200"; exit 1; }
+          done
+          echo "OK: all six canonical hosts return 200 on /up"
+
+          # Regression proof for the 2026-08-14 ALB health-check
+          # compatibility fix (docker/web/Caddyfile's @alb_health matcher)
+          # — simulates the exact request shape a real ALB target-group
+          # health check sends (private-IP Host + ELB-HealthChecker/2.0
+          # User-Agent), which staging hit for real during the first
+          # web:14 deployment attempt (3 consecutive task failures, all
+          # 400, before this fix). See
+          # tests/Feature/Security/Docker/AlbHealthCheckHostCompatibilityTest.php
+          # for the static Caddyfile-structure counterpart of this proof.
+          FAKE_IP="172.31.86.44:8080"
+          ALB_UA="ELB-HealthChecker/2.0"
+
+          # A: exact ALB request to /up must now succeed.
+          ALB_UP_CODE=$(curl -sS -H "Host: $FAKE_IP" -H "User-Agent: $ALB_UA" -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/up)
+          [ "$ALB_UP_CODE" = "200" ] || { echo "::error::simulated ALB health check on /up returned $ALB_UP_CODE, expected 200"; exit 1; }
+
+          # B: same private-IP Host with a normal (non-ALB) User-Agent must
+          # still be rejected — proves the fix is not a blanket Host bypass.
+          SPOOFED_UA_CODE=$(curl -sS -H "Host: $FAKE_IP" -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/up)
+          [ "$SPOOFED_UA_CODE" = "400" ] || { echo "::error::private-IP Host with non-ALB User-Agent on /up returned $SPOOFED_UA_CODE, expected 400"; exit 1; }
+
+          # C/D: spoofing the ALB User-Agent on ANY other route must not
+          # bypass TrustHosts — the matcher requires an exact path match too.
+          SPOOFED_ROOT_CODE=$(curl -sS -H "Host: $FAKE_IP" -H "User-Agent: $ALB_UA" -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/)
+          [ "$SPOOFED_ROOT_CODE" = "400" ] || { echo "::error::spoofed ALB User-Agent on / returned $SPOOFED_ROOT_CODE, expected 400"; exit 1; }
+          SPOOFED_LOGIN_CODE=$(curl -sS -H "Host: $FAKE_IP" -H "User-Agent: $ALB_UA" -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/login)
+          [ "$SPOOFED_LOGIN_CODE" = "400" ] || { echo "::error::spoofed ALB User-Agent on /login returned $SPOOFED_LOGIN_CODE, expected 400"; exit 1; }
+
+          echo "OK: simulated-ALB /up=$ALB_UP_CODE, spoofed-UA /up=$SPOOFED_UA_CODE, spoofed-UA /=$SPOOFED_ROOT_CODE, spoofed-UA /login=$SPOOFED_LOGIN_CODE"
 
           UID_GID=$(docker exec smoke-web /usr/local/bin/php -r "echo posix_getuid(),' ',posix_getgid();")
           [ "$UID_GID" = "1000 1000" ] || { echo "::error::expected uid/gid 1000 1000, got $UID_GID"; exit 1; }

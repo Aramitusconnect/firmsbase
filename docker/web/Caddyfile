@@ -26,7 +26,34 @@
 		format json
 	}
 
-	php_server
+	# The ALB's target-group health check has no custom Host-header
+	# override and always sends the target's own private IP:port as Host
+	# (AWS default behavior, not configurable from this Dockerfile/Caddyfile
+	# alone — see docs/security/ecs-image-vulnerability-exceptions.md
+	# "Review: 2026-08-14" for why TrustHosts/CanonicalUrlService must stay
+	# strict). That Host is correctly rejected by Laravel's TrustHosts,
+	# which made every ALB health check fail with 400 once the canonical
+	# host env vars were introduced. This matcher is intentionally narrow —
+	# exact path AND exact ALB health-checker User-Agent, both required —
+	# so only the literal `GET /up` probe ALB sends is affected; every other
+	# request (including a spoofed User-Agent on any other path) keeps its
+	# real Host and is still rejected by TrustHosts exactly as before. The
+	# rewritten Host still goes through the full php_server/Laravel path
+	# (not a synthetic Caddy-level 200), so /up keeps testing the real
+	# runtime. A `route` block is used instead of bare top-level directives
+	# because it is the only construct that guarantees literal source-order
+	# execution regardless of Caddy's global default directive order —
+	# verified below via `caddy adapt` against the actual FrankenPHP/Caddy
+	# binary in this image.
+	@alb_health {
+		path /up
+		header User-Agent ELB-HealthChecker/2.0
+	}
+
+	route {
+		request_header @alb_health Host staging.firmsvault.com
+		php_server
+	}
 
 	# Anything not matched by php_server (i.e. not an existing static file
 	# under public/ and not routed to index.php) falls through to Laravel's
