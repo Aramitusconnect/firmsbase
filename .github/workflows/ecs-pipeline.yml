@@ -55,6 +55,10 @@ on:
         description: "Full 40-character commit SHA to build and publish (not a branch, tag, or short SHA)."
         required: true
         type: string
+      base_sha:
+        description: "Optional: full 40-character commit SHA to use as the lint diff baseline (must be an ancestor of commit_sha) instead of origin/main. Use this for a long-lived feature lineage where origin/main has fallen far behind and diffing against it would falsely treat months of already-reviewed work as new. Leave blank for the default origin/main baseline."
+        required: false
+        type: string
 
 env:
   PHP_VERSION: "8.3"
@@ -73,6 +77,7 @@ jobs:
       contents: read
     outputs:
       short_sha: ${{ steps.shortsha.outputs.short_sha }}
+      lint_base_sha: ${{ steps.lintbase.outputs.lint_base_sha }}
     steps:
       - name: Reject anything that is not a full 40-character hex commit SHA
         run: |
@@ -116,6 +121,42 @@ jobs:
           SHA="${{ inputs.commit_sha }}"
           echo "short_sha=${SHA:0:7}" >> "$GITHUB_OUTPUT"
 
+      # Fails closed: an invalid or unrelated base_sha must abort the run
+      # rather than silently falling back to origin/main (which would
+      # defeat the entire point of supplying one). Blank input is the
+      # only case that legitimately falls back — every non-blank value
+      # must prove itself.
+      - name: Validate optional base_sha (lint diff baseline)
+        id: lintbase
+        run: |
+          set -euo pipefail
+          BASE_SHA="${{ inputs.base_sha }}"
+          SHA="${{ inputs.commit_sha }}"
+
+          if [[ -z "$BASE_SHA" ]]; then
+            echo "No base_sha supplied — lint job will fall back to its own origin/main merge-base."
+            echo "lint_base_sha=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! [[ "$BASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::base_sha must be exactly 40 hex characters (a full commit SHA, not a branch, tag, or abbreviated SHA). Got: '$BASE_SHA'"
+            exit 1
+          fi
+
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::base_sha '$BASE_SHA' does not exist as a commit object in this repository"
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "$BASE_SHA" "$SHA"; then
+            echo "::error::base_sha '$BASE_SHA' is not an ancestor of commit_sha '$SHA' — refusing to use an unrelated commit as the lint diff baseline."
+            exit 1
+          fi
+
+          echo "Confirmed: base_sha '$BASE_SHA' is a valid ancestor of commit_sha '$SHA'."
+          echo "lint_base_sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"
+
   # ---------------------------------------------------------------------
   lint:
     name: Lint requested commit
@@ -147,19 +188,37 @@ jobs:
         run: find app config database routes tests bootstrap -name "*.php" -print0 | xargs -0 -n1 php -l
 
       # Laravel Pint runs ONLY against PHP files this commit actually
-      # changed relative to its merge-base with origin/main. The full
-      # repository carries substantial pre-existing style debt (hundreds
-      # of files) that predates this branch and is not this branch's
-      # responsibility to fix — running `pint --test` unscoped would block
-      # every publication run on that pre-existing debt instead of on
-      # anything this commit is actually responsible for.
-      - name: Determine PHP files changed relative to origin/main
+      # changed relative to a baseline — the full repository carries
+      # substantial pre-existing style debt (hundreds of files) that
+      # predates this branch and is not this branch's responsibility to
+      # fix — running `pint --test` unscoped would block every
+      # publication run on that pre-existing debt instead of on anything
+      # this commit is actually responsible for.
+      #
+      # Default baseline is origin/main's own merge-base with HEAD. For a
+      # long-lived feature lineage where origin/main has fallen months
+      # behind (this repo's actual situation as of the staging-safety
+      # QA release — see the failed run this fixes), diffing against
+      # origin/main collects that ENTIRE lineage's accumulated debt in
+      # one shot, not just this release's own change. Pass base_sha
+      # (validated and required to be a real ancestor of commit_sha in
+      # the validate-commit job — an invalid/unrelated value fails the
+      # run closed, never silently falls back) to scope correctly
+      # instead.
+      - name: Determine PHP files changed relative to the lint baseline
         id: changed-php
         run: |
           set -euo pipefail
-          git fetch origin main --quiet
-          BASE_SHA="$(git merge-base HEAD origin/main)"
-          echo "Merge-base with origin/main: ${BASE_SHA}"
+          LINT_BASE_SHA="${{ needs.validate-commit.outputs.lint_base_sha }}"
+
+          if [[ -n "$LINT_BASE_SHA" ]]; then
+            BASE_SHA="$LINT_BASE_SHA"
+            echo "Using explicit lint baseline (base_sha input): ${BASE_SHA}"
+          else
+            git fetch origin main --quiet
+            BASE_SHA="$(git merge-base HEAD origin/main)"
+            echo "No base_sha supplied — using origin/main merge-base: ${BASE_SHA}"
+          fi
 
           # -z / --null-terminated output avoids any word-splitting or
           # newline-in-filename hazard; --diff-filter=ACMR (Added, Copied,
@@ -220,6 +279,12 @@ jobs:
       # — Laravel throws MissingAppKeyException the first time any test
       # touches per-firm key provisioning if APP_KEY is unset.
       APP_KEY: "base64:ELVhdkVn+QSCzkyvW6Io8hKv/lmwnzz6LLmlYIhiL6o="
+      # config/database.php's own redis connections default to these
+      # exact values (env('REDIS_HOST', '127.0.0.1') / env('REDIS_PORT',
+      # '6379')) — set explicitly here anyway so the job's requirement is
+      # visible without having to cross-reference application config.
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: "6379"
     services:
       postgres:
         image: postgres:16
@@ -231,6 +296,24 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      # Redis 7, matching staging's real ElastiCache engine_version (see
+      # infrastructure/ecs/environments/staging/terraform.tfvars.example,
+      # elasticache_engine_version = "7.2"). A handful of tests
+      # (e.g. DashboardRedisCacheSerializationTest) deliberately force
+      # cache.default/session.driver to 'redis' — phpunit.xml otherwise
+      # defaults both to the 'array' driver — because that exact class of
+      # bug (RedisStore's unserialize() behavior) is invisible under any
+      # non-Redis driver. Previously this job installed the redis PHP
+      # extension but never provisioned a server for it to connect to.
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
