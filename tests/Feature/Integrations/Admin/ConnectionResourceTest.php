@@ -172,7 +172,12 @@ final class ConnectionResourceTest extends TestCase
         $response = $this->actingAs($admin, 'platform_admin')->get(ConnectionResource::getUrl());
 
         $response->assertOk();
-        $response->assertSee('No connections found');
+        // Prompt 2 (Integration Operations) §94: the empty state now tells
+        // an operator where connections come from — a firm authorizing an
+        // integration in its own panel — and states explicitly that this
+        // console never creates one, so an empty list is never mistaken
+        // for a missing "Add connection" button.
+        $response->assertSee('No firm integrations yet');
     }
 
     // ------------------------------------------------------------

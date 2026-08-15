@@ -6,10 +6,12 @@ namespace App\Integrations\Services;
 
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\ProviderBillableCallReservation;
+use App\Integrations\Models\ProviderRateCardEntry;
 use App\Models\Firm;
 use App\Models\PlatformAdmin;
 use App\Services\PlatformStaffAccessPolicyService;
 use App\Services\TenantContextService;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use RuntimeException;
 
@@ -43,36 +45,61 @@ final class PlatformPlaidCostOversightReadService
     }
 
     /**
+     * @param  ?string  $from  inclusive lower bound on `reserved_at` (Y-m-d or any Carbon-parseable string)
+     * @param  ?string  $to  inclusive upper bound on `reserved_at`
      * @return Collection<int, array<string, mixed>>
      */
-    public function overviewByFirm(PlatformAdmin $admin): Collection
+    public function overviewByFirm(PlatformAdmin $admin, ?string $from = null, ?string $to = null): Collection
     {
         $this->assertCanAccess($admin);
+
+        // Prompt 2 (Integration Operations) addition: an optional
+        // reserved_at window. Both parameters default to null, so every
+        // existing caller keeps its original all-time behaviour
+        // byte-for-byte — this is additive, never a change to the
+        // established contract. The bounds are applied in SQL against
+        // `reserved_at`, which already carries a composite index
+        // (firm_id, status, reserved_at), so a windowed read is not a
+        // full scan.
+        $fromAt = filled($from) ? CarbonImmutable::parse($from)->startOfDay() : null;
+        $toAt = filled($to) ? CarbonImmutable::parse($to)->endOfDay() : null;
+
+        $applyWindow = function ($query) use ($fromAt, $toAt) {
+            if ($fromAt !== null) {
+                $query->where('reserved_at', '>=', $fromAt);
+            }
+
+            if ($toAt !== null) {
+                $query->where('reserved_at', '<=', $toAt);
+            }
+
+            return $query;
+        };
 
         $firms = Firm::query()->orderBy('name')->orderBy('id')->get();
 
         $rows = collect();
 
         foreach ($firms as $firm) {
-            $firmRow = $this->tenantContext->runWithFirmContext($firm, function () use ($firm): ?array {
-                $allocated = ProviderBillableCallReservation::query()
+            $firmRow = $this->tenantContext->runWithFirmContext($firm, function () use ($firm, $applyWindow): ?array {
+                $allocated = $applyWindow(ProviderBillableCallReservation::query()
                     ->where('firm_id', $firm->id)
                     ->where('provider_key', ProviderKey::Plaid->value)
-                    ->whereNotNull('rate_card_entry_id')
+                    ->whereNotNull('rate_card_entry_id'))
                     ->selectRaw('COUNT(*) as call_count, SUM(estimated_customer_price_cents) as total_cents')
                     ->first();
 
-                $unallocated = ProviderBillableCallReservation::query()
+                $unallocated = $applyWindow(ProviderBillableCallReservation::query()
                     ->where('firm_id', $firm->id)
                     ->where('provider_key', ProviderKey::Plaid->value)
-                    ->whereNull('rate_card_entry_id')
+                    ->whereNull('rate_card_entry_id'))
                     ->count();
 
-                $liveBalanceCalls = ProviderBillableCallReservation::query()
+                $liveBalanceCalls = $applyWindow(ProviderBillableCallReservation::query()
                     ->where('firm_id', $firm->id)
                     ->where('provider_key', ProviderKey::Plaid->value)
                     ->where('product', 'balance')
-                    ->where('billing_operation', 'get')
+                    ->where('billing_operation', 'get'))
                     ->count();
 
                 $totalCalls = (int) ($allocated->call_count ?? 0) + $unallocated;
@@ -98,5 +125,58 @@ final class PlatformPlaidCostOversightReadService
         }
 
         return $rows->values();
+    }
+
+    /**
+     * Pricing provenance for the Plaid cost estimate (Prompt 2,
+     * Integration Operations §57). The cost figures this service returns
+     * are ESTIMATES derived from `provider_rate_card_entries` — they are
+     * not, and must never be presented as, an invoice. This method
+     * exposes the facts a reader needs to judge how much to trust them:
+     * which currency the rate cards are denominated in, how many rate
+     * card entries are currently in effect, and when the effective
+     * pricing last changed.
+     *
+     * Returns explicit nulls (never a fabricated default currency, never
+     * a zero) when no rate card exists at all — the caller renders
+     * "Pricing unavailable" for that case rather than "$0.00", which
+     * would read as "this costs nothing".
+     *
+     * `provider_rate_card_entries` is global platform pricing reference
+     * data, not tenant-owned, so this reads it directly with no tenant
+     * context — matching how ProviderRateCardResolver itself reads it.
+     *
+     * @return array{currencies: array<int, string>, entry_count: int, effective_from: ?string, has_pricing: bool}
+     */
+    public function pricingProvenance(PlatformAdmin $admin): array
+    {
+        $this->assertCanAccess($admin);
+
+        $entries = ProviderRateCardEntry::query()
+            ->where('provider_key', ProviderKey::Plaid->value)
+            ->where(function ($query): void {
+                $query->whereNull('effective_to')->orWhere('effective_to', '>=', now());
+            })
+            ->get(['currency', 'effective_from']);
+
+        $currencies = $entries
+            ->pluck('currency')
+            ->filter(fn (mixed $currency): bool => is_string($currency) && trim($currency) !== '')
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+
+        $effectiveFrom = $entries
+            ->pluck('effective_from')
+            ->filter()
+            ->max();
+
+        return [
+            'currencies' => $currencies,
+            'entry_count' => $entries->count(),
+            'effective_from' => $effectiveFrom?->toDateTimeString(),
+            'has_pricing' => $entries->isNotEmpty(),
+        ];
     }
 }

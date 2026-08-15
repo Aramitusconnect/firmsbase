@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\WebhookEventResource\Pages\ListWebhookEvents;
+use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Filament\Resources\WebhookEventResource\Pages\ViewWebhookEvent;
-use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Enums\WebhookInboundEventStatus;
 use App\Integrations\Models\IntegrationInboundWebhookEvent;
 use App\Models\Firm;
@@ -118,11 +118,14 @@ class WebhookEventResource extends Resource
                 // AdminPanelProvider's own docblock), and that table
                 // carries permanent FORCE ROW LEVEL SECURITY with no
                 // cross-firm-read policy.
+                // Canonical provider labels. Str::headline() on the raw
+                // key rendered "Googleworkspace"/"Microsoft365" — a
+                // string no operator recognises and no support ticket
+                // ever says. IntegrationDisplay resolves the seeded
+                // catalog's display_name instead (§35).
                 SelectFilter::make('provider_key')
                     ->label('Provider')
-                    ->options(collect(ProviderKey::cases())
-                        ->mapWithKeys(fn (ProviderKey $key): array => [$key->value => Str::headline($key->value)])
-                        ->all()),
+                    ->options(fn (): array => IntegrationDisplay::providerFilterOptions()),
                 // Free-text "contains" filter, not a Select — event_type
                 // is an unbounded, free-form string with no closed
                 // vocabulary (unlike status), and — same reasoning as the
@@ -148,12 +151,18 @@ class WebhookEventResource extends Resource
             ])
             ->columns([
                 TextColumn::make('firm_name')->label('Firm')->searchable(),
-                TextColumn::make('provider_key')->label('Provider'),
-                TextColumn::make('event_type')->label('Event type')->placeholder('—'),
-                TextColumn::make('connection_label')->label('Connection')->placeholder('—'),
+                TextColumn::make('provider_key')
+                    ->label('Provider')
+                    ->formatStateUsing(fn (?string $state): string => IntegrationDisplay::labelForProviderCode($state)),
+                TextColumn::make('event_type')
+                    ->label('Event Type')
+                    ->formatStateUsing(fn (?string $state): string => IntegrationDisplay::orAbsent($state, 'Not recorded')),
+                TextColumn::make('connection_label')
+                    ->label('Connection')
+                    ->formatStateUsing(fn (?string $state): string => IntegrationDisplay::orAbsent($state, 'Connection removed')),
                 TextColumn::make('status')
                     ->badge()
-                    ->formatStateUsing(fn (?string $state): string => $state === null ? '—' : Str::headline($state))
+                    ->formatStateUsing(fn (?string $state): string => $state === null ? IntegrationDisplay::UNKNOWN : Str::headline($state))
                     ->color(fn (?string $state): string => match ($state) {
                         'processed' => 'success',
                         'failed' => 'danger',
@@ -161,8 +170,13 @@ class WebhookEventResource extends Resource
                         default => 'warning',
                     }),
                 TextColumn::make('processing_attempts')->label('Attempts')->alignEnd(),
-                TextColumn::make('received_at')->label('Received at')->dateTime(),
-                TextColumn::make('processed_at')->label('Processed at')->dateTime()->placeholder('—'),
+                TextColumn::make('received_at')->label('Received At')->dateTime()->sortable(),
+                TextColumn::make('processed_at')
+                    ->label('Processed At')
+                    ->dateTime()
+                    // An unprocessed event has genuinely not been
+                    // processed — that is a state, not a missing value.
+                    ->placeholder('Not yet processed'),
             ])
             ->recordActions([
                 Action::make('view')

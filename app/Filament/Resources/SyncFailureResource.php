@@ -6,6 +6,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Actions\Platform\RetrySyncFailureAction;
 use App\Filament\Resources\SyncFailureResource\Pages\ListSyncFailures;
+use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Filament\Resources\SyncFailureResource\Pages\ViewSyncFailure;
 use App\Integrations\Enums\SyncItemStatus;
 use App\Integrations\Models\IntegrationProvider;
@@ -155,19 +156,37 @@ class SyncFailureResource extends Resource
             ])
             ->columns([
                 TextColumn::make('firm_name')->label('Firm')->searchable(),
-                TextColumn::make('provider_display_name')->label('Provider')->placeholder('—'),
-                TextColumn::make('connection_label')->label('Connection')->placeholder('—'),
-                TextColumn::make('entity_type')->label('Entity type'),
+                TextColumn::make('provider')
+                    ->label('Provider')
+                    ->state(fn (array $record): string => filled($record['provider_code'] ?? null)
+                        ? IntegrationDisplay::labelForProviderCode((string) $record['provider_code'])
+                        : IntegrationDisplay::orAbsent($record['provider_display_name'] ?? null, 'Provider not recorded')),
+                TextColumn::make('connection_label')
+                    ->label('Connection')
+                    ->formatStateUsing(fn (?string $state): string => IntegrationDisplay::orAbsent($state, 'Connection removed')),
+                TextColumn::make('entity_type')->label('Entity Type'),
                 TextColumn::make('status')
                     ->badge()
-                    ->formatStateUsing(fn (?string $state): string => $state === null ? '—' : Str::headline($state))
+                    ->formatStateUsing(fn (?string $state): string => $state === null ? IntegrationDisplay::UNKNOWN : Str::headline($state))
                     ->color(fn (?string $state): string => $state === SyncItemStatus::FailedPermanent->value ? 'danger' : 'warning'),
-                TextColumn::make('failure_category')->label('Failure reason')->placeholder('—'),
+                TextColumn::make('failure_category')
+                    ->label('Failure Reason')
+                    // The read path deliberately never selects last_error
+                    // (raw provider text); this is the governed
+                    // classification. An unclassified failure is named as
+                    // such rather than shown as an empty dash.
+                    ->formatStateUsing(fn (?string $state): string => IntegrationDisplay::orAbsent($state, 'Not classified')),
                 TextColumn::make('attempt_count')->label('Attempts')->alignEnd(),
-                TextColumn::make('requeue_count')->label('Retries')->alignEnd(),
-                TextColumn::make('first_seen_at')->label('First seen')->dateTime()->placeholder('—'),
-                TextColumn::make('last_attempt_at')->label('Last attempt')->dateTime()->placeholder('—'),
-                TextColumn::make('next_attempt_at')->label('Next attempt')->dateTime()->placeholder('—'),
+                TextColumn::make('requeue_count')->label('Retries')->alignEnd()->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('first_seen_at')->label('First Seen')->dateTime()->placeholder(IntegrationDisplay::UNKNOWN)->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('last_attempt_at')->label('Last Attempt')->dateTime()->sortable()->placeholder('Never attempted'),
+                TextColumn::make('next_attempt_at')
+                    ->label('Next Attempt')
+                    ->dateTime()
+                    // No next attempt is a real, important state: the item
+                    // is exhausted or permanently failed and nothing will
+                    // pick it up again without an operator retry.
+                    ->placeholder('No retry scheduled'),
             ])
             ->recordActions([
                 RetrySyncFailureAction::make(),

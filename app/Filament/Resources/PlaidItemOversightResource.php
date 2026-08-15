@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\PlaidItemOversightResource\Pages\ListPlaidItemOversight;
+use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Services\PlatformPlaidItemDirectoryService;
 use App\Models\Firm;
@@ -109,9 +110,29 @@ class PlaidItemOversightResource extends Resource
                         'disconnected' => 'gray',
                         default => 'gray',
                     }),
-                TextColumn::make('requested_capabilities_json')->label('Products')->formatStateUsing(fn (?array $state): string => $state !== null ? implode(', ', $state) : '—')->limit(60),
-                TextColumn::make('health_summary_state')->label('Health')->badge()->placeholder('—'),
-                TextColumn::make('connected_at')->dateTime()->placeholder('—'),
+                // ->state() rather than ->formatStateUsing(?array): the
+                // same Filament single-element-array unwrapping that
+                // crashed Provider Health applies here too — a Plaid Item
+                // with exactly ONE requested product would pass a string
+                // where ?array was declared.
+                TextColumn::make('products')
+                    ->label('Products')
+                    ->state(function (array $record): string {
+                        $products = $record['requested_capabilities_json'] ?? null;
+
+                        if (! is_array($products) || $products === []) {
+                            return 'No products recorded';
+                        }
+
+                        return implode(', ', $products);
+                    })
+                    ->limit(60),
+                TextColumn::make('health_summary_state')
+                    ->label('Health')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => $state === null ? IntegrationDisplay::NOT_CHECKED : \Illuminate\Support\Str::headline($state))
+                    ->color(fn (?string $state): string => IntegrationDisplay::healthColor($state)),
+                TextColumn::make('connected_at')->label('Connected At')->dateTime()->placeholder('Never connected'),
             ])
             ->filters([
                 SelectFilter::make('firm_uuid')
@@ -128,7 +149,8 @@ class PlaidItemOversightResource extends Resource
                         'error' => 'Error',
                     ]),
             ])
-            ->emptyStateHeading('No Plaid Items yet')
+            ->emptyStateHeading('No Plaid Items connected')
+            ->emptyStateDescription('Items appear here after a firm completes Plaid authorization in its own panel. This console never creates a Plaid Item, and never renders a Plaid access token.')
             ->paginated([25, 50, 100]);
     }
 

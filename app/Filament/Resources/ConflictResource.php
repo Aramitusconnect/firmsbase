@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\ConflictResource\Pages\ListConflicts;
+use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Filament\Resources\ConflictResource\Pages\ViewConflict;
 use App\Integrations\Enums\ConflictStatus;
 use App\Integrations\Models\IntegrationConflict;
@@ -139,21 +140,35 @@ class ConflictResource extends Resource
             ])
             ->columns([
                 TextColumn::make('firm_name')->label('Firm')->searchable(),
-                TextColumn::make('provider_display_name')->label('Provider')->placeholder('—'),
-                TextColumn::make('conflict_type')->label('Conflict type'),
-                TextColumn::make('resource_type')->label('Resource type'),
-                TextColumn::make('involved_entity')->label('Involved entity')->placeholder('—'),
+                TextColumn::make('provider')
+                    ->label('Provider')
+                    ->state(fn (array $record): string => filled($record['provider_code'] ?? null)
+                        ? IntegrationDisplay::labelForProviderCode((string) $record['provider_code'])
+                        : IntegrationDisplay::orAbsent($record['provider_display_name'] ?? null, 'Provider not recorded')),
+                TextColumn::make('conflict_type')->label('Conflict Type'),
+                TextColumn::make('resource_type')->label('Resource Type'),
+                TextColumn::make('involved_entity')
+                    ->label('Involved Entity')
+                    // Deliberately only a `local_type #local_id` pointer —
+                    // never a before/after value dump (see the class
+                    // docblock's column allowlist).
+                    ->formatStateUsing(fn (?string $state): string => IntegrationDisplay::orAbsent($state, 'Not recorded')),
                 TextColumn::make('status')
                     ->badge()
-                    ->formatStateUsing(fn (?string $state): string => $state === null ? '—' : Str::headline($state))
+                    ->formatStateUsing(fn (?string $state): string => $state === null ? IntegrationDisplay::UNKNOWN : Str::headline($state))
                     ->color(fn (?string $state): string => match ($state) {
                         'detected', 'awaiting_review' => 'warning',
                         'expired' => 'gray',
                         default => 'success',
                     }),
-                IconColumn::make('requires_manual_review')->label('Manual review')->boolean(),
-                TextColumn::make('detected_at')->label('Detected at')->dateTime(),
-                TextColumn::make('resolved_at')->label('Resolved at')->dateTime()->placeholder('—'),
+                IconColumn::make('requires_manual_review')->label('Manual Review')->boolean(),
+                TextColumn::make('detected_at')->label('Detected At')->dateTime()->sortable(),
+                TextColumn::make('resolved_at')
+                    ->label('Resolved At')
+                    ->dateTime()
+                    // An unresolved conflict is the normal, expected state
+                    // on this monitoring screen — say so plainly.
+                    ->placeholder('Not resolved'),
             ])
             ->recordActions([
                 Action::make('view')

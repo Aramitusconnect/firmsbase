@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Filament\Actions\Platform\DisconnectConnectionAction;
+use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Filament\Resources\ConnectionResource\Pages\ListConnections;
 use App\Filament\Resources\ConnectionResource\Pages\ViewConnection;
 use App\Integrations\Enums\ConnectionStatus;
@@ -191,7 +192,11 @@ class ConnectionResource extends Resource
             ])
             ->columns([
                 TextColumn::make('firm_name')->label('Firm')->searchable()->description(fn (array $record): string => (string) ($record['firm_uuid'] ?? '')),
-                TextColumn::make('provider_display_name')->label('Provider'),
+                TextColumn::make('provider_display_name')
+                    ->label('Provider')
+                    ->state(fn (array $record): string => filled($record['provider_code'] ?? null)
+                        ? IntegrationDisplay::labelForProviderCode((string) $record['provider_code'])
+                        : IntegrationDisplay::orAbsent($record['provider_display_name'] ?? null, 'Provider not recorded')),
                 TextColumn::make('display_label')->label('Connection')->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('status')
                     ->badge()
@@ -203,7 +208,13 @@ class ConnectionResource extends Resource
                         default => 'warning',
                     }),
                 IconColumn::make('entitlement_enabled')->label('Integration Access')->boolean(),
-                TextColumn::make('masked_external_account_id')->label('External account')->placeholder('—')->fontFamily('mono'),
+                // Masked identifier only — never a raw external account
+                // id, never credential material.
+                TextColumn::make('masked_external_account_id')
+                    ->label('External Account')
+                    ->placeholder('Not provided by this provider')
+                    ->fontFamily('mono')
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('credential_active_count')
                     ->label('Credential Health')
                     ->formatStateUsing(function (array $record): string {
@@ -221,32 +232,31 @@ class ConnectionResource extends Resource
                 TextColumn::make('health_summary_state')
                     ->label('Health')
                     ->badge()
-                    ->placeholder('—')
-                    ->formatStateUsing(fn (?string $state): string => $state === null ? '—' : Str::headline($state))
+                    ->formatStateUsing(fn (?string $state): string => $state === null ? IntegrationDisplay::NOT_CHECKED : Str::headline($state))
                     ->color(fn (?string $state): string => match ($state) {
                         'healthy' => 'success',
                         'degraded' => 'warning',
                         'action_required', 'unavailable' => 'danger',
                         default => 'gray',
                     }),
-                TextColumn::make('last_successful_sync_at')->label('Last Successful Sync')->dateTime()->placeholder('—'),
-                TextColumn::make('last_failure_at')->label('Last Failure')->dateTime()->placeholder('—'),
+                TextColumn::make('last_successful_sync_at')->label('Last Successful Sync')->dateTime()->placeholder('Never succeeded'),
+                TextColumn::make('last_failure_at')->label('Last Failure')->dateTime()->placeholder('No failure recorded'),
                 TextColumn::make('next_retry_at')
                     ->label('Retry State')
-                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true)
                     ->formatStateUsing(function (array $record): string {
                         $nextRetryAt = $record['next_retry_at'] ?? null;
                         $consecutiveFailures = (int) ($record['consecutive_failures'] ?? 0);
 
                         if ($nextRetryAt === null && $consecutiveFailures === 0) {
-                            return '—';
+                            return 'No failures, no retry pending';
                         }
 
                         $retryLabel = $nextRetryAt !== null ? Carbon::parse($nextRetryAt)->toDayDateTimeString() : 'none scheduled';
 
                         return "{$consecutiveFailures} consecutive failure(s), next retry: {$retryLabel}";
                     }),
-                TextColumn::make('rate_limited_reset_at')->label('Rate Limit Resets At')->dateTime()->placeholder('Not rate-limited'),
+                TextColumn::make('rate_limited_reset_at')->label('Rate Limit Resets At')->dateTime()->placeholder('Not rate-limited')->toggleable(isToggledHiddenByDefault: true),
                 // Checkpoint 1 (FirmsVault Live Integrations,
                 // checkpoint1-design-health-sandbox.md §A.3.1/§A.4)
                 // additions — one TextColumn per new metrics field.
@@ -254,12 +264,11 @@ class ConnectionResource extends Resource
                 TextColumn::make('total_success_count')->label('Total Successes')->alignEnd()->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('last_operation_label')
                     ->label('Last Operation')
-                    ->placeholder('—')
-                    ->formatStateUsing(fn (?string $state): string => $state === null ? '—' : Str::headline($state))
+                    ->formatStateUsing(fn (?string $state): string => $state === null ? 'No operation recorded' : Str::headline($state))
                     ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('last_latency_ms')->label('Last Latency (ms)')->placeholder('—')->alignEnd()->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('last_sync_lag_seconds')->label('Last Sync Lag (s)')->placeholder('—')->alignEnd()->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('connected_at')->label('Connected at')->dateTime()->placeholder('—'),
+                TextColumn::make('last_latency_ms')->label('Last Latency (ms)')->placeholder(IntegrationDisplay::NOT_MEASURED)->alignEnd()->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('last_sync_lag_seconds')->label('Last Sync Lag (s)')->placeholder(IntegrationDisplay::NOT_MEASURED)->alignEnd()->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('connected_at')->label('Connected At')->dateTime()->placeholder('Never connected')->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('created_at')->label('Created')->dateTime()->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('updated_at')->label('Updated')->dateTime()->toggleable(isToggledHiddenByDefault: true),
             ])
@@ -273,8 +282,8 @@ class ConnectionResource extends Resource
                     ])),
                 DisconnectConnectionAction::make(),
             ])
-            ->emptyStateHeading('No connections found')
-            ->emptyStateDescription('Once a firm connects to a provider, its connection will appear here.')
+            ->emptyStateHeading('No firm integrations yet')
+            ->emptyStateDescription('Connections appear here after a firm authorizes an integration from its own panel. This console never creates a connection — provider authorization is always firm-driven.')
             // Disables Filament's default row-click action/url resolution
             // — mirrors FirmUserResource/PlatformFirmIntegrationDetailPage's
             // identical ->recordAction(null)->recordUrl(null) combination
