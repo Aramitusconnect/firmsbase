@@ -7,6 +7,7 @@ namespace App\Filament\Support\Integrations;
 use App\Integrations\Billing\ProviderBillingClassifier;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\ProviderKey;
+use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\ProviderKillSwitch;
 use App\Models\Firm;
 use App\Services\TenantContextService;
@@ -278,7 +279,7 @@ final class ProviderKillSwitchScope
         foreach ($firmIds as $firmId) {
             try {
                 $counts = $tenantContext->runWithFirmContext((int) $firmId, function () use ($providerCode): array {
-                    $rows = \App\Integrations\Models\FirmIntegration::query()
+                    $rows = FirmIntegration::query()
                         ->join('integration_providers', 'integration_providers.id', '=', 'firm_integrations.integration_provider_id')
                         ->where('integration_providers.code', $providerCode)
                         ->selectRaw('count(*) as total')

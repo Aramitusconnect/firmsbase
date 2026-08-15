@@ -7,9 +7,11 @@ namespace Tests\Feature\Integrations\Admin;
 use App\Enums\PlatformRoleCode;
 use App\Filament\Actions\Platform\CreateProviderKillSwitchAction;
 use App\Filament\Support\Integrations\ProviderKillSwitchScope;
+use App\Integrations\Billing\ProviderBillingClassifier;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\ProviderKillSwitch;
 use App\Models\PlatformAdmin;
+use App\Services\PlatformAdminAuditEventRecorder;
 use App\Services\PlatformRoleService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -105,7 +107,7 @@ final class ProviderKillSwitchGovernanceTest extends TestCase
      */
     public function test_endpoint_category_options_match_the_classifiers_own_categories(): void
     {
-        $classifier = new \App\Integrations\Billing\ProviderBillingClassifier;
+        $classifier = new ProviderBillingClassifier;
         $options = ProviderKillSwitchScope::endpointCategoryOptions();
 
         foreach (array_keys(ProviderKillSwitchScope::productOptions()) as $product) {
@@ -138,7 +140,7 @@ final class ProviderKillSwitchGovernanceTest extends TestCase
 
         foreach ([$executorSource, $resolverSource] as $source) {
             $this->assertStringContainsString(
-                "ProviderKillSwitch::SCOPE_PLATFORM",
+                'ProviderKillSwitch::SCOPE_PLATFORM',
                 (string) $source,
                 'Enforcement still filters on the platform scope — if this ever changes, the console must be revisited before firm scope is offered.',
             );
@@ -175,7 +177,7 @@ final class ProviderKillSwitchGovernanceTest extends TestCase
             'suspended_at' => now(),
         ]);
 
-        app(\App\Services\PlatformAdminAuditEventRecorder::class)->recordPlatformEvent(
+        app(PlatformAdminAuditEventRecorder::class)->recordPlatformEvent(
             $admin,
             'provider_kill_switch_activated',
             CreateProviderKillSwitchAction::AUDIT_CATEGORY,

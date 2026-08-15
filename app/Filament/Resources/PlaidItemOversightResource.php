@@ -19,6 +19,7 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 
 /**
  * PlaidItemOversightResource — FirmsVault Live Integrations, Checkpoint
@@ -130,7 +131,7 @@ class PlaidItemOversightResource extends Resource
                 TextColumn::make('health_summary_state')
                     ->label('Health')
                     ->badge()
-                    ->formatStateUsing(fn (?string $state): string => $state === null ? IntegrationDisplay::NOT_CHECKED : \Illuminate\Support\Str::headline($state))
+                    ->formatStateUsing(fn (?string $state): string => $state === null ? IntegrationDisplay::NOT_CHECKED : Str::headline($state))
                     ->color(fn (?string $state): string => IntegrationDisplay::healthColor($state)),
                 TextColumn::make('connected_at')->label('Connected At')->dateTime()->placeholder('Never connected'),
             ])

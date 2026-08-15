@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Filament\Actions\Platform\RequeueDeadLetterQueueEventAction;
-use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Filament\Resources\DeadLetterQueueResource\Pages\ListDeadLetterQueueEvents;
 use App\Filament\Resources\DeadLetterQueueResource\Pages\ViewDeadLetterQueueEvent;
+use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Integrations\Models\IntegrationOutboxEvent;
 use App\Integrations\Models\IntegrationProvider;
 use App\Models\Firm;

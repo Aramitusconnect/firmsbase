@@ -5,18 +5,23 @@ declare(strict_types=1);
 namespace Tests\Feature\Integrations\Admin;
 
 use App\Enums\PlatformRoleCode;
+use App\Filament\Pages\PlaidAnomalyOversightPage;
 use App\Filament\Pages\PlaidCostOversightPage;
 use App\Filament\Pages\PlatformIntegrationOverviewPage;
+use App\Filament\Pages\PlatformIntegrationUsagePage;
 use App\Filament\Pages\PlatformProviderHealthPage;
+use App\Filament\Pages\PlatformProviderOperationReconciliationPage;
 use App\Filament\Resources\ConflictResource;
 use App\Filament\Resources\ConnectionResource;
 use App\Filament\Resources\DeadLetterQueueResource;
+use App\Filament\Resources\PlaidItemOversightResource;
 use App\Filament\Resources\ProviderKillSwitchResource;
 use App\Filament\Resources\SyncFailureResource;
 use App\Filament\Resources\WebhookEventResource;
 use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Integrations\Enums\ProviderKey;
 use App\Integrations\Models\IntegrationProvider;
+use App\Integrations\Services\PlatformPlaidCostOversightReadService;
 use App\Models\PlatformAdmin;
 use App\Services\PlatformRoleService;
 use Filament\Facades\Filament;
@@ -221,12 +226,12 @@ final class IntegrationOperatorSemanticsTest extends TestCase
         $surfaces = [
             PlatformIntegrationOverviewPage::class,
             PlatformProviderHealthPage::class,
-            \App\Filament\Pages\PlatformProviderOperationReconciliationPage::class,
-            \App\Filament\Pages\PlaidAnomalyOversightPage::class,
+            PlatformProviderOperationReconciliationPage::class,
+            PlaidAnomalyOversightPage::class,
             PlaidCostOversightPage::class,
-            \App\Filament\Pages\PlatformIntegrationUsagePage::class,
+            PlatformIntegrationUsagePage::class,
             ConnectionResource::class,
-            \App\Filament\Resources\PlaidItemOversightResource::class,
+            PlaidItemOversightResource::class,
             ProviderKillSwitchResource::class,
             SyncFailureResource::class,
             WebhookEventResource::class,
@@ -255,7 +260,7 @@ final class IntegrationOperatorSemanticsTest extends TestCase
         $this->assertSame('Integration Overview', PlatformIntegrationOverviewPage::getNavigationLabel());
         $this->assertSame('Integration Conflicts', ConflictResource::getNavigationLabel());
         $this->assertSame('Provider Kill Switches', ProviderKillSwitchResource::getNavigationLabel());
-        $this->assertSame('Plaid Usage Anomalies', \App\Filament\Pages\PlaidAnomalyOversightPage::getNavigationLabel());
+        $this->assertSame('Plaid Usage Anomalies', PlaidAnomalyOversightPage::getNavigationLabel());
 
         // Filament would otherwise derive these from the underlying
         // model and show "Integration Sync Item"/"Integration Outbox
@@ -263,7 +268,7 @@ final class IntegrationOperatorSemanticsTest extends TestCase
         $this->assertSame('Sync Failures', SyncFailureResource::getPluralModelLabel());
         $this->assertSame('Dead-Lettered Events', DeadLetterQueueResource::getPluralModelLabel());
         $this->assertSame('Integration Conflicts', ConflictResource::getPluralModelLabel());
-        $this->assertSame('Plaid Items', \App\Filament\Resources\PlaidItemOversightResource::getPluralModelLabel());
+        $this->assertSame('Plaid Items', PlaidItemOversightResource::getPluralModelLabel());
     }
 
     // ------------------------------------------------------------
@@ -294,7 +299,7 @@ final class IntegrationOperatorSemanticsTest extends TestCase
     {
         $admin = $this->superAdmin();
 
-        $provenance = app(\App\Integrations\Services\PlatformPlaidCostOversightReadService::class)
+        $provenance = app(PlatformPlaidCostOversightReadService::class)
             ->pricingProvenance($admin);
 
         $this->assertFalse($provenance['has_pricing']);

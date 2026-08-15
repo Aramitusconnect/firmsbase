@@ -6,8 +6,8 @@ namespace App\Filament\Resources;
 
 use App\Filament\Actions\Platform\RetrySyncFailureAction;
 use App\Filament\Resources\SyncFailureResource\Pages\ListSyncFailures;
-use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Filament\Resources\SyncFailureResource\Pages\ViewSyncFailure;
+use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Integrations\Enums\SyncItemStatus;
 use App\Integrations\Models\IntegrationProvider;
 use App\Integrations\Models\IntegrationSyncItem;

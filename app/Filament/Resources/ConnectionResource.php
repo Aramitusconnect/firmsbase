@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Filament\Actions\Platform\DisconnectConnectionAction;
-use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Filament\Resources\ConnectionResource\Pages\ListConnections;
 use App\Filament\Resources\ConnectionResource\Pages\ViewConnection;
+use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationProvider;

@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\WebhookEventResource\Pages\ListWebhookEvents;
-use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Filament\Resources\WebhookEventResource\Pages\ViewWebhookEvent;
+use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Integrations\Enums\WebhookInboundEventStatus;
 use App\Integrations\Models\IntegrationInboundWebhookEvent;
 use App\Models\Firm;

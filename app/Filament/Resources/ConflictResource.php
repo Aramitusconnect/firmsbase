@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\ConflictResource\Pages\ListConflicts;
-use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Filament\Resources\ConflictResource\Pages\ViewConflict;
+use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Integrations\Enums\ConflictStatus;
 use App\Integrations\Models\IntegrationConflict;
 use App\Integrations\Models\IntegrationProvider;
