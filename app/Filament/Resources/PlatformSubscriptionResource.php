@@ -12,16 +12,20 @@ use App\Filament\Resources\PlatformSubscriptionResource\Pages\ViewPlatformSubscr
 use App\Models\Plan;
 use App\Models\PlatformAdmin;
 use App\Models\PlatformSubscription;
+use App\Services\PlatformBillingCommercialOverviewService;
 use App\Services\PlatformStaffAccessPolicyService;
+use App\Support\MoneyDisplay;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
@@ -66,6 +70,8 @@ class PlatformSubscriptionResource extends Resource
 
     protected static string|\UnitEnum|null $navigationGroup = 'Billing & Commercial';
 
+    protected static ?int $navigationSort = 21;
+
     protected static ?string $recordTitleAttribute = 'uuid';
 
     /**
@@ -95,16 +101,50 @@ class PlatformSubscriptionResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['billingAccount', 'plan']))
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query
+                ->with(['billingAccount.organization', 'plan'])
+                // Pushed into SQL as a scalar subquery — the recurring
+                // amount below must never trigger a per-row load of a
+                // subscription's line items.
+                ->withSum('items as items_cents', DB::raw('quantity * unit_amount_cents')))
             ->columns([
                 TextColumn::make('billingAccount.name')
                     ->label('Billing account')
                     ->searchable()
                     ->sortable(),
+                TextColumn::make('billingAccount.organization.name')
+                    ->label('Organization')
+                    ->placeholder('Not consolidated')
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('plan.name')
                     ->label('Plan')
                     ->searchable()
                     ->sortable(),
+                /**
+                 * The subscription's recurring amount for its own
+                 * billing interval. A platform subscription stores no
+                 * price of its own — only plan_id — so the plan's
+                 * current price IS its price, plus any line items. That
+                 * is safe to render as authoritative here precisely
+                 * because PlanService::update() refuses to change a
+                 * plan's price_cents or billing_interval once any
+                 * subscription or firm license references it: a
+                 * subscriber's financial terms cannot move underneath
+                 * them. Not sortable — it is a computed composite, and
+                 * offering a sort that silently ordered by only part of
+                 * it would be worse than offering none.
+                 */
+                TextColumn::make('recurring_amount')
+                    ->label('Amount')
+                    ->state(fn (PlatformSubscription $record): string => MoneyDisplay::fromCents(
+                        (int) ($record->plan?->price_cents ?? 0) + (int) ($record->items_cents ?? 0),
+                        PlatformBillingCommercialOverviewService::CURRENCY,
+                    ))
+                    ->description(fn (PlatformSubscription $record): string => 'per '.Str::lower(
+                        Str::headline($record->billing_interval->value)
+                    ).' term')
+                    ->alignEnd(),
                 TextColumn::make('status')
                     ->badge()
                     ->formatStateUsing(fn (PlatformSubscriptionStatus $state): string => Str::headline($state->value))
@@ -155,6 +195,20 @@ class PlatformSubscriptionResource extends Resource
                     ->options(collect(BillingInterval::cases())
                         ->mapWithKeys(fn (BillingInterval $interval): array => [$interval->value => Str::headline($interval->value)])
                         ->all()),
+                TernaryFilter::make('cancel_at_period_end')
+                    ->label('Cancelling at period end')
+                    ->placeholder('Any')
+                    ->trueLabel('Scheduled to cancel')
+                    ->falseLabel('Not cancelling'),
+
+                // Deliberately NO billing-account select filter. Building
+                // its options would mean plucking every billing account
+                // in the platform into PHP on every render — an
+                // unbounded load that grows with the customer base,
+                // unlike the plan filter above (plans are a small,
+                // deliberately-curated catalog). The billing account
+                // column is already searchable, which answers the same
+                // question without the unbounded query.
             ])
             ->recordActions([
                 CancelSubscriptionAction::make(),

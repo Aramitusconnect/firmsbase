@@ -71,6 +71,8 @@ class PlanAddOnResource extends Resource
 
     protected static string|\UnitEnum|null $navigationGroup = 'Billing & Commercial';
 
+    protected static ?int $navigationSort = 11;
+
     protected static ?string $recordTitleAttribute = 'module_code';
 
     /**
