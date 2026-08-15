@@ -10,6 +10,7 @@ use App\Marketplace\Enums\DirectoryImportRowStatus;
 use App\Marketplace\Enums\DirectoryPublicationState;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Models\DirectoryImportBatch;
+use App\Marketplace\Models\DirectoryImportRow;
 use App\Marketplace\Models\DirectoryProfileVersion;
 use App\Marketplace\Services\MarketplaceCsvIngestionService;
 use App\Marketplace\Services\MarketplaceImportApplyService;
@@ -21,6 +22,7 @@ use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 /**
@@ -152,6 +154,249 @@ final class CsvImportWorkflowTest extends TestCase
 
         $this->assertSame(1, $batch->total_rows);
         $this->assertSame('Acme Legal PLLC', $batch->rows()->first()->raw_data['legal_name']);
+    }
+
+    // ------------------------------------------------------------
+    // MyAttorney final hardening mission — path traversal (finding 5).
+    // ------------------------------------------------------------
+
+    public function test_a_path_traversal_original_filename_cannot_escape_the_quarantine_directory(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER."Acme Legal PLLC,Acme Legal,,,,,,,,\n";
+
+        $batch = $this->ingestion->ingest($this->csvFile($csv, '../../../../evil.csv'), $admin);
+
+        $this->assertSame(1, $batch->total_rows, 'A hostile filename must not block a legitimate CSV from importing.');
+        $this->assertFalse(Storage::disk('local')->exists('evil.csv'), 'The quarantine write must never land outside marketplace-imports/quarantine/, at the disk root or anywhere else.');
+        $this->assertStringEndsWith('.csv', $batch->original_filename);
+        $this->assertStringNotContainsString('/', $batch->original_filename, 'The stored display filename must never itself contain a path separator.');
+        $this->assertStringNotContainsString('..', $batch->original_filename);
+    }
+
+    public function test_a_windows_style_path_traversal_filename_is_also_neutralized(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER."Acme Legal PLLC,Acme Legal,,,,,,,,\n";
+
+        $batch = $this->ingestion->ingest($this->csvFile($csv, '..\\..\\..\\evil.csv'), $admin);
+
+        $this->assertSame(1, $batch->total_rows);
+        $this->assertStringNotContainsString('\\', $batch->original_filename);
+        $this->assertStringNotContainsString('/', $batch->original_filename);
+    }
+
+    public function test_no_quarantine_file_is_left_behind_after_a_hostile_filename_upload(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER."Acme Legal PLLC,Acme Legal,,,,,,,,\n";
+        $before = collect(Storage::disk('local')->allFiles('marketplace-imports/quarantine'));
+
+        $this->ingestion->ingest($this->csvFile($csv, '../../evil.csv'), $admin);
+
+        $after = collect(Storage::disk('local')->allFiles('marketplace-imports/quarantine'));
+        $this->assertCount($before->count(), $after, 'The quarantine copy must always be cleaned up, regardless of the original filename.');
+    }
+
+    // ------------------------------------------------------------
+    // MyAttorney final hardening mission — content validation (finding 2).
+    // ------------------------------------------------------------
+
+    public function test_a_binary_payload_renamed_dot_csv_is_rejected(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        // PNG magic bytes.
+        $payload = "\x89PNG\r\n\x1a\n".random_bytes(64);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->ingestion->ingest($this->csvFile($payload, 'looks-like.csv'), $admin);
+    }
+
+    public function test_a_windows_executable_renamed_dot_csv_is_rejected(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $payload = 'MZ'.str_repeat("\x90", 62);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->ingestion->ingest($this->csvFile($payload, 'setup.csv'), $admin);
+    }
+
+    public function test_a_zip_family_archive_renamed_dot_csv_is_rejected(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $payload = "PK\x03\x04".random_bytes(32);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->ingestion->ingest($this->csvFile($payload, 'archive.csv'), $admin);
+    }
+
+    public function test_a_nul_byte_containing_file_is_rejected(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $payload = self::HEADER."Acme\x00Legal,Acme,,,,,,,,\n";
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->ingestion->ingest($this->csvFile($payload), $admin);
+    }
+
+    public function test_invalid_utf8_content_is_rejected(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        // \xFF is never valid as a UTF-8 leading byte.
+        $payload = self::HEADER."Acme Legal PLLC,Acme\xFF Legal,,,,,,,,\n";
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->ingestion->ingest($this->csvFile($payload), $admin);
+    }
+
+    public function test_an_empty_file_is_handled_safely_not_a_fatal_error(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->ingestion->ingest($this->csvFile(''), $admin);
+
+        $this->assertSame(0, DirectoryImportBatch::query()->count());
+    }
+
+    public function test_a_normal_valid_csv_is_completely_unaffected_by_content_validation(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER."Café Legal PLLC,Café Legal,,,,Über-friendly firm.,,,,\n"; // real multibyte UTF-8
+
+        $batch = $this->ingestion->ingest($this->csvFile($csv), $admin);
+
+        $this->assertSame(1, $batch->total_rows);
+        $this->assertSame(DirectoryImportRowStatus::Pending, $batch->rows()->first()->status);
+    }
+
+    // ------------------------------------------------------------
+    // MyAttorney final hardening mission — row limit (finding 3).
+    // ------------------------------------------------------------
+
+    public function test_a_csv_at_exactly_the_row_limit_is_accepted(): void
+    {
+        config(['marketplace.import_max_rows' => 3]);
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER.str_repeat("Acme Legal PLLC,Acme Legal,,,,,,,,\n", 3);
+
+        $batch = $this->ingestion->ingest($this->csvFile($csv), $admin);
+
+        $this->assertSame(3, $batch->total_rows);
+    }
+
+    public function test_a_csv_one_row_below_the_limit_is_accepted(): void
+    {
+        config(['marketplace.import_max_rows' => 3]);
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER.str_repeat("Acme Legal PLLC,Acme Legal,,,,,,,,\n", 2);
+
+        $batch = $this->ingestion->ingest($this->csvFile($csv), $admin);
+
+        $this->assertSame(2, $batch->total_rows);
+    }
+
+    public function test_a_csv_one_row_over_the_limit_is_rejected_with_no_batch_created(): void
+    {
+        config(['marketplace.import_max_rows' => 3]);
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER.str_repeat("Acme Legal PLLC,Acme Legal,,,,,,,,\n", 4);
+
+        $this->expectException(\InvalidArgumentException::class);
+        try {
+            $this->ingestion->ingest($this->csvFile($csv), $admin);
+        } finally {
+            $this->assertSame(0, DirectoryImportBatch::query()->count(), 'An over-limit CSV must create no batch and no rows at all — never a partial import.');
+            $this->assertSame(0, DirectoryImportRow::query()->count());
+        }
+    }
+
+    public function test_a_pathologically_large_single_row_is_flagged_invalid_not_fatal(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER.'Acme Legal PLLC,'.str_repeat('x', 70_000).",,,,,,,,\n";
+
+        $batch = $this->ingestion->ingest($this->csvFile($csv), $admin);
+
+        $this->assertSame(1, $batch->total_rows);
+        $this->assertSame(DirectoryImportRowStatus::Invalid, $batch->rows()->first()->status);
+    }
+
+    // ------------------------------------------------------------
+    // MyAttorney final hardening mission — import lifecycle audit (finding 4).
+    // ------------------------------------------------------------
+
+    public function test_upload_writes_an_audit_event(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER."Acme Legal PLLC,Acme Legal,,,,,,,,\n";
+
+        $batch = $this->ingestion->ingest($this->csvFile($csv), $admin);
+
+        $event = app(TenantContextService::class)->runWithoutFirmContext(fn () => SecurityEvent::query()
+            ->whereNull('firm_id')
+            ->where('event_type', 'marketplace_import_uploaded')
+            ->orderByDesc('id')
+            ->first());
+
+        $this->assertNotNull($event);
+        $this->assertSame($admin->id, $event->actor_id);
+        $metadata = $event->metadata;
+        $this->assertSame($batch->id, $metadata['directory_import_batch_id']);
+        $this->assertSame(1, $metadata['total_rows']);
+        $this->assertArrayNotHasKey('raw_data', $metadata);
+    }
+
+    public function test_validate_writes_an_audit_event_only_when_an_actor_is_supplied(): void
+    {
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER."Acme Legal PLLC,Acme Legal,,,,,,,,\n";
+        $batch = $this->ingestion->ingest($this->csvFile($csv), $admin);
+
+        $this->validation->validateBatch($batch->fresh());
+        $noActorCount = app(TenantContextService::class)->runWithoutFirmContext(fn () => SecurityEvent::query()->where('event_type', 'marketplace_import_validated')->count());
+        $this->assertSame(0, $noActorCount, 'No actor supplied means no audit event — matches every other optional-actor audit call site in this codebase.');
+
+        $this->validation->validateBatch($batch->fresh(), $admin);
+        $event = app(TenantContextService::class)->runWithoutFirmContext(fn () => SecurityEvent::query()->where('event_type', 'marketplace_import_validated')->orderByDesc('id')->first());
+        $this->assertNotNull($event);
+        $this->assertSame($admin->id, $event->actor_id);
+    }
+
+    public function test_duplicate_detection_writes_an_audit_event(): void
+    {
+        DirectoryFirm::factory()->create(['display_name' => 'Acme Legal', 'name_normalized' => 'acme legal']);
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER."Acme Legal PLLC,Acme Legal,,,,,,,,\n";
+        $batch = $this->ingestion->ingest($this->csvFile($csv), $admin);
+        $this->validation->validateBatch($batch->fresh());
+
+        $this->duplicates->detectBatch($batch->fresh(), $admin);
+
+        $event = app(TenantContextService::class)->runWithoutFirmContext(fn () => SecurityEvent::query()
+            ->where('event_type', 'marketplace_import_duplicates_evaluated')
+            ->orderByDesc('id')
+            ->first());
+        $this->assertNotNull($event);
+        $this->assertSame(1, $event->metadata['duplicate_rows']);
+    }
+
+    public function test_import_audit_events_never_carry_raw_row_content(): void
+    {
+        DirectoryFirm::factory()->create(['display_name' => 'Acme Legal', 'name_normalized' => 'acme legal']);
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER."Acme Legal PLLC,Acme Legal,5555550100,,SensitiveDescriptionText,,,,,\n";
+        $batch = $this->ingestion->ingest($this->csvFile($csv), $admin);
+        $this->validation->validateBatch($batch->fresh(), $admin);
+        $this->duplicates->detectBatch($batch->fresh(), $admin);
+
+        $events = app(TenantContextService::class)->runWithoutFirmContext(fn () => SecurityEvent::query()->where('category', 'marketplace_import')->get());
+        $this->assertGreaterThan(0, $events->count());
+        foreach ($events as $event) {
+            $serialized = json_encode($event->metadata);
+            $this->assertStringNotContainsString('SensitiveDescriptionText', $serialized);
+            $this->assertStringNotContainsString('5555550100', $serialized);
+        }
     }
 
     // ------------------------------------------------------------

@@ -16,7 +16,9 @@ use App\Marketplace\Services\MarketplaceCsvIngestionService;
 use App\Marketplace\Services\MarketplaceImportDuplicateDetectionService;
 use App\Marketplace\Services\MarketplaceImportValidationService;
 use App\Models\PlatformAdmin;
+use App\Models\SecurityEvent;
 use App\Services\PlatformRoleService;
+use App\Services\TenantContextService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -141,5 +143,58 @@ final class DirectoryImportBatchOperationsTest extends TestCase
         $this->actingAs($admin, 'platform_admin');
 
         $this->get(DirectoryImportBatchResource::getUrl('index'))->assertForbidden();
+    }
+
+    /**
+     * MyAttorney final hardening mission, finding 4 — the Action's own
+     * catch block (not the ingestion service directly, which never
+     * sees a rejection this early) is what actually records
+     * `marketplace_import_rejected` in real UI usage.
+     */
+    public function test_a_rejected_upload_writes_an_audit_event_via_the_action(): void
+    {
+        Storage::fake('local');
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $test = Livewire::test(ListDirectoryImportBatches::class);
+        $test->mountAction(UploadDirectoryImportBatchAction::getDefaultName());
+        $test->set('mountedActions.0.data.file', UploadedFile::fake()->createWithContent('bad.csv', "not,the,right,headers\n1,2,3,4\n"));
+        $test->callMountedAction();
+
+        $event = app(TenantContextService::class)->runWithoutFirmContext(fn () => SecurityEvent::query()
+            ->where('event_type', 'marketplace_import_rejected')
+            ->orderByDesc('id')
+            ->first());
+
+        $this->assertNotNull($event);
+        $this->assertSame($admin->id, $event->actor_id);
+        $this->assertSame('bad.csv', $event->metadata['original_filename']);
+    }
+
+    /**
+     * MyAttorney final hardening mission, finding 5 — end-to-end proof
+     * (through the real mounted-Filament-Action flow, not just a
+     * direct service call) that a hostile original filename never
+     * reaches the quarantine disk as a literal path component and
+     * never blocks an otherwise-legitimate import.
+     */
+    public function test_a_hostile_filename_through_the_real_upload_action_is_neutralized(): void
+    {
+        Storage::fake('local');
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $test = Livewire::test(ListDirectoryImportBatches::class);
+        $test->mountAction(UploadDirectoryImportBatchAction::getDefaultName());
+        $test->set('mountedActions.0.data.file', UploadedFile::fake()->createWithContent('../../../../evil.csv', $this->sampleCsv()));
+        $test->callMountedAction();
+        $test->assertHasNoActionErrors();
+
+        $this->assertFalse(Storage::disk('local')->exists('evil.csv'));
+        $batch = DirectoryImportBatch::query()->latest('id')->first();
+        $this->assertNotNull($batch);
+        $this->assertSame(1, $batch->total_rows);
+        $this->assertStringNotContainsString('/', $batch->original_filename);
     }
 }

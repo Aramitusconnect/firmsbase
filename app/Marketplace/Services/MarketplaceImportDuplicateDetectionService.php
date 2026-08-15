@@ -9,6 +9,8 @@ use App\Marketplace\Enums\DirectoryImportRowStatus;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Models\DirectoryImportBatch;
 use App\Marketplace\Models\DirectoryImportRow;
+use App\Models\PlatformAdmin;
+use App\Services\PlatformAdminAuditEventRecorder;
 
 /**
  * MarketplaceImportDuplicateDetectionService — Mission 2 (MyAttorney
@@ -33,7 +35,17 @@ use App\Marketplace\Models\DirectoryImportRow;
  */
 class MarketplaceImportDuplicateDetectionService
 {
-    public function detectBatch(DirectoryImportBatch $batch): DirectoryImportBatch
+    public function __construct(
+        private readonly PlatformAdminAuditEventRecorder $audit = new PlatformAdminAuditEventRecorder,
+    ) {}
+
+    /**
+     * $actor is optional — see MarketplaceImportValidationService::
+     * validateBatch()'s own docblock for why. When supplied, records a
+     * `marketplace_import_duplicates_evaluated` audit event (MyAttorney
+     * final hardening mission, finding 4).
+     */
+    public function detectBatch(DirectoryImportBatch $batch, ?PlatformAdmin $actor = null): DirectoryImportBatch
     {
         $duplicateCount = 0;
 
@@ -48,7 +60,17 @@ class MarketplaceImportDuplicateDetectionService
             'duplicate_rows' => $duplicateCount,
         ]);
 
-        return $batch->fresh();
+        $fresh = $batch->fresh();
+
+        if ($actor !== null) {
+            $this->audit->recordPlatformEvent($actor, 'marketplace_import_duplicates_evaluated', 'marketplace_import', [
+                'directory_import_batch_id' => $fresh->id,
+                'directory_import_batch_uuid' => (string) $fresh->uuid,
+                'duplicate_rows' => $duplicateCount,
+            ]);
+        }
+
+        return $fresh;
     }
 
     public function detectRow(DirectoryImportRow $row): ?DirectoryFirm

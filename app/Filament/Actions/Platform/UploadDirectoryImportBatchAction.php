@@ -9,6 +9,7 @@ use App\Marketplace\Services\MarketplaceCsvIngestionService;
 use App\Marketplace\Services\MarketplaceImportDuplicateDetectionService;
 use App\Marketplace\Services\MarketplaceImportValidationService;
 use App\Models\PlatformAdmin;
+use App\Services\PlatformAdminAuditEventRecorder;
 use App\Services\PlatformStaffAccessPolicyService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
@@ -41,6 +42,18 @@ use Illuminate\Support\Facades\Storage;
  * MarketplaceCsvIngestionService::ingest(), which immediately moves it
  * into its own quarantine path, scans it, and deletes the original —
  * this action never bypasses that scan/quarantine step.
+ *
+ * MyAttorney final hardening mission, finding 5: this field
+ * deliberately does NOT call ->preserveFilenames() — Filament's own
+ * vendor docblock on that method states plainly that "preserving
+ * user-provided filenames on local ... disks can allow PHP file
+ * execution" and recommends exactly the fix applied here:
+ * ->storeFileNamesIn() to capture the true original client filename
+ * into its own Livewire state key while Filament stores the temp
+ * upload itself under a random ULID name. MarketplaceCsvIngestionService
+ * independently sanitizes whatever original filename it is given
+ * before ever using it in a storage path (defense in depth — this
+ * action's own fix does not depend on the service's, or vice versa).
  */
 class UploadDirectoryImportBatchAction extends Action
 {
@@ -61,14 +74,14 @@ class UploadDirectoryImportBatchAction extends Action
                 ->disk('local')
                 ->directory('marketplace-imports/uploads')
                 ->visibility('private')
-                ->preserveFilenames()
+                ->storeFileNamesIn('original_client_filename')
                 ->acceptedFileTypes(['text/csv', 'text/plain', 'application/vnd.ms-excel'])
                 ->maxSize(25_600)
                 ->required(),
         ]);
         $this->modalDescription('Uploads, virus-scans, validates, and checks for duplicates against the existing directory. The batch will require Source Rights confirmation before it can be applied.');
 
-        $this->action(function (array $data, PlatformStaffAccessPolicyService $accessPolicy): void {
+        $this->action(function (array $data, PlatformStaffAccessPolicyService $accessPolicy, PlatformAdminAuditEventRecorder $audit): void {
             $actor = Auth::guard('platform_admin')->user();
 
             if (! $actor instanceof PlatformAdmin) {
@@ -91,20 +104,34 @@ class UploadDirectoryImportBatchAction extends Action
                 return;
             }
 
+            // The FileUpload field no longer calls ->preserveFilenames()
+            // (see this class's own docblock — finding 5), so
+            // $storedPath is a random ULID-named file; the true
+            // original client filename lives in the separate
+            // storeFileNamesIn() state key instead. Falls back to the
+            // (safe, ULID) stored basename only if that key is somehow
+            // absent, never to any part of the raw client path.
+            $originalFilename = is_string($data['original_client_filename'] ?? null) && $data['original_client_filename'] !== ''
+                ? $data['original_client_filename']
+                : basename($storedPath);
             $absolutePath = Storage::disk('local')->path($storedPath);
-            $originalFilename = basename($storedPath);
             $mimeType = Storage::disk('local')->mimeType($storedPath) ?: 'text/csv';
             $uploadedFile = new UploadedFile($absolutePath, $originalFilename, $mimeType, null, true);
 
             try {
                 $batch = app(MarketplaceCsvIngestionService::class)->ingest($uploadedFile, $actor);
-                $batch = app(MarketplaceImportValidationService::class)->validateBatch($batch);
-                $batch = app(MarketplaceImportDuplicateDetectionService::class)->detectBatch($batch);
+                $batch = app(MarketplaceImportValidationService::class)->validateBatch($batch, $actor);
+                $batch = app(MarketplaceImportDuplicateDetectionService::class)->detectBatch($batch, $actor);
 
                 Notification::make()->title('Import batch created: '.$batch->valid_rows.' valid, '.$batch->invalid_rows.' invalid, '.$batch->duplicate_rows.' duplicate row(s).')->success()->send();
 
                 $this->redirect(DirectoryImportBatchResource::getUrl('view', ['record' => $batch]));
             } catch (\Throwable $e) {
+                $audit->recordPlatformEvent($actor, 'marketplace_import_rejected', 'marketplace_import', [
+                    'original_filename' => $originalFilename,
+                    'reason' => $e->getMessage(),
+                ]);
+
                 Notification::make()->title('Import failed')->body($e->getMessage())->danger()->send();
             } finally {
                 Storage::disk('local')->delete($storedPath);

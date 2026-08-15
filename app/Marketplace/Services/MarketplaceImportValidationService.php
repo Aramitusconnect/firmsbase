@@ -8,6 +8,8 @@ use App\Marketplace\Enums\DirectoryImportBatchStatus;
 use App\Marketplace\Enums\DirectoryImportRowStatus;
 use App\Marketplace\Models\DirectoryImportBatch;
 use App\Marketplace\Models\DirectoryImportRow;
+use App\Models\PlatformAdmin;
+use App\Services\PlatformAdminAuditEventRecorder;
 use Illuminate\Support\Str;
 
 /**
@@ -21,7 +23,19 @@ use Illuminate\Support\Str;
  */
 class MarketplaceImportValidationService
 {
-    public function validateBatch(DirectoryImportBatch $batch): DirectoryImportBatch
+    public function __construct(
+        private readonly PlatformAdminAuditEventRecorder $audit = new PlatformAdminAuditEventRecorder,
+    ) {}
+
+    /**
+     * $actor is optional — every existing test/call site that predates
+     * the MyAttorney final hardening mission (finding 4) calls this
+     * without one, and the row-level validation result is unaffected
+     * either way. When supplied, records a `marketplace_import_validated`
+     * audit event via the canonical PlatformAdminAuditEventRecorder —
+     * never a second/parallel audit mechanism.
+     */
+    public function validateBatch(DirectoryImportBatch $batch, ?PlatformAdmin $actor = null): DirectoryImportBatch
     {
         $validCount = 0;
         $invalidCount = $batch->rows()->where('status', DirectoryImportRowStatus::Invalid->value)->count();
@@ -42,7 +56,18 @@ class MarketplaceImportValidationService
             'invalid_rows' => $invalidCount,
         ]);
 
-        return $batch->fresh();
+        $fresh = $batch->fresh();
+
+        if ($actor !== null) {
+            $this->audit->recordPlatformEvent($actor, 'marketplace_import_validated', 'marketplace_import', [
+                'directory_import_batch_id' => $fresh->id,
+                'directory_import_batch_uuid' => (string) $fresh->uuid,
+                'valid_rows' => $validCount,
+                'invalid_rows' => $invalidCount,
+            ]);
+        }
+
+        return $fresh;
     }
 
     public function validateRow(DirectoryImportRow $row): DirectoryImportRow

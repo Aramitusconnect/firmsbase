@@ -44,4 +44,25 @@ return [
 
     'intake_retention_days' => env('MARKETPLACE_INTAKE_RETENTION_DAYS', 90),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Directory CSV Import Row Limit
+    |--------------------------------------------------------------------------
+    |
+    | MyAttorney SuperAdmin final hardening mission. The existing 25MB
+    | byte-size cap (MarketplaceCsvIngestionService::MAX_SIZE_BYTES) is
+    | insufficient on its own — a pathological CSV of many very short
+    | rows could still stay under 25MB while creating an unbounded
+    | number of directory_import_rows records. MarketplaceCsvIngestionService
+    | rejects (before creating any batch/row records) once a parsed CSV
+    | exceeds this many data rows (header excluded). 5,000 is generous
+    | for this catalog's real scale (a Michigan-scoped directory — see
+    | MarketplaceImportDuplicateDetectionService's own docblock on why
+    | duplicate detection is not built to scale past this) while still
+    | bounding worst-case memory and per-request row creation.
+    |
+    */
+
+    'import_max_rows' => env('MARKETPLACE_IMPORT_MAX_ROWS', 5000),
+
 ];
