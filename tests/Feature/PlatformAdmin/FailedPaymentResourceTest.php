@@ -110,14 +110,38 @@ final class FailedPaymentResourceTest extends TestCase
 
     // --- Honesty disclosure ---
 
+    /**
+     * Billing & Commercial Control Plane pass: this disclosure moved
+     * from the empty state onto ListFailedPayments::getSubheading(), so
+     * it is visible even when the page is FULL of failed payments —
+     * exactly when an operator would otherwise go looking for a Retry
+     * button. Asserted with a failed attempt present for that reason.
+     */
     public function test_the_list_page_discloses_why_no_retry_or_waive_action_exists(): void
     {
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
         $this->actingAs($admin, 'platform_admin');
 
+        PlatformPaymentAttempt::factory()->failed()->create();
+
         $response = $this->get(FailedPaymentResource::getUrl());
         $response->assertOk();
-        $response->assertSee('FakeStripeGateway');
+        $response->assertSee('Payment recovery is not operational');
+        $response->assertSee('no production payment gateway is configured');
+    }
+
+    public function test_the_list_page_does_not_fabricate_a_retry_schedule_or_recovery_rate(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        PlatformPaymentAttempt::factory()->failed()->create();
+
+        $response = $this->get(FailedPaymentResource::getUrl());
+        $response->assertOk();
+        $response->assertSee('no next-retry or recovery-rate figure is');
+        $response->assertDontSee('Recovery rate');
+        $response->assertDontSee('Next retry');
     }
 
     public function test_the_view_page_discloses_related_failed_payment_records(): void

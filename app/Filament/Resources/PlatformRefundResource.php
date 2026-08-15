@@ -38,23 +38,38 @@ use Illuminate\Support\Str;
  * positive-proof tests.
  *
  * No "Issue Refund" action: PlatformRefundService::refund() requires a
- * live StripeGateway instance and the only implementation anywhere in
- * this codebase is FakeStripeGateway — explicitly forbidden from making
- * a real Stripe API call and not even bound in the container. The
- * remaining-refundable-balance validation inside refund() is real and
- * safe, but the actual money-movement step is always simulated in this
- * codebase — exposing an "Issue Refund" action here would create the
- * false appearance of a real financial action. This mirrors the exact
+ * live StripeGateway instance, and no production-capable implementation
+ * of that interface exists in this codebase.
+ *
+ * Billing & Commercial Control Plane pass — gateway-truth correction.
+ * The Phase 3 docblock this replaces said FakeStripeGateway was "not
+ * even bound in the container"; that is no longer accurate and the
+ * user-facing copy below was corrected with it. AppServiceProvider DOES
+ * bind StripeGateway today, via
+ * PaymentGatewaySimulationPolicyService::isSimulationEnabled():
+ *   - testing, and local with PAYMENT_GATEWAY_SIMULATION_ENABLED=true
+ *     → FakeStripeGateway (simulated; never a real Stripe call),
+ *   - staging, production, everything else → UnavailablePaymentGateway,
+ *     whose createRefund() throws PaymentProviderUnavailableException
+ *     immediately rather than returning a fabricated
+ *     ['status' => 'succeeded'] shape.
+ * So the correct statement is stronger than the old one, not weaker:
+ * in the environments an operator actually uses this console from, a
+ * refund cannot execute at all. The remaining-refundable-balance
+ * validation inside refund() is real, safe, and now row-locked, but the
+ * money-movement step has no production path. This mirrors the exact
  * same structural limitation as FailedPaymentResource's missing
  * "Retry" action.
  *
- * "Credits": see this class's own ViewPlatformRefund page for the
- * separate, clearly-labeled disclosure section — no Credit model,
- * table, or service exists anywhere in this codebase for platform
- * billing (confirmed by the Phase 3 architecture investigation:
- * `grep -rl "class.*Credit" app/Models` returns nothing, no `credits`
- * migration exists). This Resource does not fabricate a credits table
- * or leave a silently-empty section with no explanation.
+ * Navigation label: "Refunds", NOT the Phase 3 "Credits and Refunds".
+ * Re-confirmed at this pass's HEAD that no Credit model, credits
+ * migration, or credit service exists anywhere in this codebase for
+ * platform billing — this resource is backed by `platform_refunds`
+ * alone. A combined label implied a Credit capability the backend does
+ * not have, and Credits and Refunds are financially different things (a
+ * credit reduces what a customer owes; a refund returns money already
+ * collected). The Credit gap is disclosed explicitly on this Resource's
+ * own List and View pages rather than implied by a label.
  */
 class PlatformRefundResource extends Resource
 {
@@ -64,7 +79,7 @@ class PlatformRefundResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedReceiptRefund;
 
-    protected static ?string $navigationLabel = 'Credits and Refunds';
+    protected static ?string $navigationLabel = 'Refunds';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Billing & Commercial';
 
@@ -125,8 +140,9 @@ class PlatformRefundResource extends Resource
             ])
             ->emptyStateHeading('No refunds found')
             ->emptyStateDescription(
-                'No "Issue Refund" action exists here — the only payment gateway in this codebase (FakeStripeGateway) '.
-                'cannot move real money. See this resource\'s View page for the separate Credits disclosure.'
+                'No "Issue Refund" action exists here — no production-capable payment gateway is configured, so a '.
+                'refund cannot execute. Credits are a separate concept and are not implemented at all in this '.
+                'codebase; this page shows refunds only. See any refund\'s View page for both disclosures in full.'
             )
             ->defaultSort('requested_at', 'desc')
             ->paginated([25, 50, 100]);

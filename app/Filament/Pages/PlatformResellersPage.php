@@ -4,83 +4,67 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
-use App\Enums\CommissionEventStatus;
-use App\Enums\CommissionEventType;
-use App\Models\CommissionEvent;
 use App\Models\PlatformAdmin;
 use App\Services\PlatformStaffAccessPolicyService;
-use App\Support\MoneyDisplay;
 use BackedEnum;
 use Filament\Pages\Page;
-use Filament\Schemas\Components\EmbeddedTable;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Text;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
-use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Concerns\InteractsWithTable;
-use Filament\Tables\Contracts\HasTable;
-use Filament\Tables\Filters\SelectFilter;
-use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Str;
 
 /**
- * PlatformResellersPage — Phase 3 (FirmsVault Platform Admin Control
- * Center, "Billing and Commercial Administration"). A structurally
- * required nav item ("Resellers") with NO matching backend concept —
- * follows this mission's own established rule for exactly this
- * situation ("when a module is structurally required but backend
- * support is incomplete: build a safe read-only status page; clearly
- * label the limitation; do not fabricate data").
+ * PlatformResellersPage — "Reseller Readiness". A structurally required
+ * nav item with NO matching backend concept, following this console's
+ * established rule for exactly that situation: build a safe read-only
+ * status page, state the limitation plainly, fabricate nothing.
  *
- * The Phase 3 architecture investigation's own exhaustive search
- * (`grep -ril "reseller" .` across the entire repo, excluding vendor/)
- * returned ZERO matches — independently re-confirmed here. No
- * Reseller/Partner model, migration, service, enum, or Filament
- * resource exists anywhere in this codebase.
+ * Re-confirmed at this pass's HEAD rather than inherited from the Phase
+ * 3 report: no Reseller or Partner model, migration, table, service,
+ * enum, or Filament resource exists anywhere in this codebase.
  *
- * This page therefore carries TWO clearly, separately labeled sections:
- *  1. A prominent, honest disclosure (at the top, before anything else
- *     renders) that no reseller/partner account system exists.
- *  2. "Internal Sales Commission Data (not a reseller/partner system)"
- *     — real, accurate, read-only data from CommissionPlan/
- *     CommissionEvent, the only adjacent backend concept, honestly
- *     labeled for what it actually is: internal FirmsVault sales-rep
- *     commission tracking (a FirmsVault employee earning commission for
- *     closing/expanding a deal), never presented as reseller/partner
- *     management. See CommissionEvent's own docblock and
- *     `platform_admin_id`/the factory's `attributedTo()` state for the
- *     confirming evidence.
+ * BILLING & COMMERCIAL CONTROL PLANE PASS — WHAT CHANGED AND WHY
+ * -------------------------------------------------------------
+ * Phase 3 built this page with TWO sections: the reseller disclosure,
+ * plus an embedded CommissionEvent table labeled "Internal Sales
+ * Commission Data (not a reseller/partner system)". The labeling was
+ * honest, but the structure was not: real employee-commission data sat
+ * under a nav item reading "Resellers", so the navigation itself
+ * asserted a capability the backend does not have, and an operator
+ * scanning the sidebar would reasonably conclude reseller commissions
+ * were being tracked.
  *
- * NO mutating action is registered anywhere in this class. CommissionEventService::
- * markPaid()/reverse() are real, safe, audited-adjacent methods, but
- * exposing them was not part of this phase's "Resellers" requirement and
- * would compound the mislabeling risk (a "Resellers" page with a "Mark
- * Commission Paid" button reads as even more confusing) — flagged as a
- * possible FUTURE enhancement, not built in this pass. Confirmed: no
- * `markPaid`/`reverse` call, and no `CommissionEventService` import,
- * anywhere in this file.
+ * The commission table therefore moved out to its own page —
+ * PlatformInternalSalesCommissionsPage ("Internal Sales Commissions") —
+ * where it is named for what it actually is. This page now contains
+ * ONLY the readiness statement, and the nav label reads "Reseller
+ * Readiness" rather than "Resellers", so nothing here implies a
+ * reseller product exists.
  *
- * `commission_events`/`commission_plans` carry no RLS at all (Global),
- * so an ordinary Eloquent `->query()` table is correct here.
+ * NO DATA IS DISPLAYED AND NO QUERY IS RUN. There is deliberately no
+ * "0 resellers" metric, no empty reseller table, and no "Create
+ * Reseller" affordance: a zero would read as "we have a reseller system
+ * with nothing in it," which is materially false. A missing product is
+ * a capability gap, not an empty dataset.
+ *
+ * This is a product/roadmap gap, NOT an operational incident — nothing
+ * here belongs in an alert queue, and nothing on this page requires
+ * operator action.
  */
-class PlatformResellersPage extends Page implements HasTable
+class PlatformResellersPage extends Page
 {
-    use InteractsWithTable;
-
     protected string $view = 'filament-panels::pages.page';
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUserGroup;
 
-    protected static ?string $navigationLabel = 'Resellers';
+    protected static ?string $navigationLabel = 'Reseller Readiness';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Billing & Commercial';
 
-    protected static ?int $navigationSort = 44;
+    protected static ?int $navigationSort = 60;
 
-    protected static ?string $title = 'Resellers';
+    protected static ?string $title = 'Reseller Readiness';
 
     public static function canAccess(): bool
     {
@@ -98,86 +82,77 @@ class PlatformResellersPage extends Page implements HasTable
         return static::canAccess();
     }
 
+    public function getSubheading(): ?string
+    {
+        return 'Reseller and partner management is not currently implemented. This page states that capability '.
+            'boundary; it does not display reseller data, because none exists.';
+    }
+
     public function content(Schema $schema): Schema
     {
         return $schema->components([
-            $this->disclosureSection(),
-            Section::make('Internal Sales Commission Data (not a reseller/partner system)')
-                ->description(
-                    'Real backend data from CommissionPlan/CommissionEvent — FirmsVault employees earning commission '.
-                    'for closing or expanding a deal. This is honestly labeled for what it actually is, not '.
-                    'presented as reseller or partner account management.'
-                )
-                ->schema([EmbeddedTable::make()]),
+            Section::make('Reseller/partner management is not currently implemented')
+                ->icon(Heroicon::OutlinedExclamationCircle)
+                ->schema([
+                    Text::make(
+                        'This platform has no reseller or partner account system. There is no reseller entity, no '.
+                        'reseller user, no reseller-owned customer firm, no reseller pricing or discount, no '.
+                        'revenue share, no payout, and no white-label or custom-domain configuration anywhere in '.
+                        'this codebase — confirmed by a repository-wide search at this release, not carried over '.
+                        'from an earlier report.'
+                    )->color('danger'),
+                    Text::make(
+                        'Nothing on this page is a metric. In particular there is no "0 resellers" figure: a zero '.
+                        'would mean a reseller system exists and is empty, which is not the case. No reseller can '.
+                        'be created, assigned firms, or paid from this console.'
+                    ),
+                    Text::make(
+                        'This is a product capability gap, not an operational problem. It does not appear in the '.
+                        'Requires Attention queue on the Billing & Commercial Overview, because there is no '.
+                        'operator action that would resolve it — building the domain is a separate engineering '.
+                        'effort, not an admin task.'
+                    ),
+                ]),
+            Section::make('Internal sales commissions are a different thing')
+                ->icon(Heroicon::OutlinedInformationCircle)
+                ->schema([
+                    Text::make(
+                        'This platform does track sales commission — but for FirmsVault employees, not external '.
+                        'partners. A CommissionEvent attributes commission to a PlatformAdmin (a FirmsVault staff '.
+                        'member) for closing or expanding a platform deal. That is internal compensation and is '.
+                        'never billed to a customer.'
+                    ),
+                    Text::make(
+                        'Employee commission is not reseller revenue share, and this console does not present it '.
+                        'as such. It lives on its own page — "Internal Sales Commissions" in this same navigation '.
+                        'group — under its real name.'
+                    ),
+                ]),
+            Section::make('What a real reseller domain would require')
+                ->icon(Heroicon::OutlinedWrenchScrewdriver)
+                ->collapsible()
+                ->collapsed()
+                ->schema([
+                    Text::make(
+                        'Recorded here so the gap is legible rather than rediscovered. A reseller-as-a-service '.
+                        'capability needs, at minimum: a reseller organization entity with contract and suspension '.
+                        'state; reseller users with their own roles and their own authentication boundary; an '.
+                        'explicit assignment of which customer firms a reseller owns; which plans a reseller may '.
+                        'sell and at what pricing or discount; revenue-share and commission rules distinct from '.
+                        'the internal employee rules above; a payout ledger; branding and custom-domain '.
+                        'configuration; scoped provisioning, support, and billing-ownership permissions; scoped '.
+                        'control-plane/API access; and an audit trail over all of it.'
+                    ),
+                    Text::make(
+                        'Access model, when it is built: resellers operate through a scoped portal and scoped APIs '.
+                        'against this centrally hosted platform. Distributing source code or standing up '.
+                        'reseller-run instances is not the intended model and should not be assumed by any future '.
+                        'design.'
+                    ),
+                    Text::make(
+                        'None of this is built here. This page is a disclosure, not a partial implementation.'
+                    ),
+                ]),
         ]);
-    }
-
-    private function disclosureSection(): Section
-    {
-        return Section::make('No Reseller/Partner Account System Exists')
-            ->icon(Heroicon::OutlinedExclamationCircle)
-            ->schema([
-                Text::make(
-                    'This codebase has no reseller or partner account system — confirmed by an exhaustive repository '.
-                    'search (no Reseller/Partner model, migration, service, or table anywhere). This page does not '.
-                    'fabricate reseller data. Below this notice is a separate, honestly-labeled section showing the '.
-                    'only adjacent real backend concept — internal FirmsVault sales-rep commission tracking — which '.
-                    'is a materially different thing from external reseller/partner account management.'
-                )->color('danger'),
-            ]);
-    }
-
-    public function table(Table $table): Table
-    {
-        return $table
-            ->query(function (): Builder {
-                $admin = Auth::guard('platform_admin')->user();
-
-                if (! $admin instanceof PlatformAdmin) {
-                    return CommissionEvent::query()->whereRaw('1 = 0');
-                }
-
-                if (! app(PlatformStaffAccessPolicyService::class)->canAccessPlatformBilling($admin)->allowed) {
-                    return CommissionEvent::query()->whereRaw('1 = 0');
-                }
-
-                return CommissionEvent::query()->with(['commissionPlan', 'billingAccount']);
-            })
-            ->filters([
-                SelectFilter::make('status')
-                    ->options(collect(CommissionEventStatus::cases())
-                        ->mapWithKeys(fn (CommissionEventStatus $status): array => [$status->value => Str::headline($status->value)])
-                        ->all()),
-                SelectFilter::make('event_type')
-                    ->label('Event type')
-                    ->options(collect(CommissionEventType::cases())
-                        ->mapWithKeys(fn (CommissionEventType $type): array => [$type->value => Str::headline($type->value)])
-                        ->all()),
-            ])
-            ->columns([
-                TextColumn::make('commissionPlan.name')->label('Commission plan')->searchable()->sortable(),
-                TextColumn::make('commissionPlan.rate_type')->label('Rate type')->placeholder('—'),
-                TextColumn::make('commissionPlan.rate_value')->label('Rate value')->placeholder('—'),
-                TextColumn::make('billingAccount.name')->label('Billing account')->searchable()->sortable(),
-                TextColumn::make('event_type')
-                    ->badge()
-                    ->formatStateUsing(fn (CommissionEventType $state): string => Str::headline($state->value)),
-                TextColumn::make('status')
-                    ->badge()
-                    ->formatStateUsing(fn (CommissionEventStatus $state): string => Str::headline($state->value))
-                    ->color(fn (CommissionEventStatus $state): string => match ($state) {
-                        CommissionEventStatus::Paid => 'success',
-                        CommissionEventStatus::Payable => 'info',
-                        CommissionEventStatus::Pending => 'warning',
-                        CommissionEventStatus::Blocked, CommissionEventStatus::Reversed => 'danger',
-                    })
-                    ->sortable(),
-                TextColumn::make('amount_cents')->label('Amount')->formatStateUsing(fn (int $state): string => MoneyDisplay::fromCents($state))->alignEnd()->sortable(),
-                TextColumn::make('holding_period_ends_at')->label('Holding period ends')->dateTime()->placeholder('—'),
-                TextColumn::make('paid_at')->label('Paid at')->dateTime()->placeholder('—')->sortable(),
-            ])
-            ->emptyStateHeading('No commission events recorded yet')
-            ->defaultSort('id', 'desc')
-            ->paginated([25, 50, 100]);
     }
 }
