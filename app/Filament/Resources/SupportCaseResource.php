@@ -62,7 +62,18 @@ class SupportCaseResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedLifebuoy;
 
-    protected static ?string $navigationLabel = 'Support Cases';
+    /**
+     * Prompt 6 navigation-truth correction. This resource reads
+     * `support_access_requests` and nothing else. There is no SupportCase
+     * model, table, service or ticket domain anywhere in this codebase —
+     * "Support Cases" named a domain that does not exist, and invited
+     * operators to look for case identifiers, owners and statuses that
+     * were never there. The nav item now says what the records are.
+     * The class/slug/namespace are deliberately NOT renamed: they are
+     * technical identifiers with existing test and route references, and
+     * only user-visible branding is in scope here.
+     */
+    protected static ?string $navigationLabel = 'Access Requests';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Support';
 
@@ -123,6 +134,7 @@ class SupportCaseResource extends Resource
                         ->all()),
             ])
             ->columns([
+                TextColumn::make('reference')->label('Request')->searchable()->copyable(),
                 TextColumn::make('firm_name')->label('Firm')->searchable(),
                 TextColumn::make('requested_by_name')->label('Requested by')->placeholder('—'),
                 TextColumn::make('access_type')
@@ -153,8 +165,8 @@ class SupportCaseResource extends Resource
                         'id' => $record['id'],
                     ])),
             ])
-            ->emptyStateHeading('No support cases found')
-            ->emptyStateDescription('Standard-access approval/denial happens on the firm side — no such UI exists yet on either panel (a deliberate architectural boundary, not a gap). This console can view request status and mark stale requests Expired.')
+            ->emptyStateHeading('No support access requests found')
+            ->emptyStateDescription('Standard-access approval and denial happen on the firm side, in the firm\'s own Support Access page — a firm owner decides, never platform staff. This console can view request status and mark stale requests Expired.')
             ->defaultSort('created_at')
             ->recordAction(null)
             ->recordUrl(null)

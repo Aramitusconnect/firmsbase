@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\SupportAccessRequestStatus;
+use App\Enums\SupportAccessSessionStatus;
+use App\Enums\SupportAccessType;
 use App\Models\Firm;
 use App\Models\PlatformAdmin;
 use App\Models\SupportAccessRequest;
 use App\Models\SupportAccessSession;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use RuntimeException;
 
@@ -63,6 +67,12 @@ final class PlatformSupportAccessDirectoryService
     private const SUPPORT_CASES_PER_FIRM_LIMIT = 200;
 
     private const SUPPORT_SESSIONS_PER_FIRM_LIMIT = 200;
+
+    /**
+     * How close to its automatic expiry an active session must be to
+     * count as "expiring soon" on the Support Overview.
+     */
+    private const EXPIRING_SOON_MINUTES = 15;
 
     private const SUPPORT_REQUEST_COLUMNS = [
         'id', 'uuid', 'firm_id', 'requested_by', 'access_type', 'reason', 'status',
@@ -144,6 +154,7 @@ final class PlatformSupportAccessDirectoryService
         return [
             'id' => $request->id,
             'uuid' => $request->uuid,
+            'reference' => $this->reference('SAR', $request->uuid),
             'firm_uuid' => $firm->uuid,
             'firm_name' => $firm->name,
             'requested_by_name' => $request->requestedBy?->name,
@@ -250,15 +261,160 @@ final class PlatformSupportAccessDirectoryService
         return [
             'id' => $session->id,
             'uuid' => $session->uuid,
+            'reference' => $this->reference('SAS', $session->uuid),
             'firm_uuid' => $firm->uuid,
             'firm_name' => $firm->name,
             'support_access_request_id' => $session->support_access_request_id,
             'platform_admin_name' => $session->platformAdmin?->name,
             'status' => $session->status?->value,
+            // Whether this session would authorize access RIGHT NOW, which
+            // is not the same question as what `status` says: a row still
+            // flagged Active whose expiry has passed authorizes nothing,
+            // because every authorization re-checks the clock. Surfaced
+            // separately so an operator is never left inferring live
+            // authority from a stale status badge.
+            'is_currently_valid' => $session->isCurrentlyValid(),
             'started_at' => $session->started_at,
             'expires_at' => $session->expires_at,
+            'time_remaining' => $session->isCurrentlyValid() && $session->expires_at !== null
+                ? $session->expires_at->diffForHumans(now(), syntax: CarbonInterface::DIFF_ABSOLUTE)
+                : null,
             'ended_at' => $session->ended_at,
             'revoked_at' => $session->revoked_at,
+        ];
+    }
+
+    /**
+     * A stable, operator-readable reference derived from the row's
+     * existing immutable uuid. Deliberately not a new sequential
+     * identifier column: these rows already carry a permanent identity,
+     * and minting a second one would mean a schema change and two
+     * competing answers to "which request is this?".
+     */
+    private function reference(string $prefix, ?string $uuid): string
+    {
+        return $uuid === null
+            ? $prefix
+            : $prefix.'-'.strtoupper(substr(str_replace('-', '', $uuid), 0, 12));
+    }
+
+    // ---------------------------------------------------------------
+    // Support Overview (Prompt 6)
+    // ---------------------------------------------------------------
+
+    /**
+     * Aggregate counters and rule-based attention signals across every
+     * firm this admin may actually see, built from the SAME
+     * chokepoint-gated, per-firm reads the two list views use — so the
+     * overview can never show an admin a count that includes rows they
+     * are not permitted to read.
+     *
+     * Every number here is measured from real rows. A genuine zero is
+     * reported as zero; there is no placeholder, no projection and no
+     * behavioural inference — the attention signals below are plain
+     * deterministic rules over persisted state.
+     *
+     * @return array{requests: array<string, int>, sessions: array<string, int>, attention: array<int, array{severity: string, title: string, detail: string, count: int}>}
+     */
+    public function supportOverview(PlatformAdmin $admin): array
+    {
+        $requests = $this->listSupportCases($admin);
+        $sessions = $this->listApprovedSupportSessions($admin);
+
+        $requestService = new SupportAccessRequestService;
+
+        $pending = $requests->where('status', SupportAccessRequestStatus::Requested->value);
+        $approved = $requests->where('status', SupportAccessRequestStatus::Approved->value);
+
+        $activeNow = $sessions->where('is_currently_valid', true);
+
+        // Persisted as Active, but the clock has already passed. This is an
+        // operational-state lag, NOT an access grant: every authorization
+        // re-checks expires_at, so these sessions already authorize
+        // nothing. Surfaced so the discrepancy is visible and explainable
+        // rather than quietly wrong-looking in the sessions list.
+        $expiredStillFlaggedActive = $sessions
+            ->where('status', SupportAccessSessionStatus::Active->value)
+            ->where('is_currently_valid', false);
+
+        $expiringSoon = $activeNow->filter(fn (array $row): bool => $row['expires_at'] !== null
+            && $row['expires_at']->isBefore(now()->addMinutes(self::EXPIRING_SOON_MINUTES)));
+
+        // Emergency requests that have not (yet) cleared the canonical
+        // high-risk platform change approval. These cannot start a session
+        // — SupportAccessPolicyService refuses them — but they represent a
+        // claimed emergency nobody has acted on.
+        // Resolved as one set rather than a per-row lookup: re-fetching each
+        // SupportAccessRequest here would run outside any firm context and,
+        // under FORCE RLS, return nothing — silently under-reporting the
+        // exact signal this counter exists to raise.
+        $highRiskApprovedRequestIds = $requestService->emergencyHighRiskApprovedRequestIds();
+
+        $emergencyAwaitingApproval = $requests
+            ->where('access_type', SupportAccessType::Emergency->value)
+            ->whereIn('status', [SupportAccessRequestStatus::Requested->value, SupportAccessRequestStatus::Approved->value])
+            ->reject(fn (array $row): bool => in_array((int) $row['id'], $highRiskApprovedRequestIds, true));
+
+        // Approvals the firm granted that were never consumed and are now
+        // past their consumption window — the firm consented, nobody used
+        // it, and it will no longer work. A new request is needed.
+        $staleApprovals = $approved->filter(fn (array $row): bool => $row['approved_at'] !== null
+            && $row['approved_at']->copy()->addMinutes(SupportAccessRequestService::APPROVAL_CONSUMPTION_WINDOW_MINUTES)->isPast());
+
+        $staleUndecided = $pending->filter(fn (array $row): bool => $row['created_at'] !== null
+            && $row['created_at']->copy()->addMinutes(SupportAccessRequestService::PENDING_REQUEST_DECISION_WINDOW_MINUTES)->isPast());
+
+        $attention = [];
+
+        $this->pushAttention($attention, 'danger', 'Emergency access awaiting high-risk approval', $emergencyAwaitingApproval->count(),
+            'Emergency support access has been requested but the canonical high-risk platform change approval has not been granted. No session can start until it is.');
+
+        $this->pushAttention($attention, 'warning', 'Support sessions expiring soon', $expiringSoon->count(),
+            'These sessions end automatically within '.self::EXPIRING_SOON_MINUTES.' minutes. Continuing beyond that requires a new request and a new firm decision — sessions are never silently extended.');
+
+        $this->pushAttention($attention, 'warning', 'Requests still awaiting a firm decision', $pending->count() - $staleUndecided->count(),
+            'These firms have not yet approved or denied. Standard support access cannot begin without their decision.');
+
+        $this->pushAttention($attention, 'gray', 'Requests that expired undecided', $staleUndecided->count(),
+            'Past the decision window and no longer approvable. Their status reconciles to Expired the next time a decision is attempted; they authorize nothing in the meantime.');
+
+        $this->pushAttention($attention, 'gray', 'Firm approvals that went unused', $staleApprovals->count(),
+            'The firm approved, but no session was started within the consumption window. These approvals no longer authorize a session — a new request is required.');
+
+        $this->pushAttention($attention, 'gray', 'Expired sessions not yet reconciled', $expiredStillFlaggedActive->count(),
+            'Authorization is already denied for these — expiry is re-checked on every access, so they grant nothing. Only their stored status still reads Active; no reaper reconciles it for this domain.');
+
+        return [
+            'requests' => [
+                'pending_firm_approval' => $pending->count(),
+                'approved' => $approved->count(),
+                'denied' => $requests->where('status', SupportAccessRequestStatus::Denied->value)->count(),
+                'expired' => $requests->where('status', SupportAccessRequestStatus::Expired->value)->count(),
+            ],
+            'sessions' => [
+                'active_now' => $activeNow->count(),
+                'expiring_soon' => $expiringSoon->count(),
+                'revoked' => $sessions->where('status', SupportAccessSessionStatus::Revoked->value)->count(),
+                'ended' => $sessions->where('status', SupportAccessSessionStatus::Expired->value)->count(),
+            ],
+            'attention' => $attention,
+        ];
+    }
+
+    /**
+     * @param  array<int, array{severity: string, title: string, detail: string, count: int}>  $attention
+     */
+    private function pushAttention(array &$attention, string $severity, string $title, int $count, string $detail): void
+    {
+        if ($count <= 0) {
+            return;
+        }
+
+        $attention[] = [
+            'severity' => $severity,
+            'title' => $title,
+            'detail' => $detail,
+            'count' => $count,
         ];
     }
 
