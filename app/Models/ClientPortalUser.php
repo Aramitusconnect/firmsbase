@@ -9,11 +9,13 @@ use App\Notifications\ClientPortalResetPasswordNotification;
 use App\Services\CorrelatedPasswordResetSenderService;
 use App\Services\TenantContextService;
 use Filament\Models\Contracts\FilamentUser;
+use Filament\Models\Contracts\HasName;
 use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Str;
 
 /**
  * ClientPortalUser — Checkpoint 4 ("Plaid financial evidence add-on"),
@@ -60,7 +62,7 @@ use Illuminate\Notifications\Notifiable;
  * test-writing pass: password-reset-link generation threw
  * `Error: Call to undefined method ClientPortalUser::notify()` without it.
  */
-class ClientPortalUser extends Authenticatable implements FilamentUser
+class ClientPortalUser extends Authenticatable implements FilamentUser, HasName
 {
     use HasFactory, HasPublicUuid, Notifiable;
 
@@ -96,6 +98,41 @@ class ClientPortalUser extends Authenticatable implements FilamentUser
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class);
+    }
+
+    /**
+     * Filament renders the signed-in user's name on every authenticated page
+     * of the Client Portal, and FilamentManager::getUserName() is typed
+     * `: string`. Without this contract Filament falls back to
+     * `$user->getAttributeValue('name')`, and `client_portal_users` has no
+     * `name` column — so it returned null and the TypeError surfaced as a
+     * 500 on the first page after a successful login.
+     *
+     * That is not a fixture quirk: ClientPortalService::activate() creates
+     * these rows with only client_id/email/password/is_active, so EVERY
+     * client reaching the portal through the canonical invitation flow hit
+     * it. Found during staging acceptance, which created the first
+     * client_portal_users rows this environment has ever had — the reason it
+     * had gone unseen rather than evidence it was harmless.
+     *
+     * The client relation is the natural source of a human name, but Client
+     * is FORCE-RLS protected, so a read without an active firm context
+     * legitimately resolves to null. This must therefore never depend on
+     * that read succeeding: it degrades to the email local-part, and finally
+     * to a neutral constant, so the return type can always be honoured. A
+     * missing display name must not be able to take the panel down again.
+     */
+    public function getFilamentName(): string
+    {
+        $displayName = trim((string) ($this->client?->display_name ?? ''));
+
+        if ($displayName !== '') {
+            return $displayName;
+        }
+
+        $emailName = trim(Str::before((string) $this->email, '@'));
+
+        return $emailName !== '' ? $emailName : 'Client';
     }
 
     /**
