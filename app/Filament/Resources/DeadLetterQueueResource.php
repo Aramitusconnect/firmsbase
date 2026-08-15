@@ -66,6 +66,19 @@ class DeadLetterQueueResource extends Resource
 
     protected static ?string $navigationLabel = 'Dead-Letter Queue';
 
+    /**
+     * Operator-facing labels (§18): the underlying model is
+     * IntegrationOutboxEvent, so Filament would otherwise render
+     * "Integration Outbox Event(s)" in the breadcrumb/detail heading
+     * while the navigation says "Dead-Letter Queue" — two names for one
+     * screen. These rows are specifically outbox events in their
+     * terminal dead_lettered state, so "Dead-Lettered Event" is the
+     * honest singular.
+     */
+    protected static ?string $modelLabel = 'Dead-Lettered Event';
+
+    protected static ?string $pluralModelLabel = 'Dead-Lettered Events';
+
     protected static string|\UnitEnum|null $navigationGroup = 'Integrations';
 
     protected static ?int $navigationSort = 22;

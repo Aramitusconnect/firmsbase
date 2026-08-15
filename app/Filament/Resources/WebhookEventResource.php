@@ -63,6 +63,10 @@ class WebhookEventResource extends Resource
 
     protected static ?string $navigationLabel = 'Webhook Events';
 
+    protected static ?string $modelLabel = 'Webhook Event';
+
+    protected static ?string $pluralModelLabel = 'Webhook Events';
+
     protected static string|\UnitEnum|null $navigationGroup = 'Integrations';
 
     protected static ?int $navigationSort = 21;

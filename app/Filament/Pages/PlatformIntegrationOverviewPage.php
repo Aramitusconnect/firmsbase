@@ -131,9 +131,31 @@ class PlatformIntegrationOverviewPage extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedGlobeAlt;
 
-    protected static ?string $navigationLabel = 'Integration Oversight';
+    /**
+     * Naming (Prompt 2 §18/§137): "Integration Overview" everywhere —
+     * navigation label, page title, breadcrumb. This page previously
+     * called itself "Integration Oversight" while its own class name,
+     * its route slug, its widget, and every one of its tests already
+     * said "overview"; the mission's own operator-facing vocabulary
+     * ("Integration Overview — the primary operational summary", §29)
+     * is adopted as the single name. Internal class/service names stay
+     * technical and unchanged.
+     */
+    protected static ?string $navigationLabel = 'Integration Overview';
 
-    protected static ?string $title = 'Integration Oversight';
+    protected static ?string $title = 'Integration Overview';
+
+    /**
+     * Integrations navigation group — Prompt 2 regression fix, same as
+     * ConnectionResource/PlatformProviderHealthPage/
+     * PlatformProviderOperationReconciliationPage: this page declared no
+     * group at all and so rendered as an ungrouped top-level Admin entry
+     * while nine sibling Integration surfaces sat inside "Integrations".
+     * Sort 1 — this is the group's landing page.
+     */
+    protected static string|\UnitEnum|null $navigationGroup = 'Integrations';
+
+    protected static ?int $navigationSort = 1;
 
     public static function canAccess(): bool
     {

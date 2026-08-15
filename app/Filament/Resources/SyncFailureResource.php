@@ -70,6 +70,17 @@ class SyncFailureResource extends Resource
 
     protected static ?string $navigationLabel = 'Sync Failures';
 
+    /**
+     * Operator-facing labels (§70): the underlying model is
+     * IntegrationSyncItem, but an operator investigating this screen is
+     * looking at sync FAILURES. Without these, Filament derives
+     * "Integration Sync Item"/"Integration Sync Items" for the breadcrumb
+     * and detail heading while the navigation says "Sync Failures".
+     */
+    protected static ?string $modelLabel = 'Sync Failure';
+
+    protected static ?string $pluralModelLabel = 'Sync Failures';
+
     protected static string|\UnitEnum|null $navigationGroup = 'Integrations';
 
     protected static ?int $navigationSort = 20;

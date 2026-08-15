@@ -4,23 +4,23 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources;
 
+use App\Filament\Actions\Platform\CreateProviderKillSwitchAction;
+use App\Filament\Actions\Platform\ToggleProviderKillSwitchAction;
 use App\Filament\Resources\ProviderKillSwitchResource\Pages\ListProviderKillSwitches;
-use App\Integrations\Enums\ProviderKey;
+use App\Filament\Support\Integrations\IntegrationDisplay;
+use App\Filament\Support\Integrations\ProviderKillSwitchScope;
 use App\Integrations\Models\ProviderKillSwitch;
 use App\Models\PlatformAdmin;
 use App\Services\PlatformStaffAccessPolicyService;
 use BackedEnum;
-use Filament\Actions\Action;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\Textarea;
-use Filament\Forms\Components\TextInput;
-use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 
 /**
  * ProviderKillSwitchResource — FirmsVault Live Integrations, Checkpoint
@@ -56,26 +56,21 @@ class ProviderKillSwitchResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedNoSymbol;
 
-    protected static ?string $navigationLabel = 'Kill Switches';
+    /**
+     * Naming (§18/§137): "Provider Kill Switches" — the sidebar said
+     * "Kill Switches" while the panel also carries an unrelated platform
+     * AI kill switch (PlatformAiOversightPage), so the bare name was
+     * ambiguous about which subsystem it suspends.
+     */
+    protected static ?string $navigationLabel = 'Provider Kill Switches';
+
+    protected static ?string $modelLabel = 'Provider Kill Switch';
+
+    protected static ?string $pluralModelLabel = 'Provider Kill Switches';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Integrations';
 
-    /**
-     * Every real (non-Test) provider key an operator can manage a kill
-     * switch for. `ProviderKey::Test` is deliberately excluded — an
-     * internal fixture provider, never a live integration an incident
-     * responder would need to disable.
-     *
-     * @return array<string, string>
-     */
-    private static function manageableProviderOptions(): array
-    {
-        return [
-            ProviderKey::Microsoft365->value => 'Microsoft 365',
-            ProviderKey::GoogleWorkspace->value => 'Google Workspace',
-            ProviderKey::Plaid->value => 'Plaid',
-        ];
-    }
+    protected static ?int $navigationSort = 13;
 
     public static function canAccess(): bool
     {
@@ -96,112 +91,79 @@ class ProviderKillSwitchResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            ->query(ProviderKillSwitch::query()->whereIn('provider_key', array_keys(self::manageableProviderOptions())))
+            ->query(ProviderKillSwitch::query()->whereIn('provider_key', array_keys(IntegrationDisplay::liveProviderOptions())))
+            ->filters([
+                SelectFilter::make('provider_key')
+                    ->label('Provider')
+                    ->options(fn (): array => IntegrationDisplay::liveProviderOptions()),
+                SelectFilter::make('level')
+                    ->label('Level')
+                    ->options(fn (): array => ProviderKillSwitchScope::levelOptions()),
+                TernaryFilter::make('suspended')
+                    ->label('State')
+                    ->placeholder('Any')
+                    ->trueLabel('Active (suspending calls)')
+                    ->falseLabel('Released'),
+            ])
             ->columns([
-                TextColumn::make('provider_key')->badge()->label('Provider'),
-                TextColumn::make('level')->badge(),
-                TextColumn::make('target'),
-                TextColumn::make('scope_type')->label('Scope'),
-                IconColumn::make('suspended')->boolean()->label('Suspended'),
-                TextColumn::make('reason')->limit(60)->placeholder('—'),
-                TextColumn::make('suspended_at')->dateTime()->placeholder('—'),
+                TextColumn::make('provider_key')
+                    ->label('Provider')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => IntegrationDisplay::labelForProviderCode($state))
+                    ->sortable(),
+                // "Suspended" as a bare boolean icon read ambiguously on
+                // a screen where every row is a suspension: a checkmark
+                // could mean "this switch is fine" as easily as "calls
+                // are being refused". An explicit two-state badge cannot
+                // be misread (§20/§98).
+                TextColumn::make('suspended')
+                    ->label('State')
+                    ->badge()
+                    ->formatStateUsing(fn (bool $state): string => $state ? 'Active — calls refused' : 'Released')
+                    ->color(fn (bool $state): string => $state ? 'danger' : 'gray')
+                    ->sortable(),
+                TextColumn::make('level')
+                    ->label('Level')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => Str::headline((string) $state))
+                    ->tooltip(fn (ProviderKillSwitch $record): string => ProviderKillSwitchScope::enforcementDisclosure($record->level))
+                    ->sortable(),
+                TextColumn::make('target')->label('Target')->fontFamily('mono'),
+                TextColumn::make('reason')
+                    ->label('Reason')
+                    ->limit(60)
+                    ->wrap()
+                    // reason is NOT NULL in practice for every row this
+                    // console writes (both actions require it), so an
+                    // empty one means a row predating that requirement —
+                    // named honestly rather than shown as a dash.
+                    ->formatStateUsing(fn (?string $state): string => IntegrationDisplay::orAbsent($state, 'No reason recorded')),
+                TextColumn::make('suspendedBy.name')
+                    ->label('Changed By')
+                    ->formatStateUsing(fn (?string $state): string => IntegrationDisplay::orAbsent($state, 'Unknown actor'))
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('suspended_at')
+                    ->label('Changed At')
+                    ->dateTime()
+                    ->sortable()
+                    ->placeholder(IntegrationDisplay::UNKNOWN),
+                // Scope is constant by construction (see
+                // ProviderKillSwitchScope::ENFORCED_SCOPE) but is shown
+                // so an operator never has to assume it.
+                TextColumn::make('scope_type')
+                    ->label('Scope')
+                    ->formatStateUsing(fn (?string $state): string => $state === ProviderKillSwitch::SCOPE_PLATFORM ? 'Platform-wide' : Str::headline((string) $state))
+                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->headerActions([
-                self::createAction(),
+                CreateProviderKillSwitchAction::make(),
             ])
             ->recordActions([
-                self::toggleAction(),
+                ToggleProviderKillSwitchAction::make(),
             ])
-            ->emptyStateHeading('No kill switches configured');
-    }
-
-    private static function createAction(): Action
-    {
-        return Action::make('createKillSwitch')
-            ->label('New Kill Switch')
-            ->schema([
-                Select::make('provider_key')
-                    ->options(self::manageableProviderOptions())
-                    ->required(),
-                Select::make('level')
-                    ->options([
-                        ProviderKillSwitch::LEVEL_PROVIDER => 'Entire provider (emergency disable)',
-                        ProviderKillSwitch::LEVEL_PRODUCT => 'Product',
-                        ProviderKillSwitch::LEVEL_ENDPOINT_CATEGORY => 'Endpoint category',
-                        ProviderKillSwitch::LEVEL_OPERATION => 'Operation',
-                    ])
-                    ->required(),
-                TextInput::make('target')->label('Target (e.g. product/operation name — for "Entire provider", use the provider key itself)')->required(),
-                Textarea::make('reason')->required(),
-            ])
-            ->action(function (array $data): void {
-                $admin = Auth::guard('platform_admin')->user();
-
-                if (! $admin instanceof PlatformAdmin) {
-                    return;
-                }
-
-                // Checkpoint 4 test-gate fix: this codebase's own
-                // "read_only_auditor may never mutate data" rule
-                // (already correctly enforced elsewhere, e.g.
-                // ArchivePlanAction) was not applied here — an admin
-                // holding both PlatformAdmin and ReadOnlyAuditor could
-                // create a kill switch despite the read-only role,
-                // confirmed by a real test proving the gap. canAccessIntegrationOversight()
-                // above only gates the read/list view, never mutation.
-                $mutateDecision = app(PlatformStaffAccessPolicyService::class)->canMutate($admin);
-
-                if (! $mutateDecision->allowed) {
-                    Notification::make()->title('Not permitted')->body($mutateDecision->reason)->danger()->send();
-
-                    return;
-                }
-
-                ProviderKillSwitch::query()->create([
-                    'provider_key' => $data['provider_key'],
-                    'scope_type' => ProviderKillSwitch::SCOPE_PLATFORM,
-                    'scope_id' => null,
-                    'level' => $data['level'],
-                    'target' => $data['target'],
-                    'suspended' => true,
-                    'reason' => $data['reason'],
-                    'suspended_by' => $admin->id,
-                    'suspended_at' => now(),
-                ]);
-
-                Notification::make()->title('Kill switch created')->success()->send();
-            });
-    }
-
-    private static function toggleAction(): Action
-    {
-        return Action::make('toggle')
-            ->label(fn (ProviderKillSwitch $record): string => $record->suspended ? 'Resume' : 'Suspend')
-            ->color(fn (ProviderKillSwitch $record): string => $record->suspended ? 'success' : 'danger')
-            ->requiresConfirmation()
-            ->action(function (ProviderKillSwitch $record): void {
-                $admin = Auth::guard('platform_admin')->user();
-
-                if (! $admin instanceof PlatformAdmin) {
-                    return;
-                }
-
-                $mutateDecision = app(PlatformStaffAccessPolicyService::class)->canMutate($admin);
-
-                if (! $mutateDecision->allowed) {
-                    Notification::make()->title('Not permitted')->body($mutateDecision->reason)->danger()->send();
-
-                    return;
-                }
-
-                $record->update([
-                    'suspended' => ! $record->suspended,
-                    'suspended_by' => $admin->id,
-                    'suspended_at' => now(),
-                ]);
-
-                Notification::make()->title('Kill switch updated')->success()->send();
-            });
+            ->defaultSort('suspended', 'desc')
+            ->emptyStateHeading('No provider kill switches configured')
+            ->emptyStateDescription('No provider is currently suspended. Kill switches are created here during an incident and refuse outbound provider calls platform-wide the moment they are activated.');
     }
 
     public static function getPages(): array

@@ -42,9 +42,18 @@ class PlaidAnomalyOversightPage extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedExclamationTriangle;
 
-    protected static ?string $navigationLabel = 'Plaid Anomalies';
+    /**
+     * Naming (§18/§137): the sidebar said "Plaid Anomalies" while the
+     * page heading said "Plaid Usage Anomalies". One name now — the
+     * fuller one, which is what the mission's own surface inventory
+     * calls this screen and which reads unambiguously next to "Plaid
+     * Cost Oversight" in the same group.
+     */
+    protected static ?string $navigationLabel = 'Plaid Usage Anomalies';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Integrations';
+
+    protected static ?int $navigationSort = 10;
 
     protected static ?string $title = 'Plaid Usage Anomalies';
 

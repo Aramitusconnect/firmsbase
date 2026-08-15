@@ -43,6 +43,8 @@ class PlaidCostOversightPage extends Page implements HasTable
 
     protected static string|\UnitEnum|null $navigationGroup = 'Integrations';
 
+    protected static ?int $navigationSort = 11;
+
     protected static ?string $title = 'Plaid Cost Oversight';
 
     public static function canAccess(): bool

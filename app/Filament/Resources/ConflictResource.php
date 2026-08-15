@@ -68,7 +68,17 @@ class ConflictResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedScale;
 
-    protected static ?string $navigationLabel = 'Conflicts';
+    /**
+     * Naming (§18/§137): "Integration Conflicts" — "Conflicts" alone
+     * collides with the unrelated legal conflict-of-interest checking
+     * this platform also has (App\Services\ConflictCheckService), which
+     * is a materially different thing for an operator to be looking at.
+     */
+    protected static ?string $navigationLabel = 'Integration Conflicts';
+
+    protected static ?string $modelLabel = 'Integration Conflict';
+
+    protected static ?string $pluralModelLabel = 'Integration Conflicts';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Integrations';
 

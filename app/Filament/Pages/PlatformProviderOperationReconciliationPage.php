@@ -66,7 +66,19 @@ class PlatformProviderOperationReconciliationPage extends Page implements HasTab
 
     protected static ?string $navigationLabel = 'Provider Reconciliation';
 
-    protected static ?string $title = 'Provider Operation Reconciliation';
+    protected static ?string $title = 'Provider Reconciliation';
+
+    /**
+     * Integrations navigation group — Prompt 2 regression fix (this page
+     * declared none and rendered ungrouped at the top level). The page
+     * title is also aligned to the navigation label here: it previously
+     * read "Provider Operation Reconciliation" in the heading and
+     * breadcrumb while the sidebar said "Provider Reconciliation", so an
+     * operator saw two different names for one screen (§18).
+     */
+    protected static string|\UnitEnum|null $navigationGroup = 'Integrations';
+
+    protected static ?int $navigationSort = 4;
 
     public static function canAccess(): bool
     {

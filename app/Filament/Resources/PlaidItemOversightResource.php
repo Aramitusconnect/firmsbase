@@ -45,6 +45,21 @@ class PlaidItemOversightResource extends Resource
 
     protected static string|\UnitEnum|null $navigationGroup = 'Integrations';
 
+    protected static ?int $navigationSort = 12;
+
+    /**
+     * Operator-facing labels (§60): this Resource's underlying model is
+     * the generic FirmIntegration, but the rows it lists are Plaid Items
+     * specifically (the read service filters to the Plaid provider), so
+     * the singular/plural labels are pinned here — otherwise Filament
+     * derives them from the model and renders "Firm Integration"/"Firm
+     * Integrations" in the breadcrumb and record-title positions while
+     * the navigation says "Plaid Items".
+     */
+    protected static ?string $modelLabel = 'Plaid Item';
+
+    protected static ?string $pluralModelLabel = 'Plaid Items';
+
     protected static ?string $recordTitleAttribute = 'uuid';
 
     public static function canAccess(): bool

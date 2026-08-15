@@ -882,7 +882,25 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Pages'.DIRECTORY_SEPARATOR.'PlatformMarketplaceSettingsPage.php',
         ];
 
-        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles, $mission1bExtremeSecurityHardeningAllowedRelativeFiles, $mission1cSecurityValidationActivationAllowedRelativeFiles, $mission2MarketplaceSuperAdminControlsAllowedRelativeFiles, $mission2MarketplaceAnalyticsAllowedRelativeFiles, $mission3AiOversightAllowedRelativeFiles, $myattorneySuperAdminConsoleUpgradeAllowedRelativeFiles);
+        // Prompt 2 of the seven-mission parallel SuperAdmin upgrade
+        // program ("Integration Operations control plane",
+        // admin/integration-operations). Two Integration-owned
+        // presentation/validation helpers plus the two governed
+        // kill-switch Actions that replaced ProviderKillSwitchResource's
+        // previous inline, unaudited create/toggle closures. Same
+        // cascade-safety reasoning as every block above: the
+        // Integration-domain sweeps earlier in this file run
+        // unconditionally against these files too, and every one of them
+        // is gated behind Auth::guard('platform_admin') +
+        // PlatformStaffAccessPolicyService exactly like their siblings.
+        $promptTwoIntegrationOperationsAllowedRelativeFiles = [
+            'Support'.DIRECTORY_SEPARATOR.'Integrations'.DIRECTORY_SEPARATOR.'IntegrationDisplay.php',
+            'Support'.DIRECTORY_SEPARATOR.'Integrations'.DIRECTORY_SEPARATOR.'ProviderKillSwitchScope.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'CreateProviderKillSwitchAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ToggleProviderKillSwitchAction.php',
+        ];
+
+        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles, $mission1bExtremeSecurityHardeningAllowedRelativeFiles, $mission1cSecurityValidationActivationAllowedRelativeFiles, $mission2MarketplaceSuperAdminControlsAllowedRelativeFiles, $mission2MarketplaceAnalyticsAllowedRelativeFiles, $mission3AiOversightAllowedRelativeFiles, $myattorneySuperAdminConsoleUpgradeAllowedRelativeFiles, $promptTwoIntegrationOperationsAllowedRelativeFiles);
 
         $unauthorizedNonFirmFilamentFiles = [];
 

@@ -98,6 +98,21 @@ class ConnectionResource extends Resource
 
     protected static ?string $navigationLabel = 'Connections';
 
+    /**
+     * Integrations navigation group — Prompt 2 (Integration Operations)
+     * regression fix. This Resource's own class docblock has always
+     * described it as part of the Integration Operations Center, and
+     * nine sibling Integration surfaces already declare
+     * `$navigationGroup = 'Integrations'`, but this one declared none —
+     * so Filament rendered "Connections" as an ungrouped, top-level
+     * Admin navigation entry, visually separated from the very group it
+     * belongs to. Sort 2 places it directly after Integration Overview,
+     * matching the operator's own drill path (overview -> connections).
+     */
+    protected static string|\UnitEnum|null $navigationGroup = 'Integrations';
+
+    protected static ?int $navigationSort = 2;
+
     protected static ?string $recordTitleAttribute = 'uuid';
 
     /**
