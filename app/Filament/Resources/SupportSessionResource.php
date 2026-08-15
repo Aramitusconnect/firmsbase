@@ -103,16 +103,32 @@ class SupportSessionResource extends Resource
                         ->all()),
             ])
             ->columns([
+                TextColumn::make('reference')->label('Session')->searchable()->copyable(),
                 TextColumn::make('firm_name')->label('Firm')->searchable(),
                 TextColumn::make('platform_admin_name')->label('Platform admin')->placeholder('—'),
                 TextColumn::make('status')
                     ->badge()
-                    ->formatStateUsing(fn (?string $state): string => $state === null ? '—' : Str::headline($state))
-                    ->color(fn (?string $state): string => match ($state) {
-                        SupportAccessSessionStatus::Active->value => 'success',
-                        SupportAccessSessionStatus::Revoked->value => 'danger',
+                    // A row persisted as Active whose expiry has passed is
+                    // labelled "Active (expired)", never a plain green
+                    // Active: it authorizes nothing, and showing it as live
+                    // access would misrepresent the platform's actual reach
+                    // into that firm. The distinction is carried in the
+                    // label text, not only in the badge colour.
+                    ->formatStateUsing(fn (?string $state, array $record): string => match (true) {
+                        $state === null => '—',
+                        $state === SupportAccessSessionStatus::Active->value && ! ($record['is_currently_valid'] ?? false) => 'Active (expired)',
+                        default => Str::headline($state),
+                    })
+                    ->color(fn (?string $state, array $record): string => match (true) {
+                        $state === SupportAccessSessionStatus::Active->value && ($record['is_currently_valid'] ?? false) => 'success',
+                        $state === SupportAccessSessionStatus::Active->value => 'warning',
+                        $state === SupportAccessSessionStatus::Revoked->value => 'danger',
                         default => 'gray',
                     }),
+                TextColumn::make('time_remaining')
+                    ->label('Time remaining')
+                    ->placeholder('Not authorizing access')
+                    ->tooltip('Derived from the server clock. The server re-checks expiry on every access, so this is what it would authorize against right now.'),
                 TextColumn::make('started_at')->label('Started at')->dateTime(),
                 TextColumn::make('expires_at')->label('Expires at')->dateTime(),
                 TextColumn::make('ended_at')->label('Ended at')->dateTime()->placeholder('—'),

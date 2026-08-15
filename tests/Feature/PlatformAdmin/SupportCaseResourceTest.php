@@ -131,7 +131,10 @@ final class SupportCaseResourceTest extends TestCase
 
         $response = $this->get(SupportCaseResource::getUrl());
         $response->assertOk();
-        $response->assertSee('No support cases found');
+
+        // This resource reads support_access_requests; no SupportCase
+        // domain exists to have "cases" of.
+        $response->assertSee('No support access requests found');
     }
 
     // --- Filters ---

@@ -3,8 +3,11 @@
 namespace App\Services;
 
 use App\Enums\SupportAccessSessionStatus;
+use App\Models\FirmUser;
+use App\Models\PlatformAdmin;
 use App\Models\SupportAccessRequest;
 use App\Models\SupportAccessSession;
+use Illuminate\Support\Facades\DB;
 
 /**
  * SupportAccessSessionService — the only writer of
@@ -23,7 +26,7 @@ class SupportAccessSessionService
     {
         $expiresAt = now()->addMinutes($request->requested_duration_minutes);
 
-        return (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => SupportAccessSession::create([
+        return (new TenantContextService)->runWithFirmContext($request->firm_id, fn () => SupportAccessSession::create([
             'support_access_request_id' => $request->id,
             'firm_id' => $request->firm_id,
             'platform_admin_id' => $request->requested_by,
@@ -35,7 +38,7 @@ class SupportAccessSessionService
 
     public function end(SupportAccessSession $session): SupportAccessSession
     {
-        return (new TenantContextService())->runWithFirmContext($session->firm_id, function () use ($session) {
+        return (new TenantContextService)->runWithFirmContext($session->firm_id, function () use ($session) {
             $session->update([
                 'status' => SupportAccessSessionStatus::Expired,
                 'ended_at' => now(),
@@ -45,9 +48,9 @@ class SupportAccessSessionService
         });
     }
 
-    public function revoke(SupportAccessSession $session, \App\Models\PlatformAdmin $revokedBy): SupportAccessSession
+    public function revoke(SupportAccessSession $session, PlatformAdmin $revokedBy): SupportAccessSession
     {
-        return (new TenantContextService())->runWithFirmContext($session->firm_id, function () use ($session, $revokedBy) {
+        return (new TenantContextService)->runWithFirmContext($session->firm_id, function () use ($session, $revokedBy) {
             $session->update([
                 'status' => SupportAccessSessionStatus::Revoked,
                 'revoked_by' => $revokedBy->id,
@@ -56,6 +59,86 @@ class SupportAccessSessionService
             ]);
 
             return $session->fresh();
+        });
+    }
+
+    /**
+     * Firm-side revocation — the customer's own right to end a support
+     * session into their firm immediately, without waiting for it to
+     * expire and without needing platform staff to act.
+     *
+     * Prompt 6 addition. revoke() above takes a PlatformAdmin because
+     * support_access_sessions.revoked_by is a foreign key to
+     * platform_admins; there is no column on this table that can hold a
+     * FirmUser id, and Prompt 6 introduces no schema change. Rather than
+     * misattribute the firm's action to some platform admin — the exact
+     * class of false attribution this mission fixed in
+     * SupportAccessPolicyService::logSessionAudit() — revoked_by is left
+     * NULL and the real acting FirmUser is recorded in the security_events
+     * row below. That is the same honest-null convention
+     * PlatformFirmIntegrationBoundedAccessService already established in
+     * this domain when passing actorFirmUserId: null into services that
+     * cannot represent a PlatformAdmin actor. The security-critical
+     * property — the session stops authorizing access immediately — is
+     * fully delivered; only the native-column attribution is deferred to
+     * an owner-approved schema change (see the Prompt 6 report's database
+     * stop gate).
+     *
+     * Authorization, state validation, locking, idempotency and audit are
+     * all enforced here, in the canonical writer, because unlike the
+     * platform path there is no separate chokepoint class in front of the
+     * firm panel.
+     *
+     * @throws \RuntimeException when the revoker belongs to a different firm.
+     */
+    public function revokeByFirm(SupportAccessSession $session, FirmUser $revoker): SupportAccessSession
+    {
+        if ((int) $revoker->firm_id !== (int) $session->firm_id) {
+            throw new \RuntimeException('A support access session may only be revoked by a user of the firm it targets.');
+        }
+
+        return (new TenantContextService)->runWithFirmContext($session->firm_id, function () use ($session, $revoker) {
+            return DB::transaction(function () use ($session, $revoker) {
+                $fresh = SupportAccessSession::query()
+                    ->where('id', $session->id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                // Idempotent: an already-terminal session (revoked by
+                // either side, ended, or expired) is returned untouched,
+                // with no duplicate audit row. Double-revoke, and
+                // firm-revoke racing platform-terminate, both converge on
+                // one canonical terminal state.
+                if ($fresh->status !== SupportAccessSessionStatus::Active) {
+                    return $fresh;
+                }
+
+                $fresh->update([
+                    'status' => SupportAccessSessionStatus::Revoked,
+                    'revoked_at' => now(),
+                    'ended_at' => now(),
+                ]);
+
+                $revoked = $fresh->fresh();
+
+                DB::table('security_events')->insert([
+                    'firm_id' => $revoked->firm_id,
+                    'actor_type' => FirmUser::class,
+                    'actor_id' => $revoker->id,
+                    'event_type' => 'support_access.session_revoked_by_firm',
+                    'category' => 'support_access',
+                    'metadata' => json_encode([
+                        'support_access_session_id' => $revoked->id,
+                        'support_access_session_uuid' => $revoked->uuid,
+                        'support_access_request_id' => $revoked->support_access_request_id,
+                        'session_owner_platform_admin_id' => $revoked->platform_admin_id,
+                        'revoked_by_firm_user_id' => $revoker->id,
+                    ]),
+                    'created_at' => now(),
+                ]);
+
+                return $revoked;
+            });
         });
     }
 

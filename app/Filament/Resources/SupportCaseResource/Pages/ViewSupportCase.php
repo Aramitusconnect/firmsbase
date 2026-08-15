@@ -85,9 +85,9 @@ class ViewSupportCase extends Page
         }
 
         return $schema->components([
-            Text::make('Standard-access approval/denial happens on the firm side — no such UI exists yet on either panel (a deliberate architectural boundary, not a gap). This console can view request status and mark stale requests Expired.')
+            Text::make('Standard-access approval and denial happen on the firm side, in the firm\'s own Support Access page — a firm owner decides, never platform staff. This console can view request status and mark stale requests Expired.')
                 ->color('gray'),
-            Section::make('Support Case')
+            Section::make('Support Access Request')
                 ->columns(2)
                 ->schema([
                     Text::make('Firm: '.$row['firm_name']),
