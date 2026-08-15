@@ -162,7 +162,16 @@ final class NotificationTemplateResourceTest extends TestCase
         $response = $this->get(NotificationTemplateResource::getUrl());
         $response->assertOk();
         $response->assertSee('No notification templates found');
-        $response->assertSee('no real email transport exists');
+
+        // Transport disclosure, corrected (mission section 74). The
+        // previous assertion pinned the claim "no real email transport
+        // exists", which is no longer true at this HEAD: config/mail.php
+        // configures an SES mailer and OutboundMailCorrelationService
+        // performs genuine sends. What remains true — and is what the
+        // operator actually needs to know — is that those sends bypass
+        // this table, and the templated path performs no send.
+        $response->assertSee('performs no send');
+        $response->assertDontSee('no real email transport exists');
     }
 
     // --- Channel-agnostic scope (not Email-only) ---
