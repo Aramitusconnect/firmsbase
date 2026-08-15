@@ -67,4 +67,49 @@ trait HasPublicUuid
     {
         return 'uuid';
     }
+
+    /**
+     * Reject a malformed route key before it reaches PostgreSQL.
+     *
+     * Because getRouteKeyName() above binds every one of these models by
+     * `uuid`, and `uuid` is a real PostgreSQL `uuid` column, the framework
+     * default (`where uuid = <raw route value>`) hands whatever the caller
+     * typed straight to the database. A value that is not a well-formed
+     * UUID — `/clients/3`, a truncated id, a pasted fragment — makes
+     * PostgreSQL raise SQLSTATE[22P02] `invalid input syntax for type uuid`,
+     * which surfaces as a 500 with a QueryException. Observed on staging
+     * against the real deployed release, not hypothesised.
+     *
+     * That was never a tenant-data exposure — the generated SQL is still
+     * firm-scoped and returns nothing — but a malformed public identifier
+     * must not be able to reach the database as an invalid value or to turn
+     * a routine "no such record" into a server error. It also kept
+     * malformed input distinguishable from a valid-but-absent id (500 vs
+     * 404), which is a small existence-oracle difference worth removing.
+     *
+     * The guard adds a constraint and never removes one: the query passed in
+     * already carries the caller's tenant scoping and any global scopes, and
+     * is returned untouched for well-formed values. A non-UUID resolves to a
+     * query that matches nothing, so binding misses and the framework raises
+     * its normal 404 — the same answer an unknown-but-valid UUID gets.
+     *
+     * Deliberately NOT done: catching QueryException/SQLSTATE and mapping it
+     * to 404 (that would hide genuine database faults), casting the column
+     * to text in SQL (defeats the uuid index and still accepts nonsense), or
+     * routing by the bigint `id` instead (re-exposes the internal key this
+     * trait exists to hide).
+     */
+    public function resolveRouteBindingQuery($query, $value, $field = null)
+    {
+        $field ??= $this->getRouteKeyName();
+
+        // Only guard the uuid column. An explicit `{model:other_field}`
+        // binding is somebody else's contract and keeps stock behaviour.
+        if ($field === 'uuid' && ! Str::isUuid($value)) {
+            // whereIn(..., []) compiles to `0 = 1` — no raw SQL, no row.
+            return $query->whereIn($this->getQualifiedKeyName(), []);
+        }
+
+        return parent::resolveRouteBindingQuery($query, $value, $field);
+    }
 }
