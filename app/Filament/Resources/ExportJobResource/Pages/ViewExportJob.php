@@ -92,9 +92,29 @@ class ViewExportJob extends Page
                     Text::make('Export type: '.Str::headline((string) $row['export_type'])),
                     Text::make('Status: '.Str::headline((string) $row['status'])),
                     Text::make('Reason: '.($row['reason'] ?? '—')),
-                    Text::make('Legal hold checked: '.($row['legal_hold_checked'] ? 'Yes' : 'No')),
-                    Text::make('Retention checked: '.($row['retention_checked'] ? 'Yes' : 'No')),
-                    Text::make('Offboarding checked: '.($row['offboarding_checked'] ? 'Yes' : 'No')),
+                    // These three flags are written as a constant `true`
+                    // by ExportJobService::request() regardless of what
+                    // was actually evaluated: the hold/retention inputs
+                    // to ExportGovernancePolicyService are
+                    // caller-supplied booleans that default to false,
+                    // and no legal hold or retention service is
+                    // consulted by the export path itself. Rendering
+                    // them as "Yes" would assert a verification that
+                    // did not necessarily happen, so they are labelled
+                    // for what they are — a recorded flag, not evidence
+                    // of a performed check.
+                    Text::make('Legal hold clearance flag: '.($row['legal_hold_checked'] ? 'Recorded' : 'Not recorded'))
+                        ->color('gray'),
+                    Text::make('Retention clearance flag: '.($row['retention_checked'] ? 'Recorded' : 'Not recorded'))
+                        ->color('gray'),
+                    Text::make('Offboarding clearance flag: '.($row['offboarding_checked'] ? 'Recorded' : 'Not recorded'))
+                        ->color('gray'),
+                    Text::make(
+                        'These flags record that the export governance decision path ran. They are not evidence that a '
+                        .'legal hold or retention lookup was performed for this export — ExportGovernancePolicyService '
+                        .'receives those as caller-supplied inputs and the export path consults no hold or retention '
+                        .'service of its own. Consult Legal Holds directly to establish hold state for this firm.'
+                    )->color('warning'),
                     Text::make('Started at: '.($row['started_at']?->toDayDateTimeString() ?? '—')),
                     Text::make('Completed at: '.($row['completed_at']?->toDayDateTimeString() ?? '—')),
                     Text::make('Failed reason: '.($row['failed_reason'] ?? '—')),

@@ -17,7 +17,6 @@ use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -109,8 +108,22 @@ class ExportJobResource extends Resource
                         default => 'gray',
                     })
                     ->formatStateUsing(fn (?string $state): string => $state === null ? '—' : Str::headline($state)),
-                IconColumn::make('legal_hold_checked')->label('Legal hold checked')->boolean(),
-                IconColumn::make('retention_checked')->label('Retention checked')->boolean(),
+                // Deliberately not a green/red tick. Both flags are
+                // written as a constant `true` by the only writer
+                // (ExportJobService::request()), so a boolean icon here
+                // would read as "a legal hold check passed for this
+                // export" — a verification the export path never
+                // performs. See ViewExportJob for the full disclosure.
+                TextColumn::make('legal_hold_checked')
+                    ->label('Hold clearance flag')
+                    ->formatStateUsing(fn ($state): string => $state ? 'Recorded' : 'Not recorded')
+                    ->color('gray')
+                    ->toggleable(),
+                TextColumn::make('retention_checked')
+                    ->label('Retention clearance flag')
+                    ->formatStateUsing(fn ($state): string => $state ? 'Recorded' : 'Not recorded')
+                    ->color('gray')
+                    ->toggleable(),
                 TextColumn::make('created_at')->label('Requested at')->dateTime(),
                 TextColumn::make('completed_at')->label('Completed at')->dateTime()->placeholder('—'),
             ])
