@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\Firm;
 use App\Models\FirmEntitlement;
+use App\Models\FirmEntitlementEvent;
 use App\Models\PlatformAdmin;
 use Illuminate\Support\Collection;
 
@@ -124,6 +125,49 @@ class PlatformEntitlementOverrideDirectoryService
             $firm,
             fn (): ?FirmEntitlement => FirmEntitlement::query()->where('id', $id)->first()
         );
+    }
+
+    /**
+     * Append-only history for one (firm, module) pair, newest first.
+     *
+     * Scoped to the MODULE rather than to a single firm_entitlements
+     * row on purpose: precedence is resolved across all sources for a
+     * module, so "why does this firm have this module" is only
+     * answerable by seeing every source's events together — a firm
+     * override being granted is often the direct explanation for a
+     * plan-derived row ceasing to win.
+     *
+     * Bounded, and read inside the firm's tenant context because
+     * firm_entitlement_events carries FORCE RLS.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function moduleHistory(PlatformAdmin $admin, Firm $firm, string $moduleCode, int $limit = 50): Collection
+    {
+        $this->assertCanAccess($admin);
+
+        return $this->tenantContext->runWithFirmContext($firm, fn (): Collection => FirmEntitlementEvent::query()
+            ->where('firm_id', $firm->id)
+            ->where('module_code', $moduleCode)
+            ->orderByDesc('id')
+            ->limit($limit)
+            ->get(['id', 'firm_entitlement_id', 'module_code', 'source', 'action', 'reason', 'actor_type', 'actor_id', 'metadata', 'created_at'])
+            ->map(fn (FirmEntitlementEvent $event): array => [
+                'id' => $event->id,
+                'action' => $event->action,
+                'source' => $event->source,
+                'reason' => $event->reason,
+                // actor_type is 'System' for platform-admin-initiated
+                // writes by design — firm_entitlements.created_by is an
+                // FK to `users`, which a PlatformAdmin is not. The real
+                // attribution lives in security_events. Surfaced as-is
+                // rather than dressed up as a named actor.
+                'actor_type' => $event->actor_type,
+                'actor_id' => $event->actor_id,
+                'enabled' => $event->metadata['enabled'] ?? null,
+                'created_at' => $event->created_at,
+            ])
+            ->values());
     }
 
     /**

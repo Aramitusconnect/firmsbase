@@ -9,6 +9,8 @@ use App\Enums\NotificationTemplateStatus;
 use App\Filament\Actions\Platform\ArchiveNotificationTemplateAction;
 use App\Filament\Actions\Platform\CreateFirmOverrideNotificationTemplateAction;
 use App\Filament\Actions\Platform\CreateGlobalDefaultNotificationTemplateAction;
+use App\Filament\Actions\Platform\PreviewNotificationTemplateAction;
+use App\Filament\Actions\Platform\RevertFirmNotificationTemplateOverrideAction;
 use App\Filament\Resources\NotificationTemplateResource\Pages\ListNotificationTemplates;
 use App\Filament\Resources\NotificationTemplateResource\Pages\ViewNotificationTemplate;
 use App\Models\Firm;
@@ -214,6 +216,8 @@ class NotificationTemplateResource extends Resource
                 CreateFirmOverrideNotificationTemplateAction::make(),
             ])
             ->recordActions([
+                PreviewNotificationTemplateAction::make(),
+                RevertFirmNotificationTemplateOverrideAction::make(),
                 ArchiveNotificationTemplateAction::make(),
                 Action::make('view')
                     ->label('View')

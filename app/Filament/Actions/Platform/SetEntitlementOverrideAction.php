@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Actions\Platform;
 
 use App\Enums\EntitlementSource;
+use App\Filament\Support\StepUp\StepUpAuthentication;
 use App\Models\Firm;
 use App\Models\ModuleCatalog;
 use App\Models\PlatformAdmin;
@@ -62,7 +63,24 @@ class SetEntitlementOverrideAction extends Action
         $this->icon(Heroicon::OutlinedAdjustmentsHorizontal);
         $this->color('primary');
 
-        $this->schema([
+        /**
+         * Mission section 80: high-risk configuration changes get fresh
+         * re-authentication, through the EXISTING canonical mechanism
+         * (StepUpAuthentication) — never a second MFA implementation.
+         *
+         * Applied to every override write from this action rather than
+         * conditionally, because the two riskiest shapes — a platform
+         * ADMIN override (the highest-precedence source, which outranks
+         * a firm's own choice and the plan) and a PERMANENT override
+         * (no end date, outlives the incident it was created for) — are
+         * both selected inside this same form. A conditional step-up
+         * would have to re-evaluate as the operator toggled those
+         * fields, which is exactly the kind of "the gate depended on
+         * form state" weakness this mission warns against. The reusable
+         * verification window means an admin doing several of these in
+         * a row is prompted once, not once per override.
+         */
+        StepUpAuthentication::mergeInto($this, [
             Select::make('firm_uuid')
                 ->label('Firm')
                 ->searchable()
@@ -130,7 +148,7 @@ class SetEntitlementOverrideAction extends Action
                 ->label('I confirm this override should remain in effect permanently, until explicitly revoked.')
                 ->visible(fn (callable $get): bool => $get('override_duration') === self::DURATION_PERMANENT)
                 ->accepted(fn (callable $get): bool => $get('override_duration') === self::DURATION_PERMANENT),
-        ]);
+        ], 'platform_admin');
 
         $this->requiresConfirmation();
         $this->modalHeading('Set Entitlement Override');

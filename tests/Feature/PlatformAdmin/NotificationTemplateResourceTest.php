@@ -19,6 +19,7 @@ use App\Models\PlatformAdmin;
 use App\Models\SecurityEvent;
 use App\Services\PlatformNotificationTemplateDirectoryService;
 use App\Services\PlatformRoleService;
+use App\Services\Security\StepUpAuthenticationService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -319,6 +320,10 @@ final class NotificationTemplateResourceTest extends TestCase
     {
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
         $this->actingAs($admin, 'platform_admin');
+        // Creating a GLOBAL DEFAULT is now step-up protected (mission
+        // section 80) — it is the template every firm without its own
+        // override falls back to.
+        app(StepUpAuthenticationService::class)->markVerified('platform_admin');
 
         $test = Livewire::test(ListNotificationTemplates::class);
         $test->assertOk();

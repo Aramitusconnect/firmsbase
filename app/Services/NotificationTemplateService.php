@@ -186,6 +186,34 @@ class NotificationTemplateService
         }
     }
 
+    /**
+     * Revert a FIRM OVERRIDE so the global default applies again
+     * (mission section 68).
+     *
+     * Implemented by archiving the firm row, not deleting it. resolve()
+     * only ever matches an Active row, so an archived override stops
+     * winning immediately and the global default takes over — with no
+     * new resolution logic anywhere. Deleting would destroy the
+     * evidence that the firm ever had its own version, which section 68
+     * explicitly forbids ("must NOT destroy global history, rewrite
+     * global template, delete historical evidence").
+     *
+     * The global default is never touched by this operation. Refuses
+     * outright if handed a global default, which would otherwise
+     * archive the very template everyone falls back to.
+     */
+    public function revertFirmOverride(NotificationTemplate $template, ?PlatformAdmin $actor = null): NotificationTemplate
+    {
+        if ($template->isGlobalDefault()) {
+            throw new \InvalidArgumentException(
+                'This is a global default, not a firm override — there is nothing to revert to. '
+                .'Archiving a global default would remove the fallback every firm relies on.'
+            );
+        }
+
+        return $this->archive($template, $actor);
+    }
+
     public function archive(NotificationTemplate $template, ?PlatformAdmin $actor = null): NotificationTemplate
     {
         $tenantContext = app(TenantContextService::class);
