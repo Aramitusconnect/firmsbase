@@ -19,6 +19,7 @@ use App\Models\PlatformAdmin;
 use App\Models\SecurityEvent;
 use App\Services\PlatformNotificationTemplateDirectoryService;
 use App\Services\PlatformRoleService;
+use App\Services\Security\StepUpAuthenticationService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -162,7 +163,16 @@ final class NotificationTemplateResourceTest extends TestCase
         $response = $this->get(NotificationTemplateResource::getUrl());
         $response->assertOk();
         $response->assertSee('No notification templates found');
-        $response->assertSee('no real email transport exists');
+
+        // Transport disclosure, corrected (mission section 74). The
+        // previous assertion pinned the claim "no real email transport
+        // exists", which is no longer true at this HEAD: config/mail.php
+        // configures an SES mailer and OutboundMailCorrelationService
+        // performs genuine sends. What remains true — and is what the
+        // operator actually needs to know — is that those sends bypass
+        // this table, and the templated path performs no send.
+        $response->assertSee('performs no send');
+        $response->assertDontSee('no real email transport exists');
     }
 
     // --- Channel-agnostic scope (not Email-only) ---
@@ -310,6 +320,10 @@ final class NotificationTemplateResourceTest extends TestCase
     {
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
         $this->actingAs($admin, 'platform_admin');
+        // Creating a GLOBAL DEFAULT is now step-up protected (mission
+        // section 80) — it is the template every firm without its own
+        // override falls back to.
+        app(StepUpAuthenticationService::class)->markVerified('platform_admin');
 
         $test = Livewire::test(ListNotificationTemplates::class);
         $test->assertOk();

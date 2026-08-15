@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Actions\Platform;
 
 use App\Enums\ConsentChannel;
+use App\Filament\Support\StepUp\StepUpAuthentication;
 use App\Models\PlatformAdmin;
 use App\Services\NotificationTemplateService;
 use App\Services\PlatformStaffAccessPolicyService;
@@ -42,7 +43,17 @@ class CreateGlobalDefaultNotificationTemplateAction extends Action
         $this->icon(Heroicon::OutlinedGlobeAlt);
         $this->color('primary');
 
-        $this->schema([
+        /**
+         * Mission section 80: a GLOBAL DEFAULT is the template every
+         * firm without its own override falls back to, so creating one
+         * is a platform-wide content change. Protected with fresh
+         * re-authentication through the existing canonical
+         * StepUpAuthentication mechanism — never a second MFA
+         * implementation. The firm-override variant of this action is
+         * deliberately NOT step-up protected: its blast radius is a
+         * single firm.
+         */
+        StepUpAuthentication::mergeInto($this, [
             TextInput::make('key')->required(),
             Select::make('channel')
                 ->required()
@@ -56,11 +67,11 @@ class CreateGlobalDefaultNotificationTemplateAction extends Action
             Textarea::make('body')->required()->rows(5),
             TextInput::make('from_email')->label('From email (optional)')->email(),
             TextInput::make('from_domain')->label('From domain (optional)'),
-        ]);
+        ], 'platform_admin');
 
         $this->requiresConfirmation();
         $this->modalHeading('Create Global Default Notification Template');
-        $this->modalDescription('This creates content/metadata only — no real email transport exists in this codebase, and this action never sends anything.');
+        $this->modalDescription('This creates content and metadata only. This action never sends anything, and the templated dispatch path performs no send.');
 
         $this->action(function (array $data, NotificationTemplateService $templateService, PlatformStaffAccessPolicyService $accessPolicy): void {
             $admin = Auth::guard('platform_admin')->user();

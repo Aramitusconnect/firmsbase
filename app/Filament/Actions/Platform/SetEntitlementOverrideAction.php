@@ -5,13 +5,18 @@ declare(strict_types=1);
 namespace App\Filament\Actions\Platform;
 
 use App\Enums\EntitlementSource;
+use App\Filament\Support\StepUp\StepUpAuthentication;
 use App\Models\Firm;
 use App\Models\ModuleCatalog;
 use App\Models\PlatformAdmin;
+use App\Services\Configuration\EntitlementResolutionTraceService;
 use App\Services\EntitlementOverrideService;
 use App\Services\PlatformStaffAccessPolicyService;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\DateTimePicker;
+use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\Toggle;
@@ -19,7 +24,7 @@ use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Str;
+use InvalidArgumentException;
 
 /**
  * SetEntitlementOverrideAction — EntitlementOverrideResource's header
@@ -41,6 +46,10 @@ use Illuminate\Support\Str;
  */
 class SetEntitlementOverrideAction extends Action
 {
+    public const DURATION_TEMPORARY = 'temporary';
+
+    public const DURATION_PERMANENT = 'permanent';
+
     public static function getDefaultName(): ?string
     {
         return 'setEntitlementOverride';
@@ -54,7 +63,24 @@ class SetEntitlementOverrideAction extends Action
         $this->icon(Heroicon::OutlinedAdjustmentsHorizontal);
         $this->color('primary');
 
-        $this->schema([
+        /**
+         * Mission section 80: high-risk configuration changes get fresh
+         * re-authentication, through the EXISTING canonical mechanism
+         * (StepUpAuthentication) — never a second MFA implementation.
+         *
+         * Applied to every override write from this action rather than
+         * conditionally, because the two riskiest shapes — a platform
+         * ADMIN override (the highest-precedence source, which outranks
+         * a firm's own choice and the plan) and a PERMANENT override
+         * (no end date, outlives the incident it was created for) — are
+         * both selected inside this same form. A conditional step-up
+         * would have to re-evaluate as the operator toggled those
+         * fields, which is exactly the kind of "the gate depended on
+         * form state" weakness this mission warns against. The reusable
+         * verification window means an admin doing several of these in
+         * a row is prompted once, not once per override.
+         */
+        StepUpAuthentication::mergeInto($this, [
             Select::make('firm_uuid')
                 ->label('Firm')
                 ->searchable()
@@ -71,22 +97,58 @@ class SetEntitlementOverrideAction extends Action
                 ->label('Override source')
                 ->required()
                 ->native(false)
+                ->live()
                 ->options([
-                    EntitlementSource::FirmOverride->value => Str::headline(EntitlementSource::FirmOverride->value),
-                    EntitlementSource::AdminOverride->value => Str::headline(EntitlementSource::AdminOverride->value),
+                    EntitlementSource::FirmOverride->value => 'Firm override',
+                    EntitlementSource::AdminOverride->value => 'Platform admin override',
                 ])
-                ->helperText('Precedence (highest wins): admin_override > firm_override > org_inherited > plan.'),
+                ->helperText('Precedence (highest wins): Platform admin override › Firm override › Organization inherited › Plan.'),
             Toggle::make('enabled')
                 ->label('Enabled')
-                ->default(true),
+                ->default(true)
+                ->live(),
+            /**
+             * Mission section 44: show the CURRENT effective resolution
+             * before the operator confirms a change to it. Built from
+             * the canonical resolver via EntitlementResolutionTraceService
+             * — never a second precedence computation.
+             */
+            Placeholder::make('current_resolution')
+                ->label('Current effective resolution')
+                ->content(fn (callable $get): string => self::currentResolutionFor($get))
+                ->visible(fn (callable $get): bool => filled($get('firm_uuid')) && filled($get('module_code'))),
             Textarea::make('reason')
                 ->label('Reason')
                 ->required()
                 ->rows(2),
+            /**
+             * Mission section 45: a blank end date must never
+             * ACCIDENTALLY mean permanent. There is deliberately no
+             * default here — the operator must choose, and
+             * EntitlementOverrideService enforces the same rule
+             * server-side regardless of what this form submitted.
+             */
+            Radio::make('override_duration')
+                ->label('Override duration')
+                ->required()
+                ->live()
+                ->options([
+                    self::DURATION_TEMPORARY => 'Temporary — expires automatically on a date you choose',
+                    self::DURATION_PERMANENT => 'Permanent — stays in effect until someone explicitly revokes it',
+                ]),
             DateTimePicker::make('ends_at')
-                ->label('Ends at (optional)')
-                ->native(false),
-        ]);
+                ->label('Ends at')
+                ->native(false)
+                ->seconds(false)
+                ->minDate(now()->addMinute())
+                ->helperText('After this moment the override stops applying and entitlement resolution falls back to the next-highest source.')
+                ->visible(fn (callable $get): bool => $get('override_duration') === self::DURATION_TEMPORARY)
+                ->required(fn (callable $get): bool => $get('override_duration') === self::DURATION_TEMPORARY),
+            Checkbox::make('permanent_acknowledged')
+                ->label('I confirm this override should remain in effect permanently, until explicitly revoked.')
+                ->visible(fn (callable $get): bool => $get('override_duration') === self::DURATION_PERMANENT)
+                ->accepted(fn (callable $get): bool => $get('override_duration') === self::DURATION_PERMANENT),
+        ], 'platform_admin');
 
         $this->requiresConfirmation();
         $this->modalHeading('Set Entitlement Override');
@@ -117,23 +179,86 @@ class SetEntitlementOverrideAction extends Action
 
             $firm = Firm::findByUuid((string) $data['firm_uuid']);
             $source = EntitlementSource::from((string) $data['source']);
-            $endsAt = $data['ends_at'] ?? null;
 
-            $entitlement = $overrideService->setOverrideAsPlatformAdmin(
-                $firm,
-                (string) $data['module_code'],
-                $source,
-                (bool) ($data['enabled'] ?? true),
-                (string) $data['reason'],
-                $admin,
-                $endsAt !== null ? Carbon::parse($endsAt) : null,
-            );
+            // A permanent override carries no end date by definition —
+            // never trust a stale ends_at left behind by toggling the
+            // duration radio back and forth.
+            $isPermanent = ($data['override_duration'] ?? null) === self::DURATION_PERMANENT;
+            $endsAt = $isPermanent ? null : ($data['ends_at'] ?? null);
+
+            try {
+                $entitlement = $overrideService->setOverrideAsPlatformAdmin(
+                    $firm,
+                    (string) $data['module_code'],
+                    $source,
+                    (bool) ($data['enabled'] ?? true),
+                    (string) $data['reason'],
+                    $admin,
+                    $endsAt !== null ? Carbon::parse($endsAt) : null,
+                    permanentAcknowledged: $isPermanent ? (bool) ($data['permanent_acknowledged'] ?? false) : null,
+                );
+            } catch (InvalidArgumentException $e) {
+                Notification::make()->title('Could not set override')->body($e->getMessage())->danger()->send();
+
+                return;
+            }
+
+            $duration = $entitlement->ends_at === null
+                ? 'permanently, until revoked'
+                : 'until '.$entitlement->ends_at->toDayDateTimeString();
 
             Notification::make()
                 ->title('Entitlement override set')
-                ->body("{$entitlement->module_code} is now ".($entitlement->enabled ? 'enabled' : 'disabled')." for {$firm->name} ({$source->value}).")
+                ->body(sprintf(
+                    '%s is now %s for %s (%s), %s.',
+                    app(EntitlementResolutionTraceService::class)->moduleName($entitlement->module_code),
+                    $entitlement->enabled ? 'enabled' : 'disabled',
+                    $firm->name,
+                    app(EntitlementResolutionTraceService::class)->sourceLabel($source),
+                    $duration,
+                ))
                 ->success()
                 ->send();
         });
+    }
+
+    /**
+     * Renders the current effective resolution for the selected (firm,
+     * module) pair, so the operator sees what they are about to change
+     * before confirming (mission section 44).
+     */
+    private static function currentResolutionFor(callable $get): string
+    {
+        $firmUuid = $get('firm_uuid');
+        $moduleCode = $get('module_code');
+
+        if (! is_string($firmUuid) || ! is_string($moduleCode)) {
+            return 'Select a firm and module to see the current resolution.';
+        }
+
+        $firm = Firm::findByUuid($firmUuid);
+
+        if ($firm === null) {
+            return 'That firm could not be found.';
+        }
+
+        $trace = app(EntitlementResolutionTraceService::class)->trace($firm, $moduleCode);
+
+        $lines = [sprintf(
+            'Effective now: %s (winning source: %s).',
+            $trace['effective_label'],
+            $trace['winning_source_label'],
+        )];
+
+        foreach ($trace['rows'] as $row) {
+            $lines[] = sprintf(
+                '%s — %s%s',
+                $row['source_label'],
+                $row['configured_state'],
+                $row['present'] ? ' ('.$row['window_state'].')' : '',
+            );
+        }
+
+        return implode(' • ', $lines);
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Enums\EntitlementSource;
+use App\Filament\Actions\Platform\RevokeEntitlementOverrideAction;
 use App\Filament\Actions\Platform\SetEntitlementOverrideAction;
 use App\Filament\Resources\EntitlementOverrideResource\Pages\ListEntitlementOverrides;
 use App\Filament\Resources\EntitlementOverrideResource\Pages\ViewEntitlementOverride;
@@ -12,13 +13,13 @@ use App\Models\Firm;
 use App\Models\FirmEntitlement;
 use App\Models\ModuleCatalog;
 use App\Models\PlatformAdmin;
+use App\Services\Configuration\EntitlementResolutionTraceService;
 use App\Services\PlatformEntitlementOverrideDirectoryService;
 use App\Services\PlatformStaffAccessPolicyService;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -125,25 +126,71 @@ class EntitlementOverrideResource extends Resource
             ])
             ->columns([
                 TextColumn::make('firm_name')->label('Firm')->searchable(),
-                TextColumn::make('module_code')->label('Module'),
-                IconColumn::make('enabled')->label('Enabled')->boolean(),
+                TextColumn::make('module_code')
+                    ->label('Module')
+                    // Friendly name from the canonical ModuleCatalog; the
+                    // raw code stays visible underneath as technical
+                    // detail rather than as the primary UX (section 43).
+                    ->formatStateUsing(fn (string $state): string => app(EntitlementResolutionTraceService::class)->moduleName($state))
+                    ->description(fn (array $record): string => $record['module_code']),
+                TextColumn::make('configured_state')
+                    ->label('Configured')
+                    ->badge()
+                    ->formatStateUsing(fn (bool $state): string => $state ? 'Enabled' : 'Disabled')
+                    ->color(fn (bool $state): string => $state ? 'success' : 'gray')
+                    ->state(fn (array $record): bool => (bool) $record['enabled']),
+                /**
+                 * "Configured" and "In effect" are different facts and are
+                 * shown as separate columns (mission section 76). A row can
+                 * say Enabled while contributing nothing, because it is
+                 * expired, not yet started, or outranked by a
+                 * higher-precedence source.
+                 */
+                TextColumn::make('window_state')
+                    ->label('In effect')
+                    ->badge()
+                    ->color(fn (?string $state): string => match ($state) {
+                        'In effect', 'In effect — no end date' => 'success',
+                        'Expired' => 'danger',
+                        'Scheduled — not yet in effect' => 'warning',
+                        default => 'gray',
+                    }),
                 TextColumn::make('source')
                     ->label('Source')
                     ->badge()
-                    ->formatStateUsing(fn (?string $state): string => $state === null ? '—' : Str::headline($state))
+                    ->formatStateUsing(fn (?string $state): string => $state === null
+                        ? 'Unknown'
+                        : app(EntitlementResolutionTraceService::class)->sourceLabel(EntitlementSource::from($state)))
                     ->color(fn (?string $state): string => match ($state) {
                         EntitlementSource::AdminOverride->value => 'danger',
                         EntitlementSource::FirmOverride->value => 'warning',
                         default => 'gray',
-                    }),
-                TextColumn::make('precedence')->label('Precedence')->alignEnd(),
-                TextColumn::make('ends_at')->label('Ends at')->dateTime()->placeholder('No end date'),
-                TextColumn::make('updated_at')->label('Last updated')->dateTime(),
+                    })
+                    // Plan/org rows are derived entitlements, not
+                    // overrides — labelled so an operator never mistakes
+                    // one for something editable here (section 46).
+                    ->description(fn (array $record): string => in_array(
+                        $record['source'],
+                        [EntitlementSource::AdminOverride->value, EntitlementSource::FirmOverride->value],
+                        true,
+                    ) ? 'Override' : 'Derived — not editable here'),
+                TextColumn::make('ends_at')
+                    ->label('Ends')
+                    ->dateTime()
+                    // Mission section 45: a permanent override must be
+                    // unmistakable, never an ambiguous dash.
+                    ->placeholder('Permanent — until revoked'),
+                TextColumn::make('precedence')
+                    ->label('Precedence')
+                    ->alignEnd()
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('updated_at')->label('Last updated')->dateTime()->toggleable(),
             ])
             ->headerActions([
                 SetEntitlementOverrideAction::make(),
             ])
             ->recordActions([
+                RevokeEntitlementOverrideAction::make(),
                 Action::make('view')
                     ->label('View')
                     ->icon(Heroicon::OutlinedArrowRight)

@@ -165,6 +165,10 @@ final class PracticeAreaResourceTest extends TestCase
 
         $test = Livewire::test(ListPracticeAreas::class);
         $test->mountTableAction(DeactivatePracticeAreaAction::getDefaultName(), $practiceArea->getKey());
+        // Deactivation now requires an operator reason (Configuration
+        // Control Plane, mission section 34) — it is folded into the
+        // existing practice_area_deactivated audit row.
+        $test->setTableActionData(['reason' => 'Superseded by a consolidated practice area.']);
         $test->callMountedTableAction();
         $this->assertFalse($practiceArea->fresh()->is_active);
         $this->assertNotNull(PracticeArea::query()->find($practiceArea->id), 'Deactivation must never hard-delete the row.');

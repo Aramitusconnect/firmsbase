@@ -17,6 +17,7 @@ use App\Models\PlatformAdmin;
 use App\Models\SecurityEvent;
 use App\Services\PlatformEntitlementOverrideDirectoryService;
 use App\Services\PlatformRoleService;
+use App\Services\Security\StepUpAuthenticationService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -223,6 +224,11 @@ final class EntitlementOverrideResourceTest extends TestCase
 
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
         $this->actingAs($admin, 'platform_admin');
+        // Setting an override is now step-up protected (mission section
+        // 80) — a platform admin override is the highest-precedence
+        // entitlement source there is. Pre-verify, matching the
+        // established convention in PlatformAiOversightPageTest.
+        app(StepUpAuthenticationService::class)->markVerified('platform_admin');
 
         $test = Livewire::test(ListEntitlementOverrides::class);
         $test->assertOk();
@@ -233,6 +239,11 @@ final class EntitlementOverrideResourceTest extends TestCase
             'source' => EntitlementSource::AdminOverride->value,
             'enabled' => true,
             'reason' => 'Pilot access',
+            // Duration is now an explicit choice — a blank end date can
+            // no longer silently produce a permanent override (mission
+            // section 45).
+            'override_duration' => SetEntitlementOverrideAction::DURATION_PERMANENT,
+            'permanent_acknowledged' => true,
         ]);
         $test->callMountedTableAction();
         $test->assertHasNoTableActionErrors();

@@ -43,14 +43,14 @@ class AiModeResolutionServicePlatformKillSwitchTest extends TestCase
 
     public function test_kill_switch_is_not_engaged_when_explicitly_set_true(): void
     {
-        app(AiPolicySettingService::class)->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, true);
+        app(AiPolicySettingService::class)->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, true, allowGovernedKey: true);
 
         $this->assertFalse(app(AiModeResolutionService::class)->platformKillSwitchEngaged());
     }
 
     public function test_kill_switch_is_engaged_when_explicitly_set_false(): void
     {
-        app(AiPolicySettingService::class)->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, false);
+        app(AiPolicySettingService::class)->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, false, allowGovernedKey: true);
 
         $this->assertTrue(app(AiModeResolutionService::class)->platformKillSwitchEngaged());
     }
@@ -67,7 +67,7 @@ class AiModeResolutionServicePlatformKillSwitchTest extends TestCase
     public function test_a_normally_ai_enabled_firm_is_blocked_once_the_platform_kill_switch_engages(): void
     {
         $firm = $this->firmWithAiEnabled();
-        app(AiPolicySettingService::class)->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, false);
+        app(AiPolicySettingService::class)->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, false, allowGovernedKey: true);
 
         $decision = $this->runWithFirmContext($firm, fn () => app(AiModeResolutionService::class)->evaluate($firm));
 
@@ -79,7 +79,7 @@ class AiModeResolutionServicePlatformKillSwitchTest extends TestCase
     {
         $firmA = $this->firmWithAiEnabled();
         $firmB = $this->firmWithAiEnabled();
-        app(AiPolicySettingService::class)->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, false);
+        app(AiPolicySettingService::class)->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, false, allowGovernedKey: true);
 
         $this->assertFalse($this->runWithFirmContext($firmA, fn () => app(AiModeResolutionService::class)->evaluate($firmA))->allowed);
         $this->assertFalse($this->runWithFirmContext($firmB, fn () => app(AiModeResolutionService::class)->evaluate($firmB))->allowed);
@@ -89,8 +89,8 @@ class AiModeResolutionServicePlatformKillSwitchTest extends TestCase
     {
         $firm = $this->firmWithAiEnabled();
         $service = app(AiPolicySettingService::class);
-        $service->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, false);
-        $service->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, true);
+        $service->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, false, allowGovernedKey: true);
+        $service->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, true, allowGovernedKey: true);
 
         $decision = $this->runWithFirmContext($firm, fn () => app(AiModeResolutionService::class)->evaluate($firm));
 

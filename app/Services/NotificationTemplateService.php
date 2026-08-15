@@ -7,6 +7,7 @@ use App\Enums\NotificationTemplateStatus;
 use App\Models\Firm;
 use App\Models\NotificationTemplate;
 use App\Models\PlatformAdmin;
+use App\Services\Configuration\NotificationTemplateContentPolicyService;
 
 /**
  * NotificationTemplateService — resolve() implements the global-
@@ -79,6 +80,8 @@ class NotificationTemplateService
         ?string $fromDomain = null,
         ?PlatformAdmin $actor = null,
     ): NotificationTemplate {
+        $this->assertContentIsSafe($subject, $body);
+
         $create = fn () => NotificationTemplate::create([
             'firm_id' => null,
             'key' => $key,
@@ -121,6 +124,8 @@ class NotificationTemplateService
         ?string $fromDomain = null,
         ?PlatformAdmin $actor = null,
     ): NotificationTemplate {
+        $this->assertContentIsSafe($subject, $body);
+
         $create = fn () => NotificationTemplate::create([
             'firm_id' => $firm->id,
             'key' => $key,
@@ -151,6 +156,62 @@ class NotificationTemplateService
         }
 
         return $template;
+    }
+
+    /**
+     * Configuration Control Plane (mission section 70). Template content
+     * is CONTENT — never executable code. Refused at write time, in the
+     * canonical service, so the guarantee does not depend on any form.
+     *
+     * Nothing renders these bodies today (NotificationDispatchService
+     * never interpolates one, and DispatchNotificationJob performs no
+     * transport call), so no stored directive can execute right now.
+     * That is precisely why enforcing it now is worthwhile: it costs
+     * nothing while the table is small, and it means whoever wires a
+     * real renderer later cannot inherit a corpus of templates that
+     * already contains Blade or PHP.
+     *
+     * Variable NAMES are deliberately not validated — no canonical
+     * variable registry exists in this codebase, so there is no
+     * approved vocabulary to check against, and inventing one would
+     * fabricate a governance capability. See
+     * NotificationTemplateContentPolicyService's own docblock.
+     */
+    private function assertContentIsSafe(?string $subject, ?string $body): void
+    {
+        $errors = (new NotificationTemplateContentPolicyService)->validate($subject, $body);
+
+        if ($errors !== []) {
+            throw new \InvalidArgumentException(implode(' ', $errors));
+        }
+    }
+
+    /**
+     * Revert a FIRM OVERRIDE so the global default applies again
+     * (mission section 68).
+     *
+     * Implemented by archiving the firm row, not deleting it. resolve()
+     * only ever matches an Active row, so an archived override stops
+     * winning immediately and the global default takes over — with no
+     * new resolution logic anywhere. Deleting would destroy the
+     * evidence that the firm ever had its own version, which section 68
+     * explicitly forbids ("must NOT destroy global history, rewrite
+     * global template, delete historical evidence").
+     *
+     * The global default is never touched by this operation. Refuses
+     * outright if handed a global default, which would otherwise
+     * archive the very template everyone falls back to.
+     */
+    public function revertFirmOverride(NotificationTemplate $template, ?PlatformAdmin $actor = null): NotificationTemplate
+    {
+        if ($template->isGlobalDefault()) {
+            throw new \InvalidArgumentException(
+                'This is a global default, not a firm override — there is nothing to revert to. '
+                .'Archiving a global default would remove the fallback every firm relies on.'
+            );
+        }
+
+        return $this->archive($template, $actor);
     }
 
     public function archive(NotificationTemplate $template, ?PlatformAdmin $actor = null): NotificationTemplate

@@ -7,8 +7,10 @@ namespace App\Filament\Actions\Platform;
 use App\Models\AiPolicySetting;
 use App\Models\PlatformAdmin;
 use App\Services\AiPolicySettingService;
+use App\Services\Configuration\AiPolicyDefinitionRegistry;
 use App\Services\PlatformStaffAccessPolicyService;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
@@ -48,7 +50,21 @@ class EditAiPolicySettingValueAction extends Action
             'value_json' => json_encode($record->value_json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '{}',
         ]);
 
+        // A governed key has a dedicated, safer control elsewhere and is
+        // not editable here at all. Hiding the action is a courtesy —
+        // AiPolicySettingService refuses the write regardless.
+        $this->visible(fn (AiPolicySetting $record): bool => ! app(AiPolicyDefinitionRegistry::class)->isGoverned($record->key));
+
         $this->schema([
+            Placeholder::make('key_status')
+                ->label('About this key')
+                ->content(function (AiPolicySetting $record): string {
+                    $registry = app(AiPolicyDefinitionRegistry::class);
+
+                    return $registry->isRecognized($record->key)
+                        ? ($registry->find($record->key)['description'] ?? '')
+                        : 'This key is not read by any service in this codebase. Editing it changes stored data only — it has no known effect on platform behaviour.';
+                }),
             Textarea::make('value_json')
                 ->label('Value (JSON)')
                 ->required()
@@ -98,7 +114,16 @@ class EditAiPolicySettingValueAction extends Action
                 return;
             }
 
-            $updated = $settingService->set($fresh->key, $decoded, $admin);
+            try {
+                $updated = $settingService->set($fresh->key, $decoded, $admin);
+            } catch (\InvalidArgumentException $e) {
+                // Covers both a governed key (which must be operated
+                // from its own control) and a value whose type does not
+                // match what the key's real consumer expects.
+                Notification::make()->title('Could not update AI policy setting')->body($e->getMessage())->danger()->send();
+
+                return;
+            }
 
             Notification::make()
                 ->title('AI policy setting updated')

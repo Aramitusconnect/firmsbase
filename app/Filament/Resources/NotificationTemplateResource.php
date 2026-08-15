@@ -9,11 +9,14 @@ use App\Enums\NotificationTemplateStatus;
 use App\Filament\Actions\Platform\ArchiveNotificationTemplateAction;
 use App\Filament\Actions\Platform\CreateFirmOverrideNotificationTemplateAction;
 use App\Filament\Actions\Platform\CreateGlobalDefaultNotificationTemplateAction;
+use App\Filament\Actions\Platform\PreviewNotificationTemplateAction;
+use App\Filament\Actions\Platform\RevertFirmNotificationTemplateOverrideAction;
 use App\Filament\Resources\NotificationTemplateResource\Pages\ListNotificationTemplates;
 use App\Filament\Resources\NotificationTemplateResource\Pages\ViewNotificationTemplate;
 use App\Models\Firm;
 use App\Models\NotificationTemplate;
 use App\Models\PlatformAdmin;
+use App\Services\Configuration\NotificationTemplateContentPolicyService;
 use App\Services\PlatformNotificationTemplateDirectoryService;
 use App\Services\PlatformStaffAccessPolicyService;
 use BackedEnum;
@@ -59,13 +62,34 @@ use RuntimeException;
  * this phase's own architecture investigation §6, which explicitly
  * flagged this as the lower-priority half of the build.
  *
- * Content/METADATA management only — no real email transport exists
- * anywhere in this codebase (app/Mail does not exist; no Mailable
- * subclass exists outside vendor/; NotificationDispatchService's own
- * docblock: "No real email is ever sent"). No action anywhere on this
- * resource implies a live-send/preview-send capability — disclosed
- * explicitly in the empty-state description below, not merely by
- * omission.
+ * TRANSPORT TRUTH — CORRECTED (mission section 74). This resource
+ * previously stated that "no real email transport exists anywhere in
+ * this codebase". That claim was true when written and is now FALSE,
+ * and re-verified against the current HEAD rather than carried
+ * forward. The accurate position is more specific:
+ *
+ *   Real email transport DOES exist. config/mail.php configures an SES
+ *   mailer, and OutboundMailCorrelationService wires genuine
+ *   transactional sends (FirmOwnerInvitationNotification,
+ *   ClientPortalResetPasswordNotification) through Laravel's mailer,
+ *   confirming delivery off a real MessageSent event.
+ *
+ *   Those sends do NOT use this table. As that service's own docblock
+ *   states, both notifications "bypass NotificationDispatchService
+ *   entirely" — they are hardcoded Notification classes with their own
+ *   content, not rows from `notification_templates`.
+ *
+ *   The TEMPLATED path still sends nothing. NotificationDispatchService
+ *   resolves a template, checks sender-domain verification and
+ *   consent, records notification_events, and queues
+ *   DispatchNotificationJob — whose handle() explicitly performs no
+ *   transport call and only records a Sent event. There is also no
+ *   renderer: no code anywhere interpolates a template body.
+ *
+ * So every channel here is TEMPLATE ONLY. Saying "no email transport
+ * exists" would now be wrong; saying "these templates are delivered"
+ * would also be wrong. The empty state and the Delivery column state
+ * the precise position instead of either convenient simplification.
  */
 class NotificationTemplateResource extends Resource
 {
@@ -158,7 +182,33 @@ class NotificationTemplateResource extends Resource
                         NotificationTemplateStatus::Archived->value => 'gray',
                         default => 'warning',
                     }),
-                TextColumn::make('subject')->label('Subject')->placeholder('—')->limit(40),
+                TextColumn::make('subject')->label('Subject')->placeholder('No subject')->limit(40),
+                /**
+                 * Mission section 73: a template row is not a delivery
+                 * capability. Every channel is Template only today —
+                 * the templated dispatch path performs no transport
+                 * call and nothing renders a body. Stated as a column
+                 * rather than left to be inferred from silence.
+                 */
+                TextColumn::make('delivery_capability')
+                    ->label('Delivery')
+                    ->state('Template only')
+                    ->badge()
+                    ->color('gray')
+                    ->tooltip('Content is stored and governed here. The templated dispatch path records notification events but performs no send, and no renderer interpolates template variables.')
+                    ->toggleable(),
+                /**
+                 * Content validation state (mission section 88). Shows
+                 * whether the stored content would be rejected by the
+                 * canonical content policy — a template written before
+                 * that policy existed can still be invalid.
+                 */
+                TextColumn::make('content_validation')
+                    ->label('Content')
+                    ->state(fn (array $record): string => self::contentValidationLabel($record))
+                    ->badge()
+                    ->color(fn (string $state): string => $state === 'Valid' ? 'success' : 'danger')
+                    ->toggleable(),
                 TextColumn::make('updated_at')->label('Last updated')->dateTime(),
             ])
             ->headerActions([
@@ -166,6 +216,8 @@ class NotificationTemplateResource extends Resource
                 CreateFirmOverrideNotificationTemplateAction::make(),
             ])
             ->recordActions([
+                PreviewNotificationTemplateAction::make(),
+                RevertFirmNotificationTemplateOverrideAction::make(),
                 ArchiveNotificationTemplateAction::make(),
                 Action::make('view')
                     ->label('View')
@@ -176,7 +228,7 @@ class NotificationTemplateResource extends Resource
                     ])),
             ])
             ->emptyStateHeading('No notification templates found')
-            ->emptyStateDescription('This console manages template content/metadata only — no real email transport exists anywhere in this codebase, and no action here sends anything.')
+            ->emptyStateDescription('This console manages template content and metadata. The platform does have a real email transport, but it is used by a small number of hardcoded notifications that do not read this table — the templated dispatch path records notification events and performs no send. No action here sends anything.')
             ->defaultSort('updated_at')
             ->recordAction(null)
             ->recordUrl(null)
@@ -189,5 +241,18 @@ class NotificationTemplateResource extends Resource
             'index' => ListNotificationTemplates::route('/'),
             'view' => ViewNotificationTemplate::route('/{firmUuid}/{id}'),
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $record
+     */
+    private static function contentValidationLabel(array $record): string
+    {
+        $errors = app(NotificationTemplateContentPolicyService::class)->validate(
+            is_string($record['subject'] ?? null) ? $record['subject'] : null,
+            is_string($record['body'] ?? null) ? $record['body'] : null,
+        );
+
+        return $errors === [] ? 'Valid' : 'Invalid ('.count($errors).')';
     }
 }

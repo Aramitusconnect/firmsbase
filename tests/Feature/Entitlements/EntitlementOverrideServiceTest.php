@@ -108,6 +108,10 @@ class EntitlementOverrideServiceTest extends TestCase
             true,
             'Platform-admin-initiated override',
             $actor,
+            // An override with no end date is permanent until revoked,
+            // which must now be acknowledged deliberately rather than
+            // fallen into by leaving a field blank (mission section 45).
+            permanentAcknowledged: true,
         );
 
         $this->assertSame(EntitlementSource::AdminOverride, $entitlement->source);
@@ -131,6 +135,7 @@ class EntitlementOverrideServiceTest extends TestCase
             false,
             'Disabling pending investigation',
             $actor,
+            permanentAcknowledged: true,
         );
 
         $audit = $this->runWithFirmContext($firm, fn () => SecurityEvent::query()
