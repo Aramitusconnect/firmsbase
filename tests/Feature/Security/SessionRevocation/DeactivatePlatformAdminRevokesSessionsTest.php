@@ -57,6 +57,7 @@ class DeactivatePlatformAdminRevokesSessionsTest extends TestCase
 
         $test = Livewire::test(ViewPlatformAdministrator::class, ['record' => $target->uuid]);
         $test->mountAction(TogglePlatformAdminActiveStatusAction::getDefaultName());
+        $test->setActionData(['stepUpCurrentPassword' => 'password']);
         $test->callMountedAction();
 
         $target->refresh();
@@ -75,6 +76,7 @@ class DeactivatePlatformAdminRevokesSessionsTest extends TestCase
 
         $test = Livewire::test(ViewPlatformAdministrator::class, ['record' => $target->uuid]);
         $test->mountAction(TogglePlatformAdminActiveStatusAction::getDefaultName());
+        $test->setActionData(['stepUpCurrentPassword' => 'password']);
         $test->callMountedAction();
 
         $target->refresh();
