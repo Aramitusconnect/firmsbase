@@ -7,6 +7,7 @@ namespace App\Filament\Pages;
 use App\Enums\BackupRestoreTestStatus;
 use App\Models\BackupRestoreTest;
 use App\Models\PlatformAdmin;
+use App\Services\BackupRestoreCapabilityService;
 use App\Services\BackupRestoreTestService;
 use App\Services\PlatformStaffAccessPolicyService;
 use BackedEnum;
@@ -64,7 +65,7 @@ class PlatformBackupsPage extends Page implements HasTable
 
     protected static string|\UnitEnum|null $navigationGroup = 'Operations';
 
-    protected static ?int $navigationSort = 83;
+    protected static ?int $navigationSort = 84;
 
     protected static ?string $title = 'Backups';
 
@@ -88,6 +89,8 @@ class PlatformBackupsPage extends Page implements HasTable
     {
         return $schema->components([
             $this->disclosureSection(),
+            $this->inventorySection(),
+            $this->recoveryObjectivesSection(),
             $this->latestDrillSection(),
             EmbeddedTable::make(),
         ]);
@@ -98,36 +101,93 @@ class PlatformBackupsPage extends Page implements HasTable
         return Section::make('No Real Backup/Restore Drill Capability Exists')
             ->icon(Heroicon::OutlinedExclamationCircle)
             ->schema([
+                Text::make(app(BackupRestoreCapabilityService::class)->disclosure())->color('danger'),
                 Text::make(
-                    'This is NOT a live backup inventory or a "run a real disaster-recovery drill" tool. '.
-                    'backup_restore_tests records the RESULT of a BackupRestoreDrillRunner — and the only '.
-                    'implementation of that interface anywhere in this codebase is FakeBackupRestoreDrillRunner. '.
-                    'No production implementation performing a real infrastructure backup/restore exists (an explicit '.
-                    'project rule, mirroring the FakeStripeGateway precedent). A "Run Drill" action is deliberately '.
-                    'NOT provided here — a fake "Passed" result could create false confidence about real '.
-                    'disaster-recovery readiness. Below is real, honestly-labeled drill HISTORY data only.'
-                )->color('danger'),
+                    'A "Run Drill" action is deliberately NOT provided anywhere on this page. The only runner that '.
+                    'exists would record a "Passed" result without restoring anything, and a passed drill in the '.
+                    'history is exactly the artefact someone would later cite as evidence of recovery readiness.'
+                )->color('gray'),
+            ]);
+    }
+
+    /**
+     * Recovery objectives, with target and actual kept rigidly apart.
+     *
+     * Target is policy and comes from the drill record. Actual is a
+     * measurement and comes only from a real restore — while none has
+     * happened, it reads Not Yet Measured no matter what numbers a
+     * simulated drill stored.
+     */
+    private function recoveryObjectivesSection(): Section
+    {
+        $capability = app(BackupRestoreCapabilityService::class);
+        $latest = app(BackupRestoreTestService::class)->latestFor(null);
+
+        return Section::make('Recovery Objectives')
+            ->icon(Heroicon::OutlinedClock)
+            ->schema([
+                Text::make('Target RPO (policy): '.($latest?->rpo_target_seconds !== null ? $latest->rpo_target_seconds.'s' : 'Not Configured')),
+                Text::make('Actual RPO (measured in a real recovery): '.$capability->actualRpoLabel())
+                    ->color($capability->measuredActualRpoSeconds() === null ? 'warning' : 'success'),
+                Text::make('Target RTO (policy): '.($latest?->rto_target_seconds !== null ? $latest->rto_target_seconds.'s' : 'Not Configured')),
+                Text::make('Actual RTO (measured in a real recovery): '.$capability->actualRtoLabel())
+                    ->color($capability->measuredActualRtoSeconds() === null ? 'warning' : 'success'),
+                Text::make(
+                    'A target is what this platform intends to achieve. An actual is what it has been observed to '.
+                    'achieve while genuinely recovering. A configured backup interval is not an actual RPO, and a '.
+                    'passing unit test is not an actual RTO.'
+                )->color('gray'),
+            ]);
+    }
+
+    /**
+     * What this platform can and cannot see about backups at all.
+     */
+    private function inventorySection(): Section
+    {
+        $capability = app(BackupRestoreCapabilityService::class);
+
+        return Section::make('Backup Inventory & PITR')
+            ->icon(Heroicon::OutlinedCircleStack)
+            ->schema([
+                Text::make('Backup inventory: '.($capability->hasBackupInventory() ? 'Available' : 'Not Available'))
+                    ->color($capability->hasBackupInventory() ? 'success' : 'warning'),
+                Text::make('Point-in-time recovery: '.($capability->hasVerifiedPitr() ? 'Verified' : 'Unknown — Not Verified'))
+                    ->color($capability->hasVerifiedPitr() ? 'success' : 'warning'),
+                Text::make('Last verified real restore: '.($capability->hasVerifiedRestore() ? 'See history below' : 'Never'))
+                    ->color($capability->hasVerifiedRestore() ? 'success' : 'danger'),
+                Text::make(
+                    'No verified backup inventory is available: this application holds no AWS Backup, RDS, or object '.
+                    'storage client, so it cannot enumerate snapshots, read a retention setting, or query a '.
+                    'restorable time window. Reading any of those requires new AWS integration and IAM permissions, '.
+                    'which need owner approval and are not part of this change.'
+                )->color('gray'),
             ]);
     }
 
     private function latestDrillSection(): Section
     {
         $service = app(BackupRestoreTestService::class);
+        $capability = app(BackupRestoreCapabilityService::class);
         $latest = $service->latestFor(null);
 
         if ($latest === null) {
-            return Section::make('Latest Platform-Wide Drill')
+            return Section::make('Latest Recorded Drill')
                 ->schema([Text::make('No platform-wide drill has ever been recorded.')]);
         }
 
-        return Section::make('Latest Platform-Wide Drill')
+        $qualifier = $capability->recordedFigureQualifier();
+
+        return Section::make('Latest Recorded Drill')
             ->schema([
                 Text::make('Status: '.Str::headline($latest->status->value)),
-                Text::make('Meets RPO/RTO targets: '.($latest->meetsTargets() ? 'Yes' : 'No')),
-                Text::make('Fully verified (all 6 required components): '.($service->fullyVerified($latest) ? 'Yes' : 'No')),
-                Text::make('RPO target/actual: '.$latest->rpo_target_seconds.'s / '.($latest->rpo_actual_seconds ?? '—').'s'),
-                Text::make('RTO target/actual: '.$latest->rto_target_seconds.'s / '.($latest->rto_actual_seconds ?? '—').'s'),
-                Text::make('Completed at: '.($latest->completed_at?->toDayDateTimeString() ?? '—')),
+                Text::make('Recorded RPO figure: '.($latest->rpo_actual_seconds !== null ? $latest->rpo_actual_seconds.'s ('.$qualifier.')' : 'Not recorded')),
+                Text::make('Recorded RTO figure: '.($latest->rto_actual_seconds !== null ? $latest->rto_actual_seconds.'s ('.$qualifier.')' : 'Not recorded')),
+                Text::make('Recorded figures within recorded targets: '.($latest->meetsTargets() ? 'Yes' : 'No').
+                    ($capability->hasRealDrillRunner() ? '' : ' — against simulated figures, so this proves nothing about real recovery')),
+                Text::make('All 6 required components marked verified: '.($service->fullyVerified($latest) ? 'Yes' : 'No').
+                    ($capability->hasRealDrillRunner() ? '' : ' — marked by the fake runner, not actually verified')),
+                Text::make('Completed at: '.($latest->completed_at?->toDayDateTimeString() ?? 'Not completed')),
             ]);
     }
 
@@ -151,17 +211,38 @@ class PlatformBackupsPage extends Page implements HasTable
                         BackupRestoreTestStatus::Failed, BackupRestoreTestStatus::Skipped => 'danger',
                     })
                     ->sortable(),
+                TextColumn::make('evidence_kind')
+                    ->label('Evidence')
+                    ->badge()
+                    // The most important column in this table: whether
+                    // the row's numbers came from a real restore or a
+                    // test double.
+                    ->state(fn (): string => app(BackupRestoreCapabilityService::class)->hasRealDrillRunner()
+                        ? 'Measured'
+                        : 'Simulated')
+                    ->color(fn (): string => app(BackupRestoreCapabilityService::class)->hasRealDrillRunner()
+                        ? 'success'
+                        : 'warning')
+                    ->tooltip('Simulated rows were produced by FakeBackupRestoreDrillRunner and involved no real restore.'),
                 IconColumn::make('meets_targets')
-                    ->label('Meets targets')
+                    ->label('Within targets')
                     ->boolean()
-                    ->state(fn (BackupRestoreTest $record): bool => $record->meetsTargets()),
-                TextColumn::make('rpo_actual_seconds')->label('RPO actual (s)')->placeholder('—')->alignEnd(),
-                TextColumn::make('rto_actual_seconds')->label('RTO actual (s)')->placeholder('—')->alignEnd(),
+                    ->state(fn (BackupRestoreTest $record): bool => $record->meetsTargets())
+                    ->tooltip('Compares the recorded figures against the recorded targets. With simulated figures this says nothing about real recovery.'),
+                TextColumn::make('rpo_actual_seconds')
+                    ->label('Recorded RPO (s)')
+                    ->placeholder('Not recorded')
+                    ->alignEnd(),
+                TextColumn::make('rto_actual_seconds')
+                    ->label('Recorded RTO (s)')
+                    ->placeholder('Not recorded')
+                    ->alignEnd(),
                 TextColumn::make('started_at')->label('Started at')->dateTime()->sortable(),
-                TextColumn::make('completed_at')->label('Completed at')->dateTime()->placeholder('—')->sortable(),
+                TextColumn::make('completed_at')->label('Completed at')->dateTime()->placeholder('Not completed')->sortable(),
                 TextColumn::make('id')->label('#')->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])
             ->emptyStateHeading('No backup/restore drills recorded yet')
+            ->emptyStateDescription('No drill of any kind has been recorded. Note that no real restore capability exists to record one from.')
             ->defaultSort('id', 'desc')
             ->paginated([25, 50, 100]);
     }
