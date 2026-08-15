@@ -12,14 +12,17 @@ use App\Filament\Resources\PracticeAreaResource\Pages\ViewPracticeArea;
 use App\Filament\Resources\PracticeAreaResource\RelationManagers\MatterTypesRelationManager;
 use App\Models\PlatformAdmin;
 use App\Models\PracticeArea;
+use App\Services\Configuration\PracticeAreaCanonicalizationService;
 use App\Services\PlatformStaffAccessPolicyService;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
 
 /**
@@ -79,17 +82,84 @@ class PracticeAreaResource extends Resource
                     ->searchable()
                     ->sortable(),
                 TextColumn::make('code')
+                    ->label('Canonical code')
                     ->searchable()
-                    ->sortable(),
+                    ->sortable()
+                    ->description(fn (PracticeArea $record): ?string => $record->slug === null
+                        ? null
+                        : 'slug: '.$record->slug),
                 TextColumn::make('matterTypes_count')
                     ->label('Matter types')
-                    ->counts('matterTypes'),
-                IconColumn::make('is_active')
-                    ->label('Active')
-                    ->boolean(),
+                    ->counts('matterTypes')
+                    ->sortable(),
+                /**
+                 * Stored alias COUNT only. `practice_areas.synonyms` is a
+                 * real column, but no resolver in this codebase consults
+                 * it (MarketplaceSearchService's own docblock says so
+                 * explicitly), so this column is labelled "Stored
+                 * aliases" and the View page states plainly that they do
+                 * not resolve. Mission section 100: never present stored
+                 * data as a working capability.
+                 */
+                TextColumn::make('synonyms')
+                    ->label('Stored aliases')
+                    ->badge()
+                    ->formatStateUsing(fn (mixed $state): string => is_array($state) && $state !== []
+                        ? count($state).' stored'
+                        : 'None')
+                    ->color(fn (mixed $state): string => is_array($state) && $state !== [] ? 'info' : 'gray')
+                    ->toggleable(),
+                IconColumn::make('is_marketplace_visible')
+                    ->label('Marketplace')
+                    ->boolean()
+                    ->toggleable(),
+                TextColumn::make('is_active')
+                    ->label('Status')
+                    ->badge()
+                    // Textual, not colour-only — mission section 86.
+                    ->formatStateUsing(fn (bool $state): string => $state ? 'Active' : 'Inactive')
+                    ->color(fn (bool $state): string => $state ? 'success' : 'gray')
+                    ->sortable(),
+                TextColumn::make('updated_at')
+                    ->label('Last updated')
+                    ->dateTime()
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
                 TernaryFilter::make('is_active')->label('Active'),
+                TernaryFilter::make('is_marketplace_visible')->label('Marketplace visible'),
+                Filter::make('has_matter_types')
+                    ->label('Has matter types')
+                    ->query(fn (Builder $query): Builder => $query->has('matterTypes')),
+                Filter::make('has_stored_aliases')
+                    ->label('Has stored aliases')
+                    ->query(fn (Builder $query): Builder => $query
+                        ->whereNotNull('synonyms')
+                        ->whereRaw('json_array_length(synonyms::json) > 0')),
+                /**
+                 * Suspected duplicates cannot be expressed as a plain SQL
+                 * predicate — the rule is "normalizes onto another row",
+                 * which is a comparison between rows. The ids are
+                 * resolved once by the canonical analysis service and
+                 * then applied as a whereKey filter, so filtering still
+                 * happens in the database (mission section 82) rather
+                 * than by loading the catalog into PHP and filtering
+                 * there. The catalog is small, global reference data —
+                 * a few dozen rows — so this stays cheap.
+                 */
+                Filter::make('suspected_duplicate')
+                    ->label('Suspected duplicate')
+                    ->query(function (Builder $query): Builder {
+                        $ids = app(PracticeAreaCanonicalizationService::class)
+                            ->suspectedDuplicatePairs()
+                            ->flatMap(fn (array $pair): array => [$pair['lower']->id, $pair['higher']->id])
+                            ->unique()
+                            ->values()
+                            ->all();
+
+                        return $query->whereKey($ids === [] ? [0] : $ids);
+                    }),
             ])
             ->recordActions([
                 EditPracticeAreaAction::make(),
