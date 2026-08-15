@@ -131,6 +131,98 @@ final class DirectoryFirmManualAdministrationTest extends TestCase
         $test->assertSee('Possible duplicate');
     }
 
+    /**
+     * MyAttorney final hardening mission, finding 12: the warning must
+     * show WHY a candidate matched (real evidence), never a fabricated
+     * confidence score.
+     */
+    public function test_manual_creation_duplicate_warning_states_the_matching_reason(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        DirectoryFirm::factory()->create(['display_name' => 'Reason Duplicate Firm', 'name_normalized' => 'reason duplicate firm']);
+
+        Livewire::test(CreateDirectoryFirm::class)
+            ->fillForm(['display_name' => 'Reason Duplicate Firm'])
+            ->assertSee('Same normalized legal name');
+    }
+
+    /**
+     * MyAttorney final hardening mission, finding 7: "Create Anyway"
+     * governance. A detected duplicate must block plain submission
+     * until the admin supplies an explicit, non-blank override reason.
+     */
+    public function test_creating_a_firm_despite_a_duplicate_requires_an_explicit_reason(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        DirectoryFirm::factory()->create(['display_name' => 'Blocking Duplicate Firm', 'name_normalized' => 'blocking duplicate firm']);
+
+        Livewire::test(CreateDirectoryFirm::class)
+            ->fillForm(['display_name' => 'Blocking Duplicate Firm'])
+            ->call('create')
+            ->assertHasFormErrors(['duplicate_override_reason']);
+
+        $this->assertSame(1, DirectoryFirm::query()->where('display_name', 'Blocking Duplicate Firm')->count());
+    }
+
+    public function test_creating_a_firm_despite_a_duplicate_with_a_reason_succeeds_and_is_audited(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $existing = DirectoryFirm::factory()->create(['display_name' => 'Override Duplicate Firm', 'name_normalized' => 'override duplicate firm']);
+
+        Livewire::test(CreateDirectoryFirm::class)
+            ->fillForm([
+                'display_name' => 'Override Duplicate Firm',
+                'duplicate_override_reason' => 'Confirmed by phone with the firm — this is a genuinely separate branch office under a shared trade name.',
+            ])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $created = DirectoryFirm::query()->where('display_name', 'Override Duplicate Firm')->where('id', '!=', $existing->id)->first();
+        $this->assertNotNull($created, 'Create Anyway must actually create the record once a reason is supplied.');
+
+        $auditRow = DB::table('security_events')
+            ->where('event_type', 'marketplace_firm_created')
+            ->where('actor_id', $admin->id)
+            ->latest('id')
+            ->first();
+        $this->assertNotNull($auditRow);
+
+        $metadata = $auditRow->metadata;
+        $decoded = is_string($metadata) ? json_decode($metadata, true) : $metadata;
+        $this->assertArrayHasKey('duplicate_override', $decoded);
+        $this->assertSame($existing->id, $decoded['duplicate_override']['matched_directory_firm_id']);
+        $this->assertContains('Same normalized legal name', $decoded['duplicate_override']['matching_reasons']);
+        $this->assertStringContainsString('branch office', $decoded['duplicate_override']['reason']);
+    }
+
+    /**
+     * The override-reason gate is scoped to Create only (this mission's
+     * own "Manual Add Firm/Add Attorney" wording) — it must never appear
+     * or block a plain Edit, even when the edited name now collides
+     * with another existing listing.
+     */
+    public function test_the_override_reason_field_never_appears_or_blocks_when_editing_a_firm(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        DirectoryFirm::factory()->create(['display_name' => 'Edit Collision Firm', 'name_normalized' => 'edit collision firm']);
+        $firm = DirectoryFirm::factory()->create(['display_name' => 'Original Firm Name']);
+
+        Livewire::test(EditDirectoryFirm::class, ['record' => $firm->getRouteKey()])
+            ->fillForm(['display_name' => 'Edit Collision Firm'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('Edit Collision Firm', $firm->fresh()->display_name);
+    }
+
     public function test_super_admin_can_edit_a_firm_and_the_edit_is_audited_and_versioned(): void
     {
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);

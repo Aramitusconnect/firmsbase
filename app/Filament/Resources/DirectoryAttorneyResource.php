@@ -20,11 +20,13 @@ use App\Marketplace\Enums\VerificationState;
 use App\Marketplace\Models\DirectoryAttorney;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Models\DirectoryVerification;
+use App\Marketplace\Services\MarketplaceImportDuplicateDetectionService;
 use App\Models\Language;
 use App\Models\PlatformAdmin;
 use App\Models\PracticeArea;
 use App\Services\PlatformStaffAccessPolicyService;
 use BackedEnum;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\Textarea;
@@ -100,20 +102,68 @@ class DirectoryAttorneyResource extends Resource
         return parent::getEloquentQuery()->with(['firmRelationships' => fn ($q) => $q->where('relationship_state', DirectoryAttorneyFirmRelationshipState::Current)->with('firm')]);
     }
 
+    /**
+     * @return array{attorney: DirectoryAttorney, reasons: array<int, string>}|null
+     */
+    private static function duplicateCandidate(callable $get, ?DirectoryAttorney $record): ?array
+    {
+        $data = [
+            'name' => (string) ($get('name') ?? ''),
+            'bar_number' => $get('bar_number'),
+        ];
+
+        if (blank($data['name']) && blank($data['bar_number'])) {
+            return null;
+        }
+
+        return app(MarketplaceImportDuplicateDetectionService::class)->findAttorneyDuplicateCandidate($data, $record?->id);
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema->components([
             Section::make('Attorney Details')
                 ->columns(2)
                 ->schema([
-                    TextInput::make('name')->required()->maxLength(255),
+                    TextInput::make('name')->required()->maxLength(255)->live(onBlur: true),
                     TextInput::make('title')->maxLength(255)->helperText('e.g. Partner, Associate.'),
-                    TextInput::make('bar_number')->label('Bar Number')->maxLength(255),
+                    TextInput::make('bar_number')->label('Bar Number')->maxLength(255)->live(onBlur: true),
                     TagsInput::make('license_jurisdictions')
                         ->label('License Jurisdictions')
                         ->placeholder('e.g. MI, OH')
                         ->helperText('Press enter after each jurisdiction.'),
                 ]),
+            /**
+             * MyAttorney final hardening mission, finding 7. Add Attorney
+             * had no duplicate check of any kind before this mission —
+             * mirrors DirectoryFirmResource's own duplicate_warning +
+             * duplicate_override_reason pattern exactly, using the
+             * genuinely new findAttorneyDuplicateCandidate() (name +
+             * bar_number — the only two signals a DirectoryAttorney
+             * record carries).
+             */
+            Placeholder::make('duplicate_warning')
+                ->hiddenLabel()
+                ->content(function (callable $get, ?DirectoryAttorney $record): string {
+                    $candidate = self::duplicateCandidate($get, $record);
+
+                    if ($candidate === null) {
+                        return '';
+                    }
+
+                    $match = $candidate['attorney'];
+                    $reasons = implode('; ', $candidate['reasons']);
+
+                    return "⚠ Possible duplicate: an existing attorney \"{$match->name}\" (slug: {$match->slug}) — matched because: {$reasons}.";
+                })
+                ->visible(fn (callable $get): bool => filled($get('name')) || filled($get('bar_number'))),
+            Textarea::make('duplicate_override_reason')
+                ->label('Reason for creating despite possible duplicate')
+                ->rows(2)
+                ->maxLength(500)
+                ->visible(fn (callable $get, ?DirectoryAttorney $record): bool => $record === null && self::duplicateCandidate($get, $record) !== null)
+                ->required(fn (callable $get, ?DirectoryAttorney $record): bool => $record === null && self::duplicateCandidate($get, $record) !== null)
+                ->helperText('Required because a possible duplicate attorney was found above. Explain why this is a genuinely different person.'),
             Section::make('Biography')
                 ->schema([
                     Textarea::make('biography')->rows(4)->maxLength(2000),

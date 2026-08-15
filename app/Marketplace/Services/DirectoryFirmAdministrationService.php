@@ -13,6 +13,7 @@ use App\Services\PlatformAdminAuditEventRecorder;
 use BackedEnum;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 /**
  * DirectoryFirmAdministrationService — MyAttorney SuperAdmin console
@@ -66,6 +67,7 @@ class DirectoryFirmAdministrationService
     public function __construct(
         private readonly PlatformAdminAuditEventRecorder $audit = new PlatformAdminAuditEventRecorder,
         private readonly MarketplaceProfileVersionService $versions = new MarketplaceProfileVersionService,
+        private readonly MarketplaceImportDuplicateDetectionService $duplicates = new MarketplaceImportDuplicateDetectionService,
     ) {}
 
     /**
@@ -79,6 +81,30 @@ class DirectoryFirmAdministrationService
             $displayName = (string) $data['display_name'];
             $slugSource = filled($data['slug'] ?? null) ? (string) $data['slug'] : $displayName;
             $slug = DirectoryFirm::generateUniqueSlug($slugSource);
+
+            /**
+             * MyAttorney final hardening mission, finding 7: a manual
+             * Add Firm submission is checked against the same
+             * deterministic duplicate signals import uses, and — when a
+             * candidate is found — requires an explicit, non-blank
+             * override reason. Enforced HERE (not only via the Filament
+             * form's own required() closure) so this guarantee holds for
+             * every caller of this service, not just the one Livewire
+             * page.
+             */
+            $duplicate = $this->duplicates->findDuplicateCandidate([
+                'name_normalized' => Str::lower($displayName),
+                'phone' => $data['phone'] ?? null,
+                'website' => $data['website'] ?? null,
+            ]);
+
+            $overrideReason = trim((string) ($data['duplicate_override_reason'] ?? ''));
+
+            if ($duplicate !== null && $overrideReason === '') {
+                throw ValidationException::withMessages([
+                    'duplicate_override_reason' => 'A reason is required to create this firm despite a possible duplicate match.',
+                ]);
+            }
 
             $firm = DirectoryFirm::create([
                 'firm_id' => null,
@@ -109,11 +135,21 @@ class DirectoryFirmAdministrationService
             $this->syncOffice($firm, $data);
             $this->syncPracticeAreasAndLanguages($firm, $practiceAreaIds, $languageIds);
 
-            $this->writeAudit($firm, $admin, 'marketplace_firm_created', [
+            $metadata = [
                 'directory_firm_id' => $firm->id,
                 'slug' => $firm->slug,
                 'publication_state' => $firm->publication_state->value,
-            ]);
+            ];
+
+            if ($duplicate !== null) {
+                $metadata['duplicate_override'] = [
+                    'matched_directory_firm_id' => $duplicate['firm']->id,
+                    'matching_reasons' => $duplicate['reasons'],
+                    'reason' => $overrideReason,
+                ];
+            }
+
+            $this->writeAudit($firm, $admin, 'marketplace_firm_created', $metadata);
 
             return $firm->fresh(['offices', 'practiceAreas', 'languages']);
         });

@@ -112,6 +112,24 @@ class DirectoryFirmResource extends Resource
         return static::canViewAny();
     }
 
+    /**
+     * @return array{firm: DirectoryFirm, reasons: array<int, string>}|null
+     */
+    private static function duplicateCandidate(callable $get, ?DirectoryFirm $record): ?array
+    {
+        $data = [
+            'name_normalized' => Str::lower((string) ($get('display_name') ?? '')),
+            'phone' => $get('phone'),
+            'website' => $get('website'),
+        ];
+
+        if (blank($data['name_normalized']) && blank($data['phone']) && blank($data['website'])) {
+            return null;
+        }
+
+        return app(MarketplaceImportDuplicateDetectionService::class)->findDuplicateCandidate($data, $record?->id);
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema->components([
@@ -130,24 +148,36 @@ class DirectoryFirmResource extends Resource
             Placeholder::make('duplicate_warning')
                 ->hiddenLabel()
                 ->content(function (callable $get, ?DirectoryFirm $record): string {
-                    $data = [
-                        'name_normalized' => Str::lower((string) ($get('display_name') ?? '')),
-                        'phone' => $get('phone'),
-                        'website' => $get('website'),
-                    ];
+                    $candidate = self::duplicateCandidate($get, $record);
 
-                    if (blank($data['name_normalized']) && blank($data['phone']) && blank($data['website'])) {
+                    if ($candidate === null) {
                         return '';
                     }
 
-                    $match = app(MarketplaceImportDuplicateDetectionService::class)
-                        ->matchForMappedData($data, $record?->id);
+                    $match = $candidate['firm'];
+                    $reasons = implode('; ', $candidate['reasons']);
 
-                    return $match !== null
-                        ? "⚠ Possible duplicate: an existing listing \"{$match->display_name}\" (slug: {$match->slug}) matches on name, phone, or website."
-                        : '';
+                    return "⚠ Possible duplicate: an existing listing \"{$match->display_name}\" (slug: {$match->slug}) — matched because: {$reasons}.";
                 })
                 ->visible(fn (callable $get): bool => filled($get('display_name')) || filled($get('phone')) || filled($get('website'))),
+            /**
+             * MyAttorney final hardening mission, finding 7. Only shown
+             * when creating (never on Edit — this mission's own scope is
+             * "Manual Add Firm/Add Attorney") AND a duplicate candidate
+             * is actually present. Required whenever visible, so a
+             * SuperAdmin cannot create past a detected duplicate without
+             * a deliberate, audited justification — see
+             * DirectoryFirmAdministrationService::create() for the
+             * server-side enforcement (this closure is not the only
+             * gate; the service refuses creation without a reason too).
+             */
+            Textarea::make('duplicate_override_reason')
+                ->label('Reason for creating despite possible duplicate')
+                ->rows(2)
+                ->maxLength(500)
+                ->visible(fn (callable $get, ?DirectoryFirm $record): bool => $record === null && self::duplicateCandidate($get, $record) !== null)
+                ->required(fn (callable $get, ?DirectoryFirm $record): bool => $record === null && self::duplicateCandidate($get, $record) !== null)
+                ->helperText('Required because a possible duplicate listing was found above. Explain why this is a genuinely different firm.'),
             Section::make('Description')
                 ->schema([
                     Textarea::make('description')->rows(4)->maxLength(2000),

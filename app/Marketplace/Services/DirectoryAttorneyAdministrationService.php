@@ -14,6 +14,7 @@ use App\Models\PlatformAdmin;
 use App\Services\PlatformAdminAuditEventRecorder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 /**
  * DirectoryAttorneyAdministrationService — MyAttorney SuperAdmin
@@ -53,6 +54,7 @@ class DirectoryAttorneyAdministrationService
 
     public function __construct(
         private readonly PlatformAdminAuditEventRecorder $audit = new PlatformAdminAuditEventRecorder,
+        private readonly MarketplaceImportDuplicateDetectionService $duplicates = new MarketplaceImportDuplicateDetectionService,
     ) {}
 
     /**
@@ -65,6 +67,26 @@ class DirectoryAttorneyAdministrationService
         return DB::transaction(function () use ($data, $practiceAreaIds, $languageIds, $admin): DirectoryAttorney {
             $name = (string) $data['name'];
             $slug = DirectoryAttorney::generateUniqueSlug($name);
+
+            /**
+             * MyAttorney final hardening mission, finding 7: same
+             * server-side enforced Create Anyway gate as
+             * DirectoryFirmAdministrationService::create() — see that
+             * method's own docblock for why this check is not solely
+             * relied on the Filament form's client-observable state.
+             */
+            $duplicate = $this->duplicates->findAttorneyDuplicateCandidate([
+                'name' => $name,
+                'bar_number' => $data['bar_number'] ?? null,
+            ]);
+
+            $overrideReason = trim((string) ($data['duplicate_override_reason'] ?? ''));
+
+            if ($duplicate !== null && $overrideReason === '') {
+                throw ValidationException::withMessages([
+                    'duplicate_override_reason' => 'A reason is required to create this attorney despite a possible duplicate match.',
+                ]);
+            }
 
             $attorney = DirectoryAttorney::create([
                 'slug' => $slug,
@@ -87,11 +109,21 @@ class DirectoryAttorneyAdministrationService
                 $this->associateWithFirm($attorney, (int) $data['directory_firm_id'], $data['firm_title'] ?? null, $admin);
             }
 
-            $this->writeAudit($attorney, $admin, 'marketplace_attorney_created', [
+            $metadata = [
                 'directory_attorney_id' => $attorney->id,
                 'slug' => $attorney->slug,
                 'publication_state' => $attorney->publication_state->value,
-            ]);
+            ];
+
+            if ($duplicate !== null) {
+                $metadata['duplicate_override'] = [
+                    'matched_directory_attorney_id' => $duplicate['attorney']->id,
+                    'matching_reasons' => $duplicate['reasons'],
+                    'reason' => $overrideReason,
+                ];
+            }
+
+            $this->writeAudit($attorney, $admin, 'marketplace_attorney_created', $metadata);
 
             return $attorney->fresh(['firmRelationships', 'practiceAreas', 'languages']);
         });

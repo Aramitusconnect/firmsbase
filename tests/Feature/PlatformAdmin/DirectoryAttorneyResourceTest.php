@@ -167,6 +167,88 @@ final class DirectoryAttorneyResourceTest extends TestCase
             ->assertHasFormErrors(['name']);
     }
 
+    /**
+     * MyAttorney final hardening mission, finding 7. Add Attorney had no
+     * duplicate check at all before this mission — proves the new
+     * warning renders with its matching reason (finding 12).
+     */
+    public function test_manual_creation_warns_on_a_likely_duplicate_attorney_with_the_matching_reason(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        DirectoryAttorney::factory()->create(['name' => 'Reason Duplicate Attorney', 'name_normalized' => 'reason duplicate attorney']);
+
+        Livewire::test(CreateDirectoryAttorney::class)
+            ->fillForm(['name' => 'Reason Duplicate Attorney'])
+            ->assertSee('Possible duplicate')
+            ->assertSee('Same normalized name');
+    }
+
+    public function test_creating_an_attorney_despite_a_duplicate_requires_an_explicit_reason(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        DirectoryAttorney::factory()->create(['name' => 'Blocking Duplicate Attorney', 'name_normalized' => 'blocking duplicate attorney']);
+
+        Livewire::test(CreateDirectoryAttorney::class)
+            ->fillForm(['name' => 'Blocking Duplicate Attorney'])
+            ->call('create')
+            ->assertHasFormErrors(['duplicate_override_reason']);
+
+        $this->assertSame(1, DirectoryAttorney::query()->where('name', 'Blocking Duplicate Attorney')->count());
+    }
+
+    public function test_creating_an_attorney_despite_a_duplicate_with_a_reason_succeeds_and_is_audited(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $existing = DirectoryAttorney::factory()->create(['bar_number' => 'P999999']);
+
+        Livewire::test(CreateDirectoryAttorney::class)
+            ->fillForm([
+                'name' => 'A Genuinely Different Attorney',
+                'bar_number' => 'P999999',
+                'duplicate_override_reason' => 'Confirmed with the State Bar — this bar number was reassigned; not the same person.',
+            ])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $created = DirectoryAttorney::query()->where('name', 'A Genuinely Different Attorney')->first();
+        $this->assertNotNull($created, 'Create Anyway must actually create the record once a reason is supplied.');
+
+        $auditRow = DB::table('security_events')
+            ->where('event_type', 'marketplace_attorney_created')
+            ->where('actor_id', $admin->id)
+            ->latest('id')
+            ->first();
+        $this->assertNotNull($auditRow);
+
+        $decoded = json_decode((string) $auditRow->metadata, true);
+        $this->assertArrayHasKey('duplicate_override', $decoded);
+        $this->assertSame($existing->id, $decoded['duplicate_override']['matched_directory_attorney_id']);
+        $this->assertContains('Same bar number', $decoded['duplicate_override']['matching_reasons']);
+        $this->assertStringContainsString('State Bar', $decoded['duplicate_override']['reason']);
+    }
+
+    public function test_the_attorney_override_reason_field_never_appears_or_blocks_when_editing(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        DirectoryAttorney::factory()->create(['name' => 'Edit Collision Attorney', 'name_normalized' => 'edit collision attorney']);
+        $attorney = DirectoryAttorney::factory()->create(['name' => 'Original Attorney For Edit']);
+
+        Livewire::test(EditDirectoryAttorney::class, ['record' => $attorney->getRouteKey()])
+            ->fillForm(['name' => 'Edit Collision Attorney'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('Edit Collision Attorney', $attorney->fresh()->name);
+    }
+
     public function test_super_admin_can_edit_an_attorney_and_the_edit_is_audited(): void
     {
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
