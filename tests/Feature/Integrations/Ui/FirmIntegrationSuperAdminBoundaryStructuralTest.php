@@ -403,6 +403,11 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Auth'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'PlatformAdminLogin.php',
             'MultiFactor'.DIRECTORY_SEPARATOR.'AuditedAppAuthentication.php',
             'Pages'.DIRECTORY_SEPARATOR.'PlatformRolesAndPermissionsPage.php',
+            // CORE SuperAdmin mission (admin/core-superadmin-security):
+            // a real per-role drill-down, reached only via the catalog
+            // page's own "View details" link — see that class's own
+            // docblock.
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformRoleDetailPage.php',
             'Resources'.DIRECTORY_SEPARATOR.'PlatformAdministratorResource.php',
             'Resources'.DIRECTORY_SEPARATOR.'PlatformAdministratorResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListPlatformAdministrators.php',
             'Resources'.DIRECTORY_SEPARATOR.'PlatformAdministratorResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewPlatformAdministrator.php',

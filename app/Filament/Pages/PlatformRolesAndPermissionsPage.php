@@ -133,17 +133,24 @@ class PlatformRolesAndPermissionsPage extends Page
 
         return $schema->components([
             Section::make('Role Catalog')
-                ->description('What each of the 9 fixed platform-staff roles grants, per PlatformStaffAccessPolicyService.')
+                ->description('What each of the 9 fixed platform-staff roles grants, per PlatformStaffAccessPolicyService. Select a role for its full detail — effective capabilities, current holders, and recent grant/revocation history.')
                 ->schema(collect(PlatformRoleCode::cases())
                     ->map(fn (PlatformRoleCode $role) => Section::make(Str::headline($role->value))
                         ->compact()
                         ->schema([
+                            Text::make('Risk classification: '.self::riskClassificationFor($role))
+                                ->color(match (self::riskClassificationFor($role)) {
+                                    'High' => 'danger',
+                                    'Medium' => 'warning',
+                                    default => 'gray',
+                                }),
                             Text::make('Active admins holding this role: '.($usageCounts[$role->value] ?? 0)),
                             UnorderedList::make(
-                                empty($this->capabilitiesForRole($role))
+                                empty(self::capabilitiesForRole($role))
                                     ? [Text::make('No access grants defined for this role within PlatformStaffAccessPolicyService.')->color('gray')]
-                                    : collect($this->capabilitiesForRole($role))->map(fn (string $capability) => Text::make($capability))->all()
+                                    : collect(self::capabilitiesForRole($role))->map(fn (string $capability) => Text::make($capability))->all()
                             ),
+                            Text::make(fn () => 'View details: '.PlatformRoleDetailPage::getUrl(['roleCode' => $role->value])),
                         ]))
                     ->all()),
             Section::make('Current Assignments')
@@ -161,9 +168,13 @@ class PlatformRolesAndPermissionsPage extends Page
     }
 
     /**
+     * Public + static so PlatformRoleDetailPage's own drill-down can
+     * reuse the exact same, always-live-reflected capability list —
+     * never a second hand-copied description of the same role.
+     *
      * @return array<string>
      */
-    private function capabilitiesForRole(PlatformRoleCode $role): array
+    public static function capabilitiesForRole(PlatformRoleCode $role): array
     {
         $reflection = new ReflectionClass(PlatformStaffAccessPolicyService::class);
         $capabilities = [];
@@ -181,6 +192,39 @@ class PlatformRolesAndPermissionsPage extends Page
         }
 
         return $capabilities;
+    }
+
+    /**
+     * CORE SuperAdmin mission, section 33/34: a derived, never
+     * hand-tagged risk classification — reflects the SAME constants
+     * capabilitiesForRole() reads, never a separate hardcoded per-role
+     * list that could silently drift. High: appears in either
+     * management-of-other-admins constant (the two capabilities that
+     * can affect ANOTHER PlatformAdmin's own access). Medium: appears
+     * in a constant granting firm-mutation, security-log, or billing
+     * visibility. Low: everything else (e.g. SalesRep/ReadOnlyAuditor,
+     * whose grants are narrow/read-only).
+     */
+    public static function riskClassificationFor(PlatformRoleCode $role): string
+    {
+        $reflection = new ReflectionClass(PlatformStaffAccessPolicyService::class);
+
+        $highRiskConstants = ['PLATFORM_ADMINISTRATOR_MANAGEMENT_ROLES', 'ROLE_MANAGEMENT_ROLES'];
+        $mediumRiskConstants = ['FIRM_MANAGEMENT_ROLES', 'SECURITY_LOG_ROLES', 'PLATFORM_BILLING_ROLES'];
+
+        foreach ($highRiskConstants as $constantName) {
+            if (in_array($role, $reflection->getReflectionConstant($constantName)->getValue(), true)) {
+                return 'High';
+            }
+        }
+
+        foreach ($mediumRiskConstants as $constantName) {
+            if (in_array($role, $reflection->getReflectionConstant($constantName)->getValue(), true)) {
+                return 'Medium';
+            }
+        }
+
+        return 'Low';
     }
 
     /**
