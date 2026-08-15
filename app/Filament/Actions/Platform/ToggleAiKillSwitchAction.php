@@ -106,7 +106,21 @@ class ToggleAiKillSwitchAction extends Action
             }
 
             $currentlyEngaged = $aiMode->platformKillSwitchEngaged();
-            $settingService->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, $currentlyEngaged, $admin, $data['reason'] ?? null);
+
+            // This is the ONE canonical, governed path to the kill
+            // switch — step-up re-authenticated and reason-bearing — so
+            // it is the only caller permitted to write this governed
+            // key. AiPolicySettingService refuses the same write from
+            // the generic raw-JSON editor. The value is always a real
+            // boolean here, which is what the strict `=== false` check
+            // in platformKillSwitchEngaged() requires.
+            $settingService->set(
+                AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY,
+                $currentlyEngaged,
+                $admin,
+                $data['reason'] ?? null,
+                allowGovernedKey: true,
+            );
 
             Notification::make()
                 ->title($currentlyEngaged ? 'Platform AI enabled' : 'Platform AI disabled')

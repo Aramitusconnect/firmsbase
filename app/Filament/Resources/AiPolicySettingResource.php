@@ -9,6 +9,7 @@ use App\Filament\Resources\AiPolicySettingResource\Pages\ListAiPolicySettings;
 use App\Filament\Resources\AiPolicySettingResource\Pages\ViewAiPolicySetting;
 use App\Models\AiPolicySetting;
 use App\Models\PlatformAdmin;
+use App\Services\Configuration\AiPolicyDefinitionRegistry;
 use App\Services\PlatformStaffAccessPolicyService;
 use BackedEnum;
 use Filament\Resources\Resource;
@@ -69,10 +70,58 @@ class AiPolicySettingResource extends Resource
         return $table
             ->query(AiPolicySetting::query())
             ->columns([
-                TextColumn::make('key')->label('Key')->searchable(),
+                TextColumn::make('key')
+                    ->label('Policy')
+                    ->searchable()
+                    // Friendly label where the key has a real definition;
+                    // the raw key stays visible as technical detail.
+                    ->formatStateUsing(fn (string $state): string => app(AiPolicyDefinitionRegistry::class)->find($state)['label'] ?? $state)
+                    ->description(fn (string $state): string => $state),
+                TextColumn::make('category')
+                    ->label('Category')
+                    ->state(fn (AiPolicySetting $record): string => app(AiPolicyDefinitionRegistry::class)->find($record->key)['category'] ?? 'Uncategorized')
+                    ->badge()
+                    ->toggleable(),
+                TextColumn::make('type')
+                    ->label('Type')
+                    ->state(fn (AiPolicySetting $record): string => app(AiPolicyDefinitionRegistry::class)->find($record->key)['type'] ?? 'Untyped')
+                    ->badge()
+                    ->color(fn (string $state): string => $state === 'Untyped' ? 'gray' : 'info'),
                 TextColumn::make('value_json')
                     ->label('Value')
-                    ->formatStateUsing(fn (mixed $state): string => Str::limit(json_encode($state, JSON_UNESCAPED_SLASHES) ?: '', 80))
+                    ->formatStateUsing(fn (mixed $state): string => Str::limit(json_encode($state, JSON_UNESCAPED_SLASHES) ?: '', 60))
+                    // What the stored value actually MEANS, for keys with
+                    // a known consumer — so an operator is not left to
+                    // interpret a bare `false` (mission section 51).
+                    ->description(fn (AiPolicySetting $record): string => app(AiPolicyDefinitionRegistry::class)->describeValue($record->key, $record->value_json))
+                    ->wrap(),
+                /**
+                 * Mission section 100: a key nothing reads must say so,
+                 * rather than sitting in a governance console implying
+                 * it controls something. And a GOVERNED key must point
+                 * at the control that actually operates it, so nobody
+                 * goes looking for a second one here.
+                 */
+                TextColumn::make('governance')
+                    ->label('Managed by')
+                    ->state(function (AiPolicySetting $record): string {
+                        $registry = app(AiPolicyDefinitionRegistry::class);
+                        $definition = $registry->find($record->key);
+
+                        if ($definition === null) {
+                            return 'Not consumed by any service';
+                        }
+
+                        return $definition['governed']
+                            ? $definition['governed_by']
+                            : 'Editable here';
+                    })
+                    ->badge()
+                    ->color(fn (string $state): string => match (true) {
+                        $state === 'Not consumed by any service' => 'gray',
+                        $state === 'Editable here' => 'success',
+                        default => 'warning',
+                    })
                     ->wrap(),
                 TextColumn::make('updated_at')->label('Last updated')->dateTime(),
             ])

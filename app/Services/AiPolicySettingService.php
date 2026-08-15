@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\AiPolicySetting;
 use App\Models\PlatformAdmin;
+use App\Services\Configuration\AiPolicyDefinitionRegistry;
 
 /**
  * AiPolicySettingService — Phase 4 (FirmsVault Platform Admin Control
@@ -79,11 +80,18 @@ class AiPolicySettingService
      * row's metadata rather than opening a second write path; added
      * for ToggleAiKillSwitchAction (MYAT8), which requires one.
      */
-    public function set(string $key, mixed $value, ?PlatformAdmin $actor = null, ?string $reason = null): AiPolicySetting
-    {
+    public function set(
+        string $key,
+        mixed $value,
+        ?PlatformAdmin $actor = null,
+        ?string $reason = null,
+        bool $allowGovernedKey = false,
+    ): AiPolicySetting {
         if (trim($key) === '') {
             throw new \InvalidArgumentException('An AI policy setting key is required.');
         }
+
+        $this->assertWritable($key, $value, $allowGovernedKey);
 
         $existing = AiPolicySetting::query()->where('key', $key)->first();
 
@@ -112,5 +120,53 @@ class AiPolicySettingService
         }
 
         return $fresh;
+    }
+
+    /**
+     * Configuration Control Plane (mission sections 52/55/57). Two
+     * distinct protections, both enforced here rather than in any form:
+     *
+     *   GOVERNED KEYS. Some keys have a dedicated, safer control
+     *   elsewhere — today that is 'platform_ai_enabled', the
+     *   platform-wide AI kill switch, operated by
+     *   ToggleAiKillSwitchAction behind step-up re-authentication and a
+     *   mandatory reason. The generic raw-JSON editor could previously
+     *   write that same key, which was a second, ungoverned path to the
+     *   kill switch. Only the canonical caller may pass
+     *   $allowGovernedKey.
+     *
+     *   TYPE VALIDATION. platformKillSwitchEngaged() compares strictly
+     *   against `false`, so storing the STRING "false", or 0, or null,
+     *   leaves the switch disengaged while appearing to an operator to
+     *   have set it. For keys whose real type is known from their
+     *   consumer, a mismatched value is refused outright instead of
+     *   being stored and silently ignored.
+     *
+     * Keys with no known consumer stay unconstrained — this table is
+     * deliberately generic, and inventing types for undefined keys is
+     * exactly what mission section 52 forbids.
+     */
+    private function assertWritable(string $key, mixed $value, bool $allowGovernedKey): void
+    {
+        $registry = new AiPolicyDefinitionRegistry;
+
+        if ($registry->isGoverned($key) && ! $allowGovernedKey) {
+            $definition = $registry->find($key);
+
+            throw new \InvalidArgumentException(
+                sprintf(
+                    '"%s" is governed and cannot be edited here. %s Use: %s.',
+                    $key,
+                    $definition['governed_reason'],
+                    $definition['governed_by'],
+                )
+            );
+        }
+
+        $typeError = $registry->validate($key, $value);
+
+        if ($typeError !== null) {
+            throw new \InvalidArgumentException($typeError);
+        }
     }
 }
