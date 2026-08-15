@@ -20,4 +20,25 @@ use Filament\Resources\Pages\ListRecords;
 class ListPlatformSubscriptions extends ListRecords
 {
     protected static string $resource = PlatformSubscriptionResource::class;
+
+    /**
+     * Billing & Commercial Control Plane pass. States the ACTUAL
+     * lifecycle surface of this domain, so an operator is not left
+     * hunting for a "Change plan" or "Pause" action that no service
+     * implements.
+     *
+     * Verified against PlatformSubscriptionService at this pass's HEAD:
+     * it exposes subscribe(), cancel(atPeriodEnd), and addItem(), and
+     * nothing else. There is no plan change, scheduled plan change,
+     * pause, resume, cancellation-resume, add-on attach/detach on a live
+     * subscription, or proration calculation anywhere in this codebase.
+     */
+    public function getSubheading(): ?string
+    {
+        return 'FirmsVault\'s own subscriptions to its customer firms — not a firm\'s client payment plans. The '.
+            'only lifecycle changes this domain supports are cancel at period end and cancel immediately. There '.
+            'is no plan change, scheduled plan change, pause, resume, resume-cancellation, or proration, so none '.
+            'is offered here. A subscription carries no price of its own: its amount is its plan\'s current price '.
+            'plus its line items, and a plan\'s price is locked once any subscription references it.';
+    }
 }

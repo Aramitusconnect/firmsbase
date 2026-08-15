@@ -13,11 +13,14 @@ use App\Filament\Resources\TrialRequestResource\Pages\ListTrialRequests;
 use App\Filament\Resources\TrialRequestResource\Pages\ViewTrialRequest;
 use App\Models\PlatformAdmin;
 use App\Models\TrialRequest;
+use App\Services\PlatformBillingCommercialOverviewService;
 use App\Services\PlatformStaffAccessPolicyService;
 use BackedEnum;
+use Carbon\CarbonImmutable;
 use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -61,6 +64,8 @@ class TrialRequestResource extends Resource
     protected static ?string $navigationLabel = 'Trials';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Billing & Commercial';
+
+    protected static ?int $navigationSort = 22;
 
     protected static ?string $recordTitleAttribute = 'uuid';
 
@@ -111,6 +116,37 @@ class TrialRequestResource extends Resource
                 TextColumn::make('requested_at')->label('Requested')->dateTime()->sortable(),
                 TextColumn::make('provisioned_at')->label('Provisioned')->dateTime()->placeholder('—')->sortable(),
                 TextColumn::make('expires_at')->label('Expires')->dateTime()->placeholder('—')->sortable(),
+                /**
+                 * Days remaining until expiry, derived from expires_at
+                 * for trials that are still running. Deliberately blank
+                 * for a trial that has already reached a terminal
+                 * status: a countdown against a Converted or Expired
+                 * trial is meaningless, and rendering a negative number
+                 * there would read as an overdue alarm rather than as
+                 * history. Computed per row from an already-loaded
+                 * column — no query.
+                 */
+                TextColumn::make('days_remaining')
+                    ->label('Days remaining')
+                    ->alignEnd()
+                    ->placeholder('—')
+                    ->state(function (TrialRequest $record): ?string {
+                        if ($record->expires_at === null) {
+                            return null;
+                        }
+
+                        if (! in_array($record->status, [
+                            TrialRequestStatus::Requested,
+                            TrialRequestStatus::Provisioned,
+                            TrialRequestStatus::Active,
+                        ], true)) {
+                            return null;
+                        }
+
+                        $days = CarbonImmutable::now()->diffInDays($record->expires_at, false);
+
+                        return $days < 0 ? 'Past expiry date' : (string) (int) floor($days);
+                    }),
                 TextColumn::make('converted_at')->label('Converted')->dateTime()->placeholder('—')->sortable(),
             ])
             ->filters([
@@ -118,6 +154,37 @@ class TrialRequestResource extends Resource
                     ->options(collect(TrialRequestStatus::cases())
                         ->mapWithKeys(fn (TrialRequestStatus $status): array => [$status->value => Str::headline($status->value)])
                         ->all()),
+                /**
+                 * "Expiring soon" is scoped to trials that are still
+                 * running AND have an expiry date inside the horizon —
+                 * never to a trial already in a terminal status, whose
+                 * expiry date is history rather than a deadline. The
+                 * horizon comes from
+                 * PlatformBillingCommercialOverviewService so this
+                 * filter and the Billing & Commercial Overview's
+                 * "Trials expiring" figure can never drift apart.
+                 */
+                Filter::make('expiring_soon')
+                    ->label('Expiring within '.PlatformBillingCommercialOverviewService::TRIAL_EXPIRY_HORIZON_DAYS.' days')
+                    ->query(function (Builder $query): Builder {
+                        $now = CarbonImmutable::now();
+
+                        return $query
+                            ->whereIn('status', [
+                                TrialRequestStatus::Requested->value,
+                                TrialRequestStatus::Provisioned->value,
+                                TrialRequestStatus::Active->value,
+                            ])
+                            ->whereNotNull('expires_at')
+                            ->where('expires_at', '>=', $now)
+                            ->where('expires_at', '<', $now->addDays(
+                                PlatformBillingCommercialOverviewService::TRIAL_EXPIRY_HORIZON_DAYS
+                            ));
+                    }),
+                Filter::make('awaiting_provisioning')
+                    ->label('Awaiting provisioning')
+                    ->query(fn (Builder $query): Builder => $query
+                        ->where('status', TrialRequestStatus::Requested->value)),
             ])
             ->recordActions([
                 ProvisionTrialRequestAction::make(),

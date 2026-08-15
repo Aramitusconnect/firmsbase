@@ -121,14 +121,44 @@ final class PlatformRefundResourceTest extends TestCase
 
     // --- "Issue Refund" absence disclosure ---
 
+    /**
+     * Billing & Commercial Control Plane pass: this disclosure moved
+     * from the empty state onto ListPlatformRefunds::getSubheading(),
+     * so it is visible even when the page is FULL of refunds — which is
+     * exactly when an operator would otherwise go looking for an
+     * "Issue Refund" button. Asserted with a refund present for that
+     * reason.
+     */
     public function test_the_list_page_discloses_why_no_issue_refund_action_exists(): void
     {
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
         $this->actingAs($admin, 'platform_admin');
 
+        PlatformRefund::factory()->create();
+
         $response = $this->get(PlatformRefundResource::getUrl());
         $response->assertOk();
-        $response->assertSee('FakeStripeGateway');
+        $response->assertSee('no production-capable gateway is configured');
+        $response->assertSee('refunds cannot be issued or processed from this console');
+    }
+
+    public function test_the_list_page_discloses_the_absent_credit_domain_separately_from_refunds(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        PlatformRefund::factory()->create();
+
+        $response = $this->get(PlatformRefundResource::getUrl());
+        $response->assertOk();
+        $response->assertSee('Credits');
+        $response->assertSee('are not implemented anywhere');
+        $response->assertSee('no Credit model, table, or service');
+    }
+
+    public function test_the_navigation_label_does_not_imply_a_credit_capability(): void
+    {
+        $this->assertSame('Refunds', PlatformRefundResource::getNavigationLabel());
     }
 
     public function test_the_view_page_discloses_the_issue_refund_limitation(): void

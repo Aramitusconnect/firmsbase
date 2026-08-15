@@ -62,13 +62,30 @@ use Illuminate\Support\Facades\Auth;
  * navigation affordance, and it is not itself a registered Action
  * instance. See FailedPaymentResourceTest's positive-proof tests.
  *
- * No "Retry" action: the only payment gateway anywhere in this codebase
- * is FakeStripeGateway, explicitly forbidden from making a real Stripe
- * API call and not even bound in the container (StripeGateway has no
- * container binding — confirmed by grep). Retrying a failed payment
- * through PlatformPaymentService::attemptPayment() today can only ever
- * simulate success/failure; there is no live payment-collection path in
- * this codebase to expose as a genuine admin action.
+ * No "Retry" action.
+ *
+ * Billing & Commercial Control Plane pass — gateway-truth correction.
+ * The Phase 3 docblock this replaces claimed "StripeGateway has no
+ * container binding — confirmed by grep"; that is stale. It IS bound
+ * today in AppServiceProvider, resolved through
+ * PaymentGatewaySimulationPolicyService::isSimulationEnabled():
+ *   - testing, and local with PAYMENT_GATEWAY_SIMULATION_ENABLED=true
+ *     → FakeStripeGateway (simulated only, never a real Stripe call),
+ *   - staging, production, everything else → UnavailablePaymentGateway,
+ *     which throws PaymentProviderUnavailableException rather than
+ *     fabricating a ['status' => 'succeeded'] response.
+ * The conclusion is unchanged and in fact stronger: retrying a failed
+ * payment through PlatformPaymentService::attemptPayment() can only
+ * ever simulate an outcome in a test, and cannot run at all in the
+ * environments an operator uses this console from. There is no live
+ * payment-collection path to expose as a genuine admin action.
+ *
+ * No dunning/recovery state either: `platform_payment_attempts` has no
+ * next-retry, retry-state, dunning-state, customer-notified, or
+ * resolved-at column (confirmed against the create migration at this
+ * pass's HEAD), and no scheduler or job anywhere retries a platform
+ * payment. So there is nothing real behind a "Recovery Rate" or "Next
+ * Retry" figure, and none is displayed.
  *
  * No "Waive" action: no such concept exists anywhere in
  * PlatformPaymentAttemptStatus, PlatformPaymentStatus, or any platform-
@@ -149,9 +166,10 @@ class FailedPaymentResource extends Resource
             ])
             ->emptyStateHeading('No failed payments found')
             ->emptyStateDescription(
-                'No "Retry" action exists here because the only payment gateway in this codebase (FakeStripeGateway) '.
-                'cannot process a real payment. No "Waive" action exists because no such concept exists in this '.
-                'domain\'s status enums or services. This is a read-only oversight view.'
+                'Payment recovery is not operational: no production payment gateway is configured, so no "Retry" '.
+                'action exists here. No "Waive" action exists either — no such concept exists in this domain\'s '.
+                'status enums or services. There is also no retry schedule or dunning state to show, because this '.
+                'domain stores none. This is a read-only oversight view.'
             )
             ->defaultSort('attempted_at', 'desc')
             ->paginated([25, 50, 100]);

@@ -102,6 +102,43 @@ class EditPlanAction extends Action
         $this->requiresConfirmation();
         $this->modalHeading('Edit plan');
 
+        /**
+         * Billing & Commercial Control Plane pass — impact preview.
+         * Before a consequential catalog change, state how far this
+         * plan already reaches and what that means for the financial
+         * fields on the form. The numbers come from two withCount
+         * aggregates on one record, not from loading subscriptions.
+         *
+         * This preview does not enforce anything — PlanService::update()
+         * remains the single place the financial-terms lock is decided.
+         * It exists so an operator learns "23 firms are on this" BEFORE
+         * submitting, rather than from a rejection afterwards.
+         */
+        $this->modalDescription(function (Plan $record): string {
+            $reach = Plan::query()
+                ->whereKey($record->getKey())
+                ->withCount(['platformSubscriptions as subscriptions_count', 'firmLicenses as firm_licenses_count'])
+                ->firstOrFail();
+
+            $subscriptions = (int) $reach->subscriptions_count;
+            $licences = (int) $reach->firm_licenses_count;
+
+            if ($subscriptions === 0 && $licences === 0) {
+                return 'Nothing references this plan yet, so every field including price, billing interval, and '.
+                    'plan code can still be changed. They lock permanently as soon as the first subscription or '.
+                    'firm licence is created against it — there is no plan versioning or effective dating to '.
+                    'unwind that later.';
+            }
+
+            return 'This plan is already in use: '.$subscriptions.' platform subscription'.
+                ($subscriptions === 1 ? '' : 's').' and '.$licences.' firm licence'.($licences === 1 ? '' : 's').
+                ' reference it. Price, billing interval, and plan code are therefore locked and a change to them '.
+                'will be rejected — a subscription stores no price of its own, so editing them would '.
+                'retroactively change what these subscribers are understood to be paying. Name, description, '.
+                'support access level, and trial settings can still be changed, and take effect immediately for '.
+                'everyone on the plan.';
+        });
+
         $this->action(function (array $data, Plan $record, PlatformStaffAccessPolicyService $accessPolicy, PlanService $planService): void {
             $actor = Auth::guard('platform_admin')->user();
 

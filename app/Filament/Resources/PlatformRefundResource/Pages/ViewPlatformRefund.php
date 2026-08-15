@@ -62,12 +62,15 @@ class ViewPlatformRefund extends ViewRecord
                 ->schema([
                     Text::make(
                         'No "Issue Refund" action exists anywhere in this console. PlatformRefundService::refund() '.
-                        'has real, safe balance-validation logic (it checks the remaining refundable balance against '.
-                        'already-completed refunds before allowing more), but the actual money-movement step always '.
-                        'calls a StripeGateway — and the only implementation of that interface anywhere in this '.
-                        'codebase is FakeStripeGateway, explicitly forbidden from making a real Stripe API call and '.
-                        'not even bound in the container. Exposing an "Issue Refund" action here would create the '.
-                        'false appearance of a real financial action, so it is not built.'
+                        'has real, safe balance-validation logic — it holds a row lock on the payment, sums the '.
+                        'already-completed refunds against it, and rejects anything above the remaining refundable '.
+                        'balance — but the actual money-movement step always calls a StripeGateway, and this '.
+                        'codebase has no production-capable implementation of that interface. In staging and '.
+                        'production the container resolves it to UnavailablePaymentGateway, which throws rather '.
+                        'than returning a fabricated success; only the test suite (and a local machine that has '.
+                        'explicitly opted in) gets the simulated FakeStripeGateway. A refund therefore cannot '.
+                        'execute from this console at all, and an "Issue Refund" button here would be a false '.
+                        'financial affordance.'
                     ),
                 ]),
             Section::make('Credits')

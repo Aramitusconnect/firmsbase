@@ -63,6 +63,8 @@ class PlanResource extends Resource
 
     protected static string|\UnitEnum|null $navigationGroup = 'Billing & Commercial';
 
+    protected static ?int $navigationSort = 10;
+
     protected static ?string $recordTitleAttribute = 'name';
 
     /**
