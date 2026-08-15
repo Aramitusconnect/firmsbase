@@ -6,6 +6,7 @@ namespace App\Filament\Pages;
 
 use App\Enums\BootCheckStatus;
 use App\Enums\DeploymentMode;
+use App\Enums\OperationsFreshness;
 use App\Models\DeploymentConfig;
 use App\Models\DeploymentHealthCheck;
 use App\Models\Firm;
@@ -26,6 +27,7 @@ use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 
@@ -61,13 +63,13 @@ class PlatformDeploymentConfigsPage extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCircleStack;
 
-    protected static ?string $navigationLabel = 'Deployments';
+    protected static ?string $navigationLabel = 'Dedicated Deployments';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Operations';
 
-    protected static ?int $navigationSort = 86;
+    protected static ?int $navigationSort = 87;
 
-    protected static ?string $title = 'Deployment Configs & Health';
+    protected static ?string $title = 'Dedicated Deployments';
 
     public static function canAccess(): bool
     {
@@ -105,6 +107,14 @@ class PlatformDeploymentConfigsPage extends Page implements HasTable
                     'isolated_storage are declarations only — no real provisioning happens here. This list is empty '.
                     'for any environment where every firm runs plain SaaS mode, which is expected and honest, not a bug.'
                 ),
+                Text::make(
+                    'DECLARED IS NOT VERIFIED. isolated_database and isolated_storage are configuration flags a firm '.
+                    'record carries — they state what was INTENDED, and nothing in this platform inspects AWS, RDS, or '.
+                    'object storage to confirm any of it actually happened. The columns below are labelled Declared '.
+                    'for that reason, and the matching Verified columns read "Verification Not Available" because no '.
+                    'infrastructure verification capability exists here. Treat a declared-isolated deployment as '.
+                    'unproven until someone confirms it out-of-band.'
+                )->color('warning'),
                 Text::make(
                     'Version skew status is deliberately NOT computed on this page: VersionSkewPolicyService::check() '.
                     'is a real, pure comparison function, but no part of this codebase defines a live "current SaaS '.
@@ -192,9 +202,26 @@ class PlatformDeploymentConfigsPage extends Page implements HasTable
             ])
             ->columns([
                 TextColumn::make('firm_name')->label('Firm'),
-                TextColumn::make('custom_domain')->label('Custom domain')->placeholder('—'),
-                IconColumn::make('isolated_database')->label('Isolated DB')->boolean(),
-                IconColumn::make('isolated_storage')->label('Isolated storage')->boolean(),
+                TextColumn::make('custom_domain')->label('Custom domain')->placeholder('Not configured'),
+                // "Declared" is load-bearing in these two labels: the
+                // flag records intent, never a verified fact about
+                // real infrastructure. See this page's disclosure.
+                IconColumn::make('isolated_database')->label('Declared isolated DB')->boolean(),
+                IconColumn::make('isolated_storage')->label('Declared isolated storage')->boolean(),
+                TextColumn::make('verified_database_isolation')
+                    ->label('Verified DB isolation')
+                    ->state('Verification Not Available')
+                    ->badge()
+                    ->color('gray')
+                    ->tooltip('No infrastructure verification capability exists in this platform.')
+                    ->toggleable(),
+                TextColumn::make('verified_storage_isolation')
+                    ->label('Verified storage isolation')
+                    ->state('Verification Not Available')
+                    ->badge()
+                    ->color('gray')
+                    ->tooltip('No infrastructure verification capability exists in this platform.')
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('boot_check_status')
                     ->label('Boot check')
                     ->badge()
@@ -208,9 +235,22 @@ class PlatformDeploymentConfigsPage extends Page implements HasTable
                     ->label('Latest health')
                     ->placeholder('—')
                     ->formatStateUsing(fn ($state): string => $state === null ? '—' : Str::headline(is_string($state) ? $state : $state->value)),
-                TextColumn::make('latest_heartbeat_at')->label('Last heartbeat')->dateTime()->placeholder('—'),
-                TextColumn::make('reported_version')->label('Reported version')->placeholder('—'),
-                TextColumn::make('migration_status')->label('Migration status')->placeholder('—'),
+                TextColumn::make('latest_heartbeat_at')->label('Last heartbeat')->dateTime()->placeholder('Never reported'),
+                TextColumn::make('heartbeat_freshness')
+                    ->label('Heartbeat freshness')
+                    ->badge()
+                    ->state(fn (array $record): string => $this->heartbeatFreshness($record)->label())
+                    ->color(fn (array $record): string => $this->heartbeatFreshness($record)->color())
+                    ->description(fn (array $record): ?string => $this->heartbeatAgeDescription($record))
+                    ->tooltip(
+                        'No expected reporting cadence is defined for dedicated deployments anywhere in this platform, '.
+                        'so an age can be measured but "overdue" cannot be decided.'
+                    ),
+                TextColumn::make('reported_version')
+                    ->label('Reported version')
+                    ->placeholder('Never reported')
+                    ->tooltip('Self-reported by the deployment. Not a verified release — nothing here confirms it.'),
+                TextColumn::make('migration_status')->label('Migration status')->placeholder('Not reported'),
                 TextColumn::make('reported_via')
                     ->label('Reported via')
                     ->placeholder('—')
@@ -220,5 +260,41 @@ class PlatformDeploymentConfigsPage extends Page implements HasTable
             ->emptyStateDescription('Every firm in this environment runs plain SaaS mode — that is expected, not a bug.')
             ->defaultSort('firm_name')
             ->paginated([25, 50, 100]);
+    }
+
+    /**
+     * Heartbeat freshness for one deployment row.
+     *
+     * Deliberately never returns Stale. A heartbeat age is real and
+     * measurable, but "too old" is only meaningful against an
+     * expected reporting cadence, and no such cadence is defined for
+     * dedicated deployments anywhere in this codebase — not in
+     * DeploymentHealthEnvelopeService, not in the schedule, not in
+     * config. Inventing a threshold here would manufacture overdue
+     * verdicts (or, worse, reassuring fresh ones) out of nothing, so
+     * this reports CadenceUnknown and shows the real age alongside it
+     * for a human to judge.
+     *
+     * @param  array<string, mixed>  $record
+     */
+    private function heartbeatFreshness(array $record): OperationsFreshness
+    {
+        return ($record['latest_heartbeat_at'] ?? null) === null
+            ? OperationsFreshness::NeverObserved
+            : OperationsFreshness::CadenceUnknown;
+    }
+
+    /**
+     * @param  array<string, mixed>  $record
+     */
+    private function heartbeatAgeDescription(array $record): ?string
+    {
+        $heartbeatAt = $record['latest_heartbeat_at'] ?? null;
+
+        if ($heartbeatAt === null) {
+            return null;
+        }
+
+        return 'reported '.Carbon::parse($heartbeatAt)->diffForHumans();
     }
 }

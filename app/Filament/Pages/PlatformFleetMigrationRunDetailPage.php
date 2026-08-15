@@ -168,7 +168,7 @@ class PlatformFleetMigrationRunDetailPage extends Page implements HasTable
                 return app(FleetMigrationOrchestrationService::class)->instancesFor($this->run());
             })
             ->columns([
-                TextColumn::make('firm.name')->label('Firm')->placeholder('—'),
+                TextColumn::make('firm.name')->label('Firm')->placeholder('Unknown firm'),
                 TextColumn::make('status')
                     ->badge()
                     ->formatStateUsing(fn (InstanceStatus $state): string => Str::headline($state->value))
@@ -178,9 +178,9 @@ class PlatformFleetMigrationRunDetailPage extends Page implements HasTable
                         InstanceStatus::Failed => 'danger',
                         InstanceStatus::RolledBack, InstanceStatus::Skipped => 'gray',
                     }),
-                TextColumn::make('error_detail')->label('Error detail')->placeholder('—')->limit(60),
-                TextColumn::make('attempted_at')->label('Attempted at')->dateTime()->placeholder('—'),
-                TextColumn::make('completed_at')->label('Completed at')->dateTime()->placeholder('—'),
+                TextColumn::make('error_detail')->label('Error detail')->placeholder('No error recorded')->limit(60),
+                TextColumn::make('attempted_at')->label('Attempted at')->dateTime()->placeholder('Not attempted'),
+                TextColumn::make('completed_at')->label('Completed at')->dateTime()->placeholder('Not completed'),
             ])
             ->recordActions([
                 ApplyFleetMigrationInstanceAction::make(),

@@ -9,6 +9,7 @@ use App\Filament\Pages\PlatformFleetMigrationRunDetailPage;
 use App\Filament\Resources\PlatformFleetMigrationRunResource\Pages\ListPlatformFleetMigrationRuns;
 use App\Models\FleetMigrationRun;
 use App\Models\PlatformAdmin;
+use App\Services\FleetMigrationSafetyService;
 use App\Services\PlatformStaffAccessPolicyService;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -55,7 +56,7 @@ class PlatformFleetMigrationRunResource extends Resource
 
     protected static string|\UnitEnum|null $navigationGroup = 'Operations';
 
-    protected static ?int $navigationSort = 87;
+    protected static ?int $navigationSort = 88;
 
     protected static ?string $recordTitleAttribute = 'migration_identifier';
 
@@ -88,17 +89,19 @@ class PlatformFleetMigrationRunResource extends Resource
             ->columns([
                 TextColumn::make('migration_identifier')->label('Migration')->searchable()->sortable(),
                 TextColumn::make('status')
+                    // Qualified so a simulated "Completed" is never
+                    // read as a completed fleet rollout.
                     ->badge()
-                    ->formatStateUsing(fn (FleetMigrationRunStatus $state): string => Str::headline($state->value))
+                    ->formatStateUsing(fn (FleetMigrationRunStatus $state): string => Str::headline($state->value).app(FleetMigrationSafetyService::class)->statusQualifier())
                     ->color(fn (FleetMigrationRunStatus $state): string => match ($state) {
                         FleetMigrationRunStatus::Completed => 'success',
                         FleetMigrationRunStatus::InProgress, FleetMigrationRunStatus::Pending => 'warning',
                         FleetMigrationRunStatus::Halted, FleetMigrationRunStatus::RolledBack => 'danger',
                     })
                     ->sortable(),
-                TextColumn::make('started_at')->label('Started at')->dateTime()->placeholder('—')->sortable(),
-                TextColumn::make('completed_at')->label('Completed at')->dateTime()->placeholder('—')->sortable(),
-                TextColumn::make('halted_reason')->label('Halted reason')->placeholder('—')->limit(40),
+                TextColumn::make('started_at')->label('Started at')->dateTime()->placeholder('Not started')->sortable(),
+                TextColumn::make('completed_at')->label('Completed at')->dateTime()->placeholder('Not completed')->sortable(),
+                TextColumn::make('halted_reason')->label('Halted reason')->placeholder('Not halted')->limit(40),
                 TextColumn::make('id')->label('#')->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])
             ->recordActions([
@@ -109,6 +112,7 @@ class PlatformFleetMigrationRunResource extends Resource
             ])
             ->recordUrl(fn (FleetMigrationRun $record): string => PlatformFleetMigrationRunDetailPage::getUrl(['runUuid' => $record->uuid]))
             ->emptyStateHeading('No fleet migration runs yet')
+            ->emptyStateDescription('No rehearsal run has been recorded.')
             ->defaultSort('id', 'desc')
             ->paginated([25, 50, 100]);
     }
