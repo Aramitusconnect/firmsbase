@@ -128,7 +128,20 @@ class MarketplaceIntakeSummaryServiceTest extends TestCase
     public function test_generate_never_calls_the_provider_when_the_platform_kill_switch_is_engaged(): void
     {
         [$firm, $intake, $user] = $this->setUpIntakeWithAnswers();
-        app(AiPolicySettingService::class)->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, false);
+        // FINAL ADMIN RECONCILIATION: engaged through the canonical
+        // governed path. Prompt 5 closed a real bypass — the generic
+        // raw-JSON setter could write the platform AI kill switch,
+        // skipping the step-up re-authentication and written reason
+        // that ToggleAiKillSwitchAction enforces — so the generic call
+        // this fixture used now correctly refuses. Passing
+        // allowGovernedKey mirrors what the canonical action itself
+        // does, keeping Prompt 5's guard fully intact while letting
+        // this test still engage the switch it needs to assert on.
+        app(AiPolicySettingService::class)->set(
+            AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY,
+            false,
+            allowGovernedKey: true,
+        );
 
         $provider = Mockery::mock(AiProviderAdapterInterface::class);
         $provider->shouldNotReceive('generate');

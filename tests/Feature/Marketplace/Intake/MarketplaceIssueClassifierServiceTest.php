@@ -78,7 +78,20 @@ class MarketplaceIssueClassifierServiceTest extends TestCase
     public function test_classify_returns_unavailable_when_the_platform_kill_switch_is_engaged(): void
     {
         PracticeArea::factory()->create(['code' => 'general', 'is_active' => true, 'is_marketplace_visible' => true]);
-        app(AiPolicySettingService::class)->set(AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY, false);
+        // FINAL ADMIN RECONCILIATION: engaged through the canonical
+        // governed path. Prompt 5 closed a real bypass — the generic
+        // raw-JSON setter could write the platform AI kill switch,
+        // skipping the step-up re-authentication and written reason
+        // that ToggleAiKillSwitchAction enforces — so the generic call
+        // this fixture used now correctly refuses. Passing
+        // allowGovernedKey mirrors what the canonical action itself
+        // does, keeping Prompt 5's guard fully intact while letting
+        // this test still engage the switch it needs to assert on.
+        app(AiPolicySettingService::class)->set(
+            AiModeResolutionService::PLATFORM_KILL_SWITCH_KEY,
+            false,
+            allowGovernedKey: true,
+        );
 
         $result = $this->service()->classify('I need help with a contract dispute.', 'session-5', '203.0.113.1');
 
