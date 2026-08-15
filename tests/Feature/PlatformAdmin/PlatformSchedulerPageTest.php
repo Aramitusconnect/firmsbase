@@ -72,7 +72,14 @@ final class PlatformSchedulerPageTest extends TestCase
         $response->assertSee('integrations:outbox:dispatch');
     }
 
-    public function test_liveness_is_honestly_disclosed_as_unhealthy_before_any_heartbeat(): void
+    /**
+     * Operations Control Plane: "Unhealthy/Unknown" conflated two
+     * different situations. Never having observed a heartbeat is now
+     * reported distinctly from having observed a stale one, because
+     * "the scheduler has never run here" and "the scheduler stopped"
+     * call for different responses.
+     */
+    public function test_liveness_is_honestly_disclosed_as_never_observed_before_any_heartbeat(): void
     {
         Cache::forget('firmsbase:scheduler:last_heartbeat_at');
 
@@ -80,7 +87,8 @@ final class PlatformSchedulerPageTest extends TestCase
         $response = $this->actingAs($admin, 'platform_admin')->get(PlatformSchedulerPage::getUrl());
 
         $response->assertOk();
-        $response->assertSee('Unhealthy/Unknown');
+        $response->assertSee('Never Observed');
+        $response->assertSee('no scheduler heartbeat has ever been recorded');
     }
 
     public function test_liveness_reports_healthy_after_a_heartbeat(): void
@@ -91,7 +99,7 @@ final class PlatformSchedulerPageTest extends TestCase
         $response = $this->actingAs($admin, 'platform_admin')->get(PlatformSchedulerPage::getUrl());
 
         $response->assertOk();
-        $response->assertSee('Healthy (recent heartbeat seen)');
+        $response->assertSee('Healthy — heartbeat recorded');
     }
 
     public function test_no_filament_action_is_registered_anywhere_on_this_page(): void
