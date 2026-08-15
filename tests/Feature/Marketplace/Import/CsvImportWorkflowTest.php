@@ -8,6 +8,7 @@ use App\Marketplace\Enums\DataProvenanceSourceType;
 use App\Marketplace\Enums\DirectoryImportBatchStatus;
 use App\Marketplace\Enums\DirectoryImportRowStatus;
 use App\Marketplace\Enums\DirectoryPublicationState;
+use App\Marketplace\Models\DirectoryAttorney;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Models\DirectoryImportBatch;
 use App\Marketplace\Models\DirectoryImportRow;
@@ -23,6 +24,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -501,6 +503,188 @@ final class CsvImportWorkflowTest extends TestCase
         $this->duplicates->detectBatch($batch);
 
         $this->assertSame(DirectoryImportRowStatus::Valid, $batch->rows()->first()->status);
+    }
+
+    // ------------------------------------------------------------
+    // MyAttorney final hardening mission — stronger, deterministic
+    // duplicate normalization (finding 6) + match reasons (finding 12).
+    // ------------------------------------------------------------
+
+    /**
+     * @return iterable<string, array{0: string}>
+     */
+    public static function nameVariantProvider(): iterable
+    {
+        yield 'trailing comma before suffix' => ['Smith Law, PLLC'];
+        yield 'periods within the suffix and different casing' => ['SMITH LAW P.L.L.C.'];
+        yield 'repeated internal whitespace' => ['Smith   Law PLLC'];
+        yield 'leading/trailing whitespace' => ['  Smith Law PLLC  '];
+    }
+
+    #[DataProvider('nameVariantProvider')]
+    public function test_duplicate_detection_matches_conservative_name_variants(string $variant): void
+    {
+        DirectoryFirm::factory()->create(['display_name' => 'Smith Law PLLC', 'name_normalized' => 'smith law pllc']);
+        $admin = PlatformAdmin::factory()->create();
+        $quoted = '"'.str_replace('"', '""', $variant).'"';
+        $csv = self::HEADER."{$quoted},{$quoted},,,,,,,,\n";
+        $batch = $this->ingestion->ingest($this->csvFile($csv), $admin);
+        $this->validation->validateBatch($batch);
+
+        $this->duplicates->detectBatch($batch);
+
+        $this->assertSame(DirectoryImportRowStatus::Duplicate, $batch->rows()->first()->status, "Failed to match name variant: {$variant}");
+    }
+
+    public function test_similarly_named_but_genuinely_different_firms_are_never_conflated(): void
+    {
+        DirectoryFirm::factory()->create(['display_name' => 'Smith Law', 'name_normalized' => 'smith law']);
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER."Smith Legal Group PLLC,Smith Legal Group,,,,,,,,\n";
+        $batch = $this->ingestion->ingest($this->csvFile($csv), $admin);
+        $this->validation->validateBatch($batch);
+
+        $this->duplicates->detectBatch($batch);
+
+        $this->assertSame(DirectoryImportRowStatus::Valid, $batch->rows()->first()->status, 'A conservative normalizer must never treat "Smith Law" and "Smith Legal Group" as the same firm.');
+    }
+
+    /**
+     * @return iterable<string, array{0: string}>
+     */
+    public static function phoneVariantProvider(): iterable
+    {
+        yield 'parentheses and hyphen' => ['(313) 555-1212'];
+        yield 'hyphen only' => ['313-555-1212'];
+        yield 'digits only' => ['3135551212'];
+    }
+
+    #[DataProvider('phoneVariantProvider')]
+    public function test_duplicate_detection_matches_conservative_phone_variants(string $variant): void
+    {
+        DirectoryFirm::factory()->create(['phone' => '3135551212']);
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER."Totally Different Name PLLC,Totally Different,{$variant},,,,,,,\n";
+        $batch = $this->ingestion->ingest($this->csvFile($csv), $admin);
+        $this->validation->validateBatch($batch);
+
+        $this->duplicates->detectBatch($batch);
+
+        $this->assertSame(DirectoryImportRowStatus::Duplicate, $batch->rows()->first()->status, "Failed to match phone variant: {$variant}");
+    }
+
+    public function test_a_leading_country_code_is_deliberately_not_normalized_away(): void
+    {
+        // Documented design choice, not a gap: stripping a "+1" country
+        // code from an 11-digit number to compare it against a bare
+        // 10-digit number risks conflating two genuinely different
+        // numbers that merely share the same last 10 digits.
+        DirectoryFirm::factory()->create(['phone' => '3135551212']);
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER."Different Name PLLC,Different Name,+1 313 555 1212,,,,,,,\n";
+        $batch = $this->ingestion->ingest($this->csvFile($csv), $admin);
+        $this->validation->validateBatch($batch);
+
+        $this->duplicates->detectBatch($batch);
+
+        $this->assertSame(DirectoryImportRowStatus::Valid, $batch->rows()->first()->status);
+    }
+
+    public function test_a_short_digit_sequence_never_falsely_matches_on_phone(): void
+    {
+        DirectoryFirm::factory()->create(['phone' => '123456']);
+        $admin = PlatformAdmin::factory()->create();
+        $csv = self::HEADER."Different Name PLLC,Different Name,123456,,,,,,,\n";
+        $batch = $this->ingestion->ingest($this->csvFile($csv), $admin);
+        $this->validation->validateBatch($batch);
+
+        $this->duplicates->detectBatch($batch);
+
+        // Exact-string match still fires (unchanged existing behavior)
+        // — this proves the fallback's 7-digit floor doesn't SUPPRESS
+        // a real match, only the fuzzy fallback path.
+        $this->assertSame(DirectoryImportRowStatus::Duplicate, $batch->rows()->first()->status);
+    }
+
+    public function test_find_duplicate_candidate_reports_every_signal_that_matched(): void
+    {
+        $existing = DirectoryFirm::factory()->create([
+            'display_name' => 'Acme Legal',
+            'name_normalized' => 'acme legal',
+            'phone' => '3135551212',
+        ]);
+
+        $result = $this->duplicates->findDuplicateCandidate([
+            'name_normalized' => 'acme legal',
+            'phone' => '3135551212',
+        ]);
+
+        $this->assertNotNull($result);
+        $this->assertSame($existing->id, $result['firm']->id);
+        $this->assertContains('Same normalized legal name', $result['reasons']);
+        $this->assertContains('Same normalized phone number', $result['reasons']);
+        $this->assertContains('Multiple matching attributes', $result['reasons']);
+    }
+
+    public function test_find_duplicate_candidate_reports_only_the_single_signal_that_matched(): void
+    {
+        DirectoryFirm::factory()->create(['display_name' => 'Acme Legal', 'name_normalized' => 'acme legal']);
+
+        $result = $this->duplicates->findDuplicateCandidate(['name_normalized' => 'acme legal']);
+
+        $this->assertNotNull($result);
+        $this->assertSame(['Same normalized legal name'], $result['reasons']);
+    }
+
+    public function test_find_duplicate_candidate_returns_null_for_no_match(): void
+    {
+        $this->assertNull($this->duplicates->findDuplicateCandidate(['name_normalized' => 'nobody here']));
+    }
+
+    // ------------------------------------------------------------
+    // MyAttorney final hardening mission, finding 7 — Directory
+    // Attorneys had no duplicate check of any kind before this
+    // mission; findAttorneyDuplicateCandidate() is genuinely new.
+    // ------------------------------------------------------------
+
+    public function test_find_attorney_duplicate_candidate_matches_by_normalized_name(): void
+    {
+        $existing = DirectoryAttorney::factory()->create(['name' => 'Jane Smith', 'name_normalized' => 'jane smith']);
+
+        $result = $this->duplicates->findAttorneyDuplicateCandidate(['name' => 'JANE   SMITH']);
+
+        $this->assertNotNull($result);
+        $this->assertSame($existing->id, $result['attorney']->id);
+        $this->assertSame(['Same normalized name'], $result['reasons']);
+    }
+
+    public function test_find_attorney_duplicate_candidate_matches_by_bar_number(): void
+    {
+        $existing = DirectoryAttorney::factory()->create(['bar_number' => 'P12345']);
+
+        $result = $this->duplicates->findAttorneyDuplicateCandidate(['name' => 'Totally Different Name', 'bar_number' => 'P12345']);
+
+        $this->assertNotNull($result);
+        $this->assertSame($existing->id, $result['attorney']->id);
+        $this->assertContains('Same bar number', $result['reasons']);
+    }
+
+    public function test_find_attorney_duplicate_candidate_returns_null_for_a_genuinely_new_attorney(): void
+    {
+        DirectoryAttorney::factory()->create(['name' => 'Existing Attorney', 'name_normalized' => 'existing attorney', 'bar_number' => 'P00000']);
+
+        $result = $this->duplicates->findAttorneyDuplicateCandidate(['name' => 'Brand New Attorney', 'bar_number' => 'P99999']);
+
+        $this->assertNull($result);
+    }
+
+    public function test_find_attorney_duplicate_candidate_ignores_the_specified_record(): void
+    {
+        $existing = DirectoryAttorney::factory()->create(['name' => 'Jane Smith', 'name_normalized' => 'jane smith', 'bar_number' => 'P12345']);
+
+        $result = $this->duplicates->findAttorneyDuplicateCandidate(['name' => 'Jane Smith', 'bar_number' => 'P12345'], $existing->id);
+
+        $this->assertNull($result, 'Editing a record must never flag it as a duplicate of itself.');
     }
 
     // ------------------------------------------------------------
