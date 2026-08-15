@@ -104,17 +104,39 @@ class PlanAddOnResource extends Resource
             // docblock. Applied unconditionally, never overridable by a
             // filter (no "is_addon" filter is offered at all; this
             // Resource IS the add-on-only view).
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->where('is_addon', true)->with('plan'))
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query
+                ->where('is_addon', true)
+                // `module` is the module_catalog row this add-on points
+                // at, eager-loaded so the display-name column below can
+                // never become a per-row lookup.
+                ->with(['plan', 'module']))
             ->columns([
+                /**
+                 * Billing & Commercial Control Plane pass: the operator-
+                 * facing name comes FIRST, and the raw module_code is
+                 * demoted to a secondary description beneath it. A code
+                 * like `matter_analytics` is an internal identifier, not
+                 * a name a commercial operator should have to translate
+                 * in their head to work out what a plan grants.
+                 *
+                 * Falls back to the code when a catalog row is somehow
+                 * missing, rather than rendering an empty cell — the
+                 * FK guarantees it exists, but a blank primary label
+                 * would be worse than a technical one.
+                 */
+                TextColumn::make('module.module_name')
+                    ->label('Add-on')
+                    ->state(fn (PlanModule $record): string => $record->module?->module_name ?? $record->module_code)
+                    ->description(fn (PlanModule $record): string => $record->module_code)
+                    ->searchable(query: fn (Builder $query, string $search): Builder => $query
+                        ->where('module_code', 'ilike', '%'.$search.'%')
+                        ->orWhereHas('module', fn (Builder $q) => $q->where('module_name', 'ilike', '%'.$search.'%')))
+                    ->sortable(query: fn (Builder $query, string $direction): Builder => $query
+                        ->orderBy('module_code', $direction)),
                 TextColumn::make('plan.name')
                     ->label('Plan')
                     ->searchable()
                     ->sortable(),
-                TextColumn::make('module_code')
-                    ->label('Module code')
-                    ->searchable()
-                    ->sortable()
-                    ->fontFamily('mono'),
                 IconColumn::make('enabled')
                     ->boolean(),
                 TextColumn::make('status')
@@ -125,6 +147,16 @@ class PlanAddOnResource extends Resource
                         PlanModuleStatus::Retired => 'danger',
                     })
                     ->sortable(),
+                TextColumn::make('module.category')
+                    ->label('Category')
+                    ->placeholder('—')
+                    ->formatStateUsing(fn (?string $state): string => $state === null ? '—' : Str::headline($state))
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('updated_at')
+                    ->label('Last changed')
+                    ->dateTime()
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
                 SelectFilter::make('plan_id')

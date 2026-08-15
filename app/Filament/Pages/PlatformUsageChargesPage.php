@@ -102,6 +102,45 @@ class PlatformUsageChargesPage extends Page implements HasTable
                         'correction tool for usage charges in this phase — recordUsage() only ever inserts new '.
                         'rows; it has no update/delete/adjustment concept to expose as an admin action.'
                     ),
+                    /**
+                     * Billing & Commercial Control Plane pass. Three
+                     * truths an operator on a page titled "Usage
+                     * Charges" would otherwise assume, all wrong.
+                     *
+                     * Verified against the usage_rollups migration at
+                     * this pass's HEAD: the table holds
+                     * billing_account_id, firm_id, metric,
+                     * period_starts_at, period_ends_at, quantity, and
+                     * unit. There is no unit price, rate, charge,
+                     * currency, invoice_id, priced flag, or finalized
+                     * flag anywhere on it.
+                     */
+                    Text::make(
+                        'No money is shown on this page, because none is recorded. A usage row holds a quantity '.
+                        'for a metric over a period — it carries no unit price, rate, charge amount, currency, or '.
+                        'link to an invoice. So there is no priced, unpriced, billable, unbilled, or invoiced '.
+                        'usage state to report, and no such state is shown. Despite the page title, nothing here '.
+                        'has yet been charged to anyone.'
+                    ),
+                    Text::make(
+                        'A row with no firm is the billing-account-level aggregate for that metric and period — '.
+                        'not an unattributed orphan. It is labelled "Account-level" rather than "Unallocated", '.
+                        'because calling it unallocated would describe a data-quality problem that is not '.
+                        'happening.'
+                    ),
+                    Text::make(
+                        'This is platform billable usage, keyed to a billing account. It is a different thing '.
+                        'from integration provider telemetry and from what FirmsVault itself pays an upstream '.
+                        'provider — those are operational cost figures, live under Integrations, and never become '.
+                        'usage here without a deliberate metering call.'
+                    ),
+                    Text::make(
+                        'Usage records are immutable and there is no adjustment ledger. A mis-recorded quantity '.
+                        'cannot be corrected from this console, and it is deliberately not editable in place: '.
+                        'editing the original row would destroy the evidence of what was actually observed. A '.
+                        'correction would need a separate, additive adjustment record, and no such mechanism '.
+                        'exists.'
+                    ),
                 ]),
             EmbeddedTable::make(),
         ]);
