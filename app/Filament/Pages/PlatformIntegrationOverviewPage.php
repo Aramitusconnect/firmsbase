@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
+use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Filament\Widgets\PlatformIntegrationOverviewSummaryCardsWidget;
 use App\Integrations\Enums\HealthSummaryState;
 use App\Integrations\Enums\SyncRunStatus;
@@ -131,9 +132,31 @@ class PlatformIntegrationOverviewPage extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedGlobeAlt;
 
-    protected static ?string $navigationLabel = 'Integration Oversight';
+    /**
+     * Naming (Prompt 2 §18/§137): "Integration Overview" everywhere —
+     * navigation label, page title, breadcrumb. This page previously
+     * called itself "Integration Oversight" while its own class name,
+     * its route slug, its widget, and every one of its tests already
+     * said "overview"; the mission's own operator-facing vocabulary
+     * ("Integration Overview — the primary operational summary", §29)
+     * is adopted as the single name. Internal class/service names stay
+     * technical and unchanged.
+     */
+    protected static ?string $navigationLabel = 'Integration Overview';
 
-    protected static ?string $title = 'Integration Oversight';
+    protected static ?string $title = 'Integration Overview';
+
+    /**
+     * Integrations navigation group — Prompt 2 regression fix, same as
+     * ConnectionResource/PlatformProviderHealthPage/
+     * PlatformProviderOperationReconciliationPage: this page declared no
+     * group at all and so rendered as an ungrouped top-level Admin entry
+     * while nine sibling Integration surfaces sat inside "Integrations".
+     * Sort 1 — this is the group's landing page.
+     */
+    protected static string|\UnitEnum|null $navigationGroup = 'Integrations';
+
+    protected static ?int $navigationSort = 1;
 
     public static function canAccess(): bool
     {
@@ -251,7 +274,7 @@ class PlatformIntegrationOverviewPage extends Page implements HasTable
             ->columns([
                 TextColumn::make('firm_name')
                     ->label('Firm')
-                    ->placeholder('—')
+                    ->placeholder(IntegrationDisplay::UNKNOWN)
                     ->description(fn (array $record): string => (string) ($record['firm_uuid'] ?? ''))
                     ->searchable(false)
                     ->sortable(false),
@@ -261,8 +284,11 @@ class PlatformIntegrationOverviewPage extends Page implements HasTable
                 TextColumn::make('health_summary_state')
                     ->label('Overall Health')
                     ->badge()
-                    ->placeholder('—')
-                    ->formatStateUsing(fn (?string $state): string => $state === null ? '—' : Str::headline($state))
+                    // A firm with no evaluated health is NOT healthy and
+                    // is not degraded — it has not been assessed. Naming
+                    // that explicitly is the difference between an
+                    // operator triaging it and skipping past it (§20/§30).
+                    ->formatStateUsing(fn (?string $state): string => $state === null ? IntegrationDisplay::NOT_CHECKED : Str::headline($state))
                     ->color(fn (?string $state): string => match ($state) {
                         'healthy' => 'success',
                         'degraded' => 'warning',
@@ -271,9 +297,11 @@ class PlatformIntegrationOverviewPage extends Page implements HasTable
                     }),
                 TextColumn::make('last_sync_outcome')
                     ->label('Last Sync Result')
-                    ->placeholder('—')
-                    ->formatStateUsing(fn (?string $state): string => $state === null ? '—' : Str::headline($state)),
-                TextColumn::make('last_successful_sync_at')->label('Last Successful Sync')->dateTime()->placeholder('—'),
+                    ->formatStateUsing(fn (?string $state): string => $state === null ? 'No sync run yet' : Str::headline($state)),
+                TextColumn::make('last_successful_sync_at')
+                    ->label('Last Successful Sync')
+                    ->dateTime()
+                    ->placeholder('Never succeeded'),
                 TextColumn::make('failed_permanent_sync_item_count')->label('Failed Records')->alignEnd(),
                 TextColumn::make('dead_lettered_outbox_event_count')->label('Dead-Letter Queue')->alignEnd(),
                 TextColumn::make('open_conflict_count')->label('Open Conflicts')->alignEnd(),

@@ -7,6 +7,7 @@ namespace App\Filament\Resources;
 use App\Filament\Actions\Platform\RequeueDeadLetterQueueEventAction;
 use App\Filament\Resources\DeadLetterQueueResource\Pages\ListDeadLetterQueueEvents;
 use App\Filament\Resources\DeadLetterQueueResource\Pages\ViewDeadLetterQueueEvent;
+use App\Filament\Support\Integrations\IntegrationDisplay;
 use App\Integrations\Models\IntegrationOutboxEvent;
 use App\Integrations\Models\IntegrationProvider;
 use App\Models\Firm;
@@ -23,6 +24,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use RuntimeException;
@@ -65,6 +67,19 @@ class DeadLetterQueueResource extends Resource
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedInboxStack;
 
     protected static ?string $navigationLabel = 'Dead-Letter Queue';
+
+    /**
+     * Operator-facing labels (§18): the underlying model is
+     * IntegrationOutboxEvent, so Filament would otherwise render
+     * "Integration Outbox Event(s)" in the breadcrumb/detail heading
+     * while the navigation says "Dead-Letter Queue" — two names for one
+     * screen. These rows are specifically outbox events in their
+     * terminal dead_lettered state, so "Dead-Lettered Event" is the
+     * honest singular.
+     */
+    protected static ?string $modelLabel = 'Dead-Lettered Event';
+
+    protected static ?string $pluralModelLabel = 'Dead-Lettered Events';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Integrations';
 
@@ -119,13 +134,66 @@ class DeadLetterQueueResource extends Resource
             ])
             ->columns([
                 TextColumn::make('firm_name')->label('Firm')->searchable(),
-                TextColumn::make('provider_display_name')->label('Provider')->placeholder('—'),
-                TextColumn::make('connection_label')->label('Connection')->placeholder('—'),
-                TextColumn::make('original_event_type')->label('Original event type'),
-                TextColumn::make('failure_category')->label('Failure reason')->placeholder('—'),
-                TextColumn::make('dead_lettered_at')->label('Dead-lettered at')->dateTime(),
-                TextColumn::make('requeue_count')->label('Retry count')->alignEnd(),
-                TextColumn::make('max_requeues')->label('Retry limit')->alignEnd(),
+                // Canonical provider label from the code, falling back to
+                // the row's own denormalised display name and finally to
+                // an explicit "not recorded" — never a bare dash. Both
+                // fields are nullable here because an outbox event can
+                // outlive the connection that produced it.
+                TextColumn::make('provider')
+                    ->label('Provider')
+                    ->state(function (array $record): string {
+                        $code = $record['provider_code'] ?? null;
+
+                        if (filled($code)) {
+                            return IntegrationDisplay::labelForProviderCode((string) $code);
+                        }
+
+                        return IntegrationDisplay::orAbsent($record['provider_display_name'] ?? null, 'Provider not recorded');
+                    }),
+                TextColumn::make('connection_label')
+                    ->label('Connection')
+                    ->formatStateUsing(fn (?string $state): string => IntegrationDisplay::orAbsent($state, 'Connection removed')),
+                TextColumn::make('original_event_type')->label('Original Event Type'),
+                TextColumn::make('failure_category')
+                    ->label('Failure Reason')
+                    ->formatStateUsing(fn (?string $state): string => IntegrationDisplay::orAbsent($state, 'Not classified')),
+                TextColumn::make('dead_lettered_at')->label('Dead-Lettered At')->dateTime()->sortable(),
+                TextColumn::make('age')
+                    ->label('Age')
+                    ->state(fn (array $record): string => filled($record['dead_lettered_at'] ?? null)
+                        ? Carbon::parse($record['dead_lettered_at'])->diffForHumans(syntax: true)
+                        : IntegrationDisplay::UNKNOWN)
+                    ->toggleable(isToggledHiddenByDefault: true),
+                // RETENTION (§80): computed from the ACTUAL configured
+                // retention window, never a hardcoded 90 days. When the
+                // acting admin cannot read the retention config, this
+                // says so rather than inventing a date — a wrong deletion
+                // date on a forensic record is worse than no date.
+                TextColumn::make('retention_expires_at')
+                    ->label('Retention Expires')
+                    ->state(function (array $record): string {
+                        $days = self::currentRetentionDays();
+
+                        if ($days === null) {
+                            return 'Retention window unavailable';
+                        }
+
+                        if (! filled($record['dead_lettered_at'] ?? null)) {
+                            return IntegrationDisplay::UNKNOWN;
+                        }
+
+                        $expiresAt = Carbon::parse($record['dead_lettered_at'])->addDays($days);
+                        $remaining = (int) now()->startOfDay()->diffInDays($expiresAt->copy()->startOfDay(), false);
+
+                        if ($remaining < 0) {
+                            return $expiresAt->toDayDateTimeString().' (past retention)';
+                        }
+
+                        return $expiresAt->toDayDateTimeString()." ({$remaining} day(s) remaining)";
+                    })
+                    ->wrap(),
+                TextColumn::make('requeue_count')->label('Retry Count')->alignEnd(),
+                TextColumn::make('max_requeues')->label('Retry Limit')->alignEnd()->toggleable(isToggledHiddenByDefault: true),
             ])
             ->recordActions([
                 RequeueDeadLetterQueueEventAction::make(),
@@ -150,6 +218,36 @@ class DeadLetterQueueResource extends Resource
             'index' => ListDeadLetterQueueEvents::route('/'),
             'view' => ViewDeadLetterQueueEvent::route('/{firmUuid}/{id}'),
         ];
+    }
+
+    /**
+     * Retention window for the CURRENTLY acting admin, memoized for the
+     * render so a 100-row table does not re-resolve the read service —
+     * and its authorization gate — once per row. Returns null (rendered
+     * as "Retention window unavailable") when the config cannot be read,
+     * never a fabricated default.
+     */
+    private static function currentRetentionDays(): ?int
+    {
+        $admin = Auth::guard('platform_admin')->user();
+
+        if (! $admin instanceof PlatformAdmin) {
+            return null;
+        }
+
+        $memoKey = self::class.'@retentionDays:'.$admin->id;
+
+        if (app()->bound($memoKey)) {
+            /** @var ?int $memoized */
+            $memoized = app($memoKey);
+
+            return $memoized;
+        }
+
+        $days = self::deadLetteredRetentionDays($admin);
+        app()->instance($memoKey, $days);
+
+        return $days;
     }
 
     /**

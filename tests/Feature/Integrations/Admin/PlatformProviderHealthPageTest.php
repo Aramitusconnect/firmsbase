@@ -112,7 +112,12 @@ final class PlatformProviderHealthPageTest extends TestCase
         $response = $this->actingAs($admin, 'platform_admin')->get(PlatformProviderHealthPage::getUrl());
 
         $response->assertOk();
-        $response->assertSee('No provider health summaries yet');
+        // Prompt 2 (Integration Operations) §94: the empty state now
+        // states the fact an operator actually needs — that nothing has
+        // been MEASURED — rather than merely that no rows exist, and
+        // explicitly says this is not the same as "everything is
+        // healthy".
+        $response->assertSee('Provider health has not been measured yet');
     }
 
     // ------------------------------------------------------------
@@ -223,22 +228,25 @@ final class PlatformProviderHealthPageTest extends TestCase
     }
 
     /**
-     * Independent, standalone confirmation of a genuine PRE-EXISTING
-     * (pre-Checkpoint-1) bug — reported, not fixed, per this task's
-     * "STOP and report" instruction for production-code defects outside
-     * this checkpoint's own scope: `recent_error_classification_summary`'s
-     * TextColumn throws a 500 whenever the map has exactly one category.
-     * This test intentionally documents/reproduces the failure via
-     * assertStatus(500) + the specific TypeError text, so a future fix
-     * has an immediate, already-written regression test to flip once the
-     * page's column definition is corrected (e.g. by giving it an
-     * explicit `->listWithLineBreaks()`-incompatible / non-Arr::wrap()
-     * rendering path, or pre-formatting the map into a single string
-     * before the column ever sees it) — this test is NOT part of
-     * Checkpoint 1's own required coverage and asserts the CURRENT
-     * (buggy) behavior deliberately, not the desired one.
+     * FLIPPED by Prompt 2 (Integration Operations): this test previously
+     * asserted a documented, deliberately-unfixed 500 —
+     * `recent_error_classification_summary`'s TextColumn declared
+     * `?array $state`, but Filament unwraps a single-element array
+     * before invoking formatStateUsing(), so a summary carrying EXACTLY
+     * ONE error category passed an int and the entire Provider Health
+     * page crashed. Its own docblock said: "If this assertion ever fails
+     * because someone fixed the page, that is GOOD — update this test to
+     * assertOk() and assert the rendered content at that point." That is
+     * what this now does.
+     *
+     * The fix is at the source, not the signature: the column now uses
+     * ->state() to read the cast array off the model and return an
+     * already-formatted string, so Filament never receives an array for
+     * this column and has nothing to unwrap. A provider-health console
+     * that fatals precisely when a provider has exactly one class of
+     * error is the worst possible failure mode for this screen.
      */
-    public function test_know_n_bu_g_a_single_category_error_classification_summary_currently_throws_a_500(): void
+    public function test_a_single_category_error_classification_summary_renders_instead_of_throwing(): void
     {
         $provider = IntegrationProvider::factory()->create(['code' => 'known-bug-single-category-provider']);
 
@@ -269,8 +277,9 @@ final class PlatformProviderHealthPageTest extends TestCase
 
         $response = $this->actingAs($admin, 'platform_admin')->get(PlatformProviderHealthPage::getUrl());
 
-        $response->assertStatus(500, 'KNOWN, REPORTED, PRE-EXISTING BUG (not introduced by Checkpoint 1, not fixed by this test-writing pass — see this test\'s own docblock): recent_error_classification_summary\'s TextColumn currently 500s whenever the map has exactly one category. If this assertion ever fails because someone fixed the page, that is GOOD — update this test to assertOk() and assert the rendered content at that point.');
-        $this->assertStringContainsString('must be of type ?array, int given', (string) $response->exception?->getMessage());
+        $response->assertOk();
+        $response->assertSee('known-bug-single-category-provider');
+        $this->assertNull($response->exception, 'A single-category error classification summary must no longer throw.');
     }
 
     public function test_a_summary_with_zero_total_requests_shows_a_placeholder_not_a_division_by_zero(): void
