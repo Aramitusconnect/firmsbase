@@ -7,6 +7,7 @@ namespace App\Filament\Resources\PlatformAdministratorResource\Pages;
 use App\Filament\Actions\Platform\AssignPlatformAdminRoleAction;
 use App\Filament\Actions\Platform\ResetPlatformAdminMfaAction;
 use App\Filament\Actions\Platform\RevokePlatformAdminRoleAction;
+use App\Filament\Actions\Platform\RevokePlatformAdminSessionsAction;
 use App\Filament\Actions\Platform\TogglePlatformAdminActiveStatusAction;
 use App\Filament\Resources\PlatformAdministratorResource;
 use Filament\Infolists\Components\IconEntry;
@@ -34,29 +35,19 @@ use Illuminate\Support\Str;
  * own docblock for the design proposal's §6 finding that these are the
  * same underlying mechanism).
  *
- * "Revoke active sessions" is deliberately NOT a separate header
- * action either — see PlatformAdministratorResource's own docblock
- * section (below) for the reasoning, mirrored here since this is where
- * a user would otherwise look for it:
- *
- * This codebase has no existing session-revocation primitive for the
- * `platform_admin` guard (SESSION_DRIVER=database, but nothing sets
- * `session.guard`, so the `sessions` table's `user_id` column is not
- * reliably populated from PlatformAdmin authentication — building a
- * genuinely separate, reliable session-invalidation mechanism would
- * need to resolve that ambiguity first, which is its own,
- * separately-reviewable change). ResetPlatformAdminMfaAction's
- * two_factor_reset_at stamp, combined with
- * EnsurePlatformAdminMfaIsEnrolledAndVerified's step 5, already forces
- * any active session for the target to be logged out on its very next
- * request — judged sufficient for the "administrator's device/account
- * is compromised" scenario this action category exists for. The one
- * gap this leaves, disclosed rather than hidden: an admin whose
- * PASSWORD alone is compromised but whose MFA is intact has no
- * dedicated "kick their session without touching MFA" action in this
- * checkpoint — the operator's fallback today is the same as it was
- * before this checkpoint existed (there is no admin-initiated
- * password-reset-for-another-admin flow either), unchanged scope.
+ * "Revoke active sessions" — CORE SuperAdmin mission correction: the
+ * paragraph that used to live here claimed no session-revocation
+ * primitive existed for the `platform_admin` guard. That was already
+ * stale by the time this mission started: SessionRevocationService
+ * (added later in Mission 1B, see that class's own docblock) decodes
+ * each session row's guard-scoped Laravel auth key rather than
+ * trusting a bare `user_id` column, and TogglePlatformAdminActiveStatusAction
+ * has been calling it reliably on every deactivation since. The one
+ * genuine gap that stale paragraph correctly identified — an admin
+ * whose PASSWORD alone is compromised but whose MFA is intact had no
+ * dedicated "kick their session without touching MFA" action — is what
+ * RevokePlatformAdminSessionsAction below now closes, by wiring the
+ * same existing, proven service to a standalone trigger.
  */
 class ViewPlatformAdministrator extends ViewRecord
 {
@@ -68,6 +59,7 @@ class ViewPlatformAdministrator extends ViewRecord
             TogglePlatformAdminActiveStatusAction::make(),
             AssignPlatformAdminRoleAction::make(),
             RevokePlatformAdminRoleAction::make(),
+            RevokePlatformAdminSessionsAction::make(),
             ResetPlatformAdminMfaAction::make(),
         ];
     }

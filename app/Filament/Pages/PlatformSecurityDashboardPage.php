@@ -66,6 +66,8 @@ class PlatformSecurityDashboardPage extends Page implements HasTable
 
     protected static ?string $navigationLabel = 'Security Dashboard';
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Security';
+
     protected static ?string $title = 'Security Dashboard';
 
     public static function canAccess(): bool

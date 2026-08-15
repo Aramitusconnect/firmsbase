@@ -140,7 +140,7 @@ class PlatformAdministratorResourceTest extends TestCase
 
         $test = Livewire::test(ViewPlatformAdministrator::class, ['record' => $target->uuid]);
         $test->mountAction(AssignPlatformAdminRoleAction::getDefaultName());
-        $test->setActionData(['role_code' => PlatformRoleCode::BillingAdmin->value]);
+        $test->setActionData(['role_code' => PlatformRoleCode::BillingAdmin->value, 'stepUpCurrentPassword' => 'password']);
         $test->callMountedAction();
 
         $test->assertHasNoActionErrors();
@@ -167,7 +167,7 @@ class PlatformAdministratorResourceTest extends TestCase
 
         $test = Livewire::test(ViewPlatformAdministrator::class, ['record' => $target->uuid]);
         $test->mountAction(RevokePlatformAdminRoleAction::getDefaultName());
-        $test->setActionData(['role_code' => PlatformRoleCode::BillingAdmin->value]);
+        $test->setActionData(['role_code' => PlatformRoleCode::BillingAdmin->value, 'stepUpCurrentPassword' => 'password']);
         $test->callMountedAction();
 
         $test->assertHasNoActionErrors();
@@ -196,7 +196,7 @@ class PlatformAdministratorResourceTest extends TestCase
 
         $test = Livewire::test(ViewPlatformAdministrator::class, ['record' => $target->uuid]);
         $test->mountAction(ResetPlatformAdminMfaAction::getDefaultName());
-        $test->setActionData(['reason' => 'lost device']);
+        $test->setActionData(['reason' => 'lost device', 'stepUpCurrentPassword' => 'password']);
         $test->callMountedAction();
 
         $test->assertHasNoActionErrors();

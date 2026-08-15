@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Actions\Platform;
 
 use App\Enums\PlatformRoleCode;
+use App\Filament\Support\StepUp\StepUpAuthentication;
 use App\Models\PlatformAdmin;
 use App\Services\PlatformAdminAuditEventRecorder;
 use App\Services\PlatformRoleService;
@@ -29,6 +30,10 @@ use Illuminate\Support\Str;
  * attempting to revoke their OWN SuperAdmin role is blocked by the
  * exact same guard, with no separate "is this actor the target"
  * special-casing needed — see that method's own docblock for why).
+ *
+ * CORE SuperAdmin mission: role revocation now requires a fresh
+ * step-up verification (StepUpAuthentication::mergeInto()), matching
+ * section 29's high-risk-operation list.
  */
 class RevokePlatformAdminRoleAction extends Action
 {
@@ -45,7 +50,7 @@ class RevokePlatformAdminRoleAction extends Action
         $this->icon(Heroicon::OutlinedMinusCircle);
         $this->color('danger');
 
-        $this->schema([
+        StepUpAuthentication::mergeInto($this, [
             Select::make('role_code')
                 ->label('Role')
                 ->options(fn (PlatformAdmin $record): array => collect(app(PlatformRoleService::class)->activeRolesFor($record))
@@ -53,9 +58,8 @@ class RevokePlatformAdminRoleAction extends Action
                     ->all())
                 ->required()
                 ->native(false),
-        ]);
+        ], 'platform_admin');
 
-        $this->requiresConfirmation();
         $this->modalHeading('Revoke role');
 
         $this->action(function (array $data, PlatformAdmin $record, PlatformStaffAccessPolicyService $accessPolicy, PlatformRoleService $roleService, PlatformAdminAuditEventRecorder $auditRecorder): void {

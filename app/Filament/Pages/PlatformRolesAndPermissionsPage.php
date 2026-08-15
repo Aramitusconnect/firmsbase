@@ -83,6 +83,8 @@ class PlatformRolesAndPermissionsPage extends Page
 
     protected static ?string $navigationLabel = 'Roles & Permissions';
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Security';
+
     protected static ?string $title = 'Roles & Permissions';
 
     protected static ?string $slug = 'roles-and-permissions';

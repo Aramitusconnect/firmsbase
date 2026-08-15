@@ -106,10 +106,20 @@ class FirmUserInvitationService
     ) {}
 
     /**
+     * $invitedBy is nullable — CORE SuperAdmin mission addition:
+     * InviteFirmUserAction is the first caller of this service whose
+     * actor is a PlatformAdmin, not a FirmUser's own User account, and
+     * `firm_users.invited_by` (a `users` FK) has no PlatformAdmin
+     * counterpart to attribute the invite to. The column is already
+     * nullable — no schema change — so a platform-admin-initiated
+     * invite simply records no inviter here; WHO actually invited them
+     * (the PlatformAdmin) is captured in full by
+     * InviteFirmUserAction's own audit event instead, never lost.
+     *
      * @throws FirmSeatLimitExceededException if the firm has no remaining licensed seat.
      * @throws RuntimeException if the email already belongs to a member of this firm.
      */
-    public function invite(Firm $firm, string $email, string $name, FirmUserRole $role, User $invitedBy): FirmUser
+    public function invite(Firm $firm, string $email, string $name, FirmUserRole $role, ?User $invitedBy): FirmUser
     {
         $firmUser = (new TenantContextService)->runWithFirmContext(
             $firm,
@@ -139,7 +149,7 @@ class FirmUserInvitationService
                     'role' => $role,
                     'status' => FirmUserStatus::Invited,
                     'is_primary' => false,
-                    'invited_by' => $invitedBy->id,
+                    'invited_by' => $invitedBy?->id,
                 ]);
             },
         );

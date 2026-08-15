@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Actions\Platform;
 
+use App\Filament\Support\StepUp\StepUpAuthentication;
 use App\Models\PlatformAdmin;
 use App\Services\PlatformAdminAuditEventRecorder;
 use App\Services\PlatformRoleService;
@@ -43,6 +44,12 @@ use Illuminate\Support\Facades\DB;
  * modal copy below reflects this — "on its next request" was true
  * before this mission and is now additionally backstopped by immediate
  * revocation.
+ *
+ * CORE SuperAdmin mission: both directions now require a fresh
+ * step-up verification (StepUpAuthentication::protect()) — activating
+ * a dormant privileged account is also a meaningful security decision,
+ * not only deactivation, so the guard applies to the whole toggle
+ * rather than being conditioned on direction.
  */
 class TogglePlatformAdminActiveStatusAction extends Action
 {
@@ -59,7 +66,7 @@ class TogglePlatformAdminActiveStatusAction extends Action
         $this->icon(fn (PlatformAdmin $record): Heroicon => $record->is_active ? Heroicon::OutlinedNoSymbol : Heroicon::OutlinedCheckCircle);
         $this->color(fn (PlatformAdmin $record): string => $record->is_active ? 'danger' : 'success');
 
-        $this->requiresConfirmation();
+        StepUpAuthentication::protect($this, 'platform_admin');
         $this->modalHeading(fn (PlatformAdmin $record): string => $record->is_active ? 'Deactivate platform administrator' : 'Activate platform administrator');
         $this->modalDescription(fn (PlatformAdmin $record): string => $record->is_active
             ? 'This immediately blocks this administrator from the panel and revokes every one of their active sessions. This can be reversed by activating them again.'

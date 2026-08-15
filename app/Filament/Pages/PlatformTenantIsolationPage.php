@@ -59,6 +59,8 @@ class PlatformTenantIsolationPage extends Page
 
     protected static ?string $navigationLabel = 'Tenant Isolation';
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Security';
+
     protected static ?string $title = 'Tenant Isolation';
 
     private const REFRESH_RATE_LIMIT_KEY_PREFIX = 'tenant-isolation-report-refresh:';

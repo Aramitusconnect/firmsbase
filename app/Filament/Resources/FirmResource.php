@@ -7,25 +7,37 @@ namespace App\Filament\Resources;
 use App\Enums\CustomerType;
 use App\Enums\DeploymentMode;
 use App\Enums\FirmActivationStatus;
+use App\Filament\Resources\FirmResource\Pages\EditFirm;
 use App\Filament\Resources\FirmResource\Pages\ListFirms;
 use App\Filament\Resources\FirmResource\Pages\ViewFirm;
 use App\Models\Firm;
+use App\Models\PlatformAdmin;
+use App\Services\PlatformStaffAccessPolicyService;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\Auth;
 
 /**
- * FirmResource — Phase 1 FirmsVault Admin Control Center. Cross-firm,
- * read-only administrative oversight over the `firms` table, mirroring
- * the Firm panel's App\Filament\Firm\Resources\FirmIntegration Resource's established
- * conventions (layered canAccess(), List+View pages only, no
- * Create/Edit forms). Unlike the Firm panel's FirmIntegration Resource, this Resource
- * lives in the platform-admin panel (`App\Filament\Resources`,
- * AdminPanelProvider's discovery path, gated by the `platform_admin`
- * guard) rather than the firm panel.
+ * FirmResource — Phase 1 FirmsVault Admin Control Center. Cross-firm
+ * administrative oversight over the `firms` table, originally
+ * read-only (List+View only, mirroring the Firm panel's
+ * App\Filament\Firm\Resources\FirmIntegration Resource's established
+ * conventions) — this Resource lives in the platform-admin panel
+ * (`App\Filament\Resources`, AdminPanelProvider's discovery path,
+ * gated by the `platform_admin` guard) rather than the firm panel.
+ *
+ * CORE SuperAdmin mission, section 19: a narrow safe-metadata Edit page
+ * was added (see EditFirm's own docblock for the exact
+ * SAFE_OPERATOR_METADATA vs SYSTEM_MANAGED field split). There is still
+ * deliberately NO Create page — provisioning a new Firm is a
+ * multi-system operation that already has its own dedicated,
+ * preserved workflow (ProvisionFirmAction, wired into ListFirms — see
+ * that action's own docblock), never a generic "insert a firms row"
+ * form.
  *
  * `firms` carries no BelongsToTenant / RLS (it is the tenancy ROOT, not
  * a tenant-owned table — the RLS coverage registry's own full table
@@ -58,6 +70,8 @@ class FirmResource extends Resource
 
     protected static ?string $navigationLabel = 'Firms';
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Platform';
+
     protected static ?string $recordTitleAttribute = 'name';
 
     /**
@@ -76,6 +90,24 @@ class FirmResource extends Resource
     public static function canAccess(): bool
     {
         return parent::canAccess();
+    }
+
+    /**
+     * The narrow safe-metadata Edit page requires the mutating
+     * canManageFirms() gate — a strictly narrower ceiling than the
+     * read-only canAccess()/canViewAny() check above, matching the
+     * mission's own "safe editing" (section 19) vs "oversight" (this
+     * Resource's original scope) distinction.
+     */
+    public static function canEdit($record): bool
+    {
+        $admin = Auth::guard('platform_admin')->user();
+
+        if (! $admin instanceof PlatformAdmin) {
+            return false;
+        }
+
+        return app(PlatformStaffAccessPolicyService::class)->canManageFirms($admin)->allowed;
     }
 
     public static function table(Table $table): Table
@@ -134,6 +166,7 @@ class FirmResource extends Resource
         return [
             'index' => ListFirms::route('/'),
             'view' => ViewFirm::route('/{record}'),
+            'edit' => EditFirm::route('/{record}/edit'),
         ];
     }
 }
