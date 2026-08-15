@@ -9,6 +9,7 @@ use App\Enums\PlatformPaymentAttemptStatus;
 use App\Enums\PlatformPaymentStatus;
 use App\Enums\PlatformRefundStatus;
 use App\Enums\PlatformRoleCode;
+use App\Exceptions\PaymentProviderUnavailableException;
 use App\Filament\Pages\PlatformUsageChargesPage;
 use App\Filament\Resources\PlatformInvoiceResource;
 use App\Models\BillingAccount;
@@ -90,7 +91,7 @@ final class BillingOperationsTruthTest extends TestCase
     {
         $gateway = new UnavailablePaymentGateway;
 
-        $this->expectException(\App\Exceptions\PaymentProviderUnavailableException::class);
+        $this->expectException(PaymentProviderUnavailableException::class);
 
         $gateway->createRefund('pi_whatever', 100);
     }
