@@ -8,6 +8,7 @@ use App\Enums\StatusPageEventStatus;
 use App\Models\PlatformAdmin;
 use App\Models\StatusPageEvent;
 use App\Services\PlatformStaffAccessPolicyService;
+use App\Services\StatusPagePublicationCapabilityService;
 use App\Services\StatusPageService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Textarea;
@@ -33,7 +34,11 @@ class ResolveStatusPageEventPubliclyAction extends Action
     {
         parent::setUp();
 
-        $this->label('Resolve Publicly');
+        // Capability-derived: "Publicly" is only true once a public
+        // endpoint exists. See StatusPagePublicationCapabilityService.
+        $this->label(fn (): string => app(StatusPagePublicationCapabilityService::class)->hasPublicPublicationBackend()
+            ? 'Resolve Publicly'
+            : 'Record Resolution (Internal)');
         $this->icon(Heroicon::OutlinedCheckCircle);
         $this->color('success');
 
@@ -42,7 +47,8 @@ class ResolveStatusPageEventPubliclyAction extends Action
         ]);
 
         $this->requiresConfirmation();
-        $this->modalHeading('Resolve this status update publicly');
+        $this->modalHeading('Record the resolution of this status update');
+        $this->modalDescription(fn (): string => app(StatusPagePublicationCapabilityService::class)->disclosure());
 
         $this->visible(fn (StatusPageEvent $record): bool => in_array($record->status, [StatusPageEventStatus::Draft, StatusPageEventStatus::Published], true));
 

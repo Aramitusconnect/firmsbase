@@ -6,12 +6,15 @@ namespace App\Filament\Actions\Platform;
 
 use App\Models\PlatformAdmin;
 use App\Services\PlatformStaffAccessPolicyService;
+use App\Services\StatusPagePublicationCapabilityService;
 use App\Services\StatusPageService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DateTimePicker;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -24,6 +27,20 @@ use Illuminate\Support\Facades\Auth;
  * anywhere in this codebase (explicit project rule — see
  * StatusPageEvent's own docblock) — this is the platform-admin-facing
  * draft/publish workflow over the process/data foundation only.
+ *
+ * OPERATIONS CONTROL PLANE ADDITIONS, both about the gap between what
+ * this action is called and what it does:
+ *
+ *  - The confirmation now states plainly, derived from
+ *    StatusPagePublicationCapabilityService, that no public endpoint
+ *    exists and that customers are not informed by this action. The
+ *    word "Publish" on a button during an incident is otherwise read
+ *    as "customers have been told."
+ *  - A live preview of the exact public message is shown before
+ *    confirming. Public text is a different information
+ *    classification from internal incident detail, and the only
+ *    reliable way to keep hostnames, stack traces and customer names
+ *    out of it is to make the author look at the finished text.
  */
 class PublishStatusPageEventAction extends Action
 {
@@ -36,7 +53,11 @@ class PublishStatusPageEventAction extends Action
     {
         parent::setUp();
 
-        $this->label('Publish Status Update');
+        // Capability-derived label: while no public endpoint exists,
+        // the button must not promise publication it cannot perform.
+        $this->label(fn (): string => app(StatusPagePublicationCapabilityService::class)->hasPublicPublicationBackend()
+            ? 'Publish Status Update'
+            : 'Record Status Update (Internal)');
         $this->icon(Heroicon::OutlinedMegaphone);
         $this->color('primary');
 
@@ -51,7 +72,18 @@ class PublishStatusPageEventAction extends Action
             Textarea::make('public_message')
                 ->label('Public message')
                 ->required()
-                ->rows(3),
+                ->rows(3)
+                ->live(onBlur: true)
+                ->helperText(
+                    'Written for customers, not for engineers. Never include hostnames, private IPs, AWS account or '.
+                    'resource identifiers, database names, stack traces, security-investigation detail, or the names '.
+                    'of specific firms.'
+                ),
+            Placeholder::make('public_message_preview')
+                ->label('Preview — exactly this text is stored as the public message')
+                ->content(fn (Get $get): string => trim((string) $get('public_message')) !== ''
+                    ? (string) $get('public_message')
+                    : 'Nothing entered yet.'),
             DateTimePicker::make('starts_at')
                 ->label('Starts at')
                 ->required()
@@ -62,7 +94,8 @@ class PublishStatusPageEventAction extends Action
         ]);
 
         $this->requiresConfirmation();
-        $this->modalHeading('Publish a new status page update');
+        $this->modalHeading('Record a new status update');
+        $this->modalDescription(fn (): string => app(StatusPagePublicationCapabilityService::class)->disclosure());
 
         $this->action(function (array $data, PlatformStaffAccessPolicyService $accessPolicy, StatusPageService $statusPageService): void {
             $actor = Auth::guard('platform_admin')->user();
@@ -98,7 +131,17 @@ class PublishStatusPageEventAction extends Action
                 $actor,
             );
 
-            Notification::make()->title('Status update published')->success()->send();
+            $capability = app(StatusPagePublicationCapabilityService::class);
+
+            Notification::make()
+                ->title($capability->hasPublicPublicationBackend()
+                    ? 'Status update published'
+                    : 'Status update recorded internally')
+                ->body($capability->hasPublicPublicationBackend()
+                    ? null
+                    : 'No public status page exists — customers have NOT been notified by this action.')
+                ->success()
+                ->send();
         });
     }
 }

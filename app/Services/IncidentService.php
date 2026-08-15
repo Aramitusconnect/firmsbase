@@ -8,6 +8,7 @@ use App\Models\Firm;
 use App\Models\IncidentEvent;
 use App\Models\PlatformAdmin;
 use App\Models\User;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
@@ -234,6 +235,69 @@ class IncidentService
             ->where('correlation_id', $correlationId)
             ->oldest('id')
             ->get();
+    }
+
+    /**
+     * Derived, evidence-backed facts about one incident, computed
+     * from its own append-only timeline. Operations Control Plane
+     * addition — read-only, no schema change.
+     *
+     * `incident_events` has no detected_at, acknowledged_at or
+     * resolved_at column, but it does not need them: the timeline
+     * already records exactly when the incident was opened and when
+     * it was resolved, because those are rows. Reading them is real
+     * evidence; adding columns to store the same facts twice would
+     * be a schema change with no new information in it.
+     *
+     * What genuinely CANNOT be derived, and is therefore absent
+     * rather than approximated: incident ownership (commander,
+     * technical lead, communications lead) and affected components.
+     * No column, relation, or event type carries any of them. See
+     * ownershipEvidence().
+     *
+     * @return array{detected_at: ?Carbon, resolved_at: ?Carbon, duration_seconds: ?int, event_count: int}
+     */
+    public function derivedFacts(string $correlationId): array
+    {
+        $timeline = $this->timeline($correlationId);
+
+        $detectedAt = $timeline->first()?->created_at;
+        $resolvedAt = $timeline
+            ->last(fn (IncidentEvent $event): bool => $event->status === IncidentStatus::Resolved)
+            ?->created_at;
+
+        return [
+            'detected_at' => $detectedAt,
+            'resolved_at' => $resolvedAt,
+            'duration_seconds' => ($detectedAt !== null && $resolvedAt !== null)
+                ? max(0, (int) $detectedAt->diffInSeconds($resolvedAt, absolute: true))
+                : null,
+            'event_count' => $timeline->count(),
+        ];
+    }
+
+    /**
+     * Incident ownership evidence. There is none.
+     *
+     * Returned explicitly so every caller renders "Not Recorded"
+     * rather than leaving the field silently blank, which reads as
+     * "nobody has been assigned yet" when the truth is "this platform
+     * cannot record an assignment at all". Assigning an incident
+     * commander requires a schema change and owner approval.
+     *
+     * @return array{available: bool, reason: string, incident_commander: null, technical_lead: null, communications_lead: null}
+     */
+    public function ownershipEvidence(): array
+    {
+        return [
+            'available' => false,
+            'reason' => 'incident_events records no owner, commander, or lead of any kind — there is no column, '.
+                'relation, or event type for it. Ownership cannot be assigned or displayed without a schema change. '.
+                'actor_user_id records who performed each individual event, which is attribution, not ownership.',
+            'incident_commander' => null,
+            'technical_lead' => null,
+            'communications_lead' => null,
+        ];
     }
 
     private function appendEvent(IncidentEvent $current, string $eventType, array $overrides, ?User $actor): IncidentEvent
