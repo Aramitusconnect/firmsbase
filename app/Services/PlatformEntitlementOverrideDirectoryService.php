@@ -142,9 +142,30 @@ class PlatformEntitlementOverrideDirectoryService
             'precedence' => $entitlement->source?->precedence(),
             'starts_at' => $entitlement->starts_at,
             'ends_at' => $entitlement->ends_at,
+            // Whether this row is currently inside its active window, in
+            // operator-facing words. Derived from the model's own
+            // canonical isWithinActiveWindow() inputs — this is a
+            // DISPLAY label for one row, never a precedence decision
+            // (that remains EntitlementService's alone).
+            'window_state' => $this->windowState($entitlement),
             'created_at' => $entitlement->created_at,
             'updated_at' => $entitlement->updated_at,
         ];
+    }
+
+    private function windowState(FirmEntitlement $entitlement): string
+    {
+        $now = now();
+
+        if ($entitlement->starts_at && $entitlement->starts_at->isAfter($now)) {
+            return 'Scheduled — not yet in effect';
+        }
+
+        if ($entitlement->ends_at && $entitlement->ends_at->isBefore($now)) {
+            return 'Expired';
+        }
+
+        return $entitlement->ends_at === null ? 'In effect — no end date' : 'In effect';
     }
 
     /**

@@ -94,8 +94,10 @@ class EntitlementOverrideService
         string $reason,
         PlatformAdmin $actor,
         ?\DateTimeInterface $endsAt = null,
+        ?bool $permanentAcknowledged = null,
     ): FirmEntitlement {
         $this->assertValidOverride($source, $reason);
+        $this->assertDurationWasChosenDeliberately($endsAt, $permanentAcknowledged);
 
         $entitlement = $this->entitlementService->setForSource(
             firm: $firm,
@@ -120,10 +122,134 @@ class EntitlementOverrideService
                 'enabled' => $enabled,
                 'reason' => $reason,
                 'ends_at' => $endsAt?->format(\DateTimeInterface::ATOM),
+                // Recorded explicitly so the audit trail distinguishes
+                // "temporary, expires on X" from "permanent until
+                // revoked" — the two have very different risk profiles
+                // and must not be inferred from a null end date alone.
+                'override_duration' => $endsAt === null ? 'permanent_until_revoked' : 'temporary',
             ],
         );
 
         return $entitlement;
+    }
+
+    /**
+     * Mission section 45. A null `ends_at` means PERMANENT UNTIL
+     * REVOKED — an override that silently outlives the incident it was
+     * created for. Historically the admin UI exposed this as an
+     * optional "Ends at" field, so simply leaving it blank produced a
+     * permanent platform-level entitlement change with no deliberate
+     * act by the operator.
+     *
+     * This makes the choice explicit and enforces it in the SERVICE, so
+     * the guarantee does not depend on any particular form rendering:
+     * omitting an end date now REQUIRES an affirmative acknowledgement
+     * that permanence was intended.
+     *
+     * Applies only to the PlatformAdmin path. The pre-existing
+     * setOverride(User $actor) signature is untouched — its callers
+     * predate this mission and are not part of the admin console this
+     * mission owns.
+     */
+    private function assertDurationWasChosenDeliberately(?\DateTimeInterface $endsAt, ?bool $permanentAcknowledged): void
+    {
+        if ($endsAt !== null) {
+            if ($endsAt <= now()->toDateTime()) {
+                throw new \InvalidArgumentException(
+                    'A temporary override must end in the future — an end date in the past would create a record that is expired the moment it is written.'
+                );
+            }
+
+            return;
+        }
+
+        if ($permanentAcknowledged !== true) {
+            throw new \InvalidArgumentException(
+                'This override has no end date, which makes it permanent until explicitly revoked. '
+                .'Confirm that permanence is intended, or supply an end date to make it temporary.'
+            );
+        }
+    }
+
+    /**
+     * Stands an override down immediately by ending its active window,
+     * so the canonical resolver falls back to the next-highest source.
+     *
+     * Deliberately NOT a delete: FirmEntitlement::isWithinActiveWindow()
+     * already excludes a row whose `ends_at` has passed, so ending the
+     * window is sufficient to stop it winning — while the row and its
+     * firm_entitlement_events history survive as evidence (mission
+     * section 47). Routes through the same setForSource() chokepoint as
+     * every other override write, so the revocation is audited
+     * identically and no second mutation path is introduced.
+     *
+     * Refuses when no override row exists for that exact (firm, module,
+     * source) triple, rather than silently writing a brand-new
+     * already-expired record.
+     */
+    public function revokeOverrideAsPlatformAdmin(
+        Firm $firm,
+        string $moduleCode,
+        EntitlementSource $source,
+        string $reason,
+        PlatformAdmin $actor,
+    ): FirmEntitlement {
+        $this->assertValidOverride($source, $reason);
+
+        $existing = $this->findOverride($firm, $moduleCode, $source);
+
+        if ($existing === null) {
+            throw new \InvalidArgumentException(
+                'There is no '.$source->value.' override for that module to revoke.'
+            );
+        }
+
+        $revokedAt = now();
+
+        $entitlement = $this->entitlementService->setForSource(
+            firm: $firm,
+            moduleCode: $moduleCode,
+            source: $source,
+            // The stored enabled/disabled intent is preserved as-is; it
+            // is the WINDOW that ends. Flipping `enabled` instead would
+            // rewrite what the override said it wanted, corrupting the
+            // historical record of the original decision.
+            enabled: $existing->enabled,
+            actor: null,
+            reason: $reason,
+            startsAt: $existing->starts_at,
+            endsAt: $revokedAt,
+        );
+
+        $this->auditRecorder->record(
+            $firm,
+            $actor,
+            'entitlement_override_revoked',
+            self::AUDIT_CATEGORY,
+            [
+                'firm_entitlement_id' => $entitlement->id,
+                'firm_entitlement_uuid' => $entitlement->uuid,
+                'module_code' => $moduleCode,
+                'source' => $source->value,
+                'reason' => $reason,
+                'revoked_at' => $revokedAt->format(\DateTimeInterface::ATOM),
+                'previous_ends_at' => $existing->ends_at?->format(\DateTimeInterface::ATOM),
+            ],
+        );
+
+        return $entitlement;
+    }
+
+    private function findOverride(Firm $firm, string $moduleCode, EntitlementSource $source): ?FirmEntitlement
+    {
+        return app(TenantContextService::class)->runWithFirmContext(
+            $firm,
+            fn (): ?FirmEntitlement => FirmEntitlement::query()
+                ->where('firm_id', $firm->id)
+                ->where('module_code', $moduleCode)
+                ->where('source', $source->value)
+                ->first(),
+        );
     }
 
     private function assertValidOverride(EntitlementSource $source, string $reason): void

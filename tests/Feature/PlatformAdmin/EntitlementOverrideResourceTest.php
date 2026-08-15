@@ -233,6 +233,11 @@ final class EntitlementOverrideResourceTest extends TestCase
             'source' => EntitlementSource::AdminOverride->value,
             'enabled' => true,
             'reason' => 'Pilot access',
+            // Duration is now an explicit choice — a blank end date can
+            // no longer silently produce a permanent override (mission
+            // section 45).
+            'override_duration' => SetEntitlementOverrideAction::DURATION_PERMANENT,
+            'permanent_acknowledged' => true,
         ]);
         $test->callMountedTableAction();
         $test->assertHasNoTableActionErrors();
