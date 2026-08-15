@@ -17,24 +17,26 @@ use App\ValueObjects\TenantTableInventoryItem;
  * the live database, never runs SQL, and never activates RLS itself.
  *
  * RLS enforcement (FORCE ROW LEVEL SECURITY + SET LOCAL
- * app.current_firm_id session middleware) is PARTIALLY active: as of
- * Section 39A-3K, FORCE ROW LEVEL SECURITY had been activated on 18 of
- * the 52 prepared tables, and further sections keep forcing more of
- * them one batch at a time. Rather than hardcode a count that a
- * still-active rollout would immediately outdate again,
- * forcedTables() below is derived at call time from every
+ * app.current_firm_id session middleware): CORE SuperAdmin mission
+ * correction — the paragraph that used to live here claimed
+ * enforcement was still "PARTIALLY active... 18 of the 52 prepared
+ * tables" as of Section 39A-3K. That was stale by the time this
+ * mission ran: MISSING_PREPARED_TABLES is now empty (see that
+ * constant's own docblock — the 39A-5 rollout finished at Wave 11) and
+ * forcedTables() (derived at call time from every
  * database/migrations/*_force_rls_on_*_table.php migration present in
- * the repository — see forcedTables() for how. SET LOCAL
- * app.current_firm_id wiring (TenantContextService) is exercised by
- * every forced table's write paths. This is real, partial enforcement
- * — it is NOT schema-wide: prepared tables that have no FORCE
- * migration yet are still inert for the app's own database connection
- * (table-owner role is exempt from non-forced RLS), and the currently
- * inventoried unprepared tables in MISSING_PREPARED_TABLES have no RLS
- * policy of any kind yet — see missingPreparedTables() for the live
- * count, rather than hardcoding it here where it would go stale as
- * MISSING_PREPARED_TABLES changes. Do not read this docblock as "RLS
- * is fully enforced" — it is not.
+ * the repository, never hardcoded — see forcedTables() for how)
+ * currently returns one FORCE migration for every single prepared
+ * table. Rather than hardcode a "fully enforced" claim here that a
+ * future PREPARED_TABLES/MISSING_PREPARED_TABLES change could make
+ * stale again the same way this paragraph went stale, read
+ * coverageSummary()['enforcement_active'] for the live, self-updating
+ * answer — it is computed as (forced count === prepared count), not
+ * asserted in prose. SET LOCAL app.current_firm_id wiring
+ * (TenantContextService) is exercised by every forced table's write
+ * paths. Do not read this docblock as a permanent guarantee that
+ * enforcement will always be complete — re-check coverageSummary()
+ * rather than trusting this comment's own point-in-time snapshot.
  *
  * Source of truth: the 6 RLS-preparation migrations
  * (2026_07_04_500001 through 2026_07_09_900024) cover only Phases 1-6.
