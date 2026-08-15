@@ -306,6 +306,42 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
         'platform-requires-attention-widget.blade.php',
     ];
 
+    /**
+     * FINAL ADMIN RECONCILIATION (admin/final-reconciliation), on
+     * behalf of Prompt 6 — Zero-Trust Support Access
+     * (admin/support-access): the two firm-facing support-access views
+     * `resources/views/filament/firm/support-access/active-sessions.blade.php`
+     * and `.../past-sessions.blade.php`. These are the firm's own
+     * record of who entered their data and why, rendered inside the
+     * Firm panel. They tripped this sweep only once all seven mission
+     * branches were combined — Prompt 6's own targeted suite did not
+     * include this cross-cutting governance test — so this is a
+     * reconciliation-only gap, not a new UI surface.
+     *
+     * Reviewed against the same bar as every entry above, by reading
+     * both templates in full:
+     *
+     *   - Session state is conveyed by explicit visible text inside the
+     *     badge ("Active", "Ended", "Revoked", "Expired"), never by
+     *     colour alone; past-sessions deliberately keeps revoked and
+     *     expired as distinct words because the difference is
+     *     materially different information to the firm.
+     *   - Structure is real semantic markup: `<ul role="list">` for the
+     *     collection and `<dl>/<dt>/<dd>` for each session's fields.
+     *   - The empty state is a plain, real `<p>` element.
+     *   - Neither template contains ANY interactive control — no links,
+     *     buttons, icon-only controls, custom dropdowns, modals, or
+     *     clickable `<div>`s — so there is no keyboard trap and nothing
+     *     that could be unreachable by keyboard.
+     *   - All dynamic output is escaped through `{{ }}`.
+     *
+     * @var array<int, string>
+     */
+    private const PROMPT_SIX_SUPPORT_ACCESS_ALLOWED_BLADE_BASENAMES = [
+        'active-sessions.blade.php',
+        'past-sessions.blade.php',
+    ];
+
     public function test_no_blade_filament_livewire_frontend_or_browser_accessibility_files_exist(): void
     {
         $bladeFiles = [];
@@ -336,7 +372,8 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
                 && ! in_array(basename($path), self::MYATTORNEY_MARKETPLACE_ALLOWED_BLADE_BASENAMES, true)
                 && ! in_array(basename($path), self::MARKETPLACE_INTAKE_SESSION_RESUME_ALLOWED_BLADE_BASENAMES, true)
                 && ! in_array(basename($path), self::CLIENT_PORTAL_INVITATION_ACCEPTANCE_ALLOWED_BLADE_BASENAMES, true)
-                && ! in_array(basename($path), self::CORE_SUPERADMIN_REQUIRES_ATTENTION_WIDGET_ALLOWED_BLADE_BASENAMES, true),
+                && ! in_array(basename($path), self::CORE_SUPERADMIN_REQUIRES_ATTENTION_WIDGET_ALLOWED_BLADE_BASENAMES, true)
+                && ! in_array(basename($path), self::PROMPT_SIX_SUPPORT_ACCESS_ALLOWED_BLADE_BASENAMES, true),
         ));
 
         $this->assertEmpty($nonDefaultBladeFiles, 'Found unexpected Blade files: '.implode(', ', $nonDefaultBladeFiles));

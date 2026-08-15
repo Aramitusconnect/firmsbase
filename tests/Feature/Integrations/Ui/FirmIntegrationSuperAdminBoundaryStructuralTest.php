@@ -924,7 +924,70 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ToggleProviderKillSwitchAction.php',
         ];
 
-        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles, $mission1bExtremeSecurityHardeningAllowedRelativeFiles, $mission1cSecurityValidationActivationAllowedRelativeFiles, $mission2MarketplaceSuperAdminControlsAllowedRelativeFiles, $mission2MarketplaceAnalyticsAllowedRelativeFiles, $mission3AiOversightAllowedRelativeFiles, $myattorneySuperAdminConsoleUpgradeAllowedRelativeFiles, $promptTwoIntegrationOperationsAllowedRelativeFiles);
+        // FINAL ADMIN RECONCILIATION (admin/final-reconciliation).
+        // Prompts 3-7 of the seven-mission parallel SuperAdmin upgrade
+        // program each added their own Filament surfaces, and each
+        // mission's targeted suite passed in isolation because this
+        // firewall test lives in the Integration domain and was not in
+        // any of their affected-file sets. Combined, those surfaces
+        // tripped this sweep for the first time — a genuine
+        // reconciliation-only regression, closed here by naming every
+        // file exactly rather than by broadening the sweep.
+        //
+        // The allowlist deliberately stays exact-file: no directory
+        // wildcard, no app/Filament/* entry. An unauthorized new file
+        // under app/Filament still fails this test.
+        //
+        // Every entry below carries the same cascade-safety property as
+        // the blocks above. Each Page and Resource resolves
+        // Auth::guard('platform_admin') and defers to
+        // PlatformStaffAccessPolicyService. The Resource *Pages* and the
+        // Action carry no inline guard by design, exactly like the
+        // already-allowlisted FirmResource/Pages/ListFirms.php: a
+        // ListRecords/ViewRecord page inherits its Resource's
+        // canViewAny()/canView(), and an Action renders only inside an
+        // already-gated page. None references the Integration domain.
+
+        // Prompt 3 — Governance console (admin/governance-console).
+        $promptThreeGovernanceAllowedRelativeFiles = [
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformGovernanceOverviewPage.php',
+        ];
+
+        // Prompt 4 — Billing & Commercial (admin/billing-commercial).
+        // BillingAccountResource is gated by
+        // canAccessPlatformBilling(); its two Pages inherit that gate.
+        $promptFourBillingCommercialAllowedRelativeFiles = [
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformBillingCommercialOverviewPage.php',
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformInternalSalesCommissionsPage.php',
+            'Resources'.DIRECTORY_SEPARATOR.'BillingAccountResource.php',
+            'Resources'.DIRECTORY_SEPARATOR.'BillingAccountResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListBillingAccounts.php',
+            'Resources'.DIRECTORY_SEPARATOR.'BillingAccountResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewBillingAccount.php',
+        ];
+
+        // Prompt 5 — Configuration control plane
+        // (admin/configuration-control-plane). ProposePracticeAreaMerge
+        // only PROPOSES: it executes no taxonomy merge (see that
+        // action's own docblock and its mission report).
+        $promptFiveConfigurationAllowedRelativeFiles = [
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformConfigurationOverviewPage.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RevokeEntitlementOverrideAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RevertFirmNotificationTemplateOverrideAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ProposePracticeAreaMergeAction.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'PreviewNotificationTemplateAction.php',
+        ];
+
+        // Prompt 6 — Zero-trust support access (admin/support-access).
+        $promptSixSupportAccessAllowedRelativeFiles = [
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformSupportOverviewPage.php',
+        ];
+
+        // Prompt 7 — Operations control plane
+        // (admin/operations-control-plane).
+        $promptSevenOperationsAllowedRelativeFiles = [
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformOperationsOverviewPage.php',
+        ];
+
+        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles, $mission1bExtremeSecurityHardeningAllowedRelativeFiles, $mission1cSecurityValidationActivationAllowedRelativeFiles, $mission2MarketplaceSuperAdminControlsAllowedRelativeFiles, $mission2MarketplaceAnalyticsAllowedRelativeFiles, $mission3AiOversightAllowedRelativeFiles, $myattorneySuperAdminConsoleUpgradeAllowedRelativeFiles, $promptTwoIntegrationOperationsAllowedRelativeFiles, $promptThreeGovernanceAllowedRelativeFiles, $promptFourBillingCommercialAllowedRelativeFiles, $promptFiveConfigurationAllowedRelativeFiles, $promptSixSupportAccessAllowedRelativeFiles, $promptSevenOperationsAllowedRelativeFiles);
 
         $unauthorizedNonFirmFilamentFiles = [];
 
