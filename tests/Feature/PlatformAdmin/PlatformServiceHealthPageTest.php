@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\PlatformAdmin;
 
+use App\Enums\HealthCheckMonitoringType;
 use App\Enums\HealthCheckStatus;
 use App\Enums\HealthCheckType;
 use App\Enums\PlatformRoleCode;
@@ -95,12 +96,56 @@ final class PlatformServiceHealthPageTest extends TestCase
 
     // --- Disclosure ---
 
-    public function test_the_page_discloses_the_stub_checks(): void
+    /**
+     * Operations Control Plane: the disclosure is no longer a
+     * hardcoded sentence naming a stale count. The page now derives
+     * its monitoring census from HealthCheckRegistry and states
+     * plainly that the unmonitored surfaces never report Healthy.
+     */
+    public function test_the_page_discloses_which_surfaces_are_not_monitored(): void
     {
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
         $response = $this->actingAs($admin, 'platform_admin')->get(PlatformServiceHealthPage::getUrl());
         $response->assertOk();
-        $response->assertSee('stub checks with no real external provider');
+        $response->assertSee('not monitored');
+        $response->assertSee('they report Not Monitored, never Healthy');
+        $response->assertSee('Web Uptime');
+    }
+
+    /**
+     * The count in the coverage census must come from the registry,
+     * not from prose. Nine check types, five of them unmonitored.
+     */
+    public function test_the_monitoring_census_is_derived_from_the_registry(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $response = $this->actingAs($admin, 'platform_admin')->get(PlatformServiceHealthPage::getUrl());
+        $response->assertOk();
+        $response->assertSee('9 check type(s) registered in total');
+        $response->assertSee('5 not monitored');
+    }
+
+    /**
+     * The specific false-confidence defect this mission corrected: an
+     * unmonitored surface must never be rendered as Healthy anywhere
+     * on this page.
+     */
+    public function test_an_unmonitored_check_is_never_rendered_as_healthy(): void
+    {
+        HealthCheck::create([
+            'firm_id' => null,
+            'check_type' => HealthCheckType::WebUptime,
+            'status' => HealthCheckStatus::NotMonitored,
+            'detail' => 'No external uptime provider is configured.',
+            'checked_at' => now(),
+            'metadata_json' => ['monitoring_type' => HealthCheckMonitoringType::NotMonitored->value],
+        ]);
+
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $response = $this->actingAs($admin, 'platform_admin')->get(PlatformServiceHealthPage::getUrl());
+        $response->assertOk();
+        $response->assertSee('Web Uptime — Not Monitored');
+        $response->assertDontSee('Web Uptime — Healthy');
     }
 
     // --- Empty state ---

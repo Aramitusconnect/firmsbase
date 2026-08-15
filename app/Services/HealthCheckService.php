@@ -2,9 +2,10 @@
 
 namespace App\Services;
 
+use App\Enums\HealthCheckStatus;
+use App\Enums\HealthCheckType;
 use App\Models\Firm;
 use App\Models\HealthCheck;
-use App\Services\TenantContextService;
 
 /**
  * HealthCheckService — persists a health_checks row (append-only) for
@@ -22,9 +23,7 @@ use App\Services\TenantContextService;
  */
 class HealthCheckService
 {
-    public function __construct(private HealthCheckRegistry $registry)
-    {
-    }
+    public function __construct(private HealthCheckRegistry $registry) {}
 
     /**
      * Read phase runs under one context (matching $firm) so that
@@ -55,7 +54,7 @@ class HealthCheckService
         $firmResult = null;
 
         foreach ($results as $result) {
-            if ($firm && $result->checkType === \App\Enums\HealthCheckType::TenantIsolationAnomalies) {
+            if ($firm && $result->checkType === HealthCheckType::TenantIsolationAnomalies) {
                 $firmResult = $result;
             } else {
                 $platformResults[] = $result;
@@ -69,6 +68,7 @@ class HealthCheckService
                 'status' => $result->status,
                 'detail' => $result->detail,
                 'checked_at' => $checkedAt,
+                'metadata_json' => ['monitoring_type' => $result->monitoringType->value],
             ]),
             $platformResults
         );
@@ -82,13 +82,14 @@ class HealthCheckService
                 'status' => $firmResult->status,
                 'detail' => $firmResult->detail,
                 'checked_at' => $checkedAt,
+                'metadata_json' => ['monitoring_type' => $firmResult->monitoringType->value],
             ]));
         }
 
         return $created;
     }
 
-    public function latestFor(\App\Enums\HealthCheckType $type): ?HealthCheck
+    public function latestFor(HealthCheckType $type): ?HealthCheck
     {
         return HealthCheck::query()
             ->where('check_type', $type->value)
@@ -100,17 +101,31 @@ class HealthCheckService
      * "Monitoring and alerting are active" (acceptance criterion) —
      * true only when every registered check's most recent recorded
      * result is Healthy or Degraded (not Unhealthy/Unknown).
+     *
+     * Operations Control Plane note: NotMonitored is deliberately NOT
+     * treated as a failure here, because an unmonitored surface is an
+     * absence of evidence, not an observed fault — flipping this to
+     * false would make every environment permanently "unhealthy" and
+     * train operators to ignore it. It is equally NOT evidence of
+     * health: this method answers only "has anything observable
+     * broken," which is a narrower question than "is the platform
+     * healthy." The broader question — which requires distinguishing
+     * observed-good from nobody-looked from stale — is answered by
+     * OperationsHealthEvaluationService::evaluate(), and that is what
+     * the Operations console renders. Callers wanting an overall
+     * verdict fit to show a human should use that service, not this
+     * boolean.
      */
     public function isOverallHealthy(): bool
     {
-        foreach (\App\Enums\HealthCheckType::cases() as $type) {
+        foreach (HealthCheckType::cases() as $type) {
             $latest = $this->latestFor($type);
 
             if (! $latest) {
                 continue;
             }
 
-            if (in_array($latest->status, [\App\Enums\HealthCheckStatus::Unhealthy, \App\Enums\HealthCheckStatus::Unknown], true)) {
+            if (in_array($latest->status, [HealthCheckStatus::Unhealthy, HealthCheckStatus::Unknown], true)) {
                 return false;
             }
         }
