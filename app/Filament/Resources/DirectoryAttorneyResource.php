@@ -21,6 +21,7 @@ use App\Marketplace\Models\DirectoryAttorney;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Models\DirectoryVerification;
 use App\Marketplace\Services\MarketplaceImportDuplicateDetectionService;
+use App\Marketplace\Services\MarketplaceVerificationService;
 use App\Models\Language;
 use App\Models\PlatformAdmin;
 use App\Models\PracticeArea;
@@ -119,6 +120,41 @@ class DirectoryAttorneyResource extends Resource
         return app(MarketplaceImportDuplicateDetectionService::class)->findAttorneyDuplicateCandidate($data, $record?->id);
     }
 
+    /**
+     * MyAttorney final hardening mission, finding 8, section 15: a
+     * pre-save impact preview — only ever rendered while editing an
+     * EXISTING attorney (never on Create, nothing to invalidate yet),
+     * and only for the two dimensions DirectoryAttorneyAdministrationService::
+     * invalidateAffectedVerifications() will actually enforce server-side
+     * (see that method's own docblock for the field matrix this mirrors
+     * exactly) — this warning is never shown without the backend
+     * genuinely following through on it.
+     */
+    private static function verificationImpactWarning(callable $get, DirectoryAttorney $record): string
+    {
+        $warnings = [];
+
+        $nameChanged = (string) ($get('name') ?? '') !== $record->name;
+        if ($nameChanged && app(MarketplaceVerificationService::class)->isVerified($record, VerificationDimension::AttorneyIdentity)) {
+            $warnings[] = 'Changing the Name will invalidate the current identity verification.';
+        }
+
+        $barNumberChanged = (string) ($get('bar_number') ?? '') !== (string) ($record->bar_number ?? '');
+        $jurisdictions = collect($get('license_jurisdictions') ?? [])->sort()->values()->all();
+        $recordJurisdictions = collect($record->license_jurisdictions ?? [])->sort()->values()->all();
+        $jurisdictionsChanged = $jurisdictions !== $recordJurisdictions;
+
+        if (($barNumberChanged || $jurisdictionsChanged) && app(MarketplaceVerificationService::class)->isVerified($record, VerificationDimension::AttorneyLicense)) {
+            $warnings[] = 'Changing the Bar Number or License Jurisdictions will invalidate the current license verification.';
+        }
+
+        if ($warnings === []) {
+            return '';
+        }
+
+        return '⚠ '.implode(' ', $warnings).' Saving will proceed and this will be recorded in the audit log.';
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema->components([
@@ -131,8 +167,13 @@ class DirectoryAttorneyResource extends Resource
                     TagsInput::make('license_jurisdictions')
                         ->label('License Jurisdictions')
                         ->placeholder('e.g. MI, OH')
-                        ->helperText('Press enter after each jurisdiction.'),
+                        ->helperText('Press enter after each jurisdiction.')
+                        ->live(),
                 ]),
+            Placeholder::make('verification_impact_warning')
+                ->hiddenLabel()
+                ->content(fn (callable $get, ?DirectoryAttorney $record): string => $record !== null ? self::verificationImpactWarning($get, $record) : '')
+                ->visible(fn (callable $get, ?DirectoryAttorney $record): bool => $record !== null && self::verificationImpactWarning($get, $record) !== ''),
             /**
              * MyAttorney final hardening mission, finding 7. Add Attorney
              * had no duplicate check of any kind before this mission —

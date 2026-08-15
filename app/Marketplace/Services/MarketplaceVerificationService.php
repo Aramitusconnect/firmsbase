@@ -71,7 +71,21 @@ class MarketplaceVerificationService
         return $verification;
     }
 
-    public function revoke(Model $verifiable, VerificationDimension $dimension, PlatformAdmin $admin, string $reason): DirectoryVerification
+    /**
+     * @param  array<string, mixed>  $extraMetadata  Additional audit
+     *                                               metadata merged
+     *                                               onto the standard
+     *                                               revoke event —
+     *                                               e.g. a correlation
+     *                                               ID linking this
+     *                                               revocation back to
+     *                                               the edit that
+     *                                               triggered it (see
+     *                                               DirectoryAttorneyAdministrationService's
+     *                                               own docblock,
+     *                                               finding 8).
+     */
+    public function revoke(Model $verifiable, VerificationDimension $dimension, PlatformAdmin $admin, string $reason, array $extraMetadata = []): DirectoryVerification
     {
         $verification = DirectoryVerification::query()
             ->where('verifiable_type', $verifiable::class)
@@ -89,7 +103,7 @@ class MarketplaceVerificationService
             'revocation_reason' => $reason,
         ]);
 
-        $this->audit($verifiable, $admin, 'marketplace_verification_revoked', $verification->fresh());
+        $this->audit($verifiable, $admin, 'marketplace_verification_revoked', $verification->fresh(), $extraMetadata);
 
         return $verification->fresh();
     }
@@ -151,7 +165,10 @@ class MarketplaceVerificationService
             ->all();
     }
 
-    private function audit(Model $verifiable, PlatformAdmin $admin, string $eventType, DirectoryVerification $verification): void
+    /**
+     * @param  array<string, mixed>  $extraMetadata
+     */
+    private function audit(Model $verifiable, PlatformAdmin $admin, string $eventType, DirectoryVerification $verification, array $extraMetadata = []): void
     {
         $metadata = [
             'directory_verification_id' => $verification->id,
@@ -159,6 +176,7 @@ class MarketplaceVerificationService
             'verifiable_id' => $verification->verifiable_id,
             'dimension' => $verification->dimension->value,
             'state' => $verification->state->value,
+            ...$extraMetadata,
         ];
 
         $firm = $this->resolveLinkedTenantFirm($verifiable);

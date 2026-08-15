@@ -7,6 +7,7 @@ namespace App\Marketplace\Services;
 use App\Marketplace\Enums\DataProvenanceSourceType;
 use App\Marketplace\Enums\DirectoryAttorneyFirmRelationshipState;
 use App\Marketplace\Enums\DirectoryPublicationState;
+use App\Marketplace\Enums\VerificationDimension;
 use App\Marketplace\Models\DirectoryAttorney;
 use App\Marketplace\Models\DirectoryAttorneyFirm;
 use App\Models\Firm;
@@ -52,9 +53,34 @@ class DirectoryAttorneyAdministrationService
         'license_jurisdictions',
     ];
 
+    /**
+     * MyAttorney final hardening mission, finding 8: the field →
+     * verification-dimension dependency matrix. Built from what each
+     * dimension actually attests to (see VerificationDimension's own
+     * docblock) — never "clear every flag on every edit":
+     *
+     * - AttorneyIdentity attests this is the same real, identifiable
+     *   person a SuperAdmin reviewed evidence for. Only `name` can
+     *   invalidate it — a title or biography edit doesn't change who
+     *   the person is.
+     * - AttorneyLicense attests the reviewed bar record matches this
+     *   attorney's license identifier and jurisdictions. `bar_number`
+     *   and `license_jurisdictions` are the only fields that describe
+     *   that license, so only they can invalidate it.
+     *
+     * `title` and `biography` invalidate neither dimension — they are
+     * not evidence either verification is based on.
+     */
+    private const IDENTITY_SENSITIVE_FIELDS = ['name'];
+
+    private const LICENSE_SENSITIVE_FIELDS = ['bar_number', 'license_jurisdictions'];
+
+    private const VERIFICATION_SENSITIVE_FIELDS = [...self::IDENTITY_SENSITIVE_FIELDS, ...self::LICENSE_SENSITIVE_FIELDS];
+
     public function __construct(
         private readonly PlatformAdminAuditEventRecorder $audit = new PlatformAdminAuditEventRecorder,
         private readonly MarketplaceImportDuplicateDetectionService $duplicates = new MarketplaceImportDuplicateDetectionService,
+        private readonly MarketplaceVerificationService $verifications = new MarketplaceVerificationService,
     ) {}
 
     /**
@@ -138,6 +164,7 @@ class DirectoryAttorneyAdministrationService
     {
         return DB::transaction(function () use ($attorney, $data, $practiceAreaIds, $languageIds, $admin): DirectoryAttorney {
             $changes = [];
+            $before = [];
             $attributes = [];
 
             foreach (self::EDITABLE_ATTORNEY_FIELDS as $field) {
@@ -150,6 +177,7 @@ class DirectoryAttorneyAdministrationService
 
                 if ($current !== $value) {
                     $changes[$field] = $value;
+                    $before[$field] = $current;
                 }
 
                 $attributes[$field] = $value;
@@ -165,13 +193,88 @@ class DirectoryAttorneyAdministrationService
 
             $this->syncPracticeAreasAndLanguages($attorney, $practiceAreaIds, $languageIds);
 
-            $this->writeAudit($attorney, $admin, 'marketplace_attorney_updated', [
+            $correlationId = (string) Str::uuid();
+            $verificationImpact = $this->invalidateAffectedVerifications($attorney, $changes, $before, $admin, $correlationId);
+
+            $metadata = [
                 'directory_attorney_id' => $attorney->id,
                 'changed_fields' => array_keys($changes),
-            ]);
+                'correlation_id' => $correlationId,
+            ];
+
+            $sensitiveChanges = array_intersect_key($changes, array_flip(self::VERIFICATION_SENSITIVE_FIELDS));
+            if ($sensitiveChanges !== []) {
+                $metadata['sensitive_field_changes'] = collect($sensitiveChanges)
+                    ->mapWithKeys(fn ($after, $field) => [$field => ['before' => $before[$field], 'after' => $after]])
+                    ->all();
+            }
+
+            if ($verificationImpact !== []) {
+                $metadata['verification_invalidated'] = $verificationImpact;
+            }
+
+            $this->writeAudit($attorney, $admin, 'marketplace_attorney_updated', $metadata);
 
             return $attorney->fresh(['firmRelationships', 'practiceAreas', 'languages']);
         });
+    }
+
+    /**
+     * MyAttorney final hardening mission, finding 8: applies the
+     * field → verification-dimension matrix (see
+     * IDENTITY_SENSITIVE_FIELDS/LICENSE_SENSITIVE_FIELDS' own docblock)
+     * to a just-applied edit. Only ever revokes a dimension that is (a)
+     * actually affected by what changed and (b) currently Verified —
+     * never touches Pending/Revoked/Expired rows (nothing to
+     * invalidate) and never touches the OTHER dimension. Uses the
+     * existing MarketplaceVerificationService::revoke() state
+     * transition — the same one a SuperAdmin's manual
+     * RevokeDirectoryAttorneyVerificationAction already uses — so this
+     * is a normal, fully audited state change, not a silent flag
+     * clear; the pre-revoke evidence (source/verified_at/notes) is
+     * preserved on the row until a future re-verification overwrites
+     * it, exactly like a manual revoke would.
+     *
+     * license_jurisdictions is compared order-insensitively (a
+     * reordered-but-identical set is not a real change) so the array's
+     * insertion order alone can never trigger a false invalidation.
+     *
+     * @param  array<string, mixed>  $changes
+     * @param  array<string, mixed>  $before
+     * @return array<int, array{dimension: string, triggering_field: string}>
+     */
+    private function invalidateAffectedVerifications(DirectoryAttorney $attorney, array $changes, array $before, PlatformAdmin $admin, string $correlationId): array
+    {
+        $impact = [];
+
+        if (array_key_exists('name', $changes) && $this->verifications->isVerified($attorney, VerificationDimension::AttorneyIdentity)) {
+            $this->verifications->revoke(
+                $attorney,
+                VerificationDimension::AttorneyIdentity,
+                $admin,
+                'Automatically invalidated: name changed after verification.',
+                ['correlation_id' => $correlationId, 'triggered_by' => 'attorney_edit', 'triggering_field' => 'name'],
+            );
+            $impact[] = ['dimension' => VerificationDimension::AttorneyIdentity->value, 'triggering_field' => 'name'];
+        }
+
+        $barNumberChanged = array_key_exists('bar_number', $changes);
+        $jurisdictionsChanged = array_key_exists('license_jurisdictions', $changes)
+            && collect($before['license_jurisdictions'] ?? [])->sort()->values()->all() !== collect($changes['license_jurisdictions'] ?? [])->sort()->values()->all();
+
+        if (($barNumberChanged || $jurisdictionsChanged) && $this->verifications->isVerified($attorney, VerificationDimension::AttorneyLicense)) {
+            $triggeringField = $barNumberChanged ? 'bar_number' : 'license_jurisdictions';
+            $this->verifications->revoke(
+                $attorney,
+                VerificationDimension::AttorneyLicense,
+                $admin,
+                "Automatically invalidated: {$triggeringField} changed after verification.",
+                ['correlation_id' => $correlationId, 'triggered_by' => 'attorney_edit', 'triggering_field' => $triggeringField],
+            );
+            $impact[] = ['dimension' => VerificationDimension::AttorneyLicense->value, 'triggering_field' => $triggeringField];
+        }
+
+        return $impact;
     }
 
     public function publish(DirectoryAttorney $attorney, PlatformAdmin $admin): DirectoryAttorney

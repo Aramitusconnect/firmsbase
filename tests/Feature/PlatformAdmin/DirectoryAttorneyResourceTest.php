@@ -15,9 +15,12 @@ use App\Filament\Resources\DirectoryAttorneyResource\Pages\ViewDirectoryAttorney
 use App\Marketplace\Enums\DataProvenanceSourceType;
 use App\Marketplace\Enums\DirectoryAttorneyFirmRelationshipState;
 use App\Marketplace\Enums\DirectoryPublicationState;
+use App\Marketplace\Enums\VerificationDimension;
+use App\Marketplace\Enums\VerificationState;
 use App\Marketplace\Models\DirectoryAttorney;
 use App\Marketplace\Models\DirectoryAttorneyFirm;
 use App\Marketplace\Models\DirectoryFirm;
+use App\Marketplace\Models\DirectoryVerification;
 use App\Models\Language;
 use App\Models\PlatformAdmin;
 use App\Models\PracticeArea;
@@ -269,6 +272,193 @@ final class DirectoryAttorneyResourceTest extends TestCase
             ->latest('id')
             ->first();
         $this->assertNotNull($auditRow);
+    }
+
+    /**
+     * MyAttorney final hardening mission, finding 8. Verification is
+     * multi-dimensional — a `name` edit must invalidate only
+     * AttorneyIdentity, never touch a currently-verified
+     * AttorneyLicense dimension it has nothing to do with.
+     */
+    public function test_editing_the_name_invalidates_identity_verification_but_not_license_verification(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $attorney = DirectoryAttorney::factory()->create(['name' => 'Verified Identity Attorney']);
+        DirectoryVerification::factory()->forVerifiable($attorney, VerificationDimension::AttorneyIdentity)->verified()->create();
+        DirectoryVerification::factory()->forVerifiable($attorney, VerificationDimension::AttorneyLicense)->verified()->create();
+
+        Livewire::test(EditDirectoryAttorney::class, ['record' => $attorney->getRouteKey()])
+            ->fillForm(['name' => 'A Renamed Attorney'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $identity = DirectoryVerification::query()->where('verifiable_id', $attorney->id)->where('dimension', VerificationDimension::AttorneyIdentity->value)->first();
+        $license = DirectoryVerification::query()->where('verifiable_id', $attorney->id)->where('dimension', VerificationDimension::AttorneyLicense->value)->first();
+
+        $this->assertSame(VerificationState::Revoked, $identity->state);
+        $this->assertSame(VerificationState::Verified, $license->state, 'A name change must never invalidate the unrelated License dimension.');
+    }
+
+    public function test_editing_the_bar_number_invalidates_license_verification_but_not_identity_verification(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $attorney = DirectoryAttorney::factory()->create(['bar_number' => 'P100001']);
+        DirectoryVerification::factory()->forVerifiable($attorney, VerificationDimension::AttorneyIdentity)->verified()->create();
+        DirectoryVerification::factory()->forVerifiable($attorney, VerificationDimension::AttorneyLicense)->verified()->create();
+
+        Livewire::test(EditDirectoryAttorney::class, ['record' => $attorney->getRouteKey()])
+            ->fillForm(['bar_number' => 'P999999'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $identity = DirectoryVerification::query()->where('verifiable_id', $attorney->id)->where('dimension', VerificationDimension::AttorneyIdentity->value)->first();
+        $license = DirectoryVerification::query()->where('verifiable_id', $attorney->id)->where('dimension', VerificationDimension::AttorneyLicense->value)->first();
+
+        $this->assertSame(VerificationState::Verified, $identity->state, 'A bar number change must never invalidate the unrelated Identity dimension.');
+        $this->assertSame(VerificationState::Revoked, $license->state);
+    }
+
+    public function test_editing_license_jurisdictions_invalidates_license_verification(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $attorney = DirectoryAttorney::factory()->create(['license_jurisdictions' => ['MI']]);
+        DirectoryVerification::factory()->forVerifiable($attorney, VerificationDimension::AttorneyLicense)->verified()->create();
+
+        Livewire::test(EditDirectoryAttorney::class, ['record' => $attorney->getRouteKey()])
+            ->fillForm(['license_jurisdictions' => ['MI', 'OH']])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $license = DirectoryVerification::query()->where('verifiable_id', $attorney->id)->where('dimension', VerificationDimension::AttorneyLicense->value)->first();
+        $this->assertSame(VerificationState::Revoked, $license->state);
+    }
+
+    public function test_merely_reordering_license_jurisdictions_does_not_invalidate_verification(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $attorney = DirectoryAttorney::factory()->create(['license_jurisdictions' => ['MI', 'OH']]);
+        DirectoryVerification::factory()->forVerifiable($attorney, VerificationDimension::AttorneyLicense)->verified()->create();
+
+        Livewire::test(EditDirectoryAttorney::class, ['record' => $attorney->getRouteKey()])
+            ->fillForm(['license_jurisdictions' => ['OH', 'MI']])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $license = DirectoryVerification::query()->where('verifiable_id', $attorney->id)->where('dimension', VerificationDimension::AttorneyLicense->value)->first();
+        $this->assertSame(VerificationState::Verified, $license->state, 'A merely-reordered, semantically identical jurisdiction list must never falsely invalidate verification.');
+    }
+
+    /**
+     * "Do NOT expand functionality" — title/biography are not evidence
+     * either dimension is based on, so editing them must never touch
+     * verification at all.
+     */
+    public function test_editing_title_or_biography_never_touches_verification(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $attorney = DirectoryAttorney::factory()->create();
+        DirectoryVerification::factory()->forVerifiable($attorney, VerificationDimension::AttorneyIdentity)->verified()->create();
+        DirectoryVerification::factory()->forVerifiable($attorney, VerificationDimension::AttorneyLicense)->verified()->create();
+
+        Livewire::test(EditDirectoryAttorney::class, ['record' => $attorney->getRouteKey()])
+            ->fillForm(['title' => 'Senior Partner', 'biography' => 'An updated biography.'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $identity = DirectoryVerification::query()->where('verifiable_id', $attorney->id)->where('dimension', VerificationDimension::AttorneyIdentity->value)->first();
+        $license = DirectoryVerification::query()->where('verifiable_id', $attorney->id)->where('dimension', VerificationDimension::AttorneyLicense->value)->first();
+
+        $this->assertSame(VerificationState::Verified, $identity->state);
+        $this->assertSame(VerificationState::Verified, $license->state);
+    }
+
+    public function test_editing_sensitive_fields_on_an_unverified_attorney_never_errors_or_writes_a_revoke_event(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $attorney = DirectoryAttorney::factory()->create(['name' => 'Never Verified', 'bar_number' => 'P1']);
+
+        Livewire::test(EditDirectoryAttorney::class, ['record' => $attorney->getRouteKey()])
+            ->fillForm(['name' => 'Still Never Verified', 'bar_number' => 'P2'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $revokeEvent = DB::table('security_events')->where('event_type', 'marketplace_verification_revoked')->exists();
+        $this->assertFalse($revokeEvent, 'Editing a never-verified attorney must never write a revoke event.');
+    }
+
+    public function test_the_update_audit_event_records_before_after_and_the_invalidated_dimension(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $attorney = DirectoryAttorney::factory()->create(['bar_number' => 'P100001']);
+        DirectoryVerification::factory()->forVerifiable($attorney, VerificationDimension::AttorneyLicense)->verified()->create();
+
+        Livewire::test(EditDirectoryAttorney::class, ['record' => $attorney->getRouteKey()])
+            ->fillForm(['bar_number' => 'P999999'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $auditRow = DB::table('security_events')
+            ->where('event_type', 'marketplace_attorney_updated')
+            ->where('actor_id', $admin->id)
+            ->latest('id')
+            ->first();
+        $this->assertNotNull($auditRow);
+
+        $decoded = json_decode((string) $auditRow->metadata, true);
+        $this->assertArrayHasKey('correlation_id', $decoded);
+        $this->assertSame(['before' => 'P100001', 'after' => 'P999999'], $decoded['sensitive_field_changes']['bar_number']);
+        $this->assertSame([['dimension' => 'attorney_license', 'triggering_field' => 'bar_number']], $decoded['verification_invalidated']);
+
+        $revokeRow = DB::table('security_events')
+            ->where('event_type', 'marketplace_verification_revoked')
+            ->latest('id')
+            ->first();
+        $revokeMetadata = json_decode((string) $revokeRow->metadata, true);
+        $this->assertSame($decoded['correlation_id'], $revokeMetadata['correlation_id'], 'The edit and the resulting revoke must share a correlation ID so they can be linked in review.');
+    }
+
+    /**
+     * Section 15's pre-save impact preview must only ever appear when
+     * the backend will actually enforce it — never a decorative-only
+     * warning.
+     */
+    public function test_the_pre_save_impact_warning_appears_only_when_a_sensitive_field_changes_on_a_verified_attorney(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $attorney = DirectoryAttorney::factory()->create(['bar_number' => 'P100001']);
+        DirectoryVerification::factory()->forVerifiable($attorney, VerificationDimension::AttorneyLicense)->verified()->create();
+
+        $test = Livewire::test(EditDirectoryAttorney::class, ['record' => $attorney->getRouteKey()]);
+        $test->assertDontSee('will invalidate the current license verification');
+
+        $test->fillForm(['bar_number' => 'P999999']);
+        $test->assertSee('will invalidate the current license verification');
+    }
+
+    public function test_the_pre_save_impact_warning_never_appears_on_create(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        Livewire::test(CreateDirectoryAttorney::class)
+            ->fillForm(['name' => 'Brand New Attorney', 'bar_number' => 'P1'])
+            ->assertDontSee('will invalidate');
     }
 
     public function test_associating_with_a_new_firm_ends_the_prior_current_relationship_rather_than_duplicating(): void
