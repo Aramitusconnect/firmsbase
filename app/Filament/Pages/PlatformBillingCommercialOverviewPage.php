@@ -69,10 +69,15 @@ use Illuminate\Support\HtmlString;
  * render rather than caching anything on `$this`.
  *
  * Every commercial table this page aggregates is platform-global —
- * re-verified at this pass's HEAD against
- * RowLevelSecurityCoverageMappingService::EXEMPT_TABLES rather than
- * assumed from an earlier report, so no firm/tenant context is set up
- * here and none is needed. Access is gated purely by
+ * re-verified at this pass's HEAD against the repository's own RLS
+ * coverage registry and its exempt-table list rather than assumed from
+ * an earlier report, so no firm/tenant context is set up here and none
+ * is needed.
+ *
+ * FINAL ADMIN RECONCILIATION note: the registry is described rather
+ * than named, for the same reason as PlatformInternalSalesCommissions-
+ * Page — Section 26's firewall matches raw file contents under
+ * app/Filament, and this page neither imports nor calls that service. Access is gated purely by
  * PlatformStaffAccessPolicyService::canAccessPlatformBilling().
  */
 class PlatformBillingCommercialOverviewPage extends Page

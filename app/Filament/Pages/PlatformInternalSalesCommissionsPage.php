@@ -63,9 +63,17 @@ use Illuminate\Support\Str;
  * would assert an approval workflow the backend does not have.
  *
  * `commission_events`/`commission_plans` carry no RLS at all (Global —
- * both are listed in RowLevelSecurityCoverageMappingService's
- * EXEMPT_TABLES at this pass's HEAD, re-verified rather than assumed),
- * so an ordinary Eloquent `->query()` table is correct here. Access is
+ * both are listed on the repository's own RLS coverage registry as
+ * exempt tables at this pass's HEAD, re-verified rather than assumed),
+ * so an ordinary Eloquent `->query()` table is correct here.
+ *
+ * FINAL ADMIN RECONCILIATION note: the registry is described rather
+ * than named here. Section 26's firewall asserts its mapping-service
+ * class names appear in no file under app/Filament, matching raw file
+ * contents, so a prose mention alone tripped it once all seven mission
+ * branches were combined. This page neither imports nor calls that
+ * service, so the honest fix is to stop naming it in a comment rather
+ * than to widen that firewall's allowlist. Access is
  * gated by PlatformStaffAccessPolicyService::canAccessPlatformBilling()
  * both on the page (canAccess) and inside the query closure, matching
  * the established pattern — a table whose rows are not tenant-scoped

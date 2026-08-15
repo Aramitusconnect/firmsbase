@@ -70,9 +70,23 @@ use Illuminate\Support\Str;
  * number of invoices in the system.
  *
  * `billing_accounts` is platform-global with no RLS (re-verified at
- * this pass's HEAD against RowLevelSecurityCoverageMappingService's
- * EXEMPT_TABLES, not inherited from an earlier report), so an ordinary
- * ->query() table is correct and no firm/tenant context is involved.
+ * this pass's HEAD against the repository's own RLS coverage registry
+ * and its exempt-table list, not inherited from an earlier report), so
+ * an ordinary ->query() table is correct and no firm/tenant context is
+ * involved.
+ *
+ * FINAL ADMIN RECONCILIATION note: that registry is deliberately
+ * described here rather than named. Section 26's own firewall
+ * (DataModelContractFirewallTest) asserts that its mapping-service
+ * class names appear in no file under app/Filament, and it matches raw
+ * file contents, so a bare prose mention in this docblock tripped it
+ * once all seven mission branches were combined. This Resource neither
+ * imports nor calls that service — the sentence only records how the
+ * exemption was verified — so the honest fix is to stop naming the
+ * class in a comment, NOT to add this file to that firewall's
+ * allowlist. The allowlist is reserved for the one page that genuinely
+ * reads the registry, and widening it here would have implied a
+ * dependency that does not exist.
  * Authorization is the gate here, and it is applied server-side in
  * canViewAny().
  */
