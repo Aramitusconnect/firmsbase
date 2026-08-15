@@ -376,9 +376,20 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Resources'.DIRECTORY_SEPARATOR.'FirmResource.php',
             'Resources'.DIRECTORY_SEPARATOR.'FirmResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListFirms.php',
             'Resources'.DIRECTORY_SEPARATOR.'FirmResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewFirm.php',
+            // CORE SuperAdmin mission (admin/core-superadmin-security):
+            // EditFirm.php — safe-metadata edit page (FirmResource
+            // previously had List+View only, see that Resource's own
+            // docblock) — and InviteFirmUserAction.php — the first
+            // invitation capability FirmUserResource has ever had.
+            'Resources'.DIRECTORY_SEPARATOR.'FirmResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'EditFirm.php',
             'Resources'.DIRECTORY_SEPARATOR.'FirmUserResource.php',
             'Resources'.DIRECTORY_SEPARATOR.'FirmUserResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListFirmUsers.php',
             'Resources'.DIRECTORY_SEPARATOR.'FirmUserResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewFirmUser.php',
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'InviteFirmUserAction.php',
+            // Phase 5, section 61: bounded CSV export mirroring the
+            // established League\Csv/streamDownload pattern — see that
+            // action's own docblock.
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'ExportFirmInventoryCsvAction.php',
             'Pages'.DIRECTORY_SEPARATOR.'PlatformSecurityDashboardPage.php',
             'Pages'.DIRECTORY_SEPARATOR.'PlatformTenantIsolationPage.php',
         ];
@@ -396,6 +407,11 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Auth'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'PlatformAdminLogin.php',
             'MultiFactor'.DIRECTORY_SEPARATOR.'AuditedAppAuthentication.php',
             'Pages'.DIRECTORY_SEPARATOR.'PlatformRolesAndPermissionsPage.php',
+            // CORE SuperAdmin mission (admin/core-superadmin-security):
+            // a real per-role drill-down, reached only via the catalog
+            // page's own "View details" link — see that class's own
+            // docblock.
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformRoleDetailPage.php',
             'Resources'.DIRECTORY_SEPARATOR.'PlatformAdministratorResource.php',
             'Resources'.DIRECTORY_SEPARATOR.'PlatformAdministratorResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListPlatformAdministrators.php',
             'Resources'.DIRECTORY_SEPARATOR.'PlatformAdministratorResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewPlatformAdministrator.php',
@@ -403,6 +419,10 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'TogglePlatformAdminActiveStatusAction.php',
             'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'AssignPlatformAdminRoleAction.php',
             'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RevokePlatformAdminRoleAction.php',
+            // CORE SuperAdmin mission (admin/core-superadmin-security):
+            // a standalone "Revoke Sessions" action, independent of
+            // activation/MFA state — see that class's own docblock.
+            'Actions'.DIRECTORY_SEPARATOR.'Platform'.DIRECTORY_SEPARATOR.'RevokePlatformAdminSessionsAction.php',
         ];
 
         // Phase 1 FirmsVault Admin Control Center, final scope item —
@@ -425,6 +445,10 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Widgets'.DIRECTORY_SEPARATOR.'PlatformSecurityOverviewWidget.php',
             'Widgets'.DIRECTORY_SEPARATOR.'PlatformSystemHealthWidget.php',
             'Widgets'.DIRECTORY_SEPARATOR.'PlatformRecentPrivilegedActivityWidget.php',
+            // CORE SuperAdmin mission, Phase 5: prominent "Requires
+            // Attention" surface — derives entirely from the existing
+            // snapshot, no new query (see its own class docblock).
+            'Widgets'.DIRECTORY_SEPARATOR.'PlatformRequiresAttentionWidget.php',
         ];
 
         // Phase 2 FirmsVault Admin Control Center ("Integration

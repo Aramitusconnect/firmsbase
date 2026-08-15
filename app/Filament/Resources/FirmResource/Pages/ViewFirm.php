@@ -11,6 +11,7 @@ use App\Models\Firm;
 use App\Models\FirmLicense;
 use App\Services\FirmSeatCapacityService;
 use App\Services\TenantContextService;
+use Filament\Actions\EditAction;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Section;
@@ -63,6 +64,7 @@ class ViewFirm extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            EditAction::make(),
             ResendFirmOwnerInvitationAction::make(),
         ];
     }

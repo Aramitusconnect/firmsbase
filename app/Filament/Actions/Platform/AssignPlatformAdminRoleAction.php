@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Actions\Platform;
 
 use App\Enums\PlatformRoleCode;
+use App\Filament\Support\StepUp\StepUpAuthentication;
 use App\Models\PlatformAdmin;
 use App\Services\PlatformAdminAuditEventRecorder;
 use App\Services\PlatformRoleService;
@@ -22,6 +23,13 @@ use Illuminate\Support\Str;
  * — no role-grant business logic lives here. Offers only roles the
  * target does not already actively hold (grant() is itself idempotent,
  * but narrowing the Select avoids a confusing no-op submission).
+ *
+ * CORE SuperAdmin mission: granting a role — especially SuperAdmin — is
+ * a privileged capability change, so this now requires a fresh step-up
+ * verification via StepUpAuthentication::mergeInto() (appends the
+ * password field to the existing role_code schema rather than
+ * replacing it), matching section 29's "fresh MFA/re-auth where
+ * supported/required" requirement for role grants.
  */
 class AssignPlatformAdminRoleAction extends Action
 {
@@ -38,7 +46,7 @@ class AssignPlatformAdminRoleAction extends Action
         $this->icon(Heroicon::OutlinedPlusCircle);
         $this->color('primary');
 
-        $this->schema([
+        StepUpAuthentication::mergeInto($this, [
             Select::make('role_code')
                 ->label('Role')
                 ->options(fn (PlatformAdmin $record): array => collect(PlatformRoleCode::cases())
@@ -47,9 +55,8 @@ class AssignPlatformAdminRoleAction extends Action
                     ->all())
                 ->required()
                 ->native(false),
-        ]);
+        ], 'platform_admin');
 
-        $this->requiresConfirmation();
         $this->modalHeading('Assign role');
 
         $this->action(function (array $data, PlatformAdmin $record, PlatformStaffAccessPolicyService $accessPolicy, PlatformRoleService $roleService, PlatformAdminAuditEventRecorder $auditRecorder): void {

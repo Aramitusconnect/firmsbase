@@ -64,6 +64,8 @@ class FirmUserResource extends Resource
 
     protected static ?string $navigationLabel = 'Firm Users';
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Platform';
+
     protected static ?string $recordTitleAttribute = 'uuid';
 
     /**

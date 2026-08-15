@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
+use App\Filament\Resources\PlatformIncidentResource;
 use App\Models\PlatformAdmin;
 use App\Services\PlatformSecurityDashboardService;
 use App\Services\PlatformStaffAccessPolicyService;
@@ -66,6 +67,8 @@ class PlatformSecurityDashboardPage extends Page implements HasTable
 
     protected static ?string $navigationLabel = 'Security Dashboard';
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Security';
+
     protected static ?string $title = 'Security Dashboard';
 
     public static function canAccess(): bool
@@ -87,13 +90,45 @@ class PlatformSecurityDashboardPage extends Page implements HasTable
     public function content(Schema $schema): Schema
     {
         return $schema->components([
+            $this->securityMetricsSection(),
             $this->mfaGapSection(),
+            $this->privilegedActivitySection(),
             $this->recentRoleChangesSection(),
             $this->integrationOversightLinkSection(),
+            $this->incidentLinkSection(),
             Section::make('Recent Security Activity')
                 ->description('Most recent security_events rows across every firm (redacted — event metadata is never rendered here).')
                 ->schema([EmbeddedTable::make()]),
         ]);
+    }
+
+    /**
+     * CORE SuperAdmin mission, section 37: REAL measured numbers only —
+     * no fabricated "0 Critical / 0 High" cards, since SecurityEvent
+     * carries no severity column at all (confirmed by direct source
+     * read of that model/migration). Rather than inventing a severity
+     * taxonomy that doesn't exist, this section shows the metrics that
+     * ARE genuinely measurable today, each honestly labeled, plus one
+     * explicit note that severity itself is not yet classified.
+     */
+    private function securityMetricsSection(): Section
+    {
+        return Section::make('Security Metrics')
+            ->columns(3)
+            ->schema([
+                Text::make(function (): string {
+                    $count = app(PlatformSecurityDashboardService::class)->platformAdminFailedLoginCount(24);
+
+                    return "Platform admin failed logins (last 24h): {$count}";
+                })->color(fn () => app(PlatformSecurityDashboardService::class)->platformAdminFailedLoginCount(24) > 0 ? 'warning' : 'success'),
+                Text::make(function (): string {
+                    $count = app(PlatformSecurityDashboardService::class)->adminsWithoutConfirmedMfa()->count();
+
+                    return "Platform admins without confirmed MFA: {$count}";
+                })->color(fn () => app(PlatformSecurityDashboardService::class)->adminsWithoutConfirmedMfa()->isEmpty() ? 'success' : 'warning'),
+                Text::make('Severity classification: Not classified — security_events carries no severity taxonomy today. Every event shown below is real; none is ranked by severity.')
+                    ->color('gray'),
+            ]);
     }
 
     public function table(Table $table): Table
@@ -125,10 +160,25 @@ class PlatformSecurityDashboardPage extends Page implements HasTable
             ->paginated([10, 25, 50]);
     }
 
+    /**
+     * CORE SuperAdmin mission, section 38: the description here used to
+     * claim "the MFA enrollment/challenge system itself is a separate,
+     * not-yet-built effort" — false by the time this checkpoint ran
+     * (confirmed by direct source read): AdminPanelProvider requires
+     * TOTP+WebAuthn via EnsurePlatformAdminMfaIsEnrolledAndVerified on
+     * every request, and PlatformAdministratorResource's own MFA
+     * status column, ResetPlatformAdminMfaAction, and
+     * RevokeDirectoryAttorneyVerificationAction-style audited actions
+     * all already exist and are exercised elsewhere in this panel.
+     * Enrollment (has the admin ever confirmed a TOTP/WebAuthn factor)
+     * and enforcement (is the panel actually requiring it before
+     * granting access) are now stated as the two DISTINCT facts they
+     * are, never conflated.
+     */
     private function mfaGapSection(): Section
     {
         return Section::make('PlatformAdmins Without Confirmed MFA')
-            ->description('Read-only reporting — the MFA enrollment/challenge system itself is a separate, not-yet-built effort. This lists every PlatformAdmin whose two_factor_confirmed_at is still null.')
+            ->description('MFA enforcement is active platform-wide — every PlatformAdmin is forced through TOTP/WebAuthn setup on their next request if not yet enrolled (EnsurePlatformAdminMfaIsEnrolledAndVerified). This lists who currently lacks a confirmed enrollment — a transient in-progress state, not a policy gap.')
             ->schema([
                 UnorderedList::make(function (): array {
                     $admin = Auth::guard('platform_admin')->user();
@@ -194,5 +244,52 @@ class PlatformSecurityDashboardPage extends Page implements HasTable
                 Text::make(fn (): string => 'See: '.PlatformIntegrationOverviewPage::getUrl()),
             ])
             ->collapsible();
+    }
+
+    /**
+     * CORE SuperAdmin mission, section 40: surfaces the highest-
+     * privilege PlatformAdmin-management actions (role grants/
+     * revocations, activation/deactivation, session revocation, MFA
+     * reset) via PlatformSecurityDashboardService::
+     * recentPrivilegedPlatformActivity() — see that method's own
+     * docblock for exactly which event types and why Firm/FirmUser-
+     * scoped privileged events are deliberately NOT duplicated here
+     * (they are already visible in the Recent Security Activity table
+     * below).
+     */
+    private function privilegedActivitySection(): Section
+    {
+        return Section::make('Privileged Platform Activity')
+            ->description('Role grants/revocations, administrator activation/deactivation, session revocation, and MFA resets — the actions this panel treats as highest-privilege.')
+            ->schema([
+                UnorderedList::make(function (): array {
+                    $rows = app(PlatformSecurityDashboardService::class)->recentPrivilegedPlatformActivity();
+
+                    if ($rows->isEmpty()) {
+                        return ['No privileged platform-administration activity recorded yet.'];
+                    }
+
+                    return $rows->map(function (array $row): string {
+                        $description = str_replace('_', ' ', $row['event_type']);
+                        $target = $row['target_platform_admin_id'] !== null ? " (target admin #{$row['target_platform_admin_id']})" : '';
+                        $role = $row['role_code'] !== null ? " [{$row['role_code']}]" : '';
+                        $when = $row['created_at']?->toDayDateTimeString() ?? '—';
+
+                        return "{$description}{$role}{$target} — actor #{$row['actor_id']} — {$when}";
+                    })->all();
+                }),
+            ])
+            ->collapsible();
+    }
+
+    private function incidentLinkSection(): Section
+    {
+        return Section::make('Incident Console')
+            ->description('The canonical Incident subsystem (severity, status, root cause) is a separate console, not re-implemented here.')
+            ->schema([
+                Text::make(fn (): string => 'See: '.PlatformIncidentResource::getUrl()),
+            ])
+            ->collapsible()
+            ->collapsed();
     }
 }

@@ -82,6 +82,8 @@ class PlatformAdministratorResource extends Resource
 
     protected static ?string $navigationLabel = 'Platform Administrators';
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Platform';
+
     protected static ?string $recordTitleAttribute = 'name';
 
     /**

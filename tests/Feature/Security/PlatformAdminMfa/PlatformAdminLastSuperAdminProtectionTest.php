@@ -142,6 +142,7 @@ class PlatformAdminLastSuperAdminProtectionTest extends TestCase
 
         $test = Livewire::test(ViewPlatformAdministrator::class, ['record' => $target->uuid]);
         $test->mountAction(TogglePlatformAdminActiveStatusAction::getDefaultName());
+        $test->setActionData(['stepUpCurrentPassword' => 'password']);
         $test->callMountedAction();
 
         $target->refresh();
@@ -180,7 +181,7 @@ class PlatformAdminLastSuperAdminProtectionTest extends TestCase
 
         $test = Livewire::test(ViewPlatformAdministrator::class, ['record' => $target->uuid]);
         $test->mountAction(RevokePlatformAdminRoleAction::getDefaultName());
-        $test->setActionData(['role_code' => PlatformRoleCode::SuperAdmin->value]);
+        $test->setActionData(['role_code' => PlatformRoleCode::SuperAdmin->value, 'stepUpCurrentPassword' => 'password']);
         $test->callMountedAction();
 
         $this->assertFalse($this->roleService()->hasRole($target->fresh(), PlatformRoleCode::SuperAdmin), 'Revoking a DIFFERENT admin\'s SuperAdmin role, while the actor remains one, must succeed.');
@@ -211,7 +212,7 @@ class PlatformAdminLastSuperAdminProtectionTest extends TestCase
 
         $test = Livewire::test(ViewPlatformAdministrator::class, ['record' => $sole->uuid]);
         $test->mountAction(ResetPlatformAdminMfaAction::getDefaultName());
-        $test->setActionData(['reason' => 'lost device, sole superadmin']);
+        $test->setActionData(['reason' => 'lost device, sole superadmin', 'stepUpCurrentPassword' => 'password']);
         $test->callMountedAction();
 
         $test->assertHasNoActionErrors();

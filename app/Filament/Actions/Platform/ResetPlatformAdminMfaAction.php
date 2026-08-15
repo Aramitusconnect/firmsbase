@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Actions\Platform;
 
+use App\Filament\Support\StepUp\StepUpAuthentication;
 use App\Models\PlatformAdmin;
 use App\Services\PlatformAdminMfaResetService;
 use App\Services\PlatformStaffAccessPolicyService;
@@ -53,6 +54,11 @@ use RuntimeException;
  * (a deliberately out-of-band, non-production-by-default path, not
  * reachable through the panel UI at all).
  *
+ * CORE SuperAdmin mission: now requires a fresh step-up verification
+ * (StepUpAuthentication::mergeInto(), appended to the existing
+ * `reason` schema) — an MFA reset is exactly the "credential
+ * compromise/lost device" high-risk category section 26 calls out.
+ *
  * Last-SuperAdmin protection (PlatformRoleService::
  * wouldLeaveNoActiveSuperAdmin()) deliberately does NOT gate this
  * action — an MFA reset never revokes a role or deactivates an
@@ -75,15 +81,14 @@ class ResetPlatformAdminMfaAction extends Action
         $this->icon(Heroicon::OutlinedShieldExclamation);
         $this->color('danger');
 
-        $this->schema([
+        StepUpAuthentication::mergeInto($this, [
             Textarea::make('reason')
                 ->label('Reason')
                 ->required()
                 ->maxLength(500)
                 ->helperText('Recorded in the audit trail. Explain why this admin\'s MFA is being reset (e.g. lost device, lost recovery codes).'),
-        ]);
+        ], 'platform_admin');
 
-        $this->requiresConfirmation();
         $this->modalHeading('Reset platform administrator MFA');
         $this->modalDescription('This immediately clears the target admin\'s authenticator app enrollment and recovery codes, and forces their current session (if any) to log out and re-enroll on their next request. This cannot be undone.');
 

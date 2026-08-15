@@ -209,6 +209,26 @@ class PlatformExecutiveDashboardService
             'reason' => null,
             'active_count' => PlatformAdmin::query()->where('is_active', true)->count(),
             'without_confirmed_mfa_count' => $this->securityDashboard->adminsWithoutConfirmedMfa()->count(),
+            // CORE SuperAdmin mission, section 15 (Requires Attention):
+            // the same "active" definition PlatformRoleService::
+            // wouldLeaveNoActiveSuperAdmin() uses (is_active AND an
+            // unrevoked SuperAdmin grant), expressed via the identical
+            // whereExists() shape that method already uses — never a
+            // join that could double-count an admin holding more than
+            // one non-revoked grant row — so
+            // PlatformRequiresAttentionWidget can flag a sole-active-
+            // SuperAdmin platform without a second, differently-shaped
+            // query.
+            'active_super_admin_count' => PlatformAdmin::query()
+                ->where('is_active', true)
+                ->whereExists(function ($query): void {
+                    $query->select(DB::raw(1))
+                        ->from('platform_roles')
+                        ->whereColumn('platform_roles.platform_admin_id', 'platform_admins.id')
+                        ->where('platform_roles.role_code', 'super_admin')
+                        ->whereNull('platform_roles.revoked_at');
+                })
+                ->count(),
         ];
     }
 

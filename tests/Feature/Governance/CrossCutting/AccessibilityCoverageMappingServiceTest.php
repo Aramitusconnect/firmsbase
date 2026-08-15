@@ -285,6 +285,27 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
         'accept-invitation-page.blade.php',
     ];
 
+    /**
+     * CORE SuperAdmin mission (admin/core-superadmin-security), Phase
+     * 5, addition: `resources/views/filament/widgets/platform-requires-attention-widget.blade.php` —
+     * PlatformRequiresAttentionWidget's own view (a plain Filament
+     * Widget subclass, not a StatsOverviewWidget, so it needs its own
+     * Blade view rather than a pre-built column set — Platform Admin
+     * panel only). Reviewed and found accessible: severity is conveyed
+     * through a real, visible text badge ("Critical"/"Warning"/"Info")
+     * inside `<x-filament::badge>`, never color alone; the only
+     * interactive controls are real `<a href="...">` links with genuine
+     * visible text content (never icon-only, never a clickable
+     * `<div>`); the empty state renders as a plain, real `<p>` element;
+     * and no bespoke/custom interactive markup exists (no custom
+     * dropdowns, modals, or keyboard traps) — the same bar this file's
+     * own convention already applies to every other allow-listed entry
+     * above.
+     */
+    private const CORE_SUPERADMIN_REQUIRES_ATTENTION_WIDGET_ALLOWED_BLADE_BASENAMES = [
+        'platform-requires-attention-widget.blade.php',
+    ];
+
     public function test_no_blade_filament_livewire_frontend_or_browser_accessibility_files_exist(): void
     {
         $bladeFiles = [];
@@ -314,7 +335,8 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
                 && ! in_array(basename($path), self::WEBAUTHN_ALLOWED_BLADE_BASENAMES, true)
                 && ! in_array(basename($path), self::MYATTORNEY_MARKETPLACE_ALLOWED_BLADE_BASENAMES, true)
                 && ! in_array(basename($path), self::MARKETPLACE_INTAKE_SESSION_RESUME_ALLOWED_BLADE_BASENAMES, true)
-                && ! in_array(basename($path), self::CLIENT_PORTAL_INVITATION_ACCEPTANCE_ALLOWED_BLADE_BASENAMES, true),
+                && ! in_array(basename($path), self::CLIENT_PORTAL_INVITATION_ACCEPTANCE_ALLOWED_BLADE_BASENAMES, true)
+                && ! in_array(basename($path), self::CORE_SUPERADMIN_REQUIRES_ATTENTION_WIDGET_ALLOWED_BLADE_BASENAMES, true),
         ));
 
         $this->assertEmpty($nonDefaultBladeFiles, 'Found unexpected Blade files: '.implode(', ', $nonDefaultBladeFiles));

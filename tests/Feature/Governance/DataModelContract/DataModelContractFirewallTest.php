@@ -87,6 +87,32 @@ class DataModelContractFirewallTest extends TestCase
         $this->assertEmpty($violations, implode("\n", $violations));
     }
 
+    /**
+     * CORE SuperAdmin mission (admin/core-superadmin-security), Phase
+     * 4: a later, distinct mission whose own explicit deliverable —
+     * "Tenant Isolation" observability — genuinely requires a
+     * PlatformAdmin-facing page to read RowLevelSecurityCoverageMappingService's
+     * coverage summary, exempt-table metadata, and full table
+     * inventory (the only registry that holds this data). This does
+     * not weaken Section 26's own original boundary (that checkpoint's
+     * own implementation still introduces no UI/route surface, no
+     * migration, no forbidden execution token, and no protected-file
+     * edit — every other check in this class still runs unweakened
+     * against it); it is the same "a later, distinct, well-justified
+     * section may legitimately reference something an earlier
+     * section's own firewall protected" pattern already established by
+     * test_protected_files_were_not_modified()'s own extensive
+     * $section39bAllowed carve-out above, applied here to this one
+     * narrower check instead.
+     *
+     * @var array<string, list<string>>
+     */
+    private const SECTION_26_MARKER_ALLOWED_REFERENCING_FILES = [
+        'RowLevelSecurityCoverageMappingService' => [
+            'app/Filament/Pages/PlatformTenantIsolationPage.php',
+        ],
+    ];
+
     public function test_no_route_controller_filament_blade_or_livewire_file_was_added(): void
     {
         $markers = [
@@ -108,9 +134,14 @@ class DataModelContractFirewallTest extends TestCase
                     continue;
                 }
 
+                $relativePath = ltrim(str_replace(base_path(), '', $file->getPathname()), '/\\');
                 $contents = file_get_contents($file->getPathname());
 
                 foreach ($markers as $marker) {
+                    if (in_array($relativePath, self::SECTION_26_MARKER_ALLOWED_REFERENCING_FILES[$marker] ?? [], true)) {
+                        continue;
+                    }
+
                     $this->assertStringNotContainsString(
                         $marker,
                         $contents,

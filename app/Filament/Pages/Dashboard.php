@@ -9,6 +9,7 @@ use App\Filament\Widgets\PlatformEnvironmentBadgeWidget;
 use App\Filament\Widgets\PlatformFirmsOverviewWidget;
 use App\Filament\Widgets\PlatformIntegrationsHealthWidget;
 use App\Filament\Widgets\PlatformRecentPrivilegedActivityWidget;
+use App\Filament\Widgets\PlatformRequiresAttentionWidget;
 use App\Filament\Widgets\PlatformSecurityOverviewWidget;
 use App\Filament\Widgets\PlatformSystemHealthWidget;
 use App\Models\PlatformAdmin;
@@ -84,6 +85,10 @@ class Dashboard extends \Filament\Pages\Dashboard
     public function getWidgets(): array
     {
         return [
+            // CORE SuperAdmin mission, section 15: positioned first —
+            // "a prominent Requires Attention section" — ahead of every
+            // other status widget.
+            PlatformRequiresAttentionWidget::class,
             PlatformEnvironmentBadgeWidget::class,
             PlatformFirmsOverviewWidget::class,
             PlatformAdministratorsOverviewWidget::class,
