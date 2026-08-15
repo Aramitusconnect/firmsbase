@@ -100,6 +100,33 @@ class PlatformSecurityDashboardService
 
     private const CACHE_TTL_SECONDS = 120;
 
+    /**
+     * CORE SuperAdmin mission, section 40. The event_type strings the
+     * PlatformAdmin-management actions this mission's own Phase 1
+     * touched actually write (AssignPlatformAdminRoleAction,
+     * RevokePlatformAdminRoleAction, TogglePlatformAdminActiveStatusAction,
+     * RevokePlatformAdminSessionsAction, PlatformAdminMfaResetService) —
+     * confirmed by direct source read of each, never guessed. All are
+     * written via PlatformAdminAuditEventRecorder::recordPlatformEvent()
+     * (null firm_id — see that method's own docblock), so this is a
+     * single cheap indexed query, not the per-firm scan
+     * recentSecurityEvents() below needs. Deliberately does NOT include
+     * the Firm/FirmUser-scoped privileged events this mission also
+     * added (firm_metadata_updated, firm_user_invited_by_platform_admin,
+     * etc.) — those carry a real firm_id and are already visible
+     * through recentSecurityEvents()'s own per-firm feed; duplicating
+     * them here would mean a second, more expensive per-firm scan for
+     * data the dashboard already shows.
+     */
+    private const PRIVILEGED_PLATFORM_EVENT_TYPES = [
+        'platform_admin_role_granted',
+        'platform_admin_role_revoked',
+        'platform_admin_activated',
+        'platform_admin_deactivated',
+        'platform_admin_sessions_revoked',
+        'mfa_reset_by_admin',
+    ];
+
     public function __construct(
         private readonly PlatformStaffAccessPolicyService $accessPolicy,
         private readonly TenantContextService $tenantContext = new TenantContextService,
@@ -239,5 +266,63 @@ class PlatformSecurityDashboardService
             ->orderByDesc('id')
             ->limit($limit)
             ->get();
+    }
+
+    /**
+     * CORE SuperAdmin mission, section 37: a REAL, measured count — not
+     * a fabricated zero. Scoped to the `platform_admin` guard only (the
+     * same null-firm_id login_succeeded/login_failed convention
+     * PlatformAdministratorResource::lastLoginAtByAdminId() already
+     * established) — a single cheap indexed query, no per-firm scan.
+     * Firm-User login failures are a genuinely separate, more expensive
+     * signal (real firm_id, would need the same per-firm scan
+     * recentSecurityEvents() uses) — out of scope for this platform-
+     * level card, disclosed rather than silently merged in.
+     */
+    public function platformAdminFailedLoginCount(int $hours = 24): int
+    {
+        return $this->tenantContext->runWithoutFirmContext(
+            fn (): int => SecurityEvent::query()
+                ->where('actor_type', PlatformAdmin::class)
+                ->where('event_type', 'login_failed')
+                ->where('created_at', '>=', now()->subHours($hours))
+                ->count()
+        );
+    }
+
+    /**
+     * CORE SuperAdmin mission, section 40. See
+     * PRIVILEGED_PLATFORM_EVENT_TYPES' own docblock for exactly which
+     * event types this covers and why. Only three whitelisted, non-
+     * secret metadata keys are ever surfaced (target admin id/uuid,
+     * role_code) — never the raw metadata blob, matching this class's
+     * own established redaction discipline.
+     *
+     * @return Collection<int, array{event_type: string, category: string, actor_type: string, actor_id: int, created_at: ?Carbon, target_platform_admin_id: ?int, role_code: ?string}>
+     */
+    public function recentPrivilegedPlatformActivity(int $limit = 25): Collection
+    {
+        return $this->tenantContext->runWithoutFirmContext(
+            fn (): Collection => SecurityEvent::query()
+                ->whereNull('firm_id')
+                ->whereIn('event_type', self::PRIVILEGED_PLATFORM_EVENT_TYPES)
+                ->orderByDesc('created_at')
+                ->orderByDesc('id')
+                ->limit($limit)
+                ->get(['actor_type', 'actor_id', 'event_type', 'category', 'created_at', 'metadata'])
+                ->map(function (SecurityEvent $event): array {
+                    $metadata = is_array($event->metadata) ? $event->metadata : [];
+
+                    return [
+                        'event_type' => $event->event_type,
+                        'category' => $event->category,
+                        'actor_type' => class_basename($event->actor_type),
+                        'actor_id' => $event->actor_id,
+                        'created_at' => $event->created_at,
+                        'target_platform_admin_id' => $metadata['target_platform_admin_id'] ?? null,
+                        'role_code' => $metadata['role_code'] ?? null,
+                    ];
+                })
+        );
     }
 }
