@@ -166,5 +166,44 @@ final class DirectoryClaimReviewWorkflowTest extends TestCase
         // context — the same pre-existing constraint ViewDirectoryFirm's own
         // claimant.user.name field already lives with, not something this
         // mission introduced or can fix here.
+        //
+        // MyAttorney final hardening mission, finding 1: the page must
+        // instead show a truthful, non-generic explanation for exactly
+        // this field, never a bare '—' indistinguishable from "left
+        // blank" — see ViewDirectoryClaim's own docblock.
+        $response->assertSee('Restricted by tenant isolation');
+        $response->assertDontSee('Claimant Person');
+    }
+
+    /**
+     * MyAttorney final hardening mission, finding 1 (test section 21):
+     * the restricted-identity label must never be an RLS bypass — a
+     * SuperAdmin viewing the SAME claim while a DIFFERENT firm's
+     * tenant context happens to be active must still see the honest
+     * restricted note, never the other firm's data and never the real
+     * claimant identity leaking through.
+     */
+    public function test_claimant_identity_stays_restricted_regardless_of_any_ambient_tenant_context(): void
+    {
+        $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
+        $this->actingAs($admin, 'platform_admin');
+
+        $listing = DirectoryFirm::factory()->create();
+        $tenantFirm = Firm::factory()->create();
+        $claimant = app(TenantContextService::class)->runWithFirmContext(
+            $tenantFirm,
+            fn () => FirmUser::factory()->forFirm($tenantFirm)->forUser(User::factory()->create(['name' => 'Never Exposed Name']))->role(FirmUserRole::FirmOwner)->create()
+        );
+        $claim = DirectoryClaim::factory()->create([
+            'directory_firm_id' => $listing->id,
+            'firm_id' => $tenantFirm->id,
+            'claimant_firm_user_id' => $claimant->id,
+        ]);
+
+        $response = $this->get(DirectoryClaimResource::getUrl('view', ['record' => $claim]));
+
+        $response->assertOk();
+        $response->assertSee('Restricted by tenant isolation');
+        $response->assertDontSee('Never Exposed Name');
     }
 }

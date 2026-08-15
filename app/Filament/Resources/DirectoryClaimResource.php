@@ -32,6 +32,16 @@ use Illuminate\Support\Str;
  */
 class DirectoryClaimResource extends Resource
 {
+    /**
+     * MyAttorney final hardening mission, finding 1 — see
+     * ViewDirectoryClaim's own docblock for why the Claimant column
+     * below is genuinely, correctly unresolvable here (FORCE RLS on
+     * firm_users), and why the fix is UI honesty, never an RLS bypass.
+     */
+    private const CLAIMANT_IDENTITY_RESTRICTED_NOTE = 'Restricted by tenant isolation';
+
+    private const CLAIMANT_IDENTITY_TOOLTIP = 'Claimant user identity is tenant-protected and is not exposed through the platform marketplace review context.';
+
     protected static ?string $model = DirectoryClaim::class;
 
     protected static ?string $slug = 'directory-claims';
@@ -65,7 +75,11 @@ class DirectoryClaimResource extends Resource
                 TextColumn::make('id')->label('Claim ID')->sortable()->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('directoryFirm.display_name')->label('Listing')->searchable(),
                 TextColumn::make('firm.legal_name')->label('Claimant Firm')->searchable(),
-                TextColumn::make('claimant.user.name')->label('Claimant')->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('claimant.user.name')
+                    ->label('Claimant')
+                    ->placeholder(self::CLAIMANT_IDENTITY_RESTRICTED_NOTE)
+                    ->tooltip(self::CLAIMANT_IDENTITY_TOOLTIP)
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('state')
                     ->badge()
                     ->formatStateUsing(fn (ClaimState $state): string => Str::headline($state->value))

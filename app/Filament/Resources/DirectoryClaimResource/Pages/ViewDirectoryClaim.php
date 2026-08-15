@@ -32,10 +32,30 @@ use Illuminate\Support\Str;
  * file-upload evidence column on directory_claims (see that table's
  * migration docblock), so this section does not fabricate a document
  * list that doesn't exist.
+ *
+ * MyAttorney final hardening mission, finding 1: `claimant` (a
+ * FirmUser) and everything reached through it (`.user.name`,
+ * `.user.email`, `.role`) is genuinely, correctly unresolvable in this
+ * PlatformAdmin context — firm_users carries permanent FORCE RLS, and
+ * its own self-lookup policy only matches `app.current_user_id`
+ * against a real authenticated Firm user's session, never a
+ * PlatformAdmin's. Preserved conclusion from the prior reconciliation
+ * report: CLAIMANT_IDENTITY_LIMITED_BUT_ACCEPTABLE — the Claiming
+ * Firm's real legal name, the claim basis, and the full decision
+ * history all resolve correctly and are enough to review a claim. The
+ * fix here is UI honesty only, never an RLS bypass: the three
+ * claimant-identity fields below show CLAIMANT_IDENTITY_RESTRICTED_NOTE
+ * (with a tooltip explaining why) instead of the generic '—' every
+ * other genuinely-empty field on this page uses, so "architecturally
+ * unavailable" is never visually indistinguishable from "left blank."
  */
 class ViewDirectoryClaim extends ViewRecord
 {
     protected static string $resource = DirectoryClaimResource::class;
+
+    private const CLAIMANT_IDENTITY_RESTRICTED_NOTE = 'Restricted by tenant isolation';
+
+    private const CLAIMANT_IDENTITY_TOOLTIP = 'Claimant user identity is tenant-protected and is not exposed through the platform marketplace review context.';
 
     protected function getHeaderActions(): array
     {
@@ -69,12 +89,19 @@ class ViewDirectoryClaim extends ViewRecord
             Section::make('Claimant')
                 ->columns(2)
                 ->schema([
-                    TextEntry::make('claimant.user.name')->label('Claimant Name')->placeholder('—'),
-                    TextEntry::make('claimant.user.email')->label('Claimant Email')->placeholder('—'),
+                    TextEntry::make('claimant.user.name')
+                        ->label('Claimant Name')
+                        ->placeholder(self::CLAIMANT_IDENTITY_RESTRICTED_NOTE)
+                        ->tooltip(self::CLAIMANT_IDENTITY_TOOLTIP),
+                    TextEntry::make('claimant.user.email')
+                        ->label('Claimant Email')
+                        ->placeholder(self::CLAIMANT_IDENTITY_RESTRICTED_NOTE)
+                        ->tooltip(self::CLAIMANT_IDENTITY_TOOLTIP),
                     TextEntry::make('firm.legal_name')->label('Claiming Firm'),
                     TextEntry::make('claimant.role')
                         ->label('Role/Relationship')
-                        ->formatStateUsing(fn ($state) => $state !== null ? Str::headline($state->value) : '—'),
+                        ->formatStateUsing(fn ($state) => $state !== null ? Str::headline($state->value) : self::CLAIMANT_IDENTITY_RESTRICTED_NOTE)
+                        ->tooltip(self::CLAIMANT_IDENTITY_TOOLTIP),
                 ]),
             Section::make('Evidence')
                 ->schema([
