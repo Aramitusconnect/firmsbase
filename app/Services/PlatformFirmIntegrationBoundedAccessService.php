@@ -82,21 +82,29 @@ use RuntimeException;
  *      own docblock) was previously enforced only by a Filament UI
  *      form-options constraint. Now checked explicitly here:
  *      $session->platform_admin_id === $admin->id, or denied.
- *   6. SupportAccessPolicyService::logSessionAudit() (frozen) always
- *      attributes actor_id = $session->platform_admin_id — the ORIGINAL
+ *   6. SupportAccessPolicyService::logSessionAudit() used to ALWAYS
+ *      attribute actor_id = $session->platform_admin_id — the ORIGINAL
  *      session holder, never the admin who actually performed a revoke.
  *      Wrong specifically for RevokeSupportAccessSessionAction, whose
  *      entire purpose is letting one admin revoke a DIFFERENT admin's
  *      session.
  *      leaveSupportAccessSession()/revokeSupportAccessSession() below
- *      now ALSO call writeOversightAuditEvent() (the mechanism already
- *      used correctly elsewhere in this file, for requeue/nudge/
- *      retention-preview) with actor_id = $admin->id — the real acting
- *      admin, resolved fresh — so a correctly-attributed
- *      `security_events` row (category platform_integration_oversight)
- *      exists for every leave/revoke, alongside (not replacing)
- *      logSessionAudit()'s own support_access-category row, which still
- *      serves support_access_sessions-table-level bookkeeping.
+ *      call writeOversightAuditEvent() (the mechanism already used
+ *      correctly elsewhere in this file, for requeue/nudge/retention-
+ *      preview) with actor_id = $admin->id — the real acting admin,
+ *      resolved fresh — so a correctly-attributed `security_events` row
+ *      (category platform_integration_oversight) exists for every
+ *      leave/revoke.
+ *
+ *      Prompt 6 additionally fixed this on the CANONICAL path rather
+ *      than leaving the compensating row above as the only correct
+ *      record: logSessionAudit() now takes the acting PlatformAdmin as
+ *      an explicit third argument, and every call site in this class
+ *      passes $admin. Its support_access-category row is therefore now
+ *      correctly attributed too, and records the session owner
+ *      separately as metadata.session_owner_platform_admin_id so "who
+ *      acted" and "whose session" remain two distinct, both-present
+ *      facts.
  *
  * Operational actions (frozen design §7) — requeueOutboxEvent()/
  * requeueSyncItem()/nudgeQueue()/previewRetentionSweepDryRun() below
@@ -301,21 +309,40 @@ final class PlatformFirmIntegrationBoundedAccessService
             throw new RuntimeException('Only the platform admin who requested support access may start this session.');
         }
 
-        // Gap closure #4 (frozen design §8 item 4): canStartSession()'s
-        // approval check is not auto-sequenced before start() — checked
-        // fresh here, never trusted from an earlier mount()/visible()
-        // -time check alone (TOCTOU discipline).
-        $decision = $this->supportPolicy->canStartSession($request);
+        $firm = Firm::query()->findOrFail($request->firm_id);
 
-        if (! $decision->allowed) {
-            throw new RuntimeException($decision->reason ?? 'This support access session may not start.');
-        }
+        // Prompt 6: the authorization decision and the session write now
+        // happen under one lock on the request row. canStartSession()
+        // enforces one-approval-one-session by checking whether a session
+        // already exists for this request — evaluated outside a lock, two
+        // concurrent starts could both observe "none" and both issue a
+        // session, defeating exactly the invariant that check exists for.
+        // The request is re-read FOR UPDATE first, so the row the decision
+        // is made about is the row the session is written against.
+        return $this->tenantContext->runWithFirmContext($firm, function () use ($admin, $request): SupportAccessSession {
+            return DB::transaction(function () use ($admin, $request): SupportAccessSession {
+                $fresh = SupportAccessRequest::query()
+                    ->where('id', $request->id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
 
-        $session = $this->supportSessions->start($request);
+                // Gap closure #4 (frozen design §8 item 4): canStartSession()'s
+                // approval check is not auto-sequenced before start() — checked
+                // fresh here, never trusted from an earlier mount()/visible()
+                // -time check alone (TOCTOU discipline).
+                $decision = $this->supportPolicy->canStartSession($fresh);
 
-        $this->supportPolicy->logSessionAudit($session, 'support_access.session_started');
+                if (! $decision->allowed) {
+                    throw new RuntimeException($decision->reason ?? 'This support access session may not start.');
+                }
 
-        return $session;
+                $session = $this->supportSessions->start($fresh);
+
+                $this->supportPolicy->logSessionAudit($session, 'support_access.session_started', $admin);
+
+                return $session;
+            });
+        });
     }
 
     public function leaveSupportAccessSession(PlatformAdmin $admin, SupportAccessSession $session): SupportAccessSession
@@ -352,7 +379,7 @@ final class PlatformFirmIntegrationBoundedAccessService
 
             $ended = $this->supportSessions->end($fresh);
 
-            $this->supportPolicy->logSessionAudit($ended, 'support_access.session_ended');
+            $this->supportPolicy->logSessionAudit($ended, 'support_access.session_ended', $admin);
 
             // Security review Finding 2: SupportAccessPolicyService::
             // logSessionAudit() (frozen, unmodified) always attributes
@@ -395,7 +422,7 @@ final class PlatformFirmIntegrationBoundedAccessService
 
             $revoked = $this->supportSessions->revoke($fresh, $admin);
 
-            $this->supportPolicy->logSessionAudit($revoked, 'support_access.session_revoked');
+            $this->supportPolicy->logSessionAudit($revoked, 'support_access.session_revoked', $admin);
 
             // Security review Finding 2: RevokeSupportAccessSessionAction's
             // entire documented purpose is letting one admin end a

@@ -61,7 +61,7 @@ final class SupportAccessSessionUiEnforcementTest extends TestCase
         );
 
         $this->assertNotNull($event, 'Expected a support_access.requested SecurityEvent row.');
-        $this->assertSame(\App\Models\PlatformAdmin::class, $event->actor_type);
+        $this->assertSame(PlatformAdmin::class, $event->actor_type);
         $this->assertSame($admin->id, $event->actor_id);
     }
 
@@ -312,11 +312,16 @@ final class SupportAccessSessionUiEnforcementTest extends TestCase
 
         $this->assertSame(SupportAccessSessionStatus::Revoked, $revoked->status);
 
-        // The pre-existing support_access-category row still misattributes
-        // to the session owner (SupportAccessPolicyService::
-        // logSessionAudit() is frozen, unmodified) — that row is not what
-        // this test proves.
-        $legacyEvent = $this->runWithFirmContext(
+        // Prompt 6: the canonical support_access-category row used to
+        // misattribute this action to the session OWNER — actor_id was
+        // hardcoded to $session->platform_admin_id in
+        // SupportAccessPolicyService::logSessionAudit() regardless of who
+        // acted, so a security audit trail positively asserted that admin
+        // A revoked their own session when in fact admin B did. That row
+        // is now correctly attributed to the real acting admin, and
+        // carries the session owner separately in metadata so neither
+        // fact is lost.
+        $canonicalEvent = $this->runWithFirmContext(
             $firm,
             fn () => SecurityEvent::query()
                 ->where('firm_id', $firm->id)
@@ -324,8 +329,11 @@ final class SupportAccessSessionUiEnforcementTest extends TestCase
                 ->where('category', 'support_access')
                 ->first()
         );
-        $this->assertNotNull($legacyEvent);
-        $this->assertSame($sessionOwner->id, $legacyEvent->actor_id);
+        $this->assertNotNull($canonicalEvent);
+        $this->assertSame($revoker->id, $canonicalEvent->actor_id, 'The canonical support_access audit row must be attributed to the admin who actually revoked.');
+        $this->assertNotSame($sessionOwner->id, $canonicalEvent->actor_id);
+        $this->assertSame($sessionOwner->id, $canonicalEvent->metadata['session_owner_platform_admin_id'] ?? null, 'The session owner must still be recorded, as its own distinct fact.');
+        $this->assertSame($revoker->id, $canonicalEvent->metadata['acting_platform_admin_id'] ?? null);
 
         // The NEW, correctly-attributed companion row this fix adds —
         // actor_id must be the REVOKER, never the session owner.
@@ -339,7 +347,7 @@ final class SupportAccessSessionUiEnforcementTest extends TestCase
         );
 
         $this->assertNotNull($oversightEvent, 'Expected a correctly-attributed platform_integration_oversight.support_access_session_revoked SecurityEvent row.');
-        $this->assertSame(\App\Models\PlatformAdmin::class, $oversightEvent->actor_type);
+        $this->assertSame(PlatformAdmin::class, $oversightEvent->actor_type);
         $this->assertSame($revoker->id, $oversightEvent->actor_id);
         $this->assertNotSame($sessionOwner->id, $oversightEvent->actor_id);
     }
