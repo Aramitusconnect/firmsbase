@@ -47,13 +47,25 @@ ARG FRANKENPHP_BASE_TAG=1-php8.3-trixie
 # so `FROM ...@${FRANKENPHP_BASE_DIGEST}` still resolves the correct
 # platform automatically. The linux/amd64 child manifest digest this
 # index currently resolves to is
-# sha256:b013ee6716706167000066a4bc32084c6e42606cff4fbb1dc6e408f2541d687b
+# sha256:f7a61d45a50c7d86ca8f671faca692cd7dafee0a05a23affb242482b58f9e4f1
 # (recorded here for cross-reference with Trivy/ECR scan findings, which
 # attach to the child digest, not the index — same distinction the
 # exceptions doc's "Deployment identity" section already documents for
 # the application image itself). Re-verify and re-pin deliberately on
 # each future remediation pass rather than floating silently.
-ARG FRANKENPHP_BASE_DIGEST=sha256:501e0ba1608cd1e1b3377562c7f58ed3d2e83d5dca726979b6633ce2792f355c
+# Security refresh 2026-08-15: re-pinned from
+# sha256:501e0ba1608cd1e1b3377562c7f58ed3d2e83d5dca726979b6633ce2792f355c
+# (Go stdlib v1.26.5) to the digest below (Go stdlib v1.26.6). The old
+# base carried six HIGH Go-stdlib findings — CVE-2026-33818, -56853,
+# -56858, -56859, -56860, -56862 — none of which were covered by
+# docker/security/verify-staging-exception.php's dated exception list,
+# so the staging publication gate correctly refused to publish. They are
+# fixed in Go 1.25.13/1.26.6, so the remediation is to move the base, NOT
+# to widen the exception list. Same official dunglas/frankenphp
+# repository and same 1-php8.3-trixie tag lineage; verified by reading
+# the frankenphp binary's own Go build metadata (stdlib = v1.26.6) rather
+# than trusting the tag.
+ARG FRANKENPHP_BASE_DIGEST=sha256:9e733c52ad3f2279d3e7144d70e91d5cf6d16a57a6dd4725d4d7e39a09f56359
 # Vite 8 / laravel-vite-plugin 3.1 / @tailwindcss/oxide require Node >=20.19
 # (see package.json "engines" and docs/ecs/ec2-dependency-audit.md).
 ARG NODE_VERSION=20-bookworm-slim
@@ -505,7 +517,19 @@ FROM gcr.io/distroless/base-debian13@sha256:5c53b546dd6721a33dc6288641a25e0b2c62
 
 ARG GIT_SHA=unknown
 ARG BUILD_DATE=unknown
+# APP_SOURCE_SHA exists because a container-only security refresh makes the
+# commit that was BUILT and the commit whose application code was TESTED two
+# different things. org.opencontainers.image.revision is the built commit
+# (this container release); com.firmsvault.app-source.revision is the commit
+# whose application tree the image's PHP actually came from. On an ordinary
+# release both are identical and the second simply restates the first — it
+# only diverges when, as here, the base image moved and not a line of
+# app/, routes/, resources/, config/, bootstrap/, database/ or tests/ did.
+# Recording one and inferring the other would make the image claim an
+# application provenance it does not have.
+ARG APP_SOURCE_SHA=unknown
 LABEL org.opencontainers.image.revision="${GIT_SHA}" \
+      com.firmsvault.app-source.revision="${APP_SOURCE_SHA}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.title="firmsbase-app" \
       org.opencontainers.image.description="FirmsBase application image — web/worker/trust-worker/scheduler/migrate/maintenance, selected by command" \
