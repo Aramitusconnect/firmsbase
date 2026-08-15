@@ -28,7 +28,24 @@ class ViewSupportCase extends Page
 
     protected string $view = 'filament-panels::pages.page';
 
-    protected static ?string $title = 'Support Case';
+    /**
+     * FINAL ADMIN RECONCILIATION naming-truth follow-through. Prompt 6
+     * corrected SupportCaseResource's navigation label to "Access
+     * Requests" because there is no SupportCase model, table, service
+     * or ticket domain anywhere in this codebase — the resource reads
+     * `support_access_requests` and nothing else. This detail page's
+     * own visible title was missed by that pass, so the list said
+     * "Access Requests" while the record it opened was headed "Support
+     * Case", reintroducing the same non-existent domain one click
+     * later. The page's own body section already reads "Support Access
+     * Request".
+     *
+     * Only the user-visible string changes here. The class, namespace,
+     * slug and route are deliberately left alone, exactly as Prompt 6
+     * reasoned: they are technical identifiers with existing test and
+     * route references.
+     */
+    protected static ?string $title = 'Support Access Request';
 
     public string $firmUuid = '';
 
