@@ -726,6 +726,11 @@ class RlsForceRolloutFirewallTest extends TestCase
             // table-creation migration -- additive only, no existing
             // assertion removed or weakened.
             'marketplace_ai_usage_events',
+            // FirmsVault Pay Gate A2 (Finix Sandbox POC #1) -- 6 new tenant-owned
+            // payment tables added to both PREPARED_TABLES and the FORCE-RLS
+            // rollout in the same migrations -- additive only, no existing
+            // assertion removed or weakened.
+            'payment_intents', 'payment_intent_allocations', 'provider_commands', 'payment_attempts', 'payment_refunds', 'provider_evidence_artifacts',
         ];
 
         foreach ($coverage->preparedTables() as $table) {

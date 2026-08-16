@@ -141,6 +141,12 @@ class AccountingJournalPostingService
                     'expense_id' => $sourceRefs['expense_id'] ?? null,
                     'trust_transfer_request_id' => $sourceRefs['trust_transfer_request_id'] ?? null,
                     'pending_payment_allocation_id' => $sourceRefs['pending_payment_allocation_id'] ?? null,
+                    // FirmsVault Pay Gate A2: a provider capture posts
+                    // before (and possibly without) any canonical
+                    // Payment row, so it needs its own source link.
+                    // Additive only — every existing caller omits this
+                    // key and continues to get null, exactly as before.
+                    'payment_attempt_id' => $sourceRefs['payment_attempt_id'] ?? null,
                     'created_at' => now(),
                 ]);
 

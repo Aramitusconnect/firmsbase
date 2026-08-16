@@ -38,6 +38,9 @@ class AccountingJournalEntry extends Model
         'expense_id',
         'trust_transfer_request_id',
         'pending_payment_allocation_id',
+        // FirmsVault Pay Gate A2 — see
+        // 2026_11_21_100012_add_payment_attempt_id_to_accounting_journal_entries_table.php.
+        'payment_attempt_id',
         'created_at',
     ];
 

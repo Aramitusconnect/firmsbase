@@ -273,6 +273,11 @@ class FirmLeadsForceRlsActivationTest extends TestCase
             // migrations — additive only, no existing assertion removed
             // or weakened.
             'marketplace_intakes', 'marketplace_intake_events', 'marketplace_ai_usage_events',
+            // FirmsVault Pay Gate A2 (Finix Sandbox POC #1) -- 6 new tenant-owned
+            // payment tables added to both PREPARED_TABLES and the FORCE-RLS
+            // rollout in the same migrations -- additive only, no existing
+            // assertion removed or weakened.
+            'payment_intents', 'payment_intent_allocations', 'provider_commands', 'payment_attempts', 'payment_refunds', 'provider_evidence_artifacts',
         ];
 
         $rows = DB::select(
@@ -372,6 +377,11 @@ class FirmLeadsForceRlsActivationTest extends TestCase
             // migrations — additive only, no existing assertion removed
             // or weakened.
             'marketplace_intakes', 'marketplace_intake_events', 'marketplace_ai_usage_events',
+            // FirmsVault Pay Gate A2 (Finix Sandbox POC #1) -- 6 new tenant-owned
+            // payment tables added to both PREPARED_TABLES and the FORCE-RLS
+            // rollout in the same migrations -- additive only, no existing
+            // assertion removed or weakened.
+            'payment_intents', 'payment_intent_allocations', 'provider_commands', 'payment_attempts', 'payment_refunds', 'provider_evidence_artifacts',
         ];
 
         // Section 39A-3L, Phase B6, Checkpoint 34 (security_events) is

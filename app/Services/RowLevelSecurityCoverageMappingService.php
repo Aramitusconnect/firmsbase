@@ -602,6 +602,21 @@ class RowLevelSecurityCoverageMappingService
         // 2026_11_06_100003/100005_prepare_row_level_security_and_force_rls_on_*.php.
         // Never in MISSING_PREPARED_TABLES.
         'task_category_role_expectations', 'matter_leverage_recommendations',
+        // payment_intents, payment_intent_allocations, provider_commands,
+        // payment_attempts, payment_refunds, provider_evidence_artifacts
+        // (FirmsVault Pay Gate A2) — each prepared and forced together
+        // with its own create migration:
+        // 2026_11_21_100003/100005/100007/100009/100011/100014_prepare_row_level_security_and_force_rls_on_*.php.
+        // Never in MISSING_PREPARED_TABLES.
+        //
+        // provider_evidence_artifacts is included deliberately even
+        // though its firm_id is NULLABLE: its policy compares
+        // firm_id = <current firm>, and since NULL = anything is never
+        // true, an unresolved artifact is invisible to EVERY tenant.
+        // That is stricter than an ordinary tenant table, not looser —
+        // see that table's own RLS migration docblock.
+        'payment_intents', 'payment_intent_allocations', 'provider_commands',
+        'payment_attempts', 'payment_refunds', 'provider_evidence_artifacts',
     ];
 
     /**

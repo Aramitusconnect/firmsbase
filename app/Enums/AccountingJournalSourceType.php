@@ -52,4 +52,14 @@ enum AccountingJournalSourceType: string
      * UnappliedFundsReceived.
      */
     case UnappliedFundsResolved = 'unapplied_funds_resolved';
+
+    /**
+     * FirmsVault Pay Gate A2. A payment PROVIDER captured money for a
+     * frozen PaymentIntent. Distinguished from InvoicePaymentApplied
+     * precisely because its cash leg is NOT OperatingCash but
+     * ChartOfAccountPurpose::ProcessorClearingOperating — see that
+     * case's docblock. Posted by
+     * App\Services\Pay\ProviderPaymentJournalRecorderService.
+     */
+    case ProviderPaymentCaptured = 'provider_payment_captured';
 }

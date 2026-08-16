@@ -179,4 +179,60 @@ enum ChartOfAccountPurpose: string
      * the cash was already recorded at receipt).
      */
     case UnappliedOperatingFundsLiability = 'unapplied_operating_funds_liability';
+
+    /**
+     * FirmsVault Pay Gate A2 (Master Execution Prompt v1.4 §30/§31).
+     * An Asset-type account: money a payment PROVIDER has captured on
+     * the firm's behalf but which is NOT yet, and may never become,
+     * cash in the firm's bank account.
+     *
+     * WHY THIS EXISTS. Before Gate A2 the only cash-side account was
+     * OperatingCash, and OperatingJournalRecorderService::recordFeeEarned()
+     * debits it at the instant a payment is applied. For cash, cheque
+     * and direct bank transfer that is correct — the firm really does
+     * have the money. For a card processor it is NOT: a capture is a
+     * promise from the processor, net of fees, settled days later, and
+     * reversible. Debiting OperatingCash at capture would assert bank
+     * cash the firm does not have.
+     *
+     * Provider-collected payments therefore debit THIS account at
+     * capture instead. OperatingCash is reached only via
+     * ProviderSettlementReceivable and future real bank evidence — see
+     * that case's docblock for the full three-step chain.
+     *
+     * Cash/cheque/bank-transfer payments are completely unaffected and
+     * still debit OperatingCash directly (v1.4 §32; regression-proved
+     * by FV-A2-040).
+     */
+    case ProcessorClearingOperating = 'processor_clearing_operating';
+
+    /**
+     * FirmsVault Pay Gate A2 (Master Execution Prompt v1.4 §30/§31).
+     * An Asset-type account: a confirmed obligation from the payment
+     * provider to pay the firm a specific net amount, established when
+     * the provider issues settlement evidence.
+     *
+     * The full intended chain, of which Gate A2 implements only the
+     * first step (capture) and makes the rest representable:
+     *
+     *   1. CAPTURE
+     *      Dr ProcessorClearingOperating   (gross)
+     *        Cr revenue account(s)         (existing Billing behavior)
+     *
+     *   2. PROVIDER SETTLEMENT EVIDENCE
+     *      Dr ProviderSettlementReceivable (net)
+     *      Dr ProcessorFees                (fee)
+     *        Cr ProcessorClearingOperating (gross)
+     *
+     *   3. ACTUAL BANK EVIDENCE (future gate)
+     *      Dr OperatingCash
+     *        Cr ProviderSettlementReceivable
+     *
+     * Step 2's fee leg is what makes "trust principal never pays
+     * processor fees" structurally true for provider payments: the fee
+     * is deducted from an OPERATING clearing balance that only ever
+     * receives Operating-destined value, and no trust account appears
+     * anywhere in the chain (FV-A2-033).
+     */
+    case ProviderSettlementReceivable = 'provider_settlement_receivable';
 }

@@ -89,6 +89,13 @@ final class IntegrationWebhookRoutingIndexNoRlsAndNoSecretColumnTest extends Tes
         $expected = [
             'id', 'firm_id', 'firm_integration_id', 'integration_provider_id',
             'webhook_routing_token_hash', 'created_at', 'updated_at',
+            // FirmsVault Pay Gate A2 — the provider-resource addressing
+            // mode (mode B). Still NO secret material of any kind: a
+            // provider-minted public resource identifier, its type, and
+            // the ownership lifecycle status. See
+            // 2026_11_21_100001_add_provider_resource_ownership_to_integration_webhook_routing_index_table.php.
+            'provider_resource_type', 'provider_resource_id',
+            'ownership_status', 'ownership_established_at',
         ];
         sort($expected);
 
@@ -175,6 +182,26 @@ final class IntegrationWebhookRoutingIndexNoRlsAndNoSecretColumnTest extends Tes
             // model.
             'PlaidItemRoutingService.php',
             'ProviderInvoiceReconciliationService.php',
+            // FirmsVault Pay Gate A2 (Finix Sandbox POC #1) addition —
+            // and, unlike every entry above it, a genuine NEW READER AND
+            // WRITER of this table rather than a docblock-prose mention.
+            // That is deliberate and authorized: Master Execution Prompt
+            // v1.4 §5 rules this table to be the implementation of the
+            // architecture role `ProviderResourceLocator`, and §6
+            // requires EXACTLY ONE authoritative ownership mapping for
+            // any provider resource on the FirmsVault Pay path — so a
+            // second, sibling ownership table (the pattern Gmail and
+            // Plaid used above) was explicitly forbidden here.
+            //
+            // This service touches ONLY the new provider-resource
+            // addressing mode (mode B: provider_resource_type +
+            // provider_resource_id, token hash NULL). It never reads or
+            // writes a routing-token row, so the original webhook path
+            // this firewall was written to protect is untouched. See
+            // 2026_11_21_100001_add_provider_resource_ownership_to_integration_webhook_routing_index_table.php
+            // for the full reasoning, and ProviderResourceOwnershipService's
+            // own docblock for its bounded security properties.
+            'ProviderResourceOwnershipService.php',
         ];
 
         $violations = [];

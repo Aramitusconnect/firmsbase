@@ -1696,6 +1696,15 @@ class ProviderConnectionService
                 // unnecessary, avoidable drift).
                 IntegrationWebhookRoutingIndex::query()
                     ->where('firm_integration_id', $fresh->id)
+                    // FirmsVault Pay Gate A2: scoped to routing-TOKEN
+                    // rows only. Since that gate, this table also holds
+                    // provider-RESOURCE ownership rows (mode B), which
+                    // are historically immutable and must survive
+                    // webhook-routing disable/re-enable/disconnect —
+                    // deleting them would destroy the record of which
+                    // firm owned an external provider resource. See the
+                    // table's Gate A2 migration docblock (v1.4 §7).
+                    ->whereNull('provider_resource_id')
                     ->delete();
 
                 // Checkpoint 3 addition (FirmsVault Live Integrations,
@@ -1787,6 +1796,15 @@ class ProviderConnectionService
 
                 IntegrationWebhookRoutingIndex::query()
                     ->where('firm_integration_id', $fresh->id)
+                    // FirmsVault Pay Gate A2: scoped to routing-TOKEN
+                    // rows only. Since that gate, this table also holds
+                    // provider-RESOURCE ownership rows (mode B), which
+                    // are historically immutable and must survive
+                    // webhook-routing disable/re-enable/disconnect —
+                    // deleting them would destroy the record of which
+                    // firm owned an external provider resource. See the
+                    // table's Gate A2 migration docblock (v1.4 §7).
+                    ->whereNull('provider_resource_id')
                     ->delete();
 
                 IntegrationWebhookRoutingIndex::query()->create([
@@ -2626,6 +2644,15 @@ class ProviderConnectionService
 
                 IntegrationWebhookRoutingIndex::query()
                     ->where('firm_integration_id', $fresh->id)
+                    // FirmsVault Pay Gate A2: scoped to routing-TOKEN
+                    // rows only. Since that gate, this table also holds
+                    // provider-RESOURCE ownership rows (mode B), which
+                    // are historically immutable and must survive
+                    // webhook-routing disable/re-enable/disconnect —
+                    // deleting them would destroy the record of which
+                    // firm owned an external provider resource. See the
+                    // table's Gate A2 migration docblock (v1.4 §7).
+                    ->whereNull('provider_resource_id')
                     ->delete();
 
                 // Checkpoint 3 addition (FirmsVault Live Integrations,
