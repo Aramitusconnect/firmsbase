@@ -14,7 +14,7 @@ use App\Services\Pay\ProviderCommandService;
 use App\Services\TenantContextService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Tests\Feature\Pay\Concerns\PreservesPayAuditAttribution;
+use Tests\Feature\Pay\Concerns\CleansUpPayAuditFixtures;
 use Tests\TestCase;
 
 /**
@@ -38,7 +38,7 @@ use Tests\TestCase;
  */
 class PayRefusalAuditDurabilityTest extends TestCase
 {
-    use PreservesPayAuditAttribution;
+    use CleansUpPayAuditFixtures;
 
     private ?int $firmId = null;
 
@@ -46,19 +46,16 @@ class PayRefusalAuditDurabilityTest extends TestCase
 
     protected function tearDown(): void
     {
+        // Order is load-bearing: purge the durable Pay audit rows while
+        // they are still attributed to this firm, THEN delete the firm.
+        // Reversing these two makes the rows unidentifiable and
+        // unremovable forever (ON DELETE SET NULL + no DELETE policy).
+        $this->purgePayAuditFixturesForFirms([$this->firmId]);
+
         if ($this->firmId !== null) {
             DB::table('provider_commands')->where('firm_id', $this->firmId)->delete();
+            DB::table('firms')->where('id', $this->firmId)->delete();
         }
-
-        // DELIBERATELY DOES NOT DELETE THE FIRM ROW.
-        // security_events.firm_id is ON DELETE SET NULL, and this test
-        // writes durable Pay audit rows. Deleting the firm would orphan
-        // them to firm_id = NULL, which makes them visible to every
-        // CONTEXTLESS reader — and they can never be deleted afterwards,
-        // because security_events has no DELETE policy under FORCE RLS
-        // (it is an append-only audit log by design). Keeping the firm
-        // keeps the audit trail attributed and invisible to contextless
-        // readers. See Tests\Feature\Pay\Concerns\PreservesPayAuditAttribution.
 
         $this->assertNoOrphanedPayAuditRows();
 

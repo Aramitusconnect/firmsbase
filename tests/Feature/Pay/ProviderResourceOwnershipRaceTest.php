@@ -11,7 +11,7 @@ use App\Services\Pay\ProviderResourceOwnershipService;
 use App\Services\TenantContextService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Tests\Feature\Pay\Concerns\PreservesPayAuditAttribution;
+use Tests\Feature\Pay\Concerns\CleansUpPayAuditFixtures;
 use Tests\TestCase;
 
 /**
@@ -39,7 +39,7 @@ use Tests\TestCase;
  */
 class ProviderResourceOwnershipRaceTest extends TestCase
 {
-    use PreservesPayAuditAttribution;
+    use CleansUpPayAuditFixtures;
 
     /** @var list<int> */
     private array $createdFirmIds = [];
@@ -49,6 +49,10 @@ class ProviderResourceOwnershipRaceTest extends TestCase
     protected function tearDown(): void
     {
         DB::purge();
+
+        // Purge audit fixtures BEFORE the firms below are deleted — see
+        // CleansUpPayAuditFixtures for why the order cannot be reversed.
+        $this->purgePayAuditFixturesForFirms($this->createdFirmIds);
 
         if ($this->racedResourceId !== null) {
             // The model guard forbids deleting ownership rows, which is
@@ -61,17 +65,8 @@ class ProviderResourceOwnershipRaceTest extends TestCase
 
         if ($this->createdFirmIds !== []) {
             DB::table('firm_integrations')->whereIn('firm_id', $this->createdFirmIds)->delete();
+            DB::table('firms')->whereIn('id', $this->createdFirmIds)->delete();
         }
-
-        // DELIBERATELY DOES NOT DELETE THE FIRM ROW.
-        // security_events.firm_id is ON DELETE SET NULL, and this test
-        // writes durable Pay audit rows. Deleting the firm would orphan
-        // them to firm_id = NULL, which makes them visible to every
-        // CONTEXTLESS reader — and they can never be deleted afterwards,
-        // because security_events has no DELETE policy under FORCE RLS
-        // (it is an append-only audit log by design). Keeping the firm
-        // keeps the audit trail attributed and invisible to contextless
-        // readers. See Tests\Feature\Pay\Concerns\PreservesPayAuditAttribution.
 
         $this->assertNoOrphanedPayAuditRows();
 
