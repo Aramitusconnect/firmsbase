@@ -14,6 +14,7 @@ use App\Services\Pay\PaymentIntentService;
 use App\Services\Pay\RefundReservationService;
 use App\Services\TenantContextService;
 use Illuminate\Support\Facades\DB;
+use Tests\Feature\Pay\Concerns\CleansUpDurablePayAudit;
 use Tests\TestCase;
 
 /**
@@ -41,6 +42,8 @@ use Tests\TestCase;
  */
 class RefundReservationRaceTest extends TestCase
 {
+    use CleansUpDurablePayAudit;
+
     private ?int $firmId = null;
 
     protected function tearDown(): void
@@ -57,6 +60,8 @@ class RefundReservationRaceTest extends TestCase
             DB::table('security_events')->where('firm_id', $this->firmId)->delete();
             DB::table('firms')->where('id', $this->firmId)->delete();
         }
+
+        $this->purgeDurablePayAuditRows();
 
         parent::tearDown();
     }

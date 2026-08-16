@@ -27,6 +27,7 @@ use App\Services\Pay\PaymentIntentService;
 use App\Services\Pay\ProviderPaymentJournalRecorderService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Tests\Feature\Pay\Concerns\CleansUpDurablePayAudit;
 use Tests\TestCase;
 
 /**
@@ -45,6 +46,7 @@ use Tests\TestCase;
  */
 class ProviderPaymentAccountingTest extends TestCase
 {
+    use CleansUpDurablePayAudit;
     use RefreshDatabase;
 
     private function intents(): PaymentIntentService

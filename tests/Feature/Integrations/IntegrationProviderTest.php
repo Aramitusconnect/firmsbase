@@ -49,6 +49,37 @@ class IntegrationProviderTest extends TestCase
     ];
 
     /**
+     * FirmsVault Pay Gate A2 (Finix Sandbox POC #1) whole-wave migration
+     * paths, in creation order.
+     *
+     * These add a NEW dependency chain onto firm_integrations (and, via
+     * the routing-index ALTER, onto integration_providers): provider_commands,
+     * payment_attempts, payment_refunds and provider_evidence_artifacts all
+     * carry composite (firm_id, firm_integration_id) foreign keys, which
+     * v1.4 §35 requires for tenant consistency. They must therefore be torn
+     * down BEFORE any earlier integration migration's own down() can drop
+     * the tables they depend on, and re-applied LAST on the way back up.
+     *
+     * @var list<string>
+     */
+    private const FVPAY_A2_MIGRATION_PATHS = [
+        'database/migrations/2026_11_21_100001_add_provider_resource_ownership_to_integration_webhook_routing_index_table.php',
+        'database/migrations/2026_11_21_100002_create_payment_intents_table.php',
+        'database/migrations/2026_11_21_100003_prepare_row_level_security_and_force_rls_on_payment_intents_table.php',
+        'database/migrations/2026_11_21_100004_create_payment_intent_allocations_table.php',
+        'database/migrations/2026_11_21_100005_prepare_row_level_security_and_force_rls_on_payment_intent_allocations_table.php',
+        'database/migrations/2026_11_21_100006_create_provider_commands_table.php',
+        'database/migrations/2026_11_21_100007_prepare_row_level_security_and_force_rls_on_provider_commands_table.php',
+        'database/migrations/2026_11_21_100008_create_payment_attempts_table.php',
+        'database/migrations/2026_11_21_100009_prepare_row_level_security_and_force_rls_on_payment_attempts_table.php',
+        'database/migrations/2026_11_21_100010_create_payment_refunds_table.php',
+        'database/migrations/2026_11_21_100011_prepare_row_level_security_and_force_rls_on_payment_refunds_table.php',
+        'database/migrations/2026_11_21_100012_add_payment_attempt_id_to_accounting_journal_entries_table.php',
+        'database/migrations/2026_11_21_100013_create_provider_evidence_artifacts_table.php',
+        'database/migrations/2026_11_21_100014_prepare_row_level_security_and_force_rls_on_provider_evidence_artifacts_table.php',
+    ];
+
+    /**
      * POST-CHECKPOINT-6 UPDATE: Checkpoint 6 added 5 tables that
      * independently carry a real composite FK (firm_id,
      * firm_integration_id) -> firm_integrations(firm_id, id) —
@@ -825,6 +856,19 @@ class IntegrationProviderTest extends TestCase
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 3 gmail mailbox routes) must exist before this test begins, since it is now also one of integration_providers' real (direct or transitive) FK dependents.");
         }
 
+        // 1a-pre-pre-pre-pre-pre. Roll back the FirmsVault Pay Gate A2
+        // whole-wave dependency chain FIRST of all — it is the newest
+        // layer (dated 2026_11_21) and its tables carry composite
+        // (firm_id, firm_integration_id) FKs into firm_integrations,
+        // plus a leading migration that ALTERs
+        // integration_webhook_routing_index. Nothing below can be
+        // dropped while this wave still exists. Rolled back in exact
+        // reverse of its own creation order.
+        foreach (array_reverse(self::FVPAY_A2_MIGRATION_PATHS) as $path) {
+            $exit = Artisan::call('migrate:rollback', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $exit, "migrate:rollback of {$path} (FirmsVault Pay Gate A2 whole-wave) failed: ".Artisan::output());
+        }
+
         // 1a-pre-pre-pre-pre. Roll back the Checkpoint 3 gmail-mailbox-
         // routes whole-wave dependency chain FIRST — before the Checkpoint
         // 2 webhook-subscriptions whole-wave block below, since this wave
@@ -1154,6 +1198,16 @@ class IntegrationProviderTest extends TestCase
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 3 gmail mailbox routes) must be restored by the whole-wave reapplication.");
         }
 
+        // FirmsVault Pay Gate A2 whole-wave re-apply LAST — every table
+        // it depends on has been restored above.
+        foreach (self::FVPAY_A2_MIGRATION_PATHS as $path) {
+            $fvpayExit = Artisan::call('migrate', ['--path' => $path, '--force' => true]);
+            $this->assertSame(0, $fvpayExit, "migrate of {$path} (FirmsVault Pay Gate A2 whole-wave) failed: ".Artisan::output());
+        }
+        foreach (['payment_intents', 'provider_commands', 'payment_attempts', 'payment_refunds'] as $fvpayTable) {
+            $this->assertTrue(Schema::hasTable($fvpayTable), "{$fvpayTable} (FirmsVault Pay Gate A2) must be restored by the whole-wave reapplication.");
+        }
+
         // 7. Assert the exact prior state is restored — same columns,
         // same single seed row with the same values — not merely "a
         // table now exists."
@@ -1443,6 +1497,12 @@ class IntegrationProviderTest extends TestCase
         $oauthStatesRlsMigration = include database_path('migrations/2026_09_04_040002_prepare_row_level_security_and_force_rls_on_integration_oauth_states_table.php');
         $oauthStatesCreateMigration = include database_path('migrations/2026_09_04_040001_create_integration_oauth_states_table.php');
 
+        // FirmsVault Pay Gate A2 whole-wave migration objects, in creation order.
+        $fvpayA2Migrations = array_map(
+            static fn (string $path) => include base_path($path),
+            self::FVPAY_A2_MIGRATION_PATHS,
+        );
+
         // Checkpoint 6 whole-wave migration objects, in creation order.
         $cp6Migrations = array_map(
             static fn (string $path) => include base_path($path),
@@ -1552,6 +1612,14 @@ class IntegrationProviderTest extends TestCase
         }
         foreach (self::CP8_WHOLE_WAVE_TABLES as $table) {
             $this->assertFalse(Schema::hasTable($table), "{$table} (Checkpoint 8) must be fully dropped before the Checkpoint 7 whole-wave teardown can succeed.");
+        }
+
+        // FirmsVault Pay Gate A2 whole-wave teardown FIRST — before every
+        // other wave below. Its tables composite-FK firm_integrations, and
+        // its leading migration ALTERs integration_webhook_routing_index,
+        // so nothing earlier can be dropped while this wave still exists.
+        foreach (array_reverse($fvpayA2Migrations) as $migration) {
+            $migration->down();
         }
 
         // Tear down the Checkpoint 7 whole-wave dependency chain FIRST —
@@ -1800,6 +1868,17 @@ class IntegrationProviderTest extends TestCase
         foreach (self::CP3_GMAIL_MAILBOX_ROUTES_WHOLE_WAVE_TABLES as $table) {
             $this->assertTrue(Schema::hasTable($table), "{$table} (Checkpoint 3 gmail mailbox routes) must be fully restored after up().");
         }
+        // FirmsVault Pay Gate A2 whole-wave re-apply LAST — every table
+        // it composite-FKs (firm_integrations) and the routing index it
+        // ALTERs have now been restored above, so this is the only point
+        // at which it can legally come back.
+        foreach ($fvpayA2Migrations as $migration) {
+            $migration->up();
+        }
+        foreach (['payment_intents', 'provider_commands', 'payment_attempts', 'payment_refunds'] as $table) {
+            $this->assertTrue(Schema::hasTable($table), "{$table} (FirmsVault Pay Gate A2) must be fully restored after up().");
+        }
+
     }
 
     // ------------------------------------------------------------

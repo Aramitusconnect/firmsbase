@@ -11,6 +11,7 @@ use App\Services\Pay\ProviderResourceOwnershipService;
 use App\Services\TenantContextService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Feature\Pay\Concerns\CleansUpDurablePayAudit;
 use Tests\TestCase;
 
 /**
@@ -38,6 +39,8 @@ use Tests\TestCase;
  */
 class ProviderResourceOwnershipRaceTest extends TestCase
 {
+    use CleansUpDurablePayAudit;
+
     /** @var list<int> */
     private array $createdFirmIds = [];
 
@@ -60,6 +63,8 @@ class ProviderResourceOwnershipRaceTest extends TestCase
             DB::table('firm_integrations')->whereIn('firm_id', $this->createdFirmIds)->delete();
             DB::table('firms')->whereIn('id', $this->createdFirmIds)->delete();
         }
+
+        $this->purgeDurablePayAuditRows();
 
         parent::tearDown();
     }
