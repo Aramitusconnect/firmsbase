@@ -251,6 +251,13 @@ class FirmPanelProvider extends PanelProvider
                 PanelsRenderHook::TOPBAR_END,
                 fn (): string => view('filament.firm.quick-add-menu')->render(),
             )
+            // Signup entry point beneath the stock login form. A render
+            // hook keeps the login page itself untouched — no view
+            // override, no layout change, purely additive markup.
+            ->renderHook(
+                PanelsRenderHook::AUTH_LOGIN_FORM_AFTER,
+                fn (): string => view('filament.firm.auth.register-cta')->render(),
+            )
             ->middleware([
                 ConfigurePanelSessionCookie::class.':firm',
                 EstablishPanelAuthGuardDefault::class.':web',

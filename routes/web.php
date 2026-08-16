@@ -17,6 +17,7 @@ use App\Livewire\ClientPortal\AcceptInvitationPage;
 use App\Livewire\Marketplace\PublicIntakePage;
 use App\Livewire\PaymentRequests\PublicPaymentPage;
 use App\Services\CanonicalUrlService;
+use Filament\Facades\Filament;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -202,6 +203,46 @@ Route::domain($hosts->clientPortalHost())
     ->get('accept-invitation/{token}', AcceptInvitationPage::class)
     ->where('token', '[0-9a-fA-F-]{36}')
     ->name('client-portal.invitation.accept');
+
+/*
+|--------------------------------------------------------------------------
+| Signup entry points — Firm host and Client Portal host
+|--------------------------------------------------------------------------
+|
+| The login pages now offer "Register your firm" / "Create client account".
+| These are the pages those buttons land on.
+|
+| They are deliberately placeholders, not registration forms. This release has
+| no canonical self-registration backend: neither panel enables Filament's
+| ->registration(), and no register route existed on any host. Firms are
+| provisioned through FirmProvisioningService and clients through
+| ClientPortalService's invitation flow, both of which carry consent,
+| verification and seat/plan decisions that a public form cannot make on its
+| own. Rendering input fields here would imply an account can be created when
+| none can — so each page states what actually happens next instead.
+|
+| Each route stays on its own host and carries that host's own panel session
+| cookie, so neither widens a cookie or crosses a session boundary. There is
+| deliberately NO equivalent on the Admin host: platform administrators are
+| never self-registered.
+*/
+Route::domain($hosts->firmAppHost())
+    ->middleware([ConfigurePanelSessionCookie::class.':firm', 'throttle:20,1'])
+    ->get('register', fn () => view('auth.registration-placeholder', [
+        'heading' => __('Create your firm account'),
+        'body' => __('Firm accounts are currently provisioned by the FirmsVault team rather than through public signup. Contact us to get your firm set up, and we will send an invitation to your email address.'),
+        'loginUrl' => Filament::getPanel('firm')->getLoginUrl(),
+    ]))
+    ->name('firm.register');
+
+Route::domain($hosts->clientPortalHost())
+    ->middleware([ConfigurePanelSessionCookie::class.':client', 'throttle:20,1'])
+    ->get('register', fn () => view('auth.registration-placeholder', [
+        'heading' => __('Create your client account'),
+        'body' => __('Client Portal access is granted by your law firm. Ask your firm to send you a portal invitation, and the link in that email will set up your account.'),
+        'loginUrl' => Filament::getPanel('client-portal')->getLoginUrl(),
+    ]))
+    ->name('client-portal.register');
 
 /*
 |--------------------------------------------------------------------------

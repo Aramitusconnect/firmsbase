@@ -18,6 +18,7 @@ use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\View\PanelsRenderHook;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -101,6 +102,13 @@ class ClientPortalPanelProvider extends PanelProvider
             ->discoverResources(in: app_path('Filament/ClientPortal/Resources'), for: 'App\Filament\ClientPortal\Resources')
             ->discoverPages(in: app_path('Filament/ClientPortal/Pages'), for: 'App\Filament\ClientPortal\Pages')
             ->authGuard('client')
+            // Signup entry point beneath the stock login form. A render
+            // hook keeps the login page itself untouched — no view
+            // override, no layout change, purely additive markup.
+            ->renderHook(
+                PanelsRenderHook::AUTH_LOGIN_FORM_AFTER,
+                fn (): string => view('filament.client-portal.auth.register-cta')->render(),
+            )
             ->middleware([
                 ConfigurePanelSessionCookie::class.':client',
                 EstablishPanelAuthGuardDefault::class.':client',
