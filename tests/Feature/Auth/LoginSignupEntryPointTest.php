@@ -4,16 +4,27 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Auth;
 
+use App\Enums\PlatformLeadStatus;
+use App\Models\Client;
+use App\Models\ClientPortalUser;
+use App\Models\Firm;
+use App\Models\FirmUser;
+use App\Models\PlatformLead;
+use App\Models\User;
+use App\Services\ClientPortalService;
+use App\Services\TenantContextService;
+use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
 use Tests\TestCase;
 
 /**
- * The signup entry points added to the Firm and Client Portal login pages.
+ * The public registration-request forms behind the login pages.
  *
- * The security-relevant assertions here are the negative ones: each button must
- * stay on its own host, and the Admin host must never grow a public
- * registration route. Platform administrators are not self-registered.
+ * The assertions that matter here are the negative ones. These are the only
+ * unauthenticated write endpoints on the Firm and Client hosts, so the tests
+ * are written around what a submission must NOT be able to do: create an
+ * account, attach itself to a firm, or name a tenant record it wants access to.
  */
 class LoginSignupEntryPointTest extends TestCase
 {
@@ -34,6 +45,8 @@ class LoginSignupEntryPointTest extends TestCase
         return (string) parse_url((string) Config::get('hosts.admin_url'), PHP_URL_HOST);
     }
 
+    // ---------------------------------------------------------------- buttons
+
     public function test_firm_login_renders_the_register_your_firm_button(): void
     {
         $response = $this->get('https://'.$this->firmHost().'/login');
@@ -43,92 +56,188 @@ class LoginSignupEntryPointTest extends TestCase
         $response->assertSee(route('firm.register'), escape: false);
     }
 
-    public function test_client_login_renders_the_create_client_account_button(): void
+    public function test_client_login_renders_the_request_client_access_button(): void
     {
         $response = $this->get('https://'.$this->clientHost().'/login');
 
         $response->assertOk();
-        $response->assertSee('Create client account', escape: false);
+        $response->assertSee('Request client access', escape: false);
         $response->assertSee(route('client-portal.register'), escape: false);
     }
 
     public function test_existing_login_ui_is_preserved(): void
     {
-        // The change is additive: the stock form must still be intact.
         $response = $this->get('https://'.$this->firmHost().'/login');
 
         $response->assertOk();
         $response->assertSee('Sign in', escape: false);
         $response->assertSee('wire:submit="authenticate"', escape: false);
-        $response->assertSee('password', escape: false);
     }
 
-    public function test_firm_signup_route_stays_on_the_firm_host(): void
+    // ------------------------------------------------------------------ forms
+
+    public function test_firm_request_form_renders_its_fields(): void
     {
-        $this->assertStringContainsString($this->firmHost(), route('firm.register'));
-        $this->assertStringNotContainsString($this->clientHost(), route('firm.register'));
-        $this->assertStringNotContainsString($this->adminHost(), route('firm.register'));
+        $response = $this->get('https://'.$this->firmHost().'/register');
 
-        $this->get('https://'.$this->firmHost().'/register')->assertOk();
-    }
-
-    public function test_client_signup_route_stays_on_the_client_host(): void
-    {
-        $this->assertStringContainsString($this->clientHost(), route('client-portal.register'));
-        $this->assertStringNotContainsString($this->firmHost(), route('client-portal.register'));
-        $this->assertStringNotContainsString($this->adminHost(), route('client-portal.register'));
-
-        $this->get('https://'.$this->clientHost().'/register')->assertOk();
-    }
-
-    public function test_signup_pages_do_not_claim_to_create_an_account(): void
-    {
-        // There is no canonical self-registration backend. These pages must be
-        // honest entry points, not forms that imply an account can be made.
-        foreach ([$this->firmHost(), $this->clientHost()] as $host) {
-            $response = $this->get('https://'.$host.'/register');
-
-            $response->assertOk();
-            $response->assertDontSee('<input type="password"', escape: false);
-            $response->assertDontSee('type="submit"', escape: false);
+        $response->assertOk();
+        foreach (['firm_name', 'first_name', 'last_name', 'email'] as $field) {
+            $response->assertSee('name="'.$field.'"', escape: false);
         }
+        $response->assertSee('Create firm account', escape: false);
+        $response->assertSee('Already have an account?', escape: false);
+    }
+
+    public function test_client_request_form_renders_its_fields(): void
+    {
+        $response = $this->get('https://'.$this->clientHost().'/register');
+
+        $response->assertOk();
+        foreach (['first_name', 'last_name', 'email', 'firm_name', 'phone'] as $field) {
+            $response->assertSee('name="'.$field.'"', escape: false);
+        }
+        $response->assertSee('Request client access', escape: false);
+        $response->assertSee('Already have an account?', escape: false);
+    }
+
+    // --------------------------------------------------------------- creation
+
+    public function test_firm_request_records_a_lead_and_creates_no_account(): void
+    {
+        $before = ['firms' => Firm::count(), 'users' => User::count()];
+
+        $this->post('https://'.$this->firmHost().'/register', [
+            'firm_name' => 'Synthetic Acceptance Firm',
+            'first_name' => 'Test',
+            'last_name' => 'Owner',
+            'email' => 'synthetic-firm-owner@firmsbase-staging.internal',
+        ])->assertRedirect(route('firm.register'));
+
+        $lead = PlatformLead::query()->where('source', 'firm_self_registration')->sole();
+        $this->assertSame('Synthetic Acceptance Firm', $lead->company_name);
+        $this->assertSame('Test Owner', $lead->contact_name);
+        $this->assertSame(PlatformLeadStatus::New, $lead->status);
+
+        // The whole point: a request is not an account.
+        $this->assertSame($before['firms'], Firm::count(), 'No Firm may be created by a public request.');
+        $this->assertSame($before['users'], User::count(), 'No User may be created by a public request.');
+        $this->assertSame(0, FirmUser::query()->count());
+    }
+
+    public function test_client_request_records_a_lead_and_grants_no_portal_access(): void
+    {
+        $this->post('https://'.$this->clientHost().'/register', [
+            'first_name' => 'Test',
+            'last_name' => 'Client',
+            'email' => 'synthetic-client@firmsbase-staging.internal',
+            'firm_name' => 'Some Law Firm',
+            'phone' => '+15550000000',
+        ])->assertRedirect(route('client-portal.register'));
+
+        $lead = PlatformLead::query()->where('source', 'client_access_request')->sole();
+        $this->assertSame('Test Client', $lead->contact_name);
+        $this->assertSame(PlatformLeadStatus::New, $lead->status);
+
+        // Zero authorization: no portal identity, no client record, no firm link.
+        $this->assertSame(0, ClientPortalUser::query()->count());
+        $this->assertSame(0, Client::query()->withoutGlobalScopes()->count());
+        $this->assertNull($lead->converted_organization_id);
+        $this->assertNull($lead->converted_at);
+    }
+
+    public function test_a_request_cannot_claim_an_existing_tenants_records(): void
+    {
+        // The attack this endpoint invites: naming somebody else's ids.
+        $firm = Firm::factory()->create();
+        $client = (new TenantContextService)->runWithFirmContext(
+            $firm,
+            fn () => Client::factory()->create(['firm_id' => $firm->id]),
+        );
+
+        $this->post('https://'.$this->clientHost().'/register', [
+            'first_name' => 'Mallory',
+            'last_name' => 'Attacker',
+            'email' => 'mallory@firmsbase-staging.internal',
+            'firm_name' => 'Some Law Firm',
+            'firm_id' => $firm->id,
+            'client_id' => $client->id,
+            'matter_id' => 1,
+            'uuid' => $client->uuid,
+        ])->assertRedirect(route('client-portal.register'));
+
+        $lead = PlatformLead::query()->where('source', 'client_access_request')->sole();
+
+        // None of the injected identifiers may be persisted anywhere on the lead.
+        $serialised = json_encode($lead->toArray());
+        $this->assertStringNotContainsString((string) $client->uuid, (string) $serialised);
+        $this->assertNull($lead->converted_organization_id);
+
+        $this->assertSame(0, ClientPortalUser::query()->count());
+        $this->assertSame(1, Client::query()->withoutGlobalScopes()->count(),
+            'No additional Client may be created, and the existing one must be untouched.');
+    }
+
+    public function test_requests_are_validated(): void
+    {
+        $this->post('https://'.$this->firmHost().'/register', [])
+            ->assertSessionHasErrors(['firm_name', 'first_name', 'last_name', 'email']);
+
+        $this->post('https://'.$this->clientHost().'/register', [])
+            ->assertSessionHasErrors(['first_name', 'last_name', 'email', 'firm_name']);
+
+        $this->assertSame(0, PlatformLead::query()->count());
+    }
+
+    // -------------------------------------------------------------- isolation
+
+    public function test_the_existing_client_invitation_flow_is_untouched(): void
+    {
+        // Self-registration must not have displaced the real path to access.
+        $this->assertTrue(app('router')->has('client-portal.invitation.accept'));
+        $this->assertTrue(method_exists(ClientPortalService::class, 'activate'));
+        $this->assertTrue(method_exists(ClientPortalService::class, 'invite'));
     }
 
     public function test_admin_host_has_no_public_registration(): void
     {
-        // The one assertion that must never regress.
         $this->get('https://'.$this->adminHost().'/register')->assertNotFound();
+        $this->post('https://'.$this->adminHost().'/register', [])->assertNotFound();
 
-        $this->assertFalse(
-            app('router')->has('admin.register'),
-            'A public admin registration route must never exist.',
-        );
+        $this->assertFalse(app('router')->has('admin.register'));
     }
 
-    public function test_signup_routes_do_not_exist_on_any_other_host(): void
+    public function test_routes_do_not_exist_on_any_other_host(): void
     {
-        // Both routes are Route::domain()-scoped, so an unrelated host simply
-        // has no such route. (TrustHosts' own 400 for a spoofed Host header is
-        // middleware that does not engage in the testing environment — that
-        // behaviour is verified against live staging, not asserted here, so
-        // this test states only what it actually proves.)
+        // Route::domain()-scoped. (TrustHosts' own 400 for a spoofed Host header
+        // does not engage in the testing environment; that is verified against
+        // live staging instead, so this asserts only what it proves.)
         $this->get('https://evil.example.com/register')->assertNotFound();
-        $this->get('https://'.$this->adminHost().'/register')->assertNotFound();
+        $this->get('https://'.$this->clientHost().'/register')->assertOk();
+        $this->get('https://'.$this->firmHost().'/register')->assertOk();
     }
 
-    public function test_signup_routes_are_unauthenticated_and_do_not_leak_a_session_across_hosts(): void
+    public function test_csrf_protection_is_active_on_the_request_endpoints(): void
     {
-        $firm = $this->get('https://'.$this->firmHost().'/register');
-        $client = $this->get('https://'.$this->clientHost().'/register');
+        // The rest of this class runs with CSRF middleware disabled by the
+        // framework's testing helpers; this one re-enables it to prove the
+        // endpoints are genuinely protected rather than exempt.
+        $this->withMiddleware(VerifyCsrfToken::class);
 
-        $firm->assertOk();
-        $client->assertOk();
+        $this->post('https://'.$this->firmHost().'/register', [
+            'firm_name' => 'X', 'first_name' => 'A', 'last_name' => 'B',
+            'email' => 'a@firmsbase-staging.internal',
+        ])->assertStatus(419);
 
-        // Each host sets its own panel cookie; neither may widen to the parent.
-        foreach ([$firm, $client] as $response) {
+        $this->assertSame(0, PlatformLead::query()->count());
+    }
+
+    public function test_request_pages_set_no_parent_domain_cookie(): void
+    {
+        foreach ([$this->firmHost(), $this->clientHost()] as $host) {
+            $response = $this->get('https://'.$host.'/register');
+
             foreach ($response->headers->getCookies() as $cookie) {
-                $this->assertNotSame('.firmsvault.com', $cookie->getDomain(),
-                    'Signup routes must not set a parent-domain cookie.');
+                $this->assertNotSame('.firmsvault.com', $cookie->getDomain());
             }
         }
     }

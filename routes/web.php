@@ -9,6 +9,7 @@ use App\Http\Controllers\MyAttorney\HomeController as MyAttorneyHomeController;
 use App\Http\Controllers\MyAttorney\MarketplaceIntakeDocumentController;
 use App\Http\Controllers\MyAttorney\MarketplaceIntakeStartController;
 use App\Http\Controllers\MyAttorney\SitemapController;
+use App\Http\Controllers\PublicSignup\RegistrationRequestController;
 use App\Http\Controllers\Seo\RobotsTxtController;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
 use App\Http\Middleware\ConfigurePanelSessionCookie;
@@ -212,14 +213,14 @@ Route::domain($hosts->clientPortalHost())
 | The login pages now offer "Register your firm" / "Create client account".
 | These are the pages those buttons land on.
 |
-| They are deliberately placeholders, not registration forms. This release has
-| no canonical self-registration backend: neither panel enables Filament's
-| ->registration(), and no register route existed on any host. Firms are
-| provisioned through FirmProvisioningService and clients through
-| ClientPortalService's invitation flow, both of which carry consent,
-| verification and seat/plan decisions that a public form cannot make on its
-| own. Rendering input fields here would imply an account can be created when
-| none can — so each page states what actually happens next instead.
+| They are REQUEST forms, not account creation. Both record a PlatformLead via
+| the canonical PlatformSalesLeadService and stop there — no Firm, User,
+| FirmUser, Client or ClientPortalUser is created, and neither form accepts
+| firm_id/client_id/matter_id/uuid from the browser. Accounts continue to be
+| created only by FirmProvisioningService (firms) and the firm's own
+| invite -> ClientPortalService::activate() flow (clients). See
+| RegistrationRequestController for why the domain cannot represent a
+| self-registered portal identity without schema change.
 |
 | Each route stays on its own host and carries that host's own panel session
 | cookie, so neither widens a cookie or crosses a session boundary. There is
@@ -227,22 +228,28 @@ Route::domain($hosts->clientPortalHost())
 | never self-registered.
 */
 Route::domain($hosts->firmAppHost())
-    ->middleware([ConfigurePanelSessionCookie::class.':firm', 'throttle:20,1'])
-    ->get('register', fn () => view('auth.registration-placeholder', [
-        'heading' => __('Create your firm account'),
-        'body' => __('Firm accounts are currently provisioned by the FirmsVault team rather than through public signup. Contact us to get your firm set up, and we will send an invitation to your email address.'),
-        'loginUrl' => Filament::getPanel('firm')->getLoginUrl(),
-    ]))
-    ->name('firm.register');
+    ->middleware([ConfigurePanelSessionCookie::class.':firm'])
+    ->group(function (): void {
+        Route::get('register', [RegistrationRequestController::class, 'showFirmForm'])
+            ->middleware('throttle:20,1')
+            ->name('firm.register');
+
+        Route::post('register', [RegistrationRequestController::class, 'storeFirmRequest'])
+            ->middleware('throttle:5,1')
+            ->name('firm.register.store');
+    });
 
 Route::domain($hosts->clientPortalHost())
-    ->middleware([ConfigurePanelSessionCookie::class.':client', 'throttle:20,1'])
-    ->get('register', fn () => view('auth.registration-placeholder', [
-        'heading' => __('Create your client account'),
-        'body' => __('Client Portal access is granted by your law firm. Ask your firm to send you a portal invitation, and the link in that email will set up your account.'),
-        'loginUrl' => Filament::getPanel('client-portal')->getLoginUrl(),
-    ]))
-    ->name('client-portal.register');
+    ->middleware([ConfigurePanelSessionCookie::class.':client'])
+    ->group(function (): void {
+        Route::get('register', [RegistrationRequestController::class, 'showClientForm'])
+            ->middleware('throttle:20,1')
+            ->name('client-portal.register');
+
+        Route::post('register', [RegistrationRequestController::class, 'storeClientRequest'])
+            ->middleware('throttle:5,1')
+            ->name('client-portal.register.store');
+    });
 
 /*
 |--------------------------------------------------------------------------

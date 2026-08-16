@@ -22,6 +22,6 @@
         href="{{ route('client-portal.register') }}"
         class="fi-btn fi-btn-size-md relative grid-flow-col items-center justify-center font-semibold outline-none transition duration-75 focus-visible:ring-2 rounded-lg gap-1.5 px-3 py-2 text-sm inline-grid w-full bg-white text-gray-950 ring-1 ring-gray-300 hover:bg-gray-50 focus-visible:ring-primary-600 dark:bg-transparent dark:text-white dark:ring-white/20 dark:hover:bg-white/5"
     >
-        {{ __('Create client account') }}
+        {{ __('Request client access') }}
     </a>
 </div>
