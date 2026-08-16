@@ -36,6 +36,11 @@
         <env name="CACHE_STORE" value="array"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
+        <!-- PlatformNotificationCorrelationService fail-closes without this key,
+             so any test exercising the governed outbound-mail path silently
+             sends nothing without it. Test-only value; the real key is a
+             deployed secret. -->
+        <env name="PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY" value="phpunit-only-fingerprint-key-not-a-secret"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>

@@ -85,7 +85,7 @@ class LoginSignupEntryPointTest extends TestCase
         foreach (['firm_name', 'first_name', 'last_name', 'email'] as $field) {
             $response->assertSee('name="'.$field.'"', escape: false);
         }
-        $response->assertSee('Create firm account', escape: false);
+        $response->assertSee('Submit registration', escape: false);
         $response->assertSee('Already have an account?', escape: false);
     }
 

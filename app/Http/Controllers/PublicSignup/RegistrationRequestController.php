@@ -6,6 +6,7 @@ namespace App\Http\Controllers\PublicSignup;
 
 use App\Enums\PlatformLeadStatus;
 use App\Http\Controllers\Controller;
+use App\Services\FirmRegistrationAcknowledgementService;
 use App\Services\PlatformSalesLeadService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -53,8 +54,11 @@ class RegistrationRequestController extends Controller
         return view('auth.client-access-request');
     }
 
-    public function storeFirmRequest(Request $request, PlatformSalesLeadService $leads): RedirectResponse
-    {
+    public function storeFirmRequest(
+        Request $request,
+        PlatformSalesLeadService $leads,
+        FirmRegistrationAcknowledgementService $acknowledgements,
+    ): RedirectResponse {
         $data = $request->validate([
             'firm_name' => ['required', 'string', 'max:255'],
             'first_name' => ['required', 'string', 'max:100'],
@@ -67,7 +71,7 @@ class RegistrationRequestController extends Controller
             'email' => ['required', 'string', 'email:rfc', 'max:255'],
         ]);
 
-        $leads->create([
+        $lead = $leads->create([
             'company_name' => $data['firm_name'],
             'contact_name' => trim($data['first_name'].' '.$data['last_name']),
             'contact_email' => $data['email'],
@@ -76,6 +80,11 @@ class RegistrationRequestController extends Controller
                 .'No Firm, User or FirmUser was created — provisioning must still run through '
                 .'FirmProvisioningService so the owner receives the canonical setup invitation.',
         ]);
+
+        // Acknowledgement only — never the setup invitation, which is sent by
+        // FirmProvisioningService once the firm is actually provisioned. This
+        // call cannot fail the request: the lead is already committed.
+        $acknowledgements->sendFor($lead);
 
         return redirect()
             ->route('firm.register')
