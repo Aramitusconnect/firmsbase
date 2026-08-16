@@ -53,15 +53,18 @@ return Application::configure(basePath: dirname(__DIR__))
         // deployment/ops owner as a documented requirement.
         $schedule->command('integrations:outbox:dispatch')
             ->everyMinute()
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
 
         $schedule->command('integrations:sync:retry-poll')
             ->everyThreeMinutes()
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
 
         $schedule->command('integrations:retention:sweep')
             ->daily()
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
 
         // CHECKPOINT 11 — SuperAdmin cross-firm integration oversight
         // (reviews/checkpoint-11/frozen-design-post-security-review.md
@@ -73,7 +76,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // platform-admin overview page reads.
         $schedule->command('integrations:platform-overview:refresh')
             ->everyFiveMinutes()
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
 
         // Phase 2 — FirmsVault Platform Admin Control Center
         // ("Integration Operations Center"). Same shape as the
@@ -85,7 +89,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // table the platform-admin Provider Health view reads.
         $schedule->command('integrations:platform-provider-health:refresh')
             ->everyFiveMinutes()
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
 
         // FirmsVault Live Integrations, Checkpoint 2 (Microsoft 365
         // provider) — checkpoint2-design-sync-webhooks.md §3.3;
@@ -108,7 +113,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // command's own docblock.
         $schedule->command('integrations:webhooks:renew-subscriptions')
             ->everyFifteenMinutes()
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
 
         // Phase 4 — FirmsVault Platform Admin Control Center
         // ("Operations"). Resolves phase4-architecture-map-operations-
@@ -122,7 +128,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // active firm context — see HealthCheckService::runAllAndRecord()).
         $schedule->command('health:checks:run')
             ->everyFiveMinutes()
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
 
         // Phase 4 — FirmsVault Platform Admin Control Center
         // ("Operations"). Resolves the other half of Open Decision 1:
@@ -154,11 +161,13 @@ return Application::configure(basePath: dirname(__DIR__))
         // different action, for the same event.
         $schedule->command('automation:events:dispatch')
             ->everyMinute()
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
 
         $schedule->command('automation:actions:dispatch')
             ->everyMinute()
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
 
         // Threshold/time-based domain events (InvoiceOverdue,
         // DeadlineApproaching, DeadlineMissed) have no real business
@@ -175,11 +184,13 @@ return Application::configure(basePath: dirname(__DIR__))
         // same event on every run.
         $schedule->command('automation:sweep:invoice-overdue')
             ->dailyAt('06:00')
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
 
         $schedule->command('automation:sweep:deadlines')
             ->dailyAt('06:15')
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
 
         // Predictive Matter Budget Alerts — recomputes budget-vs-actual
         // for every Matter that has a budget configured and raises any
@@ -192,7 +203,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // does for the Automation Engine's own event queues.
         $schedule->command('automation:sweep:matter-budgets')
             ->hourly()
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
 
         // Leverage Ratio Optimizer — evaluates staffing/task-role/
         // margin recommendations for every Matter that has a budget
@@ -204,7 +216,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // enumeration from.
         $schedule->command('automation:sweep:leverage-recommendations')
             ->hourly()
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
 
         // Zero-Click Core Workflow Automation — wraps the existing,
         // previously-uncalled DocumentChaseSchedulerService/
@@ -216,7 +229,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // checkpoints.
         $schedule->command('automation:sweep:document-request-reminders')
             ->dailyAt('06:30')
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
 
         // Payment Plan installment scheduling remains INTENTIONALLY
         // DEFERRED (Phase 14b, decision F — see
@@ -239,7 +253,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // other day-granularity retention sweep's own cadence.
         $schedule->command('marketplace:analytics:prune')
             ->daily()
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
 
         // Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 14
         // — the "abandoned-intake retention sweep" the
@@ -248,7 +263,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // other day-granularity retention sweep's own cadence.
         $schedule->command('marketplace:intakes:retention:sweep')
             ->daily()
-            ->withoutOverlapping();
+            ->withoutOverlapping()
+            ->onOneServer();
     })
     ->withMiddleware(function (Middleware $middleware): void {
         // Trust the AWS ALB in front of this container for exactly the
