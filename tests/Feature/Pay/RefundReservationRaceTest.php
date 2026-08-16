@@ -14,7 +14,7 @@ use App\Services\Pay\PaymentIntentService;
 use App\Services\Pay\RefundReservationService;
 use App\Services\TenantContextService;
 use Illuminate\Support\Facades\DB;
-use Tests\Feature\Pay\Concerns\CleansUpDurablePayAudit;
+use Tests\Feature\Pay\Concerns\PreservesPayAuditAttribution;
 use Tests\TestCase;
 
 /**
@@ -42,19 +42,12 @@ use Tests\TestCase;
  */
 class RefundReservationRaceTest extends TestCase
 {
-    use CleansUpDurablePayAudit;
+    use PreservesPayAuditAttribution;
 
     private ?int $firmId = null;
 
     protected function tearDown(): void
     {
-        // MUST run BEFORE the firm rows below are deleted: the purge
-        // establishes tenant context per firm id read from `firms`, and
-        // FORCE RLS means a DELETE with no matching context silently
-        // removes nothing. Purging after the firms are gone leaves the
-        // durable audit rows behind forever.
-        $this->purgeDurablePayAuditRows();
-
         DB::purge();
 
         if ($this->firmId !== null) {
@@ -64,9 +57,19 @@ class RefundReservationRaceTest extends TestCase
             DB::table('integration_outbox_events')->where('firm_id', $this->firmId)->delete();
             DB::table('payment_intent_allocations')->where('firm_id', $this->firmId)->delete();
             DB::table('payment_intents')->where('firm_id', $this->firmId)->delete();
-            DB::table('security_events')->where('firm_id', $this->firmId)->delete();
-            DB::table('firms')->where('id', $this->firmId)->delete();
         }
+
+        // DELIBERATELY DOES NOT DELETE THE FIRM ROW.
+        // security_events.firm_id is ON DELETE SET NULL, and this test
+        // writes durable Pay audit rows. Deleting the firm would orphan
+        // them to firm_id = NULL, which makes them visible to every
+        // CONTEXTLESS reader — and they can never be deleted afterwards,
+        // because security_events has no DELETE policy under FORCE RLS
+        // (it is an append-only audit log by design). Keeping the firm
+        // keeps the audit trail attributed and invisible to contextless
+        // readers. See Tests\Feature\Pay\Concerns\PreservesPayAuditAttribution.
+
+        $this->assertNoOrphanedPayAuditRows();
 
         parent::tearDown();
     }

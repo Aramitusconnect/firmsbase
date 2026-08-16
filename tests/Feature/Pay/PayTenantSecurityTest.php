@@ -20,7 +20,6 @@ use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Tests\Feature\Pay\Concerns\CleansUpDurablePayAudit;
 use Tests\TestCase;
 
 /**
@@ -33,7 +32,6 @@ use Tests\TestCase;
  */
 class PayTenantSecurityTest extends TestCase
 {
-    use CleansUpDurablePayAudit;
     use RefreshDatabase;
 
     /** Every new tenant-owned Pay table. */

@@ -19,7 +19,6 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
-use Tests\Feature\Pay\Concerns\CleansUpDurablePayAudit;
 use Tests\TestCase;
 
 /**
@@ -32,7 +31,6 @@ use Tests\TestCase;
  */
 class ProviderCommandInfrastructureTest extends TestCase
 {
-    use CleansUpDurablePayAudit;
     use RefreshDatabase;
 
     private function commands(): ProviderCommandService
