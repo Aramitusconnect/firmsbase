@@ -48,6 +48,13 @@ class RefundReservationRaceTest extends TestCase
 
     protected function tearDown(): void
     {
+        // MUST run BEFORE the firm rows below are deleted: the purge
+        // establishes tenant context per firm id read from `firms`, and
+        // FORCE RLS means a DELETE with no matching context silently
+        // removes nothing. Purging after the firms are gone leaves the
+        // durable audit rows behind forever.
+        $this->purgeDurablePayAuditRows();
+
         DB::purge();
 
         if ($this->firmId !== null) {
@@ -60,8 +67,6 @@ class RefundReservationRaceTest extends TestCase
             DB::table('security_events')->where('firm_id', $this->firmId)->delete();
             DB::table('firms')->where('id', $this->firmId)->delete();
         }
-
-        $this->purgeDurablePayAuditRows();
 
         parent::tearDown();
     }

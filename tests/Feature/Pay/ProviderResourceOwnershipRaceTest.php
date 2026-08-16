@@ -48,6 +48,13 @@ class ProviderResourceOwnershipRaceTest extends TestCase
 
     protected function tearDown(): void
     {
+        // MUST run BEFORE the firm rows below are deleted: the purge
+        // establishes tenant context per firm id read from `firms`, and
+        // FORCE RLS means a DELETE with no matching context silently
+        // removes nothing. Purging after the firms are gone leaves the
+        // durable audit rows behind forever.
+        $this->purgeDurablePayAuditRows();
+
         DB::purge();
 
         if ($this->racedResourceId !== null) {
@@ -63,8 +70,6 @@ class ProviderResourceOwnershipRaceTest extends TestCase
             DB::table('firm_integrations')->whereIn('firm_id', $this->createdFirmIds)->delete();
             DB::table('firms')->whereIn('id', $this->createdFirmIds)->delete();
         }
-
-        $this->purgeDurablePayAuditRows();
 
         parent::tearDown();
     }

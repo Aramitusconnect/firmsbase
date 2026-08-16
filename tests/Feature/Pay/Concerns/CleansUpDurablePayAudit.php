@@ -51,27 +51,35 @@ trait CleansUpDurablePayAudit
             // independent connection that wrote them, per firm id.
             $connection = DB::connection('pgsql_audit');
 
-            $firmIds = $connection->table('security_events')
-                ->where('category', PayAuditRecorder::CATEGORY)
-                ->distinct()
-                ->pluck('firm_id');
+            // THE TRAP THIS CODE EXISTS TO AVOID, AND ONCE FELL INTO.
+            // security_events is FORCE RLS. A contextless SELECT against
+            // it does not error — it silently returns ZERO rows. An
+            // earlier version of this method discovered the firm ids to
+            // clean by reading security_events directly, got nothing
+            // back, looped zero times, deleted nothing, and reported
+            // success. The residue then broke unrelated later tests
+            // exactly as before.
+            //
+            // So the firm ids come from `firms` (not RLS-protected,
+            // RootTenant), and the delete runs once per firm under that
+            // firm's own context, which is the only way a FORCE-RLS
+            // DELETE can match anything at all.
+            $firmIds = $connection->table('firms')->pluck('id');
 
             foreach ($firmIds as $firmId) {
                 $connection->transaction(function () use ($connection, $firmId) {
-                    if ($firmId !== null) {
-                        $connection->statement(
-                            'select set_config(?, ?, ?)',
-                            ['app.current_firm_id', (string) $firmId, true]
-                        );
-                    }
+                    $connection->statement(
+                        'select set_config(?, ?, ?)',
+                        ['app.current_firm_id', (string) $firmId, true]
+                    );
 
                     $connection->table('security_events')
                         ->where('category', PayAuditRecorder::CATEGORY)
-                        ->when($firmId !== null, fn ($q) => $q->where('firm_id', $firmId))
-                        ->when($firmId === null, fn ($q) => $q->whereNull('firm_id'))
+                        ->where('firm_id', $firmId)
                         ->delete();
                 });
             }
+
         } catch (\Throwable) {
             // Teardown must never convert a passing test into an error.
             // A residue row is a nuisance; a failed teardown hides real

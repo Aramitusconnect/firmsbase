@@ -131,6 +131,26 @@ class PayAuditRecorder
     {
         $connection = DB::connection(self::AUDIT_CONNECTION);
 
+        // A durable write is only MEANINGFUL for a firm that is already
+        // committed. If the firm row is not visible on this independent
+        // session, the caller's transaction has not committed it yet, and
+        // writing here would either violate the foreign key or — worse —
+        // succeed and then be orphaned to firm_id = NULL the moment that
+        // firm is rolled back or deleted (security_events.firm_id is
+        // ON DELETE SET NULL). An orphaned row is permanently
+        // unreachable: FORCE RLS matches on firm_id = <current firm>, and
+        // NULL never equals anything, so no DELETE can ever remove it
+        // again.
+        //
+        // So: durable write only for a committed firm; otherwise fall
+        // through to the ambient connection, which shares the caller's
+        // fate. This costs nothing in production (a firm is always
+        // committed long before it can transact) and it is what keeps
+        // the test suite free of unreachable residue.
+        if ($firmId !== null && ! $connection->table('firms')->where('id', $firmId)->exists()) {
+            return $this->recordOnAmbientConnection($firmId, $attributes);
+        }
+
         try {
             return $connection->transaction(function () use ($connection, $firmId, $attributes): SecurityEvent {
                 if ($firmId !== null) {
@@ -161,17 +181,29 @@ class PayAuditRecorder
             // authoritative signal either way.
             report($e);
 
-            try {
-                $write = fn (): SecurityEvent => SecurityEvent::query()->create($attributes);
+            return $this->recordOnAmbientConnection($firmId, $attributes);
+        }
+    }
 
-                return $firmId === null
-                    ? $write()
-                    : (new TenantContextService)->runWithFirmContext($firmId, $write);
-            } catch (\Throwable $fallbackFailure) {
-                report($fallbackFailure);
+    /**
+     * Best-effort ambient write. Shares the caller's transaction fate,
+     * which is still better than no record at all, and never throws — an
+     * audit failure must not mask the domain refusal it records.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function recordOnAmbientConnection(?int $firmId, array $attributes): SecurityEvent
+    {
+        try {
+            $write = fn (): SecurityEvent => SecurityEvent::query()->create($attributes);
 
-                return new SecurityEvent($attributes);
-            }
+            return $firmId === null
+                ? $write()
+                : (new TenantContextService)->runWithFirmContext($firmId, $write);
+        } catch (\Throwable $fallbackFailure) {
+            report($fallbackFailure);
+
+            return new SecurityEvent($attributes);
         }
     }
 
