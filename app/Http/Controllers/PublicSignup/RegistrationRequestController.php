@@ -59,7 +59,12 @@ class RegistrationRequestController extends Controller
             'firm_name' => ['required', 'string', 'max:255'],
             'first_name' => ['required', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
-            'email' => ['required', 'string', 'email:rfc,dns', 'max:255'],
+            // 'rfc' only, deliberately not 'dns': a DNS lookup on every public
+            // submission makes signup depend on a resolver being fast and
+            // reachable, and rejects perfectly legitimate addresses on internal
+            // or newly-registered domains. Deliverability is proven by the
+            // invitation email that follows, not by a synchronous MX probe.
+            'email' => ['required', 'string', 'email:rfc', 'max:255'],
         ]);
 
         $leads->create([
@@ -82,7 +87,7 @@ class RegistrationRequestController extends Controller
         $data = $request->validate([
             'first_name' => ['required', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
-            'email' => ['required', 'string', 'email:rfc,dns', 'max:255'],
+            'email' => ['required', 'string', 'email:rfc', 'max:255'],
             // Required rather than optional: a firm has to be able to verify
             // this person, and platform_leads.company_name is NOT NULL anyway.
             'firm_name' => ['required', 'string', 'max:255'],

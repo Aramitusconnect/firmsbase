@@ -13,8 +13,9 @@ use App\Models\PlatformLead;
 use App\Models\User;
 use App\Services\ClientPortalService;
 use App\Services\TenantContextService;
-use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Config;
 use Tests\TestCase;
 
@@ -173,7 +174,15 @@ class LoginSignupEntryPointTest extends TestCase
         $this->assertNull($lead->converted_organization_id);
 
         $this->assertSame(0, ClientPortalUser::query()->count());
-        $this->assertSame(1, Client::query()->withoutGlobalScopes()->count(),
+
+        // clients is FORCE-RLS, so this must be counted inside the firm's own
+        // context — an out-of-context count returns 0 because the database
+        // refuses it, not because the row is gone.
+        $stillOne = (new TenantContextService)->runWithFirmContext(
+            $firm,
+            fn (): int => Client::query()->count(),
+        );
+        $this->assertSame(1, $stillOne,
             'No additional Client may be created, and the existing one must be untouched.');
     }
 
@@ -216,19 +225,32 @@ class LoginSignupEntryPointTest extends TestCase
         $this->get('https://'.$this->firmHost().'/register')->assertOk();
     }
 
-    public function test_csrf_protection_is_active_on_the_request_endpoints(): void
+    public function test_csrf_protection_is_attached_to_the_request_endpoints(): void
     {
-        // The rest of this class runs with CSRF middleware disabled by the
-        // framework's testing helpers; this one re-enables it to prove the
-        // endpoints are genuinely protected rather than exempt.
-        $this->withMiddleware(VerifyCsrfToken::class);
+        // Laravel's test harness disables CSRF for the whole case, so asserting
+        // a 419 here would only prove the harness works. The honest check is
+        // that the middleware is actually gathered onto these routes, and that
+        // the forms post a token.
+        foreach (['firm.register.store', 'client-portal.register.store'] as $name) {
+            $route = app('router')->getRoutes()->getByName($name);
+            $this->assertNotNull($route, "Route [{$name}] must exist.");
 
-        $this->post('https://'.$this->firmHost().'/register', [
-            'firm_name' => 'X', 'first_name' => 'A', 'last_name' => 'B',
-            'email' => 'a@firmsbase-staging.internal',
-        ])->assertStatus(419);
+            // This Laravel version gathers PreventRequestForgery — the CSRF
+            // middleware has been renamed twice (VerifyCsrfToken ->
+            // ValidateCsrfToken -> PreventRequestForgery), and only the current
+            // name is what actually lands on the route.
+            $middleware = app('router')->gatherRouteMiddleware($route);
+            $this->assertContains(PreventRequestForgery::class, $middleware,
+                "Route [{$name}] must be CSRF protected.");
 
-        $this->assertSame(0, PlatformLead::query()->count());
+            // Session must start before CSRF can mean anything.
+            $this->assertContains(StartSession::class, $middleware);
+        }
+
+        foreach ([$this->firmHost(), $this->clientHost()] as $host) {
+            $this->get('https://'.$host.'/register')
+                ->assertSee('name="_token"', escape: false);
+        }
     }
 
     public function test_request_pages_set_no_parent_domain_cookie(): void
