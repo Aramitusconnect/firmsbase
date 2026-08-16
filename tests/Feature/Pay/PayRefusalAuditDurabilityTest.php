@@ -13,6 +13,7 @@ use App\Services\Pay\ProviderCommandService;
 use App\Services\TenantContextService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Feature\Pay\Concerns\CleansUpDurablePayAudit;
 use Tests\TestCase;
 
 /**
@@ -36,14 +37,24 @@ use Tests\TestCase;
  */
 class PayRefusalAuditDurabilityTest extends TestCase
 {
+    use CleansUpDurablePayAudit;
+
     private ?int $firmId = null;
 
     private ?string $conflictKey = null;
 
     protected function tearDown(): void
     {
+        // The durable audit rows this test deliberately creates live on
+        // the independent pgsql_audit connection and are written under
+        // real tenant context. security_events is FORCE RLS, so a
+        // contextless DELETE here would silently match ZERO rows and
+        // leak them into every later test in the run — which is exactly
+        // what happened before this call was added (it broke
+        // TenantAwareLoginPolicyTest and BelongsToTenantScopeTest).
+        $this->purgeDurablePayAuditRows();
+
         if ($this->firmId !== null) {
-            DB::table('security_events')->where('firm_id', $this->firmId)->delete();
             DB::table('provider_commands')->where('firm_id', $this->firmId)->delete();
             DB::table('firms')->where('id', $this->firmId)->delete();
         }
