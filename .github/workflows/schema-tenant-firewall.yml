@@ -140,13 +140,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
         with:
-          # CERTIFICATION PIN — Gate A2 candidate commit. The mission
+          # CERTIFICATION PIN — Gate A3 candidate commit (44bc670, on top of the certified Gate A2 179cc7f). The mission
           # requires the job to prove it tested exactly 179cc7f, so the
           # application code under test is that commit, not the branch
           # tip that carries this trigger. This pin exists only on the
           # never-merged ci/gate-a2-certification branch; main's copy of
           # this workflow is unchanged and still checks out its own ref.
-          ref: 179cc7f92ccf4e94d3a461c22ce16e6cde746a19
+          ref: 44bc6709f7d3b062bef6d2b2e5834fc2f83efaf8
           fetch-depth: 0
 
       - name: Record certification identity (exact-code requirement)
@@ -157,7 +157,7 @@ jobs:
           echo "SUBJECT=$(git log -1 --format=%s)"
           echo "PHP=$(php -v | head -1)"
           echo "STARTED=$(date -u +%FT%TZ)"
-          test "$(git rev-parse --short=7 HEAD)" = "179cc7f" \
+          test "$(git rev-parse --short=7 HEAD)" = "44bc670" \
             || { echo "CERTIFICATION COMMIT MISMATCH"; exit 1; }
 
       - name: Set up PHP
