@@ -54,9 +54,17 @@ use Illuminate\Support\Facades\DB;
  *     finally block, and the restoration is ASSERTED afterwards;
  *   - no policy is created, altered or dropped — the policy definitions
  *     and the migrations that own them are untouched;
- *   - the DELETE is scoped to PayAuditRecorder::CATEGORY **and** to the
- *     explicit firm ids the calling test created, so it can never remove
- *     another domain's or another test's audit rows;
+ *   - the DELETE is scoped to the explicit firm ids the calling test
+ *     created, so it can never touch another test's rows. It deliberately
+ *     does NOT filter on category: a test may also create NON-Pay fixture
+ *     events for its own firm — the durability test writes an
+ *     `authentication` / `unrelated.probe` row to prove other categories
+ *     are untouched — and leaving those behind orphans them to
+ *     firm_id = NULL the instant the firm is deleted. That orphan was the
+ *     exact producer of the 13472/13474 failure: it is visible to every
+ *     contextless reader and can never be removed afterwards. Every row
+ *     this deletes is a fixture the calling test created, for a firm it
+ *     owns;
  *   - it must be called BEFORE the test deletes its own firm rows, which
  *     is the whole point: after that, firm_id is already NULL and the
  *     rows are no longer identifiable as this test's.
@@ -64,12 +72,14 @@ use Illuminate\Support\Facades\DB;
 trait CleansUpPayAuditFixtures
 {
     /**
-     * Remove this test's own durable Pay audit rows. MUST be called
-     * before the test deletes the corresponding firm rows.
+     * Remove ALL security_events this test created for its OWN firms.
+     * MUST be called before the test deletes those firm rows — afterwards
+     * firm_id is NULL and the rows are no longer identifiable as this
+     * test's, nor removable at all.
      *
      * @param  list<int>  $firmIds
      */
-    protected function purgePayAuditFixturesForFirms(array $firmIds): void
+    protected function purgeAuditFixturesForFirms(array $firmIds): void
     {
         $firmIds = array_values(array_filter($firmIds));
 
@@ -83,7 +93,6 @@ trait CleansUpPayAuditFixtures
 
         try {
             DB::table('security_events')
-                ->where('category', PayAuditRecorder::CATEGORY)
                 ->whereIn('firm_id', $firmIds)
                 ->delete();
         } finally {
@@ -119,7 +128,7 @@ trait CleansUpPayAuditFixtures
             0,
             $orphaned,
             'Orphaned FirmsVault Pay audit rows (firm_id = NULL) are visible to every contextless reader '
-            .'and can never be removed afterwards. Call purgePayAuditFixturesForFirms() BEFORE deleting '
+            .'and can never be removed afterwards. Call purgeAuditFixturesForFirms() BEFORE deleting '
             .'the test firm.'
         );
     }

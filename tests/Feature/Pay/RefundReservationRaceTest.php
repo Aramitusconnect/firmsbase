@@ -52,7 +52,7 @@ class RefundReservationRaceTest extends TestCase
 
         // Purge audit fixtures BEFORE the firm below is deleted — see
         // CleansUpPayAuditFixtures for why the order cannot be reversed.
-        $this->purgePayAuditFixturesForFirms([$this->firmId]);
+        $this->purgeAuditFixturesForFirms([$this->firmId]);
 
         if ($this->firmId !== null) {
             DB::table('payment_refunds')->where('firm_id', $this->firmId)->delete();

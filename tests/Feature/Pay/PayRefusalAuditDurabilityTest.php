@@ -50,7 +50,7 @@ class PayRefusalAuditDurabilityTest extends TestCase
         // they are still attributed to this firm, THEN delete the firm.
         // Reversing these two makes the rows unidentifiable and
         // unremovable forever (ON DELETE SET NULL + no DELETE policy).
-        $this->purgePayAuditFixturesForFirms([$this->firmId]);
+        $this->purgeAuditFixturesForFirms([$this->firmId]);
 
         if ($this->firmId !== null) {
             DB::table('provider_commands')->where('firm_id', $this->firmId)->delete();

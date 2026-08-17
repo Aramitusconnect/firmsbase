@@ -52,7 +52,7 @@ class ProviderResourceOwnershipRaceTest extends TestCase
 
         // Purge audit fixtures BEFORE the firms below are deleted — see
         // CleansUpPayAuditFixtures for why the order cannot be reversed.
-        $this->purgePayAuditFixturesForFirms($this->createdFirmIds);
+        $this->purgeAuditFixturesForFirms($this->createdFirmIds);
 
         if ($this->racedResourceId !== null) {
             // The model guard forbids deleting ownership rows, which is
