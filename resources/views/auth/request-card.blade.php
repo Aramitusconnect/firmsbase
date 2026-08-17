@@ -51,7 +51,7 @@
         <div class="brand">FirmsBase</div>
         <div class="card">
             @if (session('requestReceived'))
-                <h1>{{ __('Request received') }}</h1>
+                <h1>{{ __($receivedHeading ?? 'Request received') }}</h1>
                 <div class="ok">
                     <strong>{{ __('Thanks — we have your details.') }}</strong>
                     {{ $receivedBody }}

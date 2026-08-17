@@ -4,6 +4,7 @@
     'action' => route('firm.register.store'),
     'submitLabel' => __('Submit registration'),
     'loginUrl' => \Filament\Facades\Filament::getPanel('firm')->getLoginUrl(),
+    'receivedHeading' => 'Registration received',
     'receivedBody' => __("We've received your firm's registration request. Check your email for confirmation. After verification, you'll receive a separate invitation to finish setting up your account."),
 ])
 
