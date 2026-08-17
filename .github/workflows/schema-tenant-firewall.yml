@@ -95,7 +95,13 @@ jobs:
   schema-tenant-firewall:
     name: Schema tenant firewall + protected test suite
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # CERTIFICATION-BRANCH ONLY. The Gate A2 candidate's full suite is
+    # ~13.5k tests and exceeded the standard 30m ceiling — run 31995374190
+    # was CANCELLED at exactly 30m18s by this timeout, with no test
+    # failure. Raised to 90m here so the certification run can complete.
+    # main's copy of this workflow keeps its 30m budget; this branch is
+    # never merged.
+    timeout-minutes: 90
 
     services:
       postgres:
