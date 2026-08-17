@@ -198,6 +198,9 @@ class RefundReservationService
                         'amount_cents' => (int) $refund->amount_cents,
                         'currency' => $refund->currency,
                         'payment_attempt_id' => (int) $refund->payment_attempt_id,
+                        // Gate A3: the refund's stated reason doubles as the
+                        // provider-neutral reference fixture (v1.4 §6).
+                        'reason' => $refund->reason,
                     ],
                     firmIntegrationId: $refund->firm_integration_id,
                     integrationProviderId: $integrationProviderId,

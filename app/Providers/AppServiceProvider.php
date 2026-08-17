@@ -12,6 +12,9 @@ use App\Models\User;
 use App\Policies\MarketplaceIntakePolicy;
 use App\Services\AiProviderAdapterInterface;
 use App\Services\FakeAiProviderAdapter;
+use App\Services\Pay\Contracts\PaymentProviderAdapter;
+use App\Services\Pay\Fake\FakePaymentProviderAdapter;
+use App\Services\Pay\UnavailablePaymentProviderAdapter;
 use App\Services\Security\AccountLoginThrottleService;
 use App\Services\Stripe\FakeStripeGateway;
 use App\Services\Stripe\PaymentGatewaySimulationPolicyService;
@@ -93,6 +96,23 @@ class AppServiceProvider extends ServiceProvider
             }
 
             return new SqsClient($clientConfig);
+        });
+
+        // FirmsVault Pay Gate A3 — the provider-NEUTRAL payment adapter
+        // binding, mirroring the StripeGateway fail-closed factory below
+        // exactly: FakePaymentProviderAdapter only inside explicit
+        // simulation (testing always; local only on opt-in), and the
+        // throwing UnavailablePaymentProviderAdapter everywhere else, so
+        // no environment can ever appear to have executed a provider
+        // operation because a fake silently answered. Singleton, so one
+        // deterministic fake instance carries provider-side state across
+        // a test (the dispatch/outcome separation v1.4 §10 requires).
+        $this->app->singleton(PaymentProviderAdapter::class, function ($app) {
+            if ($app->make(PaymentGatewaySimulationPolicyService::class)->isSimulationEnabled()) {
+                return new FakePaymentProviderAdapter;
+            }
+
+            return new UnavailablePaymentProviderAdapter;
         });
 
         // Payment Link / QR Routing phase — the StripeGateway interface

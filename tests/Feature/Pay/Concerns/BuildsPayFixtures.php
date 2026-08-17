@@ -4,11 +4,22 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Pay\Concerns;
 
+use App\Enums\ChartOfAccountPurpose;
+use App\Enums\ChartOfAccountType;
+use App\Enums\EntitlementSource;
 use App\Enums\PaymentAttemptState;
 use App\Enums\PaymentDestinationClass;
+use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Models\IntegrationProvider;
+use App\Models\ChartOfAccount;
 use App\Models\Firm;
 use App\Models\PaymentAttempt;
 use App\Models\PaymentIntent;
+use App\Models\PaymentRefund;
+use App\Models\ProviderCommand;
+use App\Services\EntitlementService;
+use App\Services\Pay\Contracts\PaymentProviderAdapter;
+use App\Services\Pay\Fake\FakePaymentProviderAdapter;
 use App\Services\Pay\PaymentAttemptService;
 use App\Services\Pay\PaymentIntentService;
 use App\Services\Pay\RefundReservationService;
@@ -97,5 +108,98 @@ trait BuildsPayFixtures
             'created_at' => now(),
             'updated_at' => now(),
         ]));
+    }
+
+    /**
+     * Gate A3 — a firm with the accounting module enabled and every
+     * chart-of-accounts purpose the provider capture/refund postings can
+     * resolve. Mirrors ProviderPaymentAccountingTest's own builder.
+     */
+    protected function payFirmWithAccounting(): Firm
+    {
+        $firm = Firm::factory()->create();
+
+        app(EntitlementService::class)->setForSource(
+            $firm, 'expenses', EntitlementSource::AdminOverride, true,
+        );
+
+        $purposes = [
+            [ChartOfAccountPurpose::OperatingCash, ChartOfAccountType::Asset],
+            [ChartOfAccountPurpose::LegalFeeRevenue, ChartOfAccountType::Revenue],
+            [ChartOfAccountPurpose::CostReimbursementRevenue, ChartOfAccountType::Revenue],
+            [ChartOfAccountPurpose::ProcessorClearingOperating, ChartOfAccountType::Asset],
+            [ChartOfAccountPurpose::ProviderSettlementReceivable, ChartOfAccountType::Asset],
+            [ChartOfAccountPurpose::ProcessorFees, ChartOfAccountType::Expense],
+        ];
+
+        $this->runWithFirmContext($firm, function () use ($firm, $purposes) {
+            foreach ($purposes as [$purpose, $type]) {
+                ChartOfAccount::factory()->forFirm($firm)->create([
+                    'purpose' => $purpose,
+                    'account_type' => $type,
+                    'is_active' => true,
+                ]);
+            }
+        });
+
+        return $firm;
+    }
+
+    /**
+     * Gate A3 — a provider-platform connection pair for the fake
+     * provider: the IntegrationProvider (ProviderPlatformConnection
+     * role) and the firm's FirmIntegration (FirmProviderAccount role).
+     *
+     * @return array{0: IntegrationProvider, 1: FirmIntegration}
+     */
+    protected function payProviderConnection(Firm $firm): array
+    {
+        $provider = IntegrationProvider::query()->first()
+            ?? IntegrationProvider::factory()->create();
+
+        $connection = $this->runWithFirmContext($firm, fn () => FirmIntegration::factory()->create([
+            'firm_id' => $firm->id,
+            'integration_provider_id' => $provider->id,
+        ]));
+
+        return [$provider, $connection];
+    }
+
+    /**
+     * Gate A3 — an opened attempt whose canonical payload carries the
+     * fake-provider scenario token, bound to a real provider connection.
+     */
+    protected function payOpenAttemptWithToken(
+        Firm $firm,
+        IntegrationProvider $provider,
+        FirmIntegration $connection,
+        string $token,
+        int $amountCents = 10_000,
+    ): PaymentAttempt {
+        return app(PaymentAttemptService::class)->open(
+            $this->payFrozenIntent($firm, $amountCents),
+            (int) $connection->id,
+            (int) $provider->id,
+            $token,
+        );
+    }
+
+    protected function payFake(): FakePaymentProviderAdapter
+    {
+        $adapter = app(PaymentProviderAdapter::class);
+
+        if (! $adapter instanceof FakePaymentProviderAdapter) {
+            $this->fail('The fake payment provider adapter must be bound in the testing environment.');
+        }
+
+        return $adapter;
+    }
+
+    protected function payCommandOf(PaymentAttempt|PaymentRefund $aggregate): ProviderCommand
+    {
+        return $this->runWithFirmContext(
+            (int) $aggregate->firm_id,
+            fn () => ProviderCommand::query()->findOrFail($aggregate->provider_command_id),
+        );
     }
 }

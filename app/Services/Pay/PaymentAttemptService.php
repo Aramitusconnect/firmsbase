@@ -59,7 +59,7 @@ class PaymentAttemptService
      * Open an attempt for a frozen, execution-eligible intent, together
      * with its immutable command and its outbox dispatch row.
      */
-    public function open(PaymentIntent $intent, ?int $firmIntegrationId = null, ?int $integrationProviderId = null): PaymentAttempt
+    public function open(PaymentIntent $intent, ?int $firmIntegrationId = null, ?int $integrationProviderId = null, ?string $methodToken = null): PaymentAttempt
     {
         $eligibility = $this->intents->executionEligibility($intent);
 
@@ -83,7 +83,7 @@ class PaymentAttemptService
 
         return $this->tenantContext->runWithFirmContext(
             (int) $intent->firm_id,
-            fn (): PaymentAttempt => DB::transaction(function () use ($intent, $firmIntegrationId, $integrationProviderId, $eligibility): PaymentAttempt {
+            fn (): PaymentAttempt => DB::transaction(function () use ($intent, $firmIntegrationId, $integrationProviderId, $methodToken, $eligibility): PaymentAttempt {
                 // Re-assert inside the transaction: another worker may
                 // have opened an attempt between the check above and here.
                 $this->assertNoBlockingAttempt($intent);
@@ -108,6 +108,11 @@ class PaymentAttemptService
                         'currency' => $attempt->currency,
                         'payment_intent_uuid' => $intent->uuid,
                         'purpose' => $intent->purpose,
+                        // Gate A3: opaque payment-method token/reference
+                        // fixture (v1.4 §6). Part of the canonical payload,
+                        // so a different token is a different economic
+                        // instruction under the same key — by design.
+                        'method_token' => $methodToken,
                     ],
                     firmIntegrationId: $firmIntegrationId,
                     integrationProviderId: $integrationProviderId,

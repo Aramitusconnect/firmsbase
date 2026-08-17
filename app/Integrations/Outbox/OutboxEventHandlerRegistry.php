@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Integrations\Outbox;
 
 use App\Integrations\Outbox\Exceptions\UnknownOutboxEventTypeException;
+use App\Integrations\Outbox\Handlers\FirmsVaultPayDispatchHandler;
 use App\Integrations\Outbox\Handlers\TestResourcePushHandler;
 
 /**
@@ -36,6 +37,12 @@ final class OutboxEventHandlerRegistry
      */
     private const HANDLERS = [
         'test.resource.push_retry' => TestResourcePushHandler::class,
+        // FirmsVault Pay Gate A3 — the ONE dispatch event type the Pay
+        // execution flow enqueues (Gate A2 recordOnce() call sites in
+        // PaymentAttemptService/RefundReservationService). Registered in
+        // the EXISTING registry precisely so no second outbox/dispatch
+        // engine exists (v1.4 §4).
+        'firmsvault_pay.provider_command.dispatch' => FirmsVaultPayDispatchHandler::class,
     ];
 
     public function get(string $eventType): OutboxEventHandlerContract

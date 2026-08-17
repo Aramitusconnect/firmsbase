@@ -10,6 +10,7 @@ use App\Enums\PaymentAttemptState;
 use App\Models\AccountingJournalEntry;
 use App\Models\Firm;
 use App\Models\PaymentAttempt;
+use App\Models\PaymentRefund;
 use App\Services\AccountingEntitlementPolicyService;
 use App\Services\AccountingJournalPostingService;
 use App\Services\ChartOfAccountsService;
@@ -161,6 +162,46 @@ class ProviderPaymentJournalRecorderService
             // cannot post twice (FV-A2-045). Rides the existing partial
             // unique index on (firm_id, idempotency_key).
             idempotencyKey: 'provider_payment_captured:payment_attempt:'.$attempt->id,
+        );
+    }
+
+    /**
+     * Post a SUCCESSFUL provider refund. The exact mirror of the capture
+     * posting, before settlement: the money leaves the processor
+     * clearing balance, and previously recognized fee revenue is
+     * reversed. OperatingCash is — again — never touched (v1.4 §38).
+     *
+     *     Dr LegalFeeRevenue              (refunded amount)
+     *       Cr ProcessorClearingOperating (refunded amount)
+     *
+     * POC simplification, documented: Gate A2/A3 captures recognize the
+     * full amount as fee revenue, so the reversal is fee-side only;
+     * mixed fee/cost refund composition is later-gate work. Exactly-once
+     * by the journal's partial UNIQUE (firm_id, idempotency_key) with a
+     * deterministic per-refund key.
+     */
+    public function recordProviderRefund(
+        Firm $firm,
+        PaymentRefund $refund,
+    ): ?AccountingJournalEntry {
+        if (! $this->entitlementPolicy->isExpensesEnabledForFirm($firm)) {
+            return null;
+        }
+
+        $clearing = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::ProcessorClearingOperating);
+        $feeRevenue = $this->chartOfAccounts->requireByPurpose($firm, ChartOfAccountPurpose::LegalFeeRevenue);
+
+        return $this->posting->post(
+            $firm,
+            AccountingJournalSourceType::Refund,
+            'Provider refund succeeded — refund #'.$refund->id,
+            now(),
+            [
+                ['chart_of_account_id' => $feeRevenue->id, 'debit_cents' => (int) $refund->amount_cents, 'credit_cents' => 0],
+                ['chart_of_account_id' => $clearing->id, 'debit_cents' => 0, 'credit_cents' => (int) $refund->amount_cents],
+            ],
+            ['payment_attempt_id' => $refund->payment_attempt_id],
+            idempotencyKey: 'provider_refund_succeeded:payment_refund:'.$refund->id,
         );
     }
 }
