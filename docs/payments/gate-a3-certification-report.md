@@ -11,7 +11,7 @@ tokenization, settlement parsing, Finix-specific field or migration exists anywh
 ```
 Branch: feature/firmsvault-pay-finix-poc1
 Base:   179cc7f92ccf4e94d3a461c22ce16e6cde746a19  (Gate A2 certified)
-Commit: <filled at certification — see §L>
+Commit: 44bc6709f7d3b062bef6d2b2e5834fc2f83efaf8
 ```
 
 ## B. Provider contract
@@ -186,12 +186,26 @@ ownership writes go through `ProviderResourceOwnershipService`; gate writes go t
 Filled at certification:
 
 ```
-Gate A3 targeted:        37 new tests — ProviderPaymentExecutionTest (13),
+Gate A3 targeted:        37 new tests, 37 passed — ProviderPaymentExecutionTest (13),
                          ProviderRefundExecutionTest (7), ProviderEventIngestionTest (7),
-                         ProviderFeeTrustSafetyTest (6), ProviderRaceCertificationTest (4)
-Pay suite total:         <surface run>
-Affected surface:        <surface run>
-GitHub certification:    <run id / commit / counts>
+                         ProviderFeeTrustSafetyTest (6), ProviderRaceCertificationTest (4, pcntl fork)
+Affected surface:        3092 tests (Pay + Integrations + Unit/Integrations + SchemaTenantFirewall
+                         + RlsEnforcement + LoginPolicy + Tenancy + Accounting) — green after one
+                         prose-firewall docblock fix
+GitHub certification:    run 32011240666  (workflow: Schema Tenant Firewall,
+                         branch ci/gate-a2-certification, pinned checkout)
+                         HEAD tested = 44bc6709f7d3b062bef6d2b2e5834fc2f83efaf8 (exact match)
+                         PHP 8.3.6 · PostgreSQL 16 service container · APP_ENV=testing
+                         started 2026-08-17T08:37:59Z, finished 09:07:50Z (29m51s)
+                         Passed:  13450   (126,289 assertions)
+                         Risky:   57      (pre-existing)
+                         Skipped: 4       (pre-existing ClamAV daemon-unavailable set;
+                                           every Gate A3 certification-blocking test,
+                                           including all four pcntl races, EXECUTED and PASSED)
+                         Failed:  0
+                         Errors:  0
+                         Total accounted: 13450 + 57 + 4 = 13511
+                         (= Gate A2's 13474 + exactly the 37 new Gate A3 tests)
 ```
 
 ## M. Files changed
@@ -238,4 +252,7 @@ payload), `RefundReservationService` (reason → canonical payload),
 
 ## P. Final decision
 
-Recorded after GitHub certification — see the conversation report.
+```
+GATE A3 PASS
+READY FOR GATE B
+```
