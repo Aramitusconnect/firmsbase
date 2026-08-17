@@ -71,6 +71,13 @@ on:
   push:
     branches:
       - main
+      # FirmsVault Pay Gate A2 certification branch. This branch exists
+      # ONLY to run this existing workflow against the Gate A2 candidate
+      # commit on a clean GitHub runner (the development server is
+      # contended). It is never merged anywhere — see the pinned checkout
+      # ref below.
+      - ci/gate-a2-certification
+  workflow_dispatch:
 
 concurrency:
   group: schema-tenant-firewall-${{ github.workflow }}-${{ github.ref }}
@@ -126,6 +133,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
+        with:
+          # CERTIFICATION PIN — Gate A2 candidate commit. The mission
+          # requires the job to prove it tested exactly 179cc7f, so the
+          # application code under test is that commit, not the branch
+          # tip that carries this trigger. This pin exists only on the
+          # never-merged ci/gate-a2-certification branch; main's copy of
+          # this workflow is unchanged and still checks out its own ref.
+          ref: 179cc7f92ccf4e94d3a461c22ce16e6cde746a19
+          fetch-depth: 0
+
+      - name: Record certification identity (exact-code requirement)
+        run: |
+          set -euo pipefail
+          echo "HEAD=$(git rev-parse HEAD)"
+          echo "HEAD_SHORT=$(git rev-parse --short HEAD)"
+          echo "SUBJECT=$(git log -1 --format=%s)"
+          echo "PHP=$(php -v | head -1)"
+          echo "STARTED=$(date -u +%FT%TZ)"
+          test "$(git rev-parse --short=7 HEAD)" = "179cc7f" \
+            || { echo "CERTIFICATION COMMIT MISMATCH"; exit 1; }
 
       - name: Set up PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2 (2026-06 release)
