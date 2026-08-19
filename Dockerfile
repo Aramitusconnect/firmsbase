@@ -41,7 +41,7 @@ ARG FRANKENPHP_BASE_TAG=1-php8.3-trixie
 # published linux/amd64 image for this exact tag at that time. Re-verify and
 # re-pin deliberately on each future remediation pass rather than floating
 # silently.
-ARG FRANKENPHP_BASE_DIGEST=sha256:233a2d64466d697d2cb60bb951c73e23d7f6a614295072ae1001b8dc46efa4e2
+ARG FRANKENPHP_BASE_DIGEST=sha256:9e733c52ad3f2279d3e7144d70e91d5cf6d16a57a6dd4725d4d7e39a09f56359
 # Vite 8 / laravel-vite-plugin 3.1 / @tailwindcss/oxide require Node >=20.19
 # (see package.json "engines" and docs/ecs/ec2-dependency-audit.md).
 ARG NODE_VERSION=20-bookworm-slim
