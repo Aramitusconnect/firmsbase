@@ -2,6 +2,22 @@
 # reasoning behind every alarm in this file — kept in sync deliberately;
 # update both together.
 
+locals {
+  # Static, configuration-known key set for the per-service alarms below —
+  # gated by the literal var.ses_consumer_enabled boolean, never by
+  # comparing var.ses_consumer_service_name (a value that can be
+  # unknown-until-apply for a not-yet-created ses-consumer ECS service) to
+  # null. See docs/ecs/state-adoption-plan.md.
+  service_alarm_names = merge(
+    {
+      web             = var.web_service_name
+      general_worker  = var.general_worker_service_name
+      critical_worker = var.critical_worker_service_name
+    },
+    var.ses_consumer_enabled ? { ses_consumer = var.ses_consumer_service_name } : {}
+  )
+}
+
 resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   alarm_name          = "${var.name_prefix}-alb-5xx"
   comparison_operator = "GreaterThanThreshold"
@@ -67,11 +83,7 @@ resource "aws_cloudwatch_metric_alarm" "target_unhealthy" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "ecs_service_running_count" {
-  for_each = {
-    web             = var.web_service_name
-    general_worker  = var.general_worker_service_name
-    critical_worker = var.critical_worker_service_name
-  }
+  for_each = local.service_alarm_names
 
   alarm_name          = "${var.name_prefix}-${each.key}-running-count-low"
   comparison_operator = "LessThanThreshold"
@@ -95,11 +107,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_service_running_count" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "ecs_service_cpu_high" {
-  for_each = {
-    web             = var.web_service_name
-    general_worker  = var.general_worker_service_name
-    critical_worker = var.critical_worker_service_name
-  }
+  for_each = local.service_alarm_names
 
   alarm_name          = "${var.name_prefix}-${each.key}-cpu-high"
   comparison_operator = "GreaterThanThreshold"
@@ -308,4 +316,127 @@ resource "aws_cloudwatch_metric_alarm" "scheduler_heartbeat_missing" {
   ok_actions          = [var.sns_topic_arn]
 
   tags = var.tags
+}
+
+# ---------------------------------------------------------------------------
+# SES bounce/complaint queue observability — unlike the FirmsBase-namespace
+# alarms above, these use AWS/SQS metrics AWS emits automatically the
+# moment the queue exists (see docs/ecs/observability.md "Metrics
+# (AWS-native, available today without any code change)"), so they are NOT
+# gated behind enable_custom_metric_alarms — only behind the queue/DLQ
+# name actually being supplied.
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_metric_alarm" "ses_events_queue_backlog_high" {
+  count = var.ses_events_queue_name == null ? 0 : 1
+
+  alarm_name          = "${var.name_prefix}-ses-events-queue-backlog-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  period              = 300
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  statistic           = "Average"
+  threshold           = 100
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "SES bounce/complaint queue backlog above 100 visible messages for 15 minutes — the ses-consumer service may be down or falling behind."
+  alarm_actions       = [var.sns_topic_arn]
+  ok_actions          = [var.sns_topic_arn]
+
+  dimensions = {
+    QueueName = var.ses_events_queue_name
+  }
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "ses_events_oldest_message_age_high" {
+  count = var.ses_events_queue_name == null ? 0 : 1
+
+  alarm_name          = "${var.name_prefix}-ses-events-oldest-message-age-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  period              = 300
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateAgeOfOldestMessage"
+  statistic           = "Maximum"
+  threshold           = 1800 # 30 minutes
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "Oldest visible message in the SES bounce/complaint queue older than 30 minutes — events are not being consumed in a timely manner."
+  alarm_actions       = [var.sns_topic_arn]
+  ok_actions          = [var.sns_topic_arn]
+
+  dimensions = {
+    QueueName = var.ses_events_queue_name
+  }
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "ses_events_dlq_messages_present" {
+  count = var.ses_events_dlq_name == null ? 0 : 1
+
+  alarm_name          = "${var.name_prefix}-ses-events-dlq-messages-present"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  period              = 300
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  statistic           = "Maximum"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "At least one message has landed in the SES bounce/complaint dead-letter queue — SQS's own redrive policy moved it there after repeated failed processing attempts. This module grants ses-consumer no permission on the DLQ; investigate and reprocess manually."
+  alarm_actions       = [var.sns_topic_arn]
+  ok_actions          = [var.sns_topic_arn]
+
+  dimensions = {
+    QueueName = var.ses_events_dlq_name
+  }
+
+  tags = var.tags
+}
+
+# Log-based "consumer errors" detection — a CloudWatch Logs metric filter
+# over the ses-consumer service's own dedicated log group, matching the
+# exact Log::error()/Log::warning() event names
+# App\Services\SesEventConsumerService and
+# App\Console\Commands\ConsumeSesEventsCommand already emit today (no new
+# application code required — see docs/ecs/observability.md). Deliberately
+# a simple substring/term filter, not a JSON field match: LOG_STDERR_FORMATTER
+# is unset in this environment, so log lines are plain Monolog text, and a
+# literal event-name match works identically either way.
+resource "aws_cloudwatch_log_metric_filter" "ses_consumer_errors" {
+  count = var.ses_consumer_enabled ? 1 : 0
+
+  name           = "${var.name_prefix}-ses-consumer-errors"
+  log_group_name = var.ses_consumer_log_group_name
+  pattern        = "?ses_event_processing_exception ?ses_event_malformed_json ?ses_event_malformed_sns_wrapped_message ?ses_event_invalid_structure ?ses_event_recipient_mismatch ?ses_event_firm_not_found ?ses_event_platform_recipient_mismatch"
+
+  metric_transformation {
+    name          = "SesConsumerErrorCount"
+    namespace     = "FirmsBase/SesConsumer"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "ses_consumer_errors_high" {
+  count = var.ses_consumer_enabled ? 1 : 0
+
+  alarm_name          = "${var.name_prefix}-ses-consumer-errors-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  period              = 300
+  namespace           = "FirmsBase/SesConsumer"
+  metric_name         = "SesConsumerErrorCount"
+  statistic           = "Sum"
+  threshold           = 10
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "More than 10 SES event processing errors (malformed payload, unresolved correlation, recipient mismatch, etc.) logged in 5 minutes."
+  alarm_actions       = [var.sns_topic_arn]
+  ok_actions          = [var.sns_topic_arn]
+
+  tags = var.tags
+
+  depends_on = [aws_cloudwatch_log_metric_filter.ses_consumer_errors]
 }

@@ -2,6 +2,18 @@ variable "name_prefix" {
   type = string
 }
 
+variable "alb_name" {
+  description = "Override for the ALB's exact name. Null (default) preserves this module's original name_prefix-generated pattern (\"<6-char-prefix>-<random>\") — the AWS-recommended way to avoid name collisions when Terraform creates a brand-new load balancer. name (like name_prefix) is ForceNew on aws_lb — an already-imported live ALB with a fixed, pre-existing name MUST have this set to the exact live value, or the very next apply plans a disruptive replacement of a load balancer actively serving traffic. See target_group_name below (also ForceNew, same rationale)."
+  type        = string
+  default     = null
+}
+
+variable "target_group_name" {
+  description = "Override for the web target group's exact name. Null (default) preserves this module's original name_prefix-generated pattern. name (like name_prefix) is ForceNew on aws_lb_target_group — an already-imported live target group with a fixed, pre-existing name MUST have this set to the exact live value, or the very next apply plans a disruptive replacement of a target group actively registered with the live ALB and ECS service."
+  type        = string
+  default     = null
+}
+
 variable "vpc_id" {
   type = string
 }
@@ -63,6 +75,17 @@ variable "unhealthy_threshold_count" {
   default = 3
 }
 
+variable "health_check_matcher" {
+  description = "HTTP status-code matcher accepted by the ALB target-group health check."
+  type        = string
+  default     = "200"
+
+  validation {
+    condition     = can(regex("^[0-9]{3}(-[0-9]{3})?(,[0-9]{3}(-[0-9]{3})?)*$", var.health_check_matcher))
+    error_message = "health_check_matcher must be an ALB-compatible HTTP code or range such as 200 or 200-399."
+  }
+}
+
 variable "enable_deletion_protection" {
   description = "Should stay false for staging (mission does not provision production infra), left as a variable so a future production environment can override it."
   type        = bool
@@ -78,4 +101,54 @@ variable "access_logs_bucket" {
 variable "tags" {
   type    = map(string)
   default = {}
+}
+
+variable "alb_adoption_tags" {
+  description = "Extra literal tags merged onto the ALB, meant for exactly one purpose: reproducing a pre-Terraform-adoption tag set an already-imported live ALB carries so it becomes part of this resource's real, managed tag set instead of being silently dropped by the next apply. Empty (default) for a brand-new environment. Never used for ordinary environment-wide tagging — use var.tags for that."
+  type        = map(string)
+  default     = {}
+}
+
+variable "target_group_adoption_tags" {
+  description = "Extra literal tags merged onto the web target group — see alb_adoption_tags above for the identical rationale, applied to this sibling resource."
+  type        = map(string)
+  default     = {}
+}
+
+variable "https_listener_tags" {
+  description = "Extra literal tags merged onto the HTTPS listener — see alb_adoption_tags above for the identical rationale, applied to this sibling resource."
+  type        = map(string)
+  default     = {}
+}
+
+variable "http_redirect_listener_tags" {
+  description = "Extra literal tags merged onto the HTTP-redirect listener — see alb_adoption_tags above for the identical rationale, applied to this sibling resource."
+  type        = map(string)
+  default     = {}
+}
+
+variable "canonical_hostnames" {
+  description = <<-EOT
+    Mission 1 (canonical reconstruction — Domain & Security Boundary
+    Architecture). Optional map of the six canonical FirmsVault
+    hostnames this ALB should route by Host header — all to the SAME
+    target group (aws_lb_target_group.web): it is acceptable for all
+    hostnames initially to point to the same ECS service/target group;
+    do NOT create separate ECS services simply because there are
+    multiple hostnames.
+
+    Real hostnames are an external DNS/ownership input this module does
+    not invent or assign — see docs/ecs/env.ecs.example and
+    docs/ecs/staging-readiness-report.md. Left null (the default) until
+    real hostnames are provisioned; while null, no listener rules are
+    created and the existing default forward action on
+    aws_lb_listener.https continues to serve every request exactly as
+    it did before this mission, so adding this variable has zero effect
+    on any currently-deployed environment.
+
+    Expected keys (all six, once real values exist): marketing,
+    firm_app, client_portal, admin, myattorney, api.
+  EOT
+  type        = map(string)
+  default     = null
 }

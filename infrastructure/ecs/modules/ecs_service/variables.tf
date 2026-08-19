@@ -98,10 +98,20 @@ variable "security_group_ids" {
   type = list(string)
 }
 
+variable "assign_public_ip" {
+  description = "Whether ECS tasks in this service get a public IP. No default, deliberately — every caller must decide explicitly. In a VPC with no NAT gateway (true of this repo's default staging VPC — see docs/ecs/state-adoption-plan.md §9.1), this is the ONLY way tasks reach the internet at all (ECR pulls, Secrets Manager, CloudWatch Logs, SES, SQS); setting it false there cuts off all outbound connectivity. The staging root module derives this from var.private_egress_ready, which itself cannot be set true without real, verified NAT egress (nat_gateway_ids) — see environments/staging/variables.tf."
+  type        = bool
+}
+
 variable "target_group_arn" {
-  description = "Web role only — the ALB target group to register tasks in."
+  description = "Web role only — the ALB target group to register tasks in. Value only — see attach_target_group for whether the load_balancer block is included; an unknown-until-apply ARN (e.g. before the target group is imported/created) cannot be compared to null to decide a for_each/count instance set."
   type        = string
   default     = null
+}
+
+variable "attach_target_group" {
+  description = "Whether to register this service with target_group_arn. Must be a literal true/false set explicitly by every caller — never derived from whether target_group_arn is null, since that value can be unknown during import/plan for a not-yet-created target group, and an unknown value can't determine a for_each key set. No default, deliberately: a default of false would let an existing caller that already passes target_group_arn silently lose its load_balancer registration by simply omitting this variable during an upgrade, rather than failing loudly at plan/validate time."
+  type        = bool
 }
 
 variable "deployment_minimum_healthy_percent" {
@@ -157,7 +167,35 @@ variable "capacity_provider" {
   }
 }
 
+variable "use_capacity_provider_strategy" {
+  description = "Whether the service places tasks via a capacity_provider_strategy block (true) or a fixed launch_type=\"FARGATE\" (false). No default, deliberately — every caller must decide explicitly, matching this module's original design intent of always using a capacity-provider strategy versus this staging environment's live reality, where every service currently runs with launch_type=FARGATE and the cluster has no capacity-provider association at all (see docs/ecs/state-adoption-plan.md §9.10/§9.11). The two are mutually exclusive on aws_ecs_service; AWS rejects setting both."
+  type        = bool
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
+}
+
+variable "enable_ecs_managed_tags" {
+  description = "Whether ECS-managed tags (e.g. aws:ecs:serviceName) are applied to tasks. Defaults to false, matching the AWS API's own default and this staging environment's live \"web\" service. The other three live services here (worker/scheduler/critical-worker) currently run with this set true — every caller adopting an already-imported service must decide explicitly rather than silently inheriting a value that may not match the live service being adopted. See docs/ecs/state-adoption-plan.md."
+  type        = bool
+  default     = false
+}
+
+variable "readonly_root_filesystem" {
+  description = "Mission 1B (Extreme Security Hardening), section 32: read-only root filesystem, writable temp mounts only where necessary. Defaults to false, matching this module's existing readonlyRootFilesystem=false default (documented there as 'a documented hardening follow-up, not the staging default') — flipping this to true is a deliberate, later, per-environment decision, not a side effect of this mission's own code landing. When true, the container's root filesystem is read-only and the exact six writable leaf directories docs/ecs/container-architecture.md documents (storage/framework/{cache,sessions,testing,views}, storage/logs, bootstrap/cache) are each backed by their own empty Fargate-managed ephemeral volume via mountPoints — never a shared parent-directory mount, which would wipe out subdirectories the image already created via chown at build time."
+  type        = bool
+  default     = false
+}
+
+variable "propagate_tags" {
+  description = "Whether/how tags propagate from the task definition or service to tasks — \"NONE\", \"SERVICE\", or \"TASK_DEFINITION\". Defaults to \"NONE\", matching the AWS API's own default and this staging environment's live \"web\" service. The other three live services here (worker/scheduler/critical-worker) currently run with this set to \"TASK_DEFINITION\" — every caller adopting an already-imported service must decide explicitly. See docs/ecs/state-adoption-plan.md."
+  type        = string
+  default     = "NONE"
+
+  validation {
+    condition     = contains(["NONE", "SERVICE", "TASK_DEFINITION"], var.propagate_tags)
+    error_message = "propagate_tags must be \"NONE\", \"SERVICE\", or \"TASK_DEFINITION\"."
+  }
 }

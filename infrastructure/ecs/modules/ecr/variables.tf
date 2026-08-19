@@ -31,3 +31,14 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "encryption_type" {
+  description = "ECR repository encryption type — \"AES256\" or \"KMS\". Null (default) preserves this module's original KMS default, fine for a brand-new environment. ForceNew on aws_ecr_repository (the ECR API has no in-place encryption-type change) — an already-imported live repository whose encryption type differs from this default MUST have this set to the exact live value, or the very next apply plans a disruptive replacement of the entire image repository. A future migration from AES256 to KMS for an already-created repository requires a dedicated ECR migration plan (new repository, re-push/copy images, cut over consumers), never a routine config change here."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.encryption_type == null || contains(["AES256", "KMS"], var.encryption_type)
+    error_message = "encryption_type must be \"AES256\" or \"KMS\"."
+  }
+}
