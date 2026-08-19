@@ -106,6 +106,14 @@ final class TrustHostsAllowlistTest extends TestCase
 
     public function test_rejected_host_response_does_not_leak_supplied_host(): void
     {
+        // phpunit.xml does not pin APP_DEBUG, so without this the result of
+        // this test depends on whatever .env the runner happens to have: with
+        // debug on, the exception page renders the exception MESSAGE — the
+        // suspicious host itself — and the leak assertion below fails. Debug
+        // is never on in staging or production, so pin the configuration this
+        // property is actually about instead of inheriting the environment's.
+        config(['app.debug' => false]);
+
         Route::get('/__suspicious-host-leak-probe', function (): never {
             throw new SuspiciousOperationException('attacker-controlled.example');
         });
@@ -113,7 +121,17 @@ final class TrustHostsAllowlistTest extends TestCase
         $response = $this->get('http://firmsvault.test/__suspicious-host-leak-probe');
 
         $response->assertStatus(400);
-        $this->assertSame('Bad Request', $response->getContent());
+
+        // The framework answers a rejected host with its generic HTML error
+        // page, not a bare "Bad Request" body. The property under test is that
+        // the page is generic: the suspicious host must appear nowhere in the
+        // response, so assert against the raw body as well as the rendered
+        // text — assertDontSeeText strips tags and would miss a host echoed
+        // inside an attribute or comment.
+        $this->assertStringNotContainsString(
+            'attacker-controlled.example',
+            (string) $response->getContent(),
+        );
         $response->assertDontSeeText('attacker-controlled.example');
     }
 
@@ -131,8 +149,8 @@ final class TrustHostsAllowlistTest extends TestCase
         foreach ($trustedHosts as $host) {
             $this->assertNotSame('', $host);
             $this->assertStringNotContainsString('*', $host);
-            $this->assertStringNotStartsWith('^', $host);
-            $this->assertStringNotStartsWith('.', $host);
+            $this->assertStringStartsNotWith('^', $host);
+            $this->assertStringStartsNotWith('.', $host);
         }
     }
 
