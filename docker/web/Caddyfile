@@ -26,7 +26,15 @@
 		format json
 	}
 
-	php_server
+	@alb_health {
+		path /up
+		header User-Agent ELB-HealthChecker/2.0
+	}
+
+	route {
+		request_header @alb_health Host {$FIRMSVAULT_ALB_HEALTHCHECK_HOST}
+		php_server
+	}
 
 	# Anything not matched by php_server (i.e. not an existing static file
 	# under public/ and not routed to index.php) falls through to Laravel's

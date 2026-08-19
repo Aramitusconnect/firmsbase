@@ -1,11 +1,13 @@
 <?php
 
 use App\Http\Controllers\ReadinessController;
+use App\Services\CanonicalUrlService;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Symfony\Component\HttpFoundation\Exception\SuspiciousOperationException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -68,9 +70,18 @@ return Application::configure(basePath: dirname(__DIR__))
             at: '*',
             headers: Request::HEADER_X_FORWARDED_AWS_ELB,
         );
+
+        $middleware->trustHosts(
+            at: fn () => app(CanonicalUrlService::class)->trustedHostPatterns(),
+            subdomains: false,
+        );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*'),
         );
+
+        $exceptions->render(function (SuspiciousOperationException $e) {
+            return response('Bad Request', 400);
+        });
     })->create();
