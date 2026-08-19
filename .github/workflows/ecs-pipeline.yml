@@ -594,6 +594,13 @@ jobs:
             --output trivy-vuln-results.json \
             "${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}"
 
+      - name: Checkout CI policy helper separately
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .ci-policy
+          persist-credentials: false
+
       # This job has no PHP toolchain of its own (only lint/test do) — reuse
       # the PHP 8.3 runtime already inside the image this job just built,
       # same pattern as the "runtime probe: curl reports libssh2" step below
@@ -605,7 +612,7 @@ jobs:
             -v "${{ github.workspace }}:/workspace:ro" \
             --entrypoint /usr/local/bin/php \
             "${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}" \
-            /workspace/docker/security/verify-staging-exception.php /workspace/trivy-vuln-results.json
+            /workspace/.ci-policy/docker/security/verify-staging-exception.php /workspace/trivy-vuln-results.json
 
       - name: Scan image for secrets (Trivy) — 0 findings required
         run: |
