@@ -24,20 +24,41 @@ declare(strict_types=1);
  * Usage: php verify-staging-exception.php <path-to-trivy-vuln-results.json>
  */
 const APPROVED_EXCEPTIONS = [
-    'GHSA-r277-6w6q-xmqw' => '2026-09-14',
-    'GHSA-hrxh-6v49-42gf' => '2026-09-14',
-    'CVE-2026-39821' => '2026-09-14',
-    'CVE-2026-46600' => '2026-09-14',
+    'GHSA-r277-6w6q-xmqw' => [
+        'expires' => '2026-09-14',
+        'expected_target_contains' => 'frankenphp',
+        'expected_package' => null,
+        'expected_installed_version' => null,
+    ],
+    'GHSA-hrxh-6v49-42gf' => [
+        'expires' => '2026-09-14',
+        'expected_target_contains' => 'frankenphp',
+        'expected_package' => null,
+        'expected_installed_version' => null,
+    ],
+    'CVE-2026-39821' => [
+        'expires' => '2026-09-14',
+        'expected_target_contains' => 'frankenphp',
+        'expected_package' => null,
+        'expected_installed_version' => null,
+    ],
+    'CVE-2026-46600' => [
+        'expires' => '2026-09-14',
+        'expected_target_contains' => 'frankenphp',
+        'expected_package' => null,
+        'expected_installed_version' => null,
+    ],
+    'CVE-2026-14456' => [
+        'expires' => '2026-09-14',
+        'expected_target_contains' => 'debian 13.6',
+        'expected_package' => 'libssl3t64',
+        'expected_installed_version' => '3.5.6-1~deb13u2',
+    ],
 ];
 
-// The FrankenPHP candidate this exception list was assessed against. If a
-// finding under one of the approved IDs above is ever found against a
-// DIFFERENT package/version than what was actually reviewed (e.g. because
-// the base image pin moved without updating this list), that's exactly
-// the kind of silent drift this check exists to catch — so each finding
-// is matched by ID AND cross-checked that it still belongs to the
-// frankenphp binary target, not merely present somewhere in the scan.
-const EXPECTED_SCAN_TARGET_SUBSTRING = 'frankenphp';
+// Each finding is matched by ID and by the exact metadata that made the
+// exception reviewable. Null package/version pins intentionally preserve the
+// original FrankenPHP-only behavior for the first four exceptions.
 
 function fail(string $message): never
 {
@@ -94,15 +115,43 @@ foreach (($decoded['Results'] ?? []) as $result) {
             continue;
         }
 
-        if (! str_contains($target, EXPECTED_SCAN_TARGET_SUBSTRING)) {
+        $exception = APPROVED_EXCEPTIONS[$id];
+        $expectedTargetContains = (string) $exception['expected_target_contains'];
+
+        if (! str_contains($target, $expectedTargetContains)) {
             fail(sprintf(
-                "approved exception ID %s matched, but its finding is against target '%s', not the expected frankenphp binary — this looks like the same ID appearing on an unrelated/unexpected component, refusing to honor it",
+                "approved exception ID %s matched, but its finding is against target '%s', not a target containing '%s' — this looks like the same ID appearing on an unrelated/unexpected component, refusing to honor it",
                 $id,
-                $target
+                $target,
+                $expectedTargetContains
             ));
         }
 
-        $expiresAt = APPROVED_EXCEPTIONS[$id];
+        $pkgName = (string) ($vuln['PkgName'] ?? '');
+        $expectedPackage = $exception['expected_package'];
+
+        if (is_string($expectedPackage) && $pkgName !== $expectedPackage) {
+            fail(sprintf(
+                "approved exception ID %s matched, but its package is '%s', not the expected package '%s' — refusing to honor it",
+                $id,
+                $pkgName,
+                $expectedPackage
+            ));
+        }
+
+        $installedVersion = (string) ($vuln['InstalledVersion'] ?? '');
+        $expectedInstalledVersion = $exception['expected_installed_version'];
+
+        if (is_string($expectedInstalledVersion) && $installedVersion !== $expectedInstalledVersion) {
+            fail(sprintf(
+                "approved exception ID %s matched, but its installed version is '%s', not the expected installed version '%s' — refusing to honor it",
+                $id,
+                $installedVersion,
+                $expectedInstalledVersion
+            ));
+        }
+
+        $expiresAt = (string) $exception['expires'];
 
         if ($today > $expiresAt) {
             fail("approved exception {$id} expired on {$expiresAt} (today is {$today}) — re-review required before this can be honored again");
