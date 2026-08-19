@@ -124,6 +124,17 @@ variable "deployment_maximum_percent" {
   default = 200
 }
 
+variable "health_check_grace_period_seconds" {
+  description = "Seconds ECS ignores ALB health-check failures for a newly started task. Only meaningful when attach_target_group is true; ECS rejects it otherwise, so the module passes null for roles with no load balancer. Defaults to 60, the value this module previously hardcoded, so existing environments are unchanged. Preproduction raises it to 90 because /up traverses Laravel rather than being answered synthetically by Caddy, so a cold task needs longer before its first successful health check."
+  type        = number
+  default     = 60
+
+  validation {
+    condition     = var.health_check_grace_period_seconds >= 0 && var.health_check_grace_period_seconds <= 2147483647
+    error_message = "health_check_grace_period_seconds must be between 0 and 2147483647."
+  }
+}
+
 variable "enable_deployment_circuit_breaker" {
   description = "Mission requirement: 'deployment circuit breaker' + 'rollback behavior'. Automatically rolls back a service deployment that fails to reach a steady state."
   type        = bool

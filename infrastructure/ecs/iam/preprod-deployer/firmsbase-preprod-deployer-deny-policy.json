@@ -1,0 +1,129 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "NeverTouchProductionOrStagingTerraformState",
+      "Effect": "Deny",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::firmsbase-terraform-state-603013471426-us-east-1/environments/production/*",
+        "arn:aws:s3:::firmsbase-terraform-state-603013471426-us-east-1/environments/staging/*"
+      ]
+    },
+    {
+      "Sid": "NeverMutateStagingOrProductionWorkloads",
+      "Effect": "Deny",
+      "Action": [
+        "ecs:*",
+        "rds:*",
+        "elasticache:*",
+        "elasticloadbalancing:*",
+        "secretsmanager:*"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringNotLike": {
+          "aws:ResourceTag/Environment": "preproduction"
+        },
+        "Null": {
+          "aws:ResourceTag/Environment": "false"
+        }
+      }
+    },
+    {
+      "Sid": "NeverTouchNamedStagingOrProductionResources",
+      "Effect": "Deny",
+      "Action": [
+        "ecs:*",
+        "rds:*",
+        "elasticache:*"
+      ],
+      "Resource": [
+        "arn:aws:ecs:us-east-1:603013471426:cluster/firmsbase-staging-cluster",
+        "arn:aws:ecs:us-east-1:603013471426:cluster/firmsbase-production-cluster",
+        "arn:aws:ecs:us-east-1:603013471426:service/firmsbase-staging-cluster/*",
+        "arn:aws:ecs:us-east-1:603013471426:service/firmsbase-production-cluster/*",
+        "arn:aws:rds:us-east-1:603013471426:db:firmsbase-staging-db",
+        "arn:aws:rds:us-east-1:603013471426:db:firmsbase-production-db"
+      ]
+    },
+    {
+      "Sid": "NeverTouchStagingOrProductionSecrets",
+      "Effect": "Deny",
+      "Action": "secretsmanager:*",
+      "Resource": [
+        "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/staging/*",
+        "arn:aws:secretsmanager:us-east-1:603013471426:secret:firmsbase/production/*"
+      ]
+    },
+    {
+      "Sid": "NeverPushImages",
+      "Effect": "Deny",
+      "Action": [
+        "ecr:PutImage",
+        "ecr:InitiateLayerUpload",
+        "ecr:UploadLayerPart",
+        "ecr:CompleteLayerUpload",
+        "ecr:BatchDeleteImage",
+        "ecr:DeleteRepository",
+        "ecr:CreateRepository"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "NeverEscalateIamOrTamperBoundaries",
+      "Effect": "Deny",
+      "Action": [
+        "iam:CreateUser",
+        "iam:CreateAccessKey",
+        "iam:AttachUserPolicy",
+        "iam:PutUserPolicy",
+        "iam:CreateLoginProfile",
+        "iam:PutRolePermissionsBoundary",
+        "iam:DeleteRolePermissionsBoundary",
+        "iam:CreatePolicy",
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicy",
+        "iam:SetDefaultPolicyVersion",
+        "organizations:*",
+        "account:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "NeverTouchApexOrOtherEnvironmentDns",
+      "Effect": "Deny",
+      "Action": "route53:ChangeResourceRecordSets",
+      "Resource": "arn:aws:route53:::hostedzone/Z0436258R9EG7EDNOHIZ",
+      "Condition": {
+        "ForAnyValue:StringLike": {
+          "route53:ChangeResourceRecordSetsNormalizedRecordNames": [
+            "firmsvault.com",
+            "www.firmsvault.com",
+            "*.staging.firmsvault.com",
+            "staging.firmsvault.com",
+            "app.firmsvault.com",
+            "client.firmsvault.com",
+            "admin.firmsvault.com",
+            "myattorney.firmsvault.com"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "NeverCloudFront",
+      "Effect": "Deny",
+      "Action": "cloudfront:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "NeverMarketingBucket",
+      "Effect": "Deny",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::firmsvault-public-site-603013471426",
+        "arn:aws:s3:::firmsvault-public-site-603013471426/*"
+      ]
+    }
+  ]
+}

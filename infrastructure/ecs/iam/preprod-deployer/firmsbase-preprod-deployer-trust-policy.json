@@ -1,0 +1,13 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "OnlyTheStagingOperatorMayAssume",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::603013471426:user/firmsbase-staging-operator"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}

@@ -153,7 +153,7 @@ resource "aws_ecs_service" "this" {
 
   # Web tasks need time to pass the ALB health check before the deployment
   # considers them steady; other roles have no load balancer to wait on.
-  health_check_grace_period_seconds = var.attach_target_group ? 60 : null
+  health_check_grace_period_seconds = var.attach_target_group ? var.health_check_grace_period_seconds : null
 
   # enable_ecs_managed_tags/propagate_tags: real, live-tracked AWS
   # attributes (confirmed via the installed provider's own schema — both
