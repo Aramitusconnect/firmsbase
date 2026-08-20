@@ -6,6 +6,7 @@ namespace Tests\Feature\Marketplace\Intake;
 
 use App\Enums\DocumentScanStatus;
 use App\Enums\DocumentStatus;
+use App\Livewire\Marketplace\PublicIntakePage;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Models\MarketplaceIntake;
 use App\Marketplace\Services\MarketplaceIntakeDocumentService;
@@ -16,6 +17,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
@@ -42,7 +44,23 @@ class MarketplaceIntakeDocumentUploadRouteTest extends TestCase
         $directoryFirm = DirectoryFirm::factory()->member()->create(['firm_id' => $firm->id, 'accepting_inquiries' => true]);
         $intake = app(MarketplaceIntakeService::class)->startForDirectoryFirm($directoryFirm);
 
+        // Open the intake's signed page, exactly as the visitor who is about to
+        // upload already has — the upload form only exists on that page. The
+        // route now requires that proven possession (see
+        // IntakeLinkPossession), so a fixture that POSTs without it is
+        // describing a request no real visitor can make.
+        $this->openSignedLink($intake);
+
         return [$firm, $intake];
+    }
+
+    /**
+     * Mounting the wizard is what the signed GET route does, and it is where
+     * possession of the link is recorded.
+     */
+    private function openSignedLink(MarketplaceIntake $intake): void
+    {
+        Livewire::test(PublicIntakePage::class, ['uuid' => $intake->uuid]);
     }
 
     public function test_a_valid_upload_to_a_known_intake_creates_a_pending_document(): void
