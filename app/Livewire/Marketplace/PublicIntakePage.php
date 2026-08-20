@@ -9,6 +9,7 @@ use App\Marketplace\Services\MarketplaceIntakeAnswerService;
 use App\Marketplace\Services\MarketplaceIntakeConversationalAssistantService;
 use App\Marketplace\Services\MarketplaceIntakeDocumentService;
 use App\Marketplace\Services\MarketplaceIntakeService;
+use App\Marketplace\Support\IntakeLinkPossession;
 use App\Models\IntakeTemplate;
 use App\Models\IntakeTemplateQuestion;
 use App\Services\IntakeTemplateService;
@@ -142,6 +143,12 @@ class PublicIntakePage extends Component
         }
 
         $this->found = true;
+
+        // Reaching here means this session presented a VALID SIGNED link for
+        // this intake — the 'signed' middleware on the route has already run.
+        // Same-session follow-up actions that are not themselves signed (the
+        // document upload) check this rather than trusting a bare uuid.
+        IntakeLinkPossession::remember($uuid);
 
         (new TenantContextService)->runWithFirmContext($intake->firm, function () use ($intake, $service) {
             if (! $intake->isResumable()) {
@@ -281,11 +288,18 @@ class PublicIntakePage extends Component
             request()->ip(),
         );
 
-        $this->aiNotice = (! $result->usedAi && $result->fallbackReason !== null)
-            ? 'AI assistance is unavailable right now — please continue with the form below.'
-            : null;
+        $this->aiNotice = match (true) {
+            ! $result->usedAi && $result->fallbackReason !== null => 'AI assistance is unavailable right now — please continue with the form below.',
+            // The turn reached the provider and came back with something the
+            // deterministic validator would not accept — an answer that does
+            // not fit this question's own type or options. Silence here is the
+            // worst outcome: the question does not move, nothing is explained,
+            // and the visitor sends the same message again, spending the firm's
+            // tokens each time.
+            $result->validationErrors !== [] => 'That did not answer the question above — please answer it directly, or use the form below.',
+            default => null,
+        };
 
-        $this->validationErrors = $result->validationErrors;
         $this->editingFromReview = false;
 
         // Same fail-closed-outside-context pitfall as saveAnswer() —
@@ -305,6 +319,11 @@ class PublicIntakePage extends Component
         if ($fresh !== null) {
             $this->refreshWizardState($fresh);
         }
+
+        // AFTER the refresh, deliberately. refreshWizardState() clears
+        // validationErrors as part of moving to a question, which silently
+        // discarded this turn's errors when they were assigned before the call.
+        $this->validationErrors = $result->validationErrors;
     }
 
     /**

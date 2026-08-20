@@ -14,6 +14,7 @@ use App\Marketplace\Models\MarketplaceIntake;
 use App\Marketplace\Models\MarketplaceIntakeEvent;
 use App\Marketplace\Services\MarketplaceIntakeService;
 use App\Models\Client;
+use App\Models\Document;
 use App\Models\Firm;
 use App\Models\IntakeTemplate;
 use App\Models\Matter;
@@ -21,6 +22,7 @@ use App\Models\PracticeArea;
 use App\Services\AiProviderKeyService;
 use App\Services\IntakeTemplateService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Tests\Feature\Ai\Concerns\FakesOpenAiTransport;
@@ -433,5 +435,100 @@ class PublicIntakeWizardTest extends TestCase
             ->assertSet('editable', false)
             ->assertSeeText('submitted')
             ->assertDontSee('Before you begin');
+    }
+
+    public function test_an_ai_answer_the_validator_rejects_is_explained_instead_of_silently_dropped(): void
+    {
+        // Found during real-provider acceptance on staging. The visitor sent a
+        // message that did not answer the question being asked; OpenAI returned
+        // an extraction, the deterministic validator refused it, and the page
+        // showed nothing at all — same question, no message, no reason. The
+        // visitor's only recourse was to send again, spending the firm's tokens
+        // on every attempt.
+        [$firm, , $intake] = $this->aiAssistedIntake();
+
+        // Force the rejection deterministically: a value the pending question's
+        // own validator cannot accept.
+        $this->fakeOpenAiExtraction('legal_issue', '');
+
+        $component = $this->completeDisclosureAndIdentity(Livewire::test(PublicIntakePage::class, ['uuid' => $intake->uuid]))
+            ->set('chatMessage', 'What sort of thing do you need from me?')
+            ->call('sendChatMessage');
+
+        $component->assertSet('questionCode', 'legal_issue');
+        $this->assertNotEmpty(
+            $component->get('validationErrors'),
+            'The validator refused the extracted answer, so the visitor must be told why.',
+        );
+        $this->assertNotNull($component->get('aiNotice'));
+
+        $this->runWithFirmContext($firm, function () use ($intake) {
+            $this->assertNull($intake->fresh()->structured_data['legal_issue'] ?? null);
+        });
+    }
+
+    public function test_a_successful_ai_turn_leaves_no_stale_error_behind(): void
+    {
+        // The other half: the errors must not outlive the turn that produced
+        // them, or every later question would inherit a warning about an answer
+        // that was already accepted.
+        [, , $intake] = $this->aiAssistedIntake();
+
+        $component = $this->completeDisclosureAndIdentity(Livewire::test(PublicIntakePage::class, ['uuid' => $intake->uuid]))
+            ->set('chatMessage', 'This is a contract dispute with my landlord.')
+            ->call('sendChatMessage');
+
+        $component->assertSet('questionCode', 'state');
+        $this->assertSame([], $component->get('validationErrors'));
+        $this->assertNull($component->get('aiNotice'));
+    }
+
+    public function test_a_document_cannot_be_attached_to_an_intake_this_session_never_opened(): void
+    {
+        // Found during real staging acceptance. The upload route resolves the
+        // intake by uuid alone; it is deliberately not signed, and it never
+        // checked that this session had ever held the signed link. A second
+        // visitor holding only the bare uuid — from an access log, a referrer
+        // header, a shared screen — attached a file to a stranger's intake,
+        // and the firm saw it as that prospect's own evidence.
+        [, , $mine] = $this->deterministicIntake();
+        [, , $someoneElses] = $this->deterministicIntake();
+
+        // Prove possession of MY link only, exactly as loading the signed page does.
+        Livewire::test(PublicIntakePage::class, ['uuid' => $mine->uuid]);
+
+        $response = $this->post(
+            $this->myAttorneyUrl("/intake/{$someoneElses->uuid}/documents"),
+            ['file' => UploadedFile::fake()->create('planted.pdf', 8, 'application/pdf')],
+        );
+
+        $response->assertNotFound();
+
+        $this->runWithFirmContext($someoneElses->firm, function () use ($someoneElses) {
+            $this->assertSame(
+                0,
+                Document::query()->where('marketplace_intake_id', $someoneElses->id)->count(),
+                'No document may be attached to an intake this session never opened.',
+            );
+        });
+    }
+
+    public function test_a_document_can_be_attached_to_the_intake_this_session_opened(): void
+    {
+        // The other half: the guard must not break the legitimate path.
+        [$firm, , $intake] = $this->deterministicIntake();
+
+        Livewire::test(PublicIntakePage::class, ['uuid' => $intake->uuid]);
+
+        $response = $this->post(
+            $this->myAttorneyUrl("/intake/{$intake->uuid}/documents"),
+            ['file' => UploadedFile::fake()->create('my-evidence.pdf', 8, 'application/pdf')],
+        );
+
+        $response->assertRedirect();
+
+        $this->runWithFirmContext($firm, function () use ($intake) {
+            $this->assertSame(1, Document::query()->where('marketplace_intake_id', $intake->id)->count());
+        });
     }
 }

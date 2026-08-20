@@ -7,6 +7,7 @@ namespace App\Http\Controllers\MyAttorney;
 use App\Http\Controllers\Controller;
 use App\Marketplace\Services\MarketplaceIntakeDocumentService;
 use App\Marketplace\Services\MarketplaceIntakeService;
+use App\Marketplace\Support\IntakeLinkPossession;
 use App\Services\TenantContextService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -35,6 +36,20 @@ class MarketplaceIntakeDocumentController extends Controller
         $intake = $intakes->resolveByUuid($uuid);
 
         if ($intake === null) {
+            throw new NotFoundHttpException;
+        }
+
+        // A uuid is not the credential — the SIGNED link is. This route is
+        // deliberately not signed itself (a signature in a POST URL leaks into
+        // logs and referrers), so it requires the session to have actually
+        // opened the signed link at some point. Without this, anyone who
+        // learned a uuid — from an access log, a referrer header, a shared
+        // screen — could attach files to a stranger's intake, which the firm
+        // would then see as that prospect's own evidence.
+        //
+        // Same generic 404 as an unknown uuid: never distinguish "wrong
+        // intake" from "no such intake".
+        if (! IntakeLinkPossession::holds($uuid)) {
             throw new NotFoundHttpException;
         }
 
