@@ -7,13 +7,15 @@ use App\ValueObjects\AiProviderResponse;
 
 /**
  * AiProviderAdapterInterface — the entire contract a "provider"
- * implements. Phase 15 registers ONLY FakeAiProviderAdapter against
- * this interface in the container. No implementation in this phase
- * may perform real HTTP, SDK, OAuth, DNS, curl, Guzzle, fsockopen, or
- * any other network behavior — a future, separately-approved
- * provider-integration phase would add real adapters (OpenAiAdapter,
- * AnthropicAdapter, etc.) behind this same interface without changing
- * any call site.
+ * implements.
+ *
+ * Deliberately NOT bound in the container. An adapter is built per firm
+ * by AiProviderResolver from that firm's own mode and credential, so
+ * that a container binding can never make one firm's configuration
+ * serve another's request — which is exactly how a stand-in adapter
+ * once ended up answering for a firm that had configured OpenAI. A
+ * second provider adds a class here and a branch in the resolver,
+ * without changing any call site.
  */
 interface AiProviderAdapterInterface
 {

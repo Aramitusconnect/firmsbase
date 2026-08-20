@@ -2,25 +2,28 @@
 
 namespace Tests\Feature\Ai\PromptInjection;
 
+use App\Ai\OpenAi\OpenAiProviderAdapter;
 use App\Enums\AiProvider;
+use App\Enums\AiToolActionStatus;
 use App\Enums\AiUsageActionType;
 use App\Models\User;
 use App\Services\AiUsageRecorderService;
-use App\Services\FakeAiProviderAdapter;
 use App\Services\PromptInjectionResistanceService;
 use App\ValueObjects\AiPromptRequest;
+use App\ValueObjects\AiProviderResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\Feature\Ai\Concerns\SetsUpAiEntitledFirm;
 use Tests\TestCase;
 
 /**
  * Project rules 17/18: client-uploaded document text is untrusted
  * data, not instructions; prompt-injection resistance must be tested.
- * The adversarial payload lives ONLY in documentDerivedText —
- * FakeAiProviderAdapter structurally never derives tool actions from
- * that field (see its own docblock), so this test proves the whole
- * pipeline — adapter through AiToolActionRecorderService — never
- * executes an instruction smuggled inside "uploaded document" content.
+ * The adversarial payload lives ONLY in documentDerivedText, which
+ * OpenAiProviderAdapter sends in the user role and never treats as a
+ * source of tool actions, so this test proves the whole pipeline —
+ * adapter through AiToolActionRecorderService — never executes an
+ * instruction smuggled inside "uploaded document" content.
  */
 class PromptInjectionResistanceTest extends TestCase
 {
@@ -47,6 +50,32 @@ class PromptInjectionResistanceTest extends TestCase
         $this->assertFalse($detected);
     }
 
+    /**
+     * The real adapter over a mocked transport.
+     *
+     * There is no application-level fake provider any more, so provider
+     * behaviour is tested where it actually lives: OpenAiProviderAdapter,
+     * with the HTTP boundary faked. Nothing here spends OpenAI credits.
+     */
+    private function adapterReturning(string $outputText): OpenAiProviderAdapter
+    {
+        Http::fake([
+            '*/responses' => Http::response([
+                'output' => [['content' => [['text' => $outputText]]]],
+                'usage' => ['input_tokens' => 11, 'output_tokens' => 7],
+            ], 200),
+        ]);
+
+        return new OpenAiProviderAdapter(
+            apiKey: 'test-key-not-a-real-credential',
+            model: 'gpt-5.6-terra',
+            baseUri: 'https://api.openai.com/v1',
+            timeoutSeconds: 5,
+            connectTimeoutSeconds: 2,
+            maxOutputTokens: 64,
+        );
+    }
+
     public function test_adversarial_document_text_cannot_trigger_an_unauthorized_ai_tool_action(): void
     {
         $firm = $this->makeAiEntitledFirm();
@@ -54,7 +83,7 @@ class PromptInjectionResistanceTest extends TestCase
 
         $request = new AiPromptRequest(
             provider: AiProvider::OpenAi,
-            model: 'fake-model-1',
+            model: 'gpt-5.6-terra',
             actionType: AiUsageActionType::Summarization,
             instructionText: 'Summarize the attached client intake notes.',
             documentDerivedText: self::ADVERSARIAL_DOCUMENT_TEXT,
@@ -62,7 +91,7 @@ class PromptInjectionResistanceTest extends TestCase
             allowToolActions: true,
         );
 
-        $response = app(FakeAiProviderAdapter::class)->generate($request);
+        $response = $this->adapterReturning('A neutral summary of the intake notes.')->generate($request);
 
         // The trigger phrase 'REQUEST_TOOL:' only exists inside
         // documentDerivedText, never inside instructionText — the
@@ -82,7 +111,7 @@ class PromptInjectionResistanceTest extends TestCase
 
         $request = new AiPromptRequest(
             provider: AiProvider::OpenAi,
-            model: 'fake-model-1',
+            model: 'gpt-5.6-terra',
             actionType: AiUsageActionType::ToolAction,
             instructionText: "Please look up the case status.\nREQUEST_TOOL: lookup_case_status",
             documentDerivedText: 'Ordinary, non-adversarial document content.',
@@ -90,20 +119,27 @@ class PromptInjectionResistanceTest extends TestCase
             allowToolActions: true,
         );
 
-        $response = app(FakeAiProviderAdapter::class)->generate($request);
+        $response = $this->adapterReturning('REQUEST_TOOL: lookup_case_status')->generate($request);
 
-        $this->assertSame(['lookup_case_status'], $response->requestedToolActions);
+        // Capability change, deliberate: the real provider adapter NEVER
+        // returns a requested tool action, even when the instruction asks for
+        // one and even when allowToolActions is true. Tool execution was only
+        // ever produced by the deleted fake adapter's own string parsing;
+        // OpenAiProviderAdapter has no tool-calling path, so the model cannot
+        // reach an application tool. This asserts that fail-closed property
+        // rather than the fake's behaviour.
+        $this->assertSame([], $response->requestedToolActions);
 
         app(AiUsageRecorderService::class)->record($firm, $user, $request, $response);
 
-        // ai_tool_actions is now FORCE RLS-enabled; assertDatabaseHas()
-        // issues a context-free raw query, which would otherwise see
-        // zero rows regardless of what record() actually wrote.
+        // No tool action is recorded, because none was produced. ai_tool_actions
+        // is FORCE RLS-enabled, so this is asserted inside firm context —
+        // a context-free query would read zero rows either way and prove
+        // nothing.
         $this->runWithFirmContext($firm, function () use ($firm) {
-            $this->assertDatabaseHas('ai_tool_actions', [
+            $this->assertDatabaseMissing('ai_tool_actions', [
                 'firm_id' => $firm->id,
                 'tool_name' => 'lookup_case_status',
-                'was_constrained' => false,
             ]);
         });
     }
@@ -116,7 +152,7 @@ class PromptInjectionResistanceTest extends TestCase
         // allowToolActions=false, but simulate an adapter that (bug or
         // not) still returned a requested tool action — the recorder
         // must mark it Blocked, never Executed.
-        $response = new \App\ValueObjects\AiProviderResponse(
+        $response = new AiProviderResponse(
             outputText: 'output',
             tokensIn: 5,
             tokensOut: 5,
@@ -125,7 +161,7 @@ class PromptInjectionResistanceTest extends TestCase
 
         $request = new AiPromptRequest(
             provider: AiProvider::OpenAi,
-            model: 'fake-model-1',
+            model: 'gpt-5.6-terra',
             actionType: AiUsageActionType::ToolAction,
             instructionText: 'instruction',
             documentDerivedText: null,
@@ -139,7 +175,7 @@ class PromptInjectionResistanceTest extends TestCase
             $this->assertDatabaseHas('ai_tool_actions', [
                 'firm_id' => $firm->id,
                 'tool_name' => 'some_tool',
-                'status' => \App\Enums\AiToolActionStatus::Blocked->value,
+                'status' => AiToolActionStatus::Blocked->value,
             ]);
         });
     }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Marketplace\Intake;
 
 use App\Enums\AiMode;
+use App\Enums\AiProvider;
 use App\Enums\MarketplaceIntakeEventType;
 use App\Enums\MarketplaceIntakeStatus;
 use App\Livewire\Marketplace\PublicIntakePage;
@@ -17,10 +18,12 @@ use App\Models\Firm;
 use App\Models\IntakeTemplate;
 use App\Models\Matter;
 use App\Models\PracticeArea;
+use App\Services\AiProviderKeyService;
 use App\Services\IntakeTemplateService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
+use Tests\Feature\Ai\Concerns\FakesOpenAiTransport;
 use Tests\Feature\Ai\Concerns\SetsUpAiEntitledFirm;
 use Tests\TestCase;
 
@@ -36,7 +39,7 @@ use Tests\TestCase;
  */
 class PublicIntakeWizardTest extends TestCase
 {
-    use RefreshDatabase, SetsUpAiEntitledFirm;
+    use FakesOpenAiTransport, RefreshDatabase, SetsUpAiEntitledFirm;
 
     /**
      * @return array{0: Firm, 1: DirectoryFirm, 2: MarketplaceIntake}
@@ -61,7 +64,12 @@ class PublicIntakeWizardTest extends TestCase
      */
     private function aiAssistedIntake(): array
     {
-        $firm = $this->makeAiEntitledFirm(AiMode::PlatformManaged);
+        // FirmOwned with the firm's own encrypted credential. PlatformManaged
+        // resolves to no provider by design — FirmsVault holds no platform key —
+        // so an AI-assisted turn is only reachable for a firm that brought one.
+        $firm = $this->makeAiEntitledFirm(AiMode::FirmOwned);
+        app(AiProviderKeyService::class)->import($firm, AiProvider::OpenAi, 'test-key-not-a-real-credential');
+        $this->fakeOpenAiExtraction();
         $this->runWithFirmContext($firm, fn () => $firm->aiSettings->update(['intake_ai_assist_enabled' => true]));
 
         $practiceArea = PracticeArea::factory()->create();

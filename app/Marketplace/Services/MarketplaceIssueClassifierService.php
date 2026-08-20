@@ -4,13 +4,9 @@ declare(strict_types=1);
 
 namespace App\Marketplace\Services;
 
-use App\Enums\AiProvider;
-use App\Enums\AiUsageActionType;
 use App\Marketplace\ValueObjects\MarketplaceIssueClassificationResult;
 use App\Models\PracticeArea;
 use App\Services\AiModeResolutionService;
-use App\Services\AiProviderAdapterInterface;
-use App\Services\AiStructuredOutputSchemaRegistry;
 use App\Services\PromptInjectionResistanceService;
 use App\ValueObjects\AiPromptRequest;
 
@@ -42,7 +38,7 @@ use App\ValueObjects\AiPromptRequest;
  * same rule every other AI call site in this codebase follows (see
  * AiPromptRequest's own docblock) — so nothing the visitor types can
  * ever alter which schema is requested or trigger a tool action.
- * FakeAiProviderAdapter's own structural guarantee (never derives
+ * The adapter's own structural guarantee (never derives
  * requestedToolActions from documentDerivedText) is the enforcement
  * mechanism; this service's use of documentDerivedText is what invokes
  * that guarantee.
@@ -57,10 +53,9 @@ use App\ValueObjects\AiPromptRequest;
  * unavailable result can always fall back to picking a practice area
  * manually from marketplace search's own existing filter list.
  *
- * No retry: FakeAiProviderAdapter never transiently fails, so the
- * safest default is zero automatic retries rather than an unbounded
- * one — a real-provider integration would set an explicit, small
- * ceiling here rather than retrying indefinitely.
+ * No retry: a pre-Firm visitor is not worth spending a firm's tokens
+ * on twice, and OpenAiProviderAdapter is configured with zero retries
+ * for the same reason (config('ai.openai.max_retries')).
  */
 class MarketplaceIssueClassifierService
 {
@@ -69,7 +64,6 @@ class MarketplaceIssueClassifierService
     private const RESPONSE_SCHEMA_KEY = 'practice_area_classification';
 
     public function __construct(
-        private readonly AiProviderAdapterInterface $provider,
         private readonly AiModeResolutionService $modeResolution,
         private readonly MarketplaceAiUsageThrottleService $throttle,
         private readonly MarketplaceAiUsageRecorderService $usageRecorder,
@@ -94,51 +88,19 @@ class MarketplaceIssueClassifierService
             return MarketplaceIssueClassificationResult::unavailable('empty_description');
         }
 
-        $request = new AiPromptRequest(
-            provider: AiProvider::OpenAi,
-            model: 'fake-model-1',
-            actionType: AiUsageActionType::IntakeClassification,
-            instructionText: 'Classify the visitor-described issue below into a single practice area.',
-            documentDerivedText: $trimmedDescription,
-            matterIds: [],
-            allowToolActions: false,
-            responseSchemaKey: self::RESPONSE_SCHEMA_KEY,
-        );
-
-        // Audit visibility only — evaluate() never blocks the call
-        // itself; FakeAiProviderAdapter's structural design already
-        // makes an injection attempt in documentDerivedText powerless.
-        $this->promptInjectionResistance->evaluate($request);
-
-        try {
-            $response = $this->provider->generate($request);
-        } catch (\Throwable) {
-            return MarketplaceIssueClassificationResult::unavailable('provider_error');
-        }
-
-        $this->throttle->recordAttempt($sessionHash, $ipAddress);
-        $this->usageRecorder->recordPlatformClassification($sessionHash, $ipAddress, $request, $response);
-
-        if ($response->structuredOutput === null) {
-            return MarketplaceIssueClassificationResult::unavailable('no_structured_output');
-        }
-
-        $errors = AiStructuredOutputSchemaRegistry::validate(self::RESPONSE_SCHEMA_KEY, $response->structuredOutput);
-
-        if ($errors !== []) {
-            return MarketplaceIssueClassificationResult::unavailable('invalid_structured_output');
-        }
-
-        $practiceArea = PracticeArea::query()
-            ->where('code', $response->structuredOutput['practice_area_code'])
-            ->where('is_active', true)
-            ->where('is_marketplace_visible', true)
-            ->first();
-
-        if ($practiceArea === null) {
-            return MarketplaceIssueClassificationResult::unavailable('unrecognized_practice_area');
-        }
-
-        return MarketplaceIssueClassificationResult::classified($practiceArea, $response->structuredOutput['confidence']);
+        // Pre-Firm classification makes NO provider call.
+        //
+        // This runs before the visitor has chosen a firm, so there is no firm
+        // credential, no firm budget and no firm to attribute usage or cost to.
+        // AI is only reachable once ownership exists. The alternative — a
+        // platform-owned OpenAI key — was explicitly rejected: it would let
+        // anonymous traffic spend FirmsVault's money with no tenant to bill and
+        // no budget to enforce.
+        //
+        // Returning unavailable() is the designed degradation, not an error:
+        // the deterministic marketplace search remains authoritative for
+        // discovery, so a visitor can still search, browse firms, choose one
+        // and start intake. Real AI begins after firm selection.
+        return MarketplaceIssueClassificationResult::unavailable('no_firm_scoped_provider');
     }
 }

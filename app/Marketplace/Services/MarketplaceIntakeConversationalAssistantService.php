@@ -4,14 +4,13 @@ declare(strict_types=1);
 
 namespace App\Marketplace\Services;
 
-use App\Enums\AiProvider;
 use App\Enums\AiUsageActionType;
 use App\Marketplace\Models\MarketplaceIntake;
 use App\Marketplace\ValueObjects\MarketplaceIntakeConversationalTurnResult;
 use App\Models\Firm;
 use App\Services\AiBudgetEnforcementService;
 use App\Services\AiModeResolutionService;
-use App\Services\AiProviderAdapterInterface;
+use App\Services\AiProviderResolver;
 use App\Services\AiStructuredOutputSchemaRegistry;
 use App\Services\PromptInjectionResistanceService;
 use App\Services\TenantContextService;
@@ -39,8 +38,8 @@ use App\ValueObjects\AiPromptRequest;
  *   4. Places the visitor's message ONLY in
  *      AiPromptRequest::documentDerivedText, never instructionText —
  *      the target question_code is embedded via the system-authored
- *      EXTRACT_FIELD: marker instead (mirrors FakeAiProviderAdapter's
- *      own REQUEST_TOOL: convention). Nothing the visitor types can
+ *      EXTRACT_FIELD: marker instead, which OpenAiProviderAdapter
+ *      sends in the system role. Nothing the visitor types can
  *      ever choose which question gets written to, or bind this
  *      intake to a different Firm — that binding is $intake->firm_id
  *      itself, asserted server-side, never re-derived from AI output.
@@ -48,9 +47,10 @@ use App\ValueObjects\AiPromptRequest;
  *      exposes a stack trace, always falls back to deterministic on
  *      any failure.
  *   6. Explicitly rejects a mismatched question_code in the AI's own
- *      response (defense-in-depth: authorization/binding lives
- *      outside the model, not merely inside the fake adapter's
- *      current inability to produce a mismatch).
+ *      response. Structured output with strict:true should make a
+ *      mismatch impossible, which is exactly why the check is here:
+ *      binding lives outside the model, never in an assumption about
+ *      what the model can and cannot emit.
  *   7. Saves the extracted value through
  *      MarketplaceIntakeAnswerService::saveAnswers() — the SAME
  *      validator the deterministic path uses. The AI conversation
@@ -72,7 +72,7 @@ class MarketplaceIntakeConversationalAssistantService
     private const EXTRACT_FIELD_TRIGGER = 'EXTRACT_FIELD:';
 
     public function __construct(
-        private readonly AiProviderAdapterInterface $provider,
+        private readonly AiProviderResolver $providerResolver,
         private readonly AiModeResolutionService $modeResolution,
         private readonly AiBudgetEnforcementService $budgetEnforcement,
         private readonly MarketplaceAiUsageThrottleService $throttle,
@@ -146,9 +146,64 @@ class MarketplaceIntakeConversationalAssistantService
             return MarketplaceIntakeConversationalTurnResult::fallbackToDeterministic($pendingQuestion, 'throttled');
         }
 
+        // The adapter comes from THIS firm's own configuration — mode, provider
+        // and its encrypted credential — not from a global container binding.
+        // A firm without a usable credential gets no adapter and no AI turn.
+        // There is deliberately no stand-in: an intake that looks AI-assisted
+        // while producing invented output is worse than one that quietly stays
+        // deterministic.
+        $adapter = $this->tenantContext->runWithFirmContextWithoutTransaction(
+            $firm,
+            fn () => $this->providerResolver->adapterFor($firm),
+        );
+
+        if ($adapter === null) {
+            return MarketplaceIntakeConversationalTurnResult::fallbackToDeterministic($pendingQuestion, 'ai_provider_not_configured');
+        }
+
+        [$periodStartsAt, $periodEndsAt] = $this->currentPeriod();
+
+        // Budget is checked BEFORE the provider call.
+        //
+        // This previously ran AFTER generate(), measuring the response's own
+        // tokens. That was harmless against a free in-process fake, but against
+        // a paid provider it bills every turn even when the firm is already
+        // over its limit — the budget was a report, not a control. Exact cost
+        // is unknowable in advance, so the pre-call check asks the answerable
+        // question ("is this firm already at or over its limit?") with a zero
+        // increment; true usage is recorded from the provider's own response
+        // immediately after.
+        //
+        // checkFirmBudget() reads firm_ai_settings and the usage ledgers, all
+        // FORCE ROW LEVEL SECURITY — hence the tenant context.
+        // Conservative reservation, not a zero-increment probe.
+        //
+        // Asking only "is this firm already over its limit?" lets a firm at
+        // 990/1000 start a turn that ends at ~1490. So the preflight reserves
+        // what this turn could cost at worst: an estimate of the input plus the
+        // adapter's hard output ceiling.
+        //
+        // The input figure IS an estimate — characters divided by a deliberately
+        // low chars-per-token constant, which over-counts rather than under-
+        // counts. The output figure is exact, because the adapter sends
+        // max_output_tokens and the provider cannot exceed it.
+        $estimatedInputTokens = (int) ceil(
+            mb_strlen($trimmedMessage.$pendingQuestion->question_code) / max(1, (int) config('ai.openai.estimated_chars_per_token'))
+        );
+        $reservedTokens = $estimatedInputTokens + $adapter->maxOutputTokens();
+
+        $preCallBudget = $this->tenantContext->runWithFirmContextWithoutTransaction(
+            $firm,
+            fn () => $this->budgetEnforcement->checkFirmBudget($firm, $reservedTokens, 0, $periodStartsAt, $periodEndsAt),
+        );
+
+        if (! $preCallBudget->allowed()) {
+            return MarketplaceIntakeConversationalTurnResult::fallbackToDeterministic($pendingQuestion, 'firm_budget_exceeded');
+        }
+
         $request = new AiPromptRequest(
-            provider: AiProvider::OpenAi,
-            model: 'fake-model-1',
+            provider: $adapter->provider(),
+            model: $adapter->model(),
             actionType: AiUsageActionType::IntakeFieldExtraction,
             instructionText: self::EXTRACT_FIELD_TRIGGER.$pendingQuestion->question_code,
             documentDerivedText: $trimmedMessage,
@@ -157,31 +212,17 @@ class MarketplaceIntakeConversationalAssistantService
             responseSchemaKey: self::RESPONSE_SCHEMA_KEY,
         );
 
-        // Audit visibility only — FakeAiProviderAdapter's structural
-        // design already makes an injection attempt in
-        // documentDerivedText powerless to alter instructionText's
-        // own EXTRACT_FIELD_TRIGGER target.
+        // Audit visibility only — the EXTRACT_FIELD_TRIGGER target lives in
+        // instructionText, which prospect text in documentDerivedText cannot
+        // reach, so an injection attempt cannot retarget the extraction.
         $this->promptInjectionResistance->evaluate($request);
 
         try {
-            $response = $this->provider->generate($request);
+            $response = $adapter->generate($request);
         } catch (\Throwable) {
+            // Provider exceptions carry a classified, secret-free reason, but
+            // the prospect never sees provider text either way.
             return MarketplaceIntakeConversationalTurnResult::fallbackToDeterministic($pendingQuestion, 'provider_error');
-        }
-
-        $totalTokens = $response->tokensIn + $response->tokensOut;
-        [$periodStartsAt, $periodEndsAt] = $this->currentPeriod();
-
-        // checkFirmBudget() reads firm_ai_settings and ai_usage_events,
-        // both FORCE ROW LEVEL SECURITY — same reasoning as the
-        // intake_ai_assist_enabled/modeResolution read above.
-        $budgetResult = $this->tenantContext->runWithFirmContextWithoutTransaction(
-            $firm,
-            fn () => $this->budgetEnforcement->checkFirmBudget($firm, $totalTokens, 0, $periodStartsAt, $periodEndsAt),
-        );
-
-        if (! $budgetResult->allowed()) {
-            return MarketplaceIntakeConversationalTurnResult::fallbackToDeterministic($pendingQuestion, 'firm_budget_exceeded');
         }
 
         $this->throttle->recordAttempt($sessionHash, $ipAddress);

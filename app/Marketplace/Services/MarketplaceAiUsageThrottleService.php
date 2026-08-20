@@ -37,9 +37,9 @@ class MarketplaceAiUsageThrottleService
     public const DECAY_MINUTES = 60;
 
     /**
-     * A generous ceiling relative to FakeAiProviderAdapter's own tiny
-     * deterministic token counts today, but a real, disclosed cap a
-     * future real-provider integration inherits unchanged.
+     * A per-session ceiling on anonymous spend, independent of the
+     * firm's own budget: one prospect must not be able to consume a
+     * firm's entire period allowance in a single sitting.
      */
     public const MAX_TOKENS_PER_SESSION_PER_WINDOW = 20000;
 

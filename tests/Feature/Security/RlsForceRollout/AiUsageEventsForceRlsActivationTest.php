@@ -327,7 +327,7 @@ class AiUsageEventsForceRlsActivationTest extends TestCase
             $user,
             new AiPromptRequest(
                 provider: AiProvider::OpenAi,
-                model: 'fake-model-1',
+                model: 'gpt-5.6-terra',
                 actionType: AiUsageActionType::Summarization,
                 instructionText: 'Summarize the attached notes.',
                 documentDerivedText: null,
@@ -491,7 +491,7 @@ class AiUsageEventsForceRlsActivationTest extends TestCase
             'matter_id' => null,
             'ai_mode' => AiMode::PlatformManaged->value,
             'provider' => AiProvider::OpenAi->value,
-            'model' => 'fake-model-1',
+            'model' => 'gpt-5.6-terra',
             'tokens_in' => 10,
             'tokens_out' => 5,
             'cost_cents' => 1,

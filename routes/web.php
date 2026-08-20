@@ -306,8 +306,28 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
     // experience) rather than tight abuse thresholds.
     Route::middleware('throttle:60,1')->group(function () {
         Route::get('/', [MyAttorneyHomeController::class, 'index'])->name('myattorney.home');
-        Route::get('/firms/{slug}', [FirmProfileController::class, 'show'])->name('myattorney.firms.show');
         Route::get('/attorneys/{slug}', [AttorneyProfileController::class, 'show'])->name('myattorney.attorneys.show');
+    });
+
+    // The firm profile is the one "read" route that is no longer purely a
+    // read: Mission 3A put a "Start Secure Intake" POST form on it.
+    //
+    // A @csrf token is only meaningful against the session the POST target
+    // will read, and the POST target runs under
+    // ConfigurePanelSessionCookie:myattorney. Rendering the token WITHOUT that
+    // middleware wrote it into the default `firmsvault-session` cookie while
+    // the POST looked for `firmsvault-myattorney-session` — a brand-new,
+    // empty session, so every single Start Intake submission answered 419.
+    // The two routes have to agree on which cookie they mean; that agreement
+    // is the fix.
+    //
+    // Cacheability (section 78) was already lost the moment a per-visitor CSRF
+    // token appeared in this page's HTML — a shared cache storing one
+    // visitor's token and replaying it to another is worse than not caching.
+    // The controller now says so explicitly with a private/no-store header
+    // rather than leaving it to a CDN's defaults.
+    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:60,1'])->group(function () {
+        Route::get('/firms/{slug}', [FirmProfileController::class, 'show'])->name('myattorney.firms.show');
     });
 
     // The global robots.txt route above (no domain constraint) loses

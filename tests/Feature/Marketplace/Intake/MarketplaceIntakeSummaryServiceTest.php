@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Marketplace\Intake;
 
 use App\Enums\AiMode;
+use App\Enums\AiProvider;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Models\MarketplaceIntake;
 use App\Marketplace\Services\MarketplaceIntakeService;
@@ -15,8 +16,9 @@ use App\Models\FirmUser;
 use App\Models\User;
 use App\Services\AiModeResolutionService;
 use App\Services\AiPolicySettingService;
-use App\Services\AiProviderAdapterInterface;
+use App\Services\AiProviderKeyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Mockery;
 use Tests\Feature\Ai\Concerns\SetsUpAiEntitledFirm;
 use Tests\TestCase;
@@ -34,6 +36,30 @@ class MarketplaceIntakeSummaryServiceTest extends TestCase
 {
     use RefreshDatabase, SetsUpAiEntitledFirm;
 
+    /**
+     * Store a firm-owned credential through the canonical import path.
+     * The value is a test string, never a real key.
+     */
+    private function giveFirmAnOpenAiCredential(Firm $firm): void
+    {
+        app(AiProviderKeyService::class)->import($firm, AiProvider::OpenAi, 'test-key-not-a-real-credential');
+    }
+
+    /**
+     * Mock the OpenAI transport, not the adapter. There is no application-level
+     * fake provider any more, so provider behaviour is exercised through the
+     * real OpenAiProviderAdapter over a faked HTTP boundary — no credits spent.
+     */
+    private function fakeOpenAiSummaryResponse(string $text = 'Vendor contract dispute; client seeks resolution.'): void
+    {
+        Http::fake([
+            '*/responses' => Http::response([
+                'output' => [['content' => [['text' => $text]]]],
+                'usage' => ['input_tokens' => 42, 'output_tokens' => 18],
+            ], 200),
+        ]);
+    }
+
     private function service(): MarketplaceIntakeSummaryService
     {
         return app(MarketplaceIntakeSummaryService::class);
@@ -44,7 +70,12 @@ class MarketplaceIntakeSummaryServiceTest extends TestCase
      */
     private function setUpIntakeWithAnswers(): array
     {
-        $firm = $this->makeAiEntitledFirm(AiMode::PlatformManaged);
+        // Firm-owned, with the firm's own encrypted credential: PlatformManaged
+        // resolves to no provider by design (FirmsVault holds no platform key),
+        // so a summary can only be produced by a firm that brought its own.
+        $firm = $this->makeAiEntitledFirm(AiMode::FirmOwned);
+        $this->giveFirmAnOpenAiCredential($firm);
+        $this->fakeOpenAiSummaryResponse();
         $directoryFirm = DirectoryFirm::factory()->member()->create(['firm_id' => $firm->id, 'accepting_inquiries' => true]);
         $intake = app(MarketplaceIntakeService::class)->startForDirectoryFirm($directoryFirm);
 
@@ -110,12 +141,16 @@ class MarketplaceIntakeSummaryServiceTest extends TestCase
             'conversation_transcript' => [['role' => 'visitor', 'content' => 'SECRET_TRANSCRIPT_MARKER', 'at' => now()->toIso8601String()]],
         ]));
 
-        $result = $this->service()->generate($firm, $intake, $user);
+        $this->service()->generate($firm, $intake, $user);
 
-        // FakeAiProviderAdapter's output text echoes back the request's
-        // own instructionText/documentDerivedText — this proves the
-        // transcript marker never reached the prompt at all.
-        $this->assertStringNotContainsString('SECRET_TRANSCRIPT_MARKER', $result->ai_summary);
+        // Asserted on what actually LEFT the process, not on what came back:
+        // the stubbed response is canned, so checking the summary text would
+        // pass no matter what the prompt contained.
+        Http::assertSent(function ($request) {
+            $this->assertStringNotContainsString('SECRET_TRANSCRIPT_MARKER', json_encode($request->data()));
+
+            return true;
+        });
     }
 
     // ---------------------------------------------------------------
@@ -154,7 +189,9 @@ class MarketplaceIntakeSummaryServiceTest extends TestCase
 
     public function test_generate_with_no_structured_answers_still_succeeds(): void
     {
-        $firm = $this->makeAiEntitledFirm(AiMode::PlatformManaged);
+        $firm = $this->makeAiEntitledFirm(AiMode::FirmOwned);
+        $this->giveFirmAnOpenAiCredential($firm);
+        $this->fakeOpenAiSummaryResponse('No answers were provided yet.');
         $directoryFirm = DirectoryFirm::factory()->member()->create(['firm_id' => $firm->id, 'accepting_inquiries' => true]);
         $intake = app(MarketplaceIntakeService::class)->startForDirectoryFirm($directoryFirm);
         $user = User::factory()->create();

@@ -370,7 +370,7 @@ class AiToolActionsForceRlsActivationTest extends TestCase
 
         $request = new AiPromptRequest(
             provider: AiProvider::OpenAi,
-            model: 'fake-model-1',
+            model: 'gpt-5.6-terra',
             actionType: AiUsageActionType::ToolAction,
             instructionText: "Please look up the case status.\nREQUEST_TOOL: lookup_case_status",
             documentDerivedText: 'Ordinary, non-adversarial document content.',
@@ -419,7 +419,7 @@ class AiToolActionsForceRlsActivationTest extends TestCase
 
         $request = new AiPromptRequest(
             provider: AiProvider::OpenAi,
-            model: 'fake-model-1',
+            model: 'gpt-5.6-terra',
             actionType: AiUsageActionType::ToolAction,
             instructionText: 'instruction',
             documentDerivedText: null,

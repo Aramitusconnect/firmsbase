@@ -4,14 +4,13 @@ declare(strict_types=1);
 
 namespace App\Marketplace\Services;
 
-use App\Enums\AiProvider;
 use App\Enums\AiUsageActionType;
 use App\Marketplace\Models\MarketplaceIntake;
 use App\Models\Firm;
 use App\Models\IntakeTemplateQuestion;
 use App\Models\User;
 use App\Services\AiModeResolutionService;
-use App\Services\AiProviderAdapterInterface;
+use App\Services\AiProviderResolver;
 use App\Services\AiUsageRecorderService;
 use App\Services\IntakeTemplateService;
 use App\Services\PromptInjectionResistanceService;
@@ -59,7 +58,7 @@ class MarketplaceIntakeSummaryService
     private const MAX_SUMMARY_LENGTH = 4000;
 
     public function __construct(
-        private readonly AiProviderAdapterInterface $provider,
+        private readonly AiProviderResolver $providerResolver,
         private readonly AiUsageRecorderService $usageRecorder,
         private readonly AiModeResolutionService $modeResolution,
         private readonly PromptInjectionResistanceService $promptInjectionResistance,
@@ -78,11 +77,26 @@ class MarketplaceIntakeSummaryService
         $this->assertBelongsToFirm($firm, $intake);
         $this->modeResolution->assertEnabled($firm);
 
+        // Resolved from the intake's OWN firm, so a summary is generated with
+        // that firm's credential, against that firm's budget, and never with a
+        // platform-wide provider. FirmsVault holds no platform credential and
+        // deliberately does not intend to.
+        $adapter = $this->tenantContext->runWithFirmContextWithoutTransaction(
+            $firm,
+            fn () => $this->providerResolver->adapterFor($firm),
+        );
+
+        if ($adapter === null) {
+            // Fail closed. Firm review must still work without a summary, so
+            // callers treat this as "summary unavailable", not a page error.
+            throw new \RuntimeException('No AI provider is configured for this firm.');
+        }
+
         $digest = $this->tenantContext->runWithFirmContext($firm, fn () => $this->buildAnswerDigest($intake));
 
         $request = new AiPromptRequest(
-            provider: AiProvider::OpenAi,
-            model: 'fake-model-1',
+            provider: $adapter->provider(),
+            model: $adapter->model(),
             actionType: AiUsageActionType::Summarization,
             instructionText: 'Summarize this legal intake for the reviewing attorney. This is a proposal only, never legal advice, and must be verified by the reviewer before acting on it.',
             documentDerivedText: $digest,
@@ -91,7 +105,7 @@ class MarketplaceIntakeSummaryService
 
         $this->promptInjectionResistance->evaluate($request);
 
-        $response = $this->provider->generate($request);
+        $response = $adapter->generate($request);
 
         $this->usageRecorder->record($firm, $user, $request, $response);
 

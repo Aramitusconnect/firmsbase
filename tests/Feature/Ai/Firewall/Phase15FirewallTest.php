@@ -29,7 +29,6 @@ class Phase15FirewallTest extends TestCase
         'app/Services/AiRetrievalIsolationService.php',
         'app/Services/PromptInjectionResistanceService.php',
         'app/Services/AiProviderAdapterInterface.php',
-        'app/Services/FakeAiProviderAdapter.php',
     ];
 
     public function test_no_ai_file_references_any_real_transport_dns_or_provider_sdk(): void

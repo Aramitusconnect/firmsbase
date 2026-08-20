@@ -53,6 +53,18 @@ enum AiUsageActionType: string
     case IntakeFieldExtraction = 'intake_field_extraction';
 
     /**
+     * A firm administrator asking FirmsVault to prove its stored credential
+     * actually works. Carries no client, matter or intake data of any kind —
+     * the whole request is a fixed diagnostic string.
+     *
+     * It gets its own action type rather than borrowing Summarization so the
+     * usage log stays literally true about what was sent: a firm reading its
+     * own AI audit trail must be able to tell a diagnostic ping from work done
+     * on a client's behalf.
+     */
+    case ConnectionTest = 'connection_test';
+
+    /**
      * The six action types that are always high-risk and always
      * require approval before use (Master Plan §22 acceptance
      * criteria; project rules 15/16/19/20). This list is intentionally

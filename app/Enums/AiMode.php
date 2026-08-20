@@ -19,10 +19,13 @@ namespace App\Enums;
  *
  * - Disabled: no AI service may run for this firm. Every AI
  *   entry point (service, job, API surface) must block.
- * - PlatformManaged: AI runs through FirmsBase-provisioned access to a
- *   provider under a zero-retention agreement (Master Plan §22). No
- *   real provider integration exists in Phase 15 — this mode is only
- *   enforceable against the FakeAiProviderAdapter.
+ * - PlatformManaged: AI would run through FirmsBase-provisioned access
+ *   to a provider under a zero-retention agreement (Master Plan §22).
+ *   FirmsVault holds no platform credential, so this mode resolves to
+ *   no provider and no AI: AiProviderResolver returns null for it, and
+ *   the firm-facing AI settings page does not offer it. The case is
+ *   retained because historical firm_settings rows and usage events
+ *   still carry the value and must stay readable.
  * - FirmOwned: AI runs only using the firm's own encrypted provider
  *   key (firm_ai_provider_keys). Requires an Active key for the
  *   requested provider or the request must be blocked.

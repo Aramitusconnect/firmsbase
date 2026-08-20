@@ -5,10 +5,10 @@ namespace Tests\Feature\Ai\Approval;
 use App\Enums\AiApprovalCategory;
 use App\Enums\AiApprovalEventType;
 use App\Enums\AiApprovalRequestStatus;
-use App\Enums\AiMode;
 use App\Enums\AiProvider;
 use App\Enums\AiUsageActionType;
 use App\Models\AiApprovalEvent;
+use App\Models\AiApprovalRequest;
 use App\Models\Firm;
 use App\Models\User;
 use App\Services\AiApprovalWorkflowService;
@@ -36,7 +36,7 @@ class AiApprovalWorkflowServiceTest extends TestCase
     {
         return new AiPromptRequest(
             provider: AiProvider::OpenAi,
-            model: 'fake-model-1',
+            model: 'gpt-5.6-terra',
             actionType: $type,
             instructionText: 'Draft a demand letter for a breach of contract matter.',
             documentDerivedText: null,
@@ -100,7 +100,7 @@ class AiApprovalWorkflowServiceTest extends TestCase
         $event = app(AiUsageRecorderService::class)->record(
             $firm,
             $user,
-            new AiPromptRequest(AiProvider::OpenAi, 'fake-model-1', AiUsageActionType::Summarization, 'Summarize this.', null, []),
+            new AiPromptRequest(AiProvider::OpenAi, 'gpt-5.6-terra', AiUsageActionType::Summarization, 'Summarize this.', null, []),
             new AiProviderResponse(outputText: 'Summary.', tokensIn: 5, tokensOut: 5),
         );
 
@@ -120,7 +120,7 @@ class AiApprovalWorkflowServiceTest extends TestCase
             new AiProviderResponse(outputText: 'Demand letter draft.', tokensIn: 20, tokensOut: 30),
         );
 
-        $request = \App\Models\AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail();
+        $request = AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail();
 
         $this->assertSame('ai_generated_draft', $request->draft_label);
     }
@@ -146,7 +146,7 @@ class AiApprovalWorkflowServiceTest extends TestCase
             new AiProviderResponse(outputText: 'Citation draft content.', tokensIn: 20, tokensOut: 30),
         );
 
-        $request = \App\Models\AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail();
+        $request = AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail();
 
         $this->assertNotEmpty($request->encrypted_snapshot_ciphertext);
 
@@ -166,7 +166,7 @@ class AiApprovalWorkflowServiceTest extends TestCase
             new AiProviderResponse(outputText: 'Memo draft.', tokensIn: 20, tokensOut: 30),
         );
 
-        $request = \App\Models\AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail();
+        $request = AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail();
 
         $this->assertArrayNotHasKey('encrypted_snapshot_ciphertext', $request->toArray());
         $this->assertStringNotContainsString('encrypted_snapshot_ciphertext', $request->toJson());
@@ -185,7 +185,7 @@ class AiApprovalWorkflowServiceTest extends TestCase
             new AiProviderResponse(outputText: 'Demand letter draft.', tokensIn: 20, tokensOut: 30),
         );
 
-        $request = \App\Models\AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail();
+        $request = AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail();
 
         $this->expectException(\RuntimeException::class);
         app(AiApprovalWorkflowService::class)->approve($request, $paralegal);
@@ -204,14 +204,14 @@ class AiApprovalWorkflowServiceTest extends TestCase
             new AiProviderResponse(outputText: 'Demand letter draft.', tokensIn: 20, tokensOut: 30),
         );
 
-        $request = \App\Models\AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail();
+        $request = AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail();
 
         $approved = app(AiApprovalWorkflowService::class)->approve($request, $attorney);
 
         $this->assertSame(AiApprovalRequestStatus::Approved, $approved->status);
         $this->assertDatabaseHas('ai_approval_events', [
             'ai_approval_request_id' => $request->id,
-            'event_type' => \App\Enums\AiApprovalEventType::Approved->value,
+            'event_type' => AiApprovalEventType::Approved->value,
         ]);
     }
 
@@ -228,7 +228,7 @@ class AiApprovalWorkflowServiceTest extends TestCase
             new AiProviderResponse(outputText: 'Advice draft.', tokensIn: 20, tokensOut: 30),
         );
 
-        $request = \App\Models\AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail();
+        $request = AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail();
 
         $rejected = app(AiApprovalWorkflowService::class)->reject($request, $owner, 'needs revision');
 
@@ -248,7 +248,7 @@ class AiApprovalWorkflowServiceTest extends TestCase
             new AiProviderResponse(outputText: 'Demand letter draft.', tokensIn: 20, tokensOut: 30),
         );
 
-        $request = \App\Models\AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail();
+        $request = AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail();
         app(AiApprovalWorkflowService::class)->approve($request, $attorney);
 
         $this->expectException(\RuntimeException::class);
@@ -287,11 +287,11 @@ class AiApprovalWorkflowServiceTest extends TestCase
      * whatever the ambient leftover happens to be — keeps every test
      * below correct regardless of fixture ordering.
      */
-    private function findApprovalRequestForFirm(Firm $firm): \App\Models\AiApprovalRequest
+    private function findApprovalRequestForFirm(Firm $firm): AiApprovalRequest
     {
         return $this->runWithFirmContext(
             $firm,
-            fn () => \App\Models\AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail(),
+            fn () => AiApprovalRequest::query()->where('firm_id', $firm->id)->firstOrFail(),
         );
     }
 
@@ -336,7 +336,7 @@ class AiApprovalWorkflowServiceTest extends TestCase
         // approve(), so this test proves approve() establishes its own
         // context correctly rather than merely riding on a leftover
         // context from the fixtures above.
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
         $approved = app(AiApprovalWorkflowService::class)->approve($request, $attorney);
@@ -367,7 +367,7 @@ class AiApprovalWorkflowServiceTest extends TestCase
 
         $request = $this->findApprovalRequestForFirm($firm);
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
         $rejected = app(AiApprovalWorkflowService::class)->reject($request, $owner, 'needs revision');
@@ -406,7 +406,7 @@ class AiApprovalWorkflowServiceTest extends TestCase
 
         $request = $this->findApprovalRequestForFirm($firm);
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
         try {
@@ -425,7 +425,7 @@ class AiApprovalWorkflowServiceTest extends TestCase
         // confirm the mismatched-actor call had ZERO side effects.
         $reRead = $this->runWithFirmContext(
             $firm,
-            fn () => \App\Models\AiApprovalRequest::withoutGlobalScopes()->find($request->id),
+            fn () => AiApprovalRequest::withoutGlobalScopes()->find($request->id),
         );
 
         $this->assertNotNull($reRead);
@@ -456,7 +456,7 @@ class AiApprovalWorkflowServiceTest extends TestCase
 
         $request = $this->findApprovalRequestForFirm($firm);
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
         try {
@@ -470,7 +470,7 @@ class AiApprovalWorkflowServiceTest extends TestCase
 
         $reRead = $this->runWithFirmContext(
             $firm,
-            fn () => \App\Models\AiApprovalRequest::withoutGlobalScopes()->find($request->id),
+            fn () => AiApprovalRequest::withoutGlobalScopes()->find($request->id),
         );
 
         $this->assertNotNull($reRead);
@@ -506,13 +506,13 @@ class AiApprovalWorkflowServiceTest extends TestCase
 
         $request = $this->findApprovalRequestForFirm($firm);
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         app(AiApprovalWorkflowService::class)->approve($request, $attorney);
         $this->assertNoDatabaseTenantContext('Tenant context must clear after a successful approve().');
 
         $freshRequest = $this->runWithFirmContext($firm, fn () => $request->fresh());
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         try {
             app(AiApprovalWorkflowService::class)->approve($freshRequest, $attorney);
             $this->fail('Expected the already-resolved RuntimeException.');
@@ -542,13 +542,13 @@ class AiApprovalWorkflowServiceTest extends TestCase
 
         $request = $this->findApprovalRequestForFirm($firm);
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         app(AiApprovalWorkflowService::class)->reject($request, $owner, 'needs revision');
         $this->assertNoDatabaseTenantContext('Tenant context must clear after a successful reject().');
 
         $freshRequest = $this->runWithFirmContext($firm, fn () => $request->fresh());
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
         try {
             app(AiApprovalWorkflowService::class)->reject($freshRequest, $owner, 'second attempt');
             $this->fail('Expected the already-resolved RuntimeException.');

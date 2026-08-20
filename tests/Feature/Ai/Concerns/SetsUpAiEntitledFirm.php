@@ -60,7 +60,7 @@ trait SetsUpAiEntitledFirm
         // FirmSettings::factory() call above.
         $this->runWithFirmContext($firm, fn () => $firm->aiSettings()->create([
             'allowed_providers_json' => ['openai'],
-            'allowed_models_json' => ['fake-model-1'],
+            'allowed_models_json' => ['gpt-5.6-terra'],
             'token_limit_per_period' => null,
             'budget_limit_cents_per_period' => null,
             'usage_markup_basis_points' => 0,

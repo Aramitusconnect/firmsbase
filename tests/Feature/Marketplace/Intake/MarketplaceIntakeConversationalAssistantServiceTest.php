@@ -5,21 +5,23 @@ declare(strict_types=1);
 namespace Tests\Feature\Marketplace\Intake;
 
 use App\Enums\AiMode;
+use App\Enums\AiProvider;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\Models\MarketplaceAiUsageEvent;
 use App\Marketplace\Models\MarketplaceIntake;
 use App\Marketplace\Services\MarketplaceIntakeAnswerService;
 use App\Marketplace\Services\MarketplaceIntakeConversationalAssistantService;
 use App\Marketplace\Services\MarketplaceIntakeService;
+use App\Models\AiUsageEvent;
 use App\Models\Client;
 use App\Models\Firm;
 use App\Models\IntakeTemplate;
 use App\Models\PracticeArea;
-use App\Services\AiProviderAdapterInterface;
+use App\Services\AiProviderKeyService;
 use App\Services\IntakeTemplateService;
-use App\ValueObjects\AiPromptRequest;
-use App\ValueObjects\AiProviderResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
+use Tests\Feature\Ai\Concerns\FakesOpenAiTransport;
 use Tests\Feature\Ai\Concerns\SetsUpAiEntitledFirm;
 use Tests\TestCase;
 
@@ -32,7 +34,7 @@ use Tests\TestCase;
  */
 class MarketplaceIntakeConversationalAssistantServiceTest extends TestCase
 {
-    use RefreshDatabase, SetsUpAiEntitledFirm;
+    use FakesOpenAiTransport, RefreshDatabase, SetsUpAiEntitledFirm;
 
     private function assistant(): MarketplaceIntakeConversationalAssistantService
     {
@@ -49,7 +51,12 @@ class MarketplaceIntakeConversationalAssistantServiceTest extends TestCase
      */
     private function setUpAiAssistedFirmWithIntake(bool $aiAssistEnabled = true): array
     {
-        $firm = $this->makeAiEntitledFirm(AiMode::PlatformManaged);
+        // FirmOwned with the firm's own encrypted credential. PlatformManaged
+        // resolves to no provider by design — FirmsVault holds no platform key —
+        // so an AI-assisted turn is only reachable for a firm that brought one.
+        $firm = $this->makeAiEntitledFirm(AiMode::FirmOwned);
+        app(AiProviderKeyService::class)->import($firm, AiProvider::OpenAi, 'test-key-not-a-real-credential');
+        $this->fakeOpenAiExtraction();
         $this->runWithFirmContext($firm, fn () => $firm->aiSettings->update(['intake_ai_assist_enabled' => $aiAssistEnabled]));
 
         $practiceArea = PracticeArea::factory()->create();
@@ -119,13 +126,7 @@ class MarketplaceIntakeConversationalAssistantServiceTest extends TestCase
     public function test_respond_preserves_the_visitors_message_even_when_the_provider_throws(): void
     {
         [$firm, $intake] = $this->setUpAiAssistedFirmWithIntake();
-        $this->app->instance(AiProviderAdapterInterface::class, new class implements AiProviderAdapterInterface
-        {
-            public function generate(AiPromptRequest $request): AiProviderResponse
-            {
-                throw new \RuntimeException('simulated timeout');
-            }
-        });
+        $this->fakeOpenAiTransportFailure();
 
         $result = $this->assistant()->respond($firm, $intake, 'Contract dispute.', 'session-5', '203.0.113.1');
 
@@ -142,18 +143,7 @@ class MarketplaceIntakeConversationalAssistantServiceTest extends TestCase
     public function test_respond_falls_back_when_the_ai_returns_a_mismatched_question_code(): void
     {
         [$firm, $intake] = $this->setUpAiAssistedFirmWithIntake();
-        $this->app->instance(AiProviderAdapterInterface::class, new class implements AiProviderAdapterInterface
-        {
-            public function generate(AiPromptRequest $request): AiProviderResponse
-            {
-                return new AiProviderResponse(
-                    outputText: 'mismatched',
-                    tokensIn: 5,
-                    tokensOut: 5,
-                    structuredOutput: ['question_code' => 'state', 'extracted_value' => 'NY'],
-                );
-            }
-        });
+        $this->fakeOpenAiExtraction('state', 'NY');
 
         $result = $this->assistant()->respond($firm, $intake, 'Contract dispute.', 'session-6', '203.0.113.1');
 
@@ -258,5 +248,95 @@ class MarketplaceIntakeConversationalAssistantServiceTest extends TestCase
 
         $this->assertFalse($result->usedAi);
         $this->assertSame('firm_budget_exceeded', $result->fallbackReason);
+
+        // The budget gate is worth nothing if the request already went out.
+        Http::assertNothingSent();
+    }
+
+    public function test_a_firm_just_under_its_limit_is_refused_before_the_request_leaves(): void
+    {
+        // 990 of 1000 used. Nothing is over yet, so a "have you already
+        // exceeded?" check would let this turn run — and this turn can cost up
+        // to max_output_tokens on its own, finishing hundreds of tokens past
+        // the ceiling. The refusal has to happen before the call, not after.
+        [$firm, $intake] = $this->setUpAiAssistedFirmWithIntake();
+        $this->runWithFirmContext($firm, function () use ($firm) {
+            $firm->aiSettings->update(['token_limit_per_period' => 1000]);
+
+            AiUsageEvent::factory()->forFirm($firm)->create([
+                'tokens_in' => 990,
+                'tokens_out' => 0,
+                'cost_cents' => 0,
+            ]);
+        });
+
+        $result = $this->assistant()->respond($firm, $intake, 'Contract dispute.', 'session-13', '203.0.113.1');
+
+        $this->assertFalse($result->usedAi, 'AI_ALLOWED must be NO.');
+        $this->assertSame('firm_budget_exceeded', $result->fallbackReason, 'DETERMINISTIC_FALLBACK must be YES.');
+        $this->assertNotNull($result->pendingQuestion, 'The visitor must still be asked the question deterministically.');
+        Http::assertNothingSent();
+    }
+
+    public function test_marketplace_spend_and_firm_user_spend_share_one_budget(): void
+    {
+        // 600 from firm users plus 500 from earlier prospect turns is 1100
+        // against a 1000 ceiling. Neither half exceeds the budget alone.
+        [$firm, $intake] = $this->setUpAiAssistedFirmWithIntake();
+        $this->runWithFirmContext($firm, function () use ($firm) {
+            $firm->aiSettings->update(['token_limit_per_period' => 1000]);
+
+            AiUsageEvent::factory()->forFirm($firm)->create([
+                'tokens_in' => 600,
+                'tokens_out' => 0,
+                'cost_cents' => 0,
+            ]);
+
+            MarketplaceAiUsageEvent::factory()->create([
+                'firm_id' => $firm->id,
+                'tokens_in' => 500,
+                'tokens_out' => 0,
+            ]);
+        });
+
+        $result = $this->assistant()->respond($firm, $intake, 'Contract dispute.', 'session-14', '203.0.113.1');
+
+        $this->assertFalse($result->usedAi);
+        $this->assertSame('firm_budget_exceeded', $result->fallbackReason);
+        Http::assertNothingSent();
+    }
+
+    public function test_one_turn_records_one_marketplace_row_and_no_firm_user_row(): void
+    {
+        // The two usage tables are summed for budgeting, so a turn recorded in
+        // both would be charged twice. Marketplace turns have no user_id and
+        // belong in exactly one table.
+        [$firm, $intake] = $this->setUpAiAssistedFirmWithIntake();
+
+        $this->assistant()->respond($firm, $intake, 'Contract dispute.', 'session-15', '203.0.113.1');
+
+        [$marketplaceRows, $firmUserRows] = $this->runWithFirmContext($firm, fn () => [
+            MarketplaceAiUsageEvent::query()->where('firm_id', $firm->id)->count(),
+            AiUsageEvent::query()->where('firm_id', $firm->id)->count(),
+        ]);
+
+        $this->assertSame(1, $marketplaceRows);
+        $this->assertSame(0, $firmUserRows);
+    }
+
+    public function test_revoking_the_firms_credential_falls_the_intake_back_safely(): void
+    {
+        // A firm can turn AI off mid-day while a prospect is halfway through an
+        // intake. The turn must degrade to the deterministic questionnaire and
+        // must not attempt the call with a credential the firm just disabled.
+        [$firm, $intake] = $this->setUpAiAssistedFirmWithIntake();
+        app(AiProviderKeyService::class)->revoke($firm, AiProvider::OpenAi);
+
+        $result = $this->assistant()->respond($firm, $intake, 'Contract dispute.', 'session-16', '203.0.113.1');
+
+        $this->assertFalse($result->usedAi);
+        $this->assertSame('ai_provider_not_configured', $result->fallbackReason);
+        $this->assertNotNull($result->pendingQuestion);
+        Http::assertNothingSent();
     }
 }

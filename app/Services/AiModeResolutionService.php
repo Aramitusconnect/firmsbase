@@ -95,11 +95,12 @@ class AiModeResolutionService
 
     /**
      * Provider-specific gate, layered on top of evaluate(). In
-     * platform_managed mode any allowed provider is fine (no firm key
-     * needed — Phase 15 only ever reaches the FakeAiProviderAdapter
-     * regardless). In firm_owned mode, an Active
-     * firm_ai_provider_keys row for this exact (firm, provider) pair
-     * is required, or the request must be blocked.
+     * platform_managed mode any allowed provider passes this check —
+     * but no adapter can be built for that mode at all (FirmsVault
+     * holds no platform credential), so nothing reaches a provider. In
+     * firm_owned mode, an Active firm_ai_provider_keys row for this
+     * exact (firm, provider) pair is required, or the request must be
+     * blocked.
      */
     public function evaluateProviderAccess(Firm $firm, AiProvider $provider): AiAccessDecision
     {

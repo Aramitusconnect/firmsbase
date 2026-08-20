@@ -5,9 +5,11 @@ namespace Tests\Feature\Ai\Entitlement;
 use App\Enums\AiMode;
 use App\Enums\AiProvider;
 use App\Enums\AiUsageActionType;
+use App\Enums\PaymentMode;
 use App\Models\Firm;
 use App\Models\FirmSettings;
 use App\Models\User;
+use App\Services\AiProviderKeyService;
 use App\Services\AiUsageRecorderService;
 use App\ValueObjects\AiPromptRequest;
 use App\ValueObjects\AiProviderResponse;
@@ -32,7 +34,7 @@ class AiEntitlementAndModeBlockingTest extends TestCase
     {
         return new AiPromptRequest(
             provider: AiProvider::OpenAi,
-            model: 'fake-model-1',
+            model: 'gpt-5.6-terra',
             actionType: AiUsageActionType::Summarization,
             instructionText: 'Summarize the attached notes.',
             documentDerivedText: null,
@@ -56,7 +58,7 @@ class AiEntitlementAndModeBlockingTest extends TestCase
         // rejected by the policy; route through FirmSettingsFactory's
         // established context-hold fix instead.
         FirmSettings::factory()->forFirm($firm)->create([
-            'payment_mode' => \App\Enums\PaymentMode::OperatingPaymentsOnly,
+            'payment_mode' => PaymentMode::OperatingPaymentsOnly,
             'ai_mode' => AiMode::PlatformManaged,
         ]);
         $user = User::factory()->create();
@@ -106,7 +108,7 @@ class AiEntitlementAndModeBlockingTest extends TestCase
         $firm = $this->makeAiEntitledFirm(AiMode::FirmOwned);
         $user = User::factory()->create();
 
-        app(\App\Services\AiProviderKeyService::class)->generate($firm, AiProvider::OpenAi, $user);
+        app(AiProviderKeyService::class)->generate($firm, AiProvider::OpenAi, $user);
 
         $event = app(AiUsageRecorderService::class)->record($firm, $user, $this->samplePromptRequest(), $this->sampleResponse());
 

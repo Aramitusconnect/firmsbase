@@ -89,6 +89,20 @@ final class AiStructuredOutputSchemaRegistry
      *
      * @return array<string, string>
      */
+    /**
+     * The enum constraints for a schema, if any.
+     *
+     * Exposed so a provider adapter can express them in its own dialect —
+     * OpenAI's strict json_schema wants them inline. The registry stays the
+     * single source of truth; adapters only translate.
+     *
+     * @return array<string, list<string>>|null
+     */
+    public static function enumConstraintsFor(string $key): ?array
+    {
+        return self::ENUM_CONSTRAINTS[$key] ?? null;
+    }
+
     public static function validate(string $key, array $data): array
     {
         $schema = self::schemaFor($key);

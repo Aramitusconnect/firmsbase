@@ -11,8 +11,8 @@ use App\Marketplace\Services\MarketplaceAnalyticsService;
 use App\Marketplace\Services\MarketplaceStructuredDataService;
 use App\Marketplace\ViewModels\PublicFirmProfile;
 use App\Services\CanonicalUrlService;
+use Illuminate\Http\Response;
 use Illuminate\Support\Str;
-use Illuminate\View\View;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
@@ -26,10 +26,17 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  * A non-existent OR non-publicly-visible (draft/suspended/removed/
  * archived) slug 404s identically — never distinguishes "doesn't
  * exist" from "exists but hidden" in the response.
+ *
+ * NOT shared-cacheable, despite being a public SEO page: the "Start Secure
+ * Intake" form embeds a per-visitor CSRF token, and a shared cache that
+ * stored one visitor's token and served it to another would break every
+ * subsequent submission (and hand out a token minted for someone else's
+ * session). Search engines still index it — no-store is a caching
+ * instruction, not a robots directive.
  */
 class FirmProfileController extends Controller
 {
-    public function show(string $slug, CanonicalUrlService $hosts, MarketplaceStructuredDataService $structuredData, MarketplaceAnalyticsService $analytics): View
+    public function show(string $slug, CanonicalUrlService $hosts, MarketplaceStructuredDataService $structuredData, MarketplaceAnalyticsService $analytics): Response
     {
         $firm = DirectoryFirm::query()->where('slug', $slug)->first();
 
@@ -45,7 +52,7 @@ class FirmProfileController extends Controller
             ? Str::limit(strip_tags($profile->description), 155)
             : $profile->displayName.' — Firm profile on MyAttorney by FirmsVault.';
 
-        return view('myattorney.firms.show', [
+        return response()->view('myattorney.firms.show', [
             'profile' => $profile,
             // Checkpoint 6: the claim entry point is the authenticated
             // Firm app (app.firmsvault.com), never a MyAttorney-hosted
@@ -60,6 +67,6 @@ class FirmProfileController extends Controller
                 'url' => $canonicalUrl,
             ],
             'structuredData' => $structuredData->forFirm($profile),
-        ]);
+        ])->header('Cache-Control', 'private, no-store, max-age=0');
     }
 }

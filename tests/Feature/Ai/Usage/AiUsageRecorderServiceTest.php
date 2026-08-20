@@ -34,7 +34,7 @@ class AiUsageRecorderServiceTest extends TestCase
     {
         return new AiPromptRequest(
             provider: AiProvider::OpenAi,
-            model: 'fake-model-1',
+            model: 'gpt-5.6-terra',
             actionType: $type,
             instructionText: 'Summarize the attached notes.',
             documentDerivedText: null,

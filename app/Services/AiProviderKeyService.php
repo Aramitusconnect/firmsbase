@@ -27,8 +27,7 @@ class AiProviderKeyService
     public function __construct(
         private readonly EmailBodyEncryptionService $encryption,
         private readonly AiEntitlementPolicyService $entitlementPolicy,
-    ) {
-    }
+    ) {}
 
     /**
      * firm_ai_provider_keys has permanent FORCE ROW LEVEL SECURITY (see
@@ -44,7 +43,7 @@ class AiProviderKeyService
      */
     public function generate(Firm $firm, AiProvider $provider, ?User $actor = null, ?string $label = null): array
     {
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $provider, $actor, $label) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $provider, $actor, $label) {
             $this->entitlementPolicy->assertEnabled($firm);
 
             $rawKey = 'aikey_'.Str::random(48);
@@ -85,9 +84,103 @@ class AiProviderKeyService
      *
      * @return array{key: FirmAiProviderKey, rawKey: string}
      */
+    /**
+     * Store a credential the FIRM supplies — an actual OpenAI API key — rather
+     * than one FirmsVault mints.
+     *
+     * generate() above creates `aikey_<random>`, which is a FirmsVault-issued
+     * identifier and is useless as a provider credential. Talking to OpenAI
+     * requires the firm's own secret, so this is the path the AI settings page
+     * uses. Everything else is deliberately identical to generate(): same
+     * envelope encryption, same tenant context, same entitlement assertion,
+     * same Active status — only the origin of the secret differs.
+     *
+     * The plaintext is never returned, never logged, and never persisted: it
+     * exists only as the $secret argument until encrypt() consumes it. Callers
+     * must not echo it back to the browser.
+     *
+     * Any pre-existing Active key for the same provider is marked Rotated
+     * first, so a firm cannot silently end up with two live credentials and no
+     * way to tell which one signed a request. Rotated, not Revoked: a successor
+     * exists, and Revoked is reserved for "turned off, nothing replaced it" —
+     * the distinction is what the settings page reports to the firm.
+     */
+    public function import(
+        Firm $firm,
+        AiProvider $provider,
+        #[\SensitiveParameter] string $secret,
+        ?User $actor = null,
+        ?string $label = null,
+    ): FirmAiProviderKey {
+        if (! $provider->isImplemented()) {
+            throw new \InvalidArgumentException("Provider {$provider->value} has no adapter in this release.");
+        }
+
+        $secret = trim($secret);
+
+        if ($secret === '') {
+            throw new \InvalidArgumentException('An API key is required.');
+        }
+
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $provider, $secret, $actor, $label) {
+            $this->entitlementPolicy->assertEnabled($firm);
+
+            $result = $this->encryption->encrypt($firm, $secret);
+
+            if (! $result->succeeded) {
+                throw new \RuntimeException("Cannot store AI provider key: {$result->reason}");
+            }
+
+            FirmAiProviderKey::query()
+                ->where('firm_id', $firm->id)
+                ->where('provider', $provider)
+                ->where('status', AiProviderKeyStatus::Active)
+                ->update(['status' => AiProviderKeyStatus::Rotated, 'rotated_at' => now()]);
+
+            return FirmAiProviderKey::create([
+                'firm_id' => $firm->id,
+                'provider' => $provider,
+                'encrypted_key_ciphertext' => $result->ciphertext,
+                'encryption_key_id' => $result->encryptionKeyId,
+                'status' => AiProviderKeyStatus::Active,
+                'label' => $label,
+                'created_by' => $actor?->id,
+            ]);
+        });
+    }
+
+    /**
+     * The firm's single Active credential for a provider, or null.
+     */
+    public function activeKeyFor(Firm $firm, AiProvider $provider): ?FirmAiProviderKey
+    {
+        return (new TenantContextService)->runWithFirmContext($firm, fn (): ?FirmAiProviderKey => FirmAiProviderKey::query()
+            ->where('firm_id', $firm->id)
+            ->where('provider', $provider)
+            ->where('status', AiProviderKeyStatus::Active)
+            ->latest('id')
+            ->first());
+    }
+
+    /**
+     * Turn the firm's AI credential off with no replacement. Idempotent.
+     *
+     * The row is kept and marked Revoked rather than deleted (project rule 6),
+     * and Revoked is not Rotated: nothing succeeded this key. Re-enabling AI
+     * requires importing a new credential.
+     */
+    public function revoke(Firm $firm, AiProvider $provider): int
+    {
+        return (new TenantContextService)->runWithFirmContext($firm, fn (): int => FirmAiProviderKey::query()
+            ->where('firm_id', $firm->id)
+            ->where('provider', $provider)
+            ->where('status', AiProviderKeyStatus::Active)
+            ->update(['status' => AiProviderKeyStatus::Revoked]));
+    }
+
     public function rotate(Firm $firm, FirmAiProviderKey $existing, ?User $actor = null): array
     {
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $existing, $actor) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $existing, $actor) {
             if ($existing->firm_id !== $firm->id) {
                 throw new \RuntimeException('This provider key does not belong to this firm.');
             }

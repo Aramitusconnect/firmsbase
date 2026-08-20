@@ -3,6 +3,11 @@
 namespace App\Services;
 
 use App\Enums\GovernanceMappingStatus;
+use App\Models\Concerns\BelongsToTenant;
+use App\Models\Document;
+use App\Models\SecurityEvent;
+use App\Models\SupportAccessRequest;
+use App\Services\VirusScan\FakeVirusScanner;
 use App\ValueObjects\GovernanceMappingResult;
 
 /**
@@ -30,7 +35,7 @@ class SecurityBaselineMappingService
             new GovernanceMappingResult(
                 item_key: 'tenant_isolation_query_policy_api_storage',
                 item_label: 'Tenant isolation enforced at query/policy/API/storage layers',
-                owning_class: \App\Models\Concerns\BelongsToTenant::class,
+                owning_class: BelongsToTenant::class,
                 status: GovernanceMappingStatus::Implemented,
                 notes: 'BelongsToTenant adds a global scope that automatically narrows every tenant-owned model query to the active TenantContext firm_id, and stamps firm_id on create. Applied consistently across dozens of models (Document, SecurityEvent, FirmAiProviderKey, DeletionRequest, etc.).',
             ),
@@ -44,28 +49,28 @@ class SecurityBaselineMappingService
             new GovernanceMappingResult(
                 item_key: 'tenancy_single_resolver',
                 item_label: 'A single canonical tenant-context resolver',
-                owning_class: \App\Services\TenantContextResolver::class,
+                owning_class: TenantContextResolver::class,
                 status: GovernanceMappingStatus::Implemented,
                 notes: 'TenantContextResolver is the sole class that sets/reads the active TenantContext; BelongsToTenant and every tenant-safe policy service consume it exclusively.',
             ),
             new GovernanceMappingResult(
                 item_key: 'context_consumers_queries_storage_cache_queue_search',
                 item_label: 'Tenant context consumed across queries, storage, cache, queue, and search',
-                owning_class: \App\Models\Concerns\BelongsToTenant::class,
+                owning_class: BelongsToTenant::class,
                 status: GovernanceMappingStatus::PartiallyImplemented,
                 notes: 'Query-level consumption is robust and pervasive via BelongsToTenant. Queue jobs run with no bound TenantContext (no app/Jobs class consumes TenantContextResolver). AI retrieval isolation (AiRetrievalIsolationService) is enforced via an explicit Firm parameter, not the ambient resolver. No cache-key namespacing or dedicated search-layer consumer was found.',
             ),
             new GovernanceMappingResult(
                 item_key: 'per_firm_envelope_encryption',
                 item_label: 'Per-firm envelope encryption for sensitive data',
-                owning_class: \App\Services\EncryptionKeyService::class,
+                owning_class: EncryptionKeyService::class,
                 status: GovernanceMappingStatus::Implemented,
                 notes: 'TenantEncryptionKey + EncryptionKeyService provision/rotate/destroy one encryption key per firm; documents, AI provider keys, and other sensitive columns encrypt through it.',
             ),
             new GovernanceMappingResult(
                 item_key: 'phase17_key_destruction_governance',
                 item_label: 'Governed, irreversible cryptographic key destruction',
-                owning_class: \App\Services\KeyDestructionApprovalService::class,
+                owning_class: KeyDestructionApprovalService::class,
                 status: GovernanceMappingStatus::Implemented,
                 notes: 'Phase 17: KeyDestructionRequestService -> KeyDestructionApprovalService (two-person approval) -> KeyDestructionExecutionService, gated by export/retention/legal-hold clearance. Fully tested.',
             ),
@@ -121,21 +126,21 @@ class SecurityBaselineMappingService
             new GovernanceMappingResult(
                 item_key: 'suspicious_login_events',
                 item_label: 'Suspicious login detection/event recording',
-                owning_class: \App\Models\SecurityEvent::class,
+                owning_class: SecurityEvent::class,
                 status: GovernanceMappingStatus::PartiallyImplemented,
                 notes: 'SecurityEvent is a generic, append-only, firm-scoped event log with free-text event_type/category fields capable of representing a suspicious-login event, per approved decision #7 (reuse the generic model, no dedicated SuspiciousLoginService/columns). No automatic detection logic exists yet — this is structural capacity, not active detection.',
             ),
             new GovernanceMappingResult(
                 item_key: 'private_file_storage',
                 item_label: 'Documents stored privately by default',
-                owning_class: \App\Services\DocumentSecurityService::class,
+                owning_class: DocumentSecurityService::class,
                 status: GovernanceMappingStatus::Implemented,
                 notes: 'DocumentSecurityService::canAccess() is the explicit firm-scoped access gate; documents default to the "local" disk, never "public".',
             ),
             new GovernanceMappingResult(
                 item_key: 'no_public_legal_document_urls',
                 item_label: 'No legal document is ever served from a public URL',
-                owning_class: \App\Models\Document::class,
+                owning_class: Document::class,
                 status: GovernanceMappingStatus::Implemented,
                 notes: 'Document\'s own docblock states "private by default, never a public URL" as a project rule; confirmed no document-related code path ever writes to or reads from the "public" disk.',
             ),
@@ -156,49 +161,49 @@ class SecurityBaselineMappingService
             new GovernanceMappingResult(
                 item_key: 'malware_scanning_before_document_acceptance',
                 item_label: 'Malware/virus scanning gates document acceptance',
-                owning_class: \App\Services\VirusScan\FakeVirusScanner::class,
+                owning_class: FakeVirusScanner::class,
                 status: GovernanceMappingStatus::PartiallyImplemented,
                 notes: 'The gate itself is real and enforced: DocumentSecurityService only allows Approved once scan_status is Clean, applied via ScanDocumentJob. But VirusScanner\'s only implementation is FakeVirusScanner (deterministic, no real engine) — see gap "real_malware_scanning_engine_stubbed".',
             ),
             new GovernanceMappingResult(
                 item_key: 'ai_retrieval_isolation_per_firm',
                 item_label: 'AI retrieval isolated per firm (dedicated namespace)',
-                owning_class: \App\Services\AiRetrievalIsolationService::class,
+                owning_class: AiRetrievalIsolationService::class,
                 status: GovernanceMappingStatus::Implemented,
                 notes: 'provisionFor() records one unique namespace_identifier per firm; buildContext() throws on any cross-firm matter reference.',
             ),
             new GovernanceMappingResult(
                 item_key: 'ai_matter_permission_enforcement',
                 item_label: 'AI retrieval enforces matter-level user permission',
-                owning_class: \App\Services\MatterAccessPolicyService::class,
+                owning_class: MatterAccessPolicyService::class,
                 status: GovernanceMappingStatus::Implemented,
                 notes: 'canAccessMatter()/canAccessAllMatters() enforce role-based blanket access (FirmOwner/Attorney) or active MatterAssignment for other roles; consumed by AiRetrievalIsolationService::buildContext().',
             ),
             new GovernanceMappingResult(
                 item_key: 'prompt_injection_resistance',
                 item_label: 'Prompt-injection resistance for document-derived AI input',
-                owning_class: \App\Services\PromptInjectionResistanceService::class,
+                owning_class: PromptInjectionResistanceService::class,
                 status: GovernanceMappingStatus::Implemented,
-                notes: 'Deterministic denylist detection (detectsInjectionAttempt()) plus explicit untrusted-data wrapping (wrapAsUntrustedData()), as defense-in-depth on top of FakeAiProviderAdapter\'s structural guarantee.',
+                notes: 'Deterministic denylist detection (detectsInjectionAttempt()) plus explicit untrusted-data wrapping (wrapAsUntrustedData()), as defense-in-depth on top of the extraction contract: the EXTRACT_FIELD trigger lives in instructionText, which prospect-supplied documentDerivedText cannot reach.',
             ),
             new GovernanceMappingResult(
                 item_key: 'audit_logging_required_categories',
                 item_label: 'Audit logging required across all mandated categories',
-                owning_class: \App\Services\AuditPreservationPolicyService::class,
+                owning_class: AuditPreservationPolicyService::class,
                 status: GovernanceMappingStatus::PartiallyImplemented,
                 notes: 'protectedLogFamilies() declares all 10 GovernanceRecordScope families; 8 of 10 have a confirmed, append-only-guarded backing model (SecurityEvent, PaymentClassificationEvent, TrustLedgerEntry, PdfViewEvent, SupportAccessSession, PlatformBillingEvent, AiUsageEvent, WebhookEvent). ClientPortalLog and ApiLog are explicit, declared gaps (no table invented for either).',
             ),
             new GovernanceMappingResult(
                 item_key: 'reason_required_time_limited_support_access',
                 item_label: 'Reason-required, time-limited platform support access',
-                owning_class: \App\Models\SupportAccessRequest::class,
+                owning_class: SupportAccessRequest::class,
                 status: GovernanceMappingStatus::Implemented,
                 notes: 'SupportAccessRequest requires a reason and firm approval (unless emergency); SupportAccessSession is time-limited via expires_at, enforced by isCurrentlyValid(), never by status alone.',
             ),
             new GovernanceMappingResult(
                 item_key: 'two_person_approval_high_risk_key_destruction',
                 item_label: 'Two-person approval required for key destruction',
-                owning_class: \App\Services\KeyDestructionApprovalService::class,
+                owning_class: KeyDestructionApprovalService::class,
                 status: GovernanceMappingStatus::Implemented,
                 notes: 'firstApprove()/secondApprove() require two distinct platform admins before KeyDestructionExecutionService may execute; backed by HighRiskChangeType::CryptographicKeyDestruction reusing the existing two-person-approval workflow (no second approval system).',
             ),

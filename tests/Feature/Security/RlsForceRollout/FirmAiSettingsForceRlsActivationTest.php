@@ -312,7 +312,7 @@ class FirmAiSettingsForceRlsActivationTest extends TestCase
             $user,
             new AiPromptRequest(
                 provider: AiProvider::OpenAi,
-                model: 'fake-model-1',
+                model: 'gpt-5.6-terra',
                 actionType: AiUsageActionType::Summarization,
                 instructionText: 'Summarize the attached notes.',
                 documentDerivedText: null,
@@ -345,7 +345,7 @@ class FirmAiSettingsForceRlsActivationTest extends TestCase
             $user,
             new AiPromptRequest(
                 provider: AiProvider::OpenAi,
-                model: 'fake-model-1',
+                model: 'gpt-5.6-terra',
                 actionType: AiUsageActionType::DemandLetter,
                 instructionText: 'Draft a demand letter.',
                 documentDerivedText: null,
@@ -381,7 +381,7 @@ class FirmAiSettingsForceRlsActivationTest extends TestCase
             $user,
             new AiPromptRequest(
                 provider: AiProvider::OpenAi,
-                model: 'fake-model-1',
+                model: 'gpt-5.6-terra',
                 actionType: AiUsageActionType::Summarization,
                 instructionText: 'Summarize the attached notes.',
                 documentDerivedText: null,

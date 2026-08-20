@@ -3,19 +3,30 @@
 namespace App\Services;
 
 use App\Enums\UsageRollupMetric;
-use App\Models\Firm;
+use App\Marketplace\Models\MarketplaceAiUsageEvent;
 use App\Models\AiUsageEvent;
+use App\Models\Firm;
 use App\ValueObjects\AiBudgetCheckResult;
 
 /**
  * AiBudgetEnforcementService — firm-level limits read from
  * firm_ai_settings.token_limit_per_period/budget_limit_cents_per_period,
- * checked against the sum of this firm's ai_usage_events within the
- * given period (a pre-flight check based on prior usage, not a
- * mid-call token-precision check — token/cost counts for the CURRENT
- * call are only known after the fake adapter returns, so this service
- * blocks the NEXT call once a firm is at/over its limit, which is the
- * same pattern real-world token-budget gates use).
+ * checked against this firm's COMBINED usage within the given period:
+ * ai_usage_events (authenticated firm users) plus
+ * marketplace_ai_usage_events (anonymous prospect intake turns).
+ *
+ * This is a pre-flight check, and the exact cost of the current call is
+ * not knowable before the provider answers. Callers must therefore not
+ * pass 0 for a call they are about to make — they pass a conservative
+ * upper bound (estimated input plus the adapter's hard max_output_tokens
+ * ceiling), so a firm at 990/1000 is stopped rather than allowed to
+ * finish at 1490. The bound over-counts by design.
+ *
+ * What this is NOT: an atomic reservation. Two concurrent turns can each
+ * pass the check before either records usage, so the limit is a strong
+ * pre-flight ceiling rather than a hard cap under concurrency. Making it
+ * one requires a reservation row plus row-level locking — a schema change
+ * outside this change's scope.
  *
  * Organization-level budget uses the EXISTING UsageRollupService/
  * UsageRollupMetric::AiTokens pattern (Phase 6, previously unused —
@@ -32,9 +43,7 @@ use App\ValueObjects\AiBudgetCheckResult;
  */
 class AiBudgetEnforcementService
 {
-    public function __construct(private readonly UsageRollupService $usageRollupService)
-    {
-    }
+    public function __construct(private readonly UsageRollupService $usageRollupService) {}
 
     public function checkFirmBudget(
         Firm $firm,
@@ -45,12 +54,18 @@ class AiBudgetEnforcementService
     ): AiBudgetCheckResult {
         $settings = $firm->aiSettings;
 
-        $usedTokens = (int) AiUsageEvent::query()
-            ->where('firm_id', $firm->id)
-            ->where('created_at', '>=', $periodStartsAt)
-            ->where('created_at', '<=', $periodEndsAt)
-            ->selectRaw('COALESCE(SUM(tokens_in + tokens_out), 0) as total')
-            ->value('total');
+        // A firm's token budget is ONE ceiling over ALL of its AI spend, so it
+        // has to be measured across both places that spend is recorded.
+        //
+        // The two tables stay separate for good reasons of their own
+        // (ai_usage_events requires a user_id; marketplace turns are driven by
+        // anonymous prospects who have no user record), and neither is merged
+        // or duplicated here. This reads both and adds them.
+        //
+        // Cost is deliberately global-only below: marketplace_ai_usage_events
+        // has no cost_cents column, so there is nothing to add. The token
+        // ceiling is the one that binds in practice.
+        $usedTokens = $this->usedTokens($firm, $periodStartsAt, $periodEndsAt);
 
         $usedCostCents = (int) AiUsageEvent::query()
             ->where('firm_id', $firm->id)
@@ -73,6 +88,34 @@ class AiBudgetEnforcementService
         }
 
         return AiBudgetCheckResult::allow();
+    }
+
+    /**
+     * This firm's combined token usage in the period — the same figure the
+     * budget check enforces against, exposed so the AI settings page can show a
+     * firm what it has actually spent rather than a second, differently-derived
+     * number.
+     */
+    public function usedTokens(Firm $firm, \DateTimeInterface $periodStartsAt, \DateTimeInterface $periodEndsAt): int
+    {
+        $global = (int) AiUsageEvent::query()
+            ->where('firm_id', $firm->id)
+            ->where('created_at', '>=', $periodStartsAt)
+            ->where('created_at', '<=', $periodEndsAt)
+            ->selectRaw('COALESCE(SUM(tokens_in + tokens_out), 0) as total')
+            ->value('total');
+
+        // Scoped by explicit firm_id, never by RLS alone: rows with a null
+        // firm_id exist (a prospect can reach the marketplace before a firm is
+        // resolved) and must not be charged to anyone.
+        $marketplace = (int) MarketplaceAiUsageEvent::query()
+            ->where('firm_id', $firm->id)
+            ->where('created_at', '>=', $periodStartsAt)
+            ->where('created_at', '<=', $periodEndsAt)
+            ->selectRaw('COALESCE(SUM(tokens_in + tokens_out), 0) as total')
+            ->value('total');
+
+        return $global + $marketplace;
     }
 
     public function checkOrganizationBudget(

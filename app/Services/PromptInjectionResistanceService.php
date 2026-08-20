@@ -7,21 +7,21 @@ use App\ValueObjects\AiPromptRequest;
 /**
  * PromptInjectionResistanceService — enforces project rule 17
  * (document-derived text is data, not instructions) as a defense-in-
- * depth layer ON TOP OF FakeAiProviderAdapter's own structural
- * guarantee (the adapter only ever derives requestedToolActions from
- * instructionText, never from documentDerivedText — see that class's
- * docblock). This service's job is detection/audit-flagging, not the
- * sole enforcement mechanism: even if this service were removed
- * entirely, the adapter's structural design alone prevents an
- * adversarial instruction embedded in an uploaded document from ever
- * producing a tool action. Both layers are required by project rule
- * 18 (prompt-injection resistance must be explicitly tested) — the
- * test suite exercises both independently.
+ * depth layer ON TOP OF the adapter's own structural guarantee: an
+ * adapter only ever derives requestedToolActions from instructionText,
+ * never from documentDerivedText, and OpenAiProviderAdapter places
+ * document-derived text in the user role while instructions stay in
+ * the system role. This service's job is detection/audit-flagging, not
+ * the sole enforcement mechanism: even if it were removed entirely,
+ * that structural separation still prevents an adversarial instruction
+ * embedded in an uploaded document from producing a tool action. Both
+ * layers are required by project rule 18 (prompt-injection resistance
+ * must be explicitly tested) — the test suite exercises both
+ * independently.
  *
- * Detection is a fixed, deterministic denylist match — appropriate for
- * a foundation phase with no real model in the loop. A future
- * provider-integration phase may replace/extend this with a real
- * classifier without changing this service's public contract.
+ * Detection is a fixed, deterministic denylist match. It is a coarse
+ * signal for the audit trail, not a claim to catch every phrasing; the
+ * structural separation above is what the safety property rests on.
  */
 class PromptInjectionResistanceService
 {
@@ -57,9 +57,10 @@ class PromptInjectionResistanceService
 
     /**
      * Wraps document-derived text with explicit untrusted-data markers.
-     * FakeAiProviderAdapter never strips these markers or treats
-     * content between them as instructions — it is purely inert data
-     * as far as the adapter's own logic is concerned.
+     * No adapter strips these markers or promotes content between them
+     * to the instruction role — the text stays inert data as far as
+     * FirmsVault's own logic is concerned. The markers are additionally
+     * a signal to the model; the role separation is the actual control.
      */
     public function wrapAsUntrustedData(string $documentDerivedText): string
     {
@@ -72,9 +73,8 @@ class PromptInjectionResistanceService
      * True if the request's document-derived text contains an
      * injection attempt. Used by AiToolActionRecorderService to mark
      * was_constrained=true on any resulting ai_tool_actions row for
-     * audit visibility, even in cases where — as with
-     * FakeAiProviderAdapter — the attempt could never have succeeded
-     * structurally.
+     * audit visibility, even where the attempt could never have
+     * succeeded structurally.
      */
     public function evaluate(AiPromptRequest $request): bool
     {

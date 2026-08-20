@@ -16,8 +16,8 @@ use App\ValueObjects\AiProviderResponse;
  * per tool name in the adapter's response. was_constrained is set
  * whenever PromptInjectionResistanceService detects an injection
  * pattern in the request's document-derived text — for audit
- * visibility, even in cases (like FakeAiProviderAdapter) where the
- * attempt could never have structurally succeeded. status is Blocked
+ * visibility, even where the attempt could never have structurally
+ * succeeded. status is Blocked
  * whenever the request did not explicitly allow tool actions
  * (allowToolActions = false) but the caller is recording an action
  * anyway (defensive — should never happen given AiProviderResponse's
@@ -25,9 +25,7 @@ use App\ValueObjects\AiProviderResponse;
  */
 class AiToolActionRecorderService
 {
-    public function __construct(private readonly PromptInjectionResistanceService $promptInjectionResistance)
-    {
-    }
+    public function __construct(private readonly PromptInjectionResistanceService $promptInjectionResistance) {}
 
     /**
      * @return array<AiToolAction>
