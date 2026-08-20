@@ -15,6 +15,7 @@ use App\Models\FirmAiProviderKey;
 use App\Models\FirmUser;
 use App\Models\User;
 use App\Services\AiProviderKeyService;
+use App\Services\AiProviderResolver;
 use App\Services\FirmAiConfigurationService;
 use App\Services\Security\StepUpAuthenticationService;
 use Filament\Actions\Action;
@@ -512,5 +513,85 @@ final class FirmAiSettingsPageTest extends TestCase
 
         $response->assertRedirect();
         $this->assertStringContainsString('/login', $response->headers->get('Location'));
+    }
+    // -----------------------------------------------------------------
+    // Model selection
+    // -----------------------------------------------------------------
+    //
+    // An OpenAI key is scoped to a project, and a project is granted specific
+    // models. Firm 8 was configured for the platform default and only found
+    // out at Test Connection that its project had no access to it — with no
+    // way to change the model from the UI. These pin the control that closes
+    // that gap.
+
+    private function fakeModelCatalog(array $ids): void
+    {
+        Http::fake([
+            '*/models' => Http::response(['data' => array_map(fn ($id) => ['id' => $id], $ids)], 200),
+            '*/responses' => Http::response([
+                'output' => [['content' => [['text' => 'ok']]]],
+                'usage' => ['input_tokens' => 8, 'output_tokens' => 2],
+            ], 200),
+        ]);
+    }
+
+    public function test_the_model_selector_offers_only_models_the_firms_own_key_can_use(): void
+    {
+        [$firm] = $this->actingAsFirmRole(FirmUserRole::FirmOwner);
+        app(AiProviderKeyService::class)->import($firm, AiProvider::OpenAi, 'a-key');
+        $this->fakeModelCatalog(['gpt-4.1-mini', 'gpt-5.6-terra']);
+
+        Livewire::test(FirmAiSettingsPage::class)
+            ->assertOk()
+            ->assertSee('gpt-4.1-mini');
+    }
+
+    public function test_saving_a_model_points_the_firm_at_it(): void
+    {
+        [$firm] = $this->actingAsFirmRole(FirmUserRole::FirmOwner);
+        app(AiProviderKeyService::class)->import($firm, AiProvider::OpenAi, 'a-key');
+        $this->fakeModelCatalog(['gpt-4.1-mini']);
+
+        Livewire::test(FirmAiSettingsPage::class)
+            ->set('data.ai_mode', AiMode::FirmOwned->value)
+            ->set('data.intake_ai_assist_enabled', true)
+            ->set('data.model', 'gpt-4.1-mini')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame('gpt-4.1-mini', app(AiProviderResolver::class)->modelFor($firm->fresh(['firmSettings', 'aiSettings'])));
+    }
+
+    public function test_the_configured_model_stays_selectable_when_the_catalog_cannot_be_read(): void
+    {
+        // Provider down, key revoked, network gone — the page must still render
+        // and must not blank out the model the firm already chose.
+        [$firm] = $this->actingAsFirmRole(FirmUserRole::FirmOwner);
+        app(AiProviderKeyService::class)->import($firm, AiProvider::OpenAi, 'a-key');
+        app(FirmAiConfigurationService::class)->setModel($firm, 'gpt-4.1-mini');
+        Http::fake(['*/models' => Http::response([], 500)]);
+
+        Livewire::test(FirmAiSettingsPage::class)
+            ->assertOk()
+            ->assertSee('gpt-4.1-mini');
+    }
+
+    public function test_a_firm_with_no_credential_gets_an_empty_catalog_rather_than_an_error(): void
+    {
+        $this->actingAsFirmRole(FirmUserRole::FirmOwner);
+        Http::fake();
+
+        Livewire::test(FirmAiSettingsPage::class)->assertOk();
+
+        Http::assertNothingSent();
+    }
+
+    public function test_an_empty_model_is_refused_by_the_service(): void
+    {
+        $firm = $this->makeAiEntitledFirm(AiMode::FirmOwned);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        app(FirmAiConfigurationService::class)->setModel($firm, '   ');
     }
 }

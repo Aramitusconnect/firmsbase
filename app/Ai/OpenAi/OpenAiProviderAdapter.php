@@ -136,6 +136,51 @@ final readonly class OpenAiProviderAdapter implements AiProviderAdapterInterface
         );
     }
 
+    /**
+     * The model ids this credential's project may actually use.
+     *
+     * A firm's key is scoped to an OpenAI project, and a project is granted
+     * specific models — so "which model should this firm use" is a question
+     * only the credential can answer. Asking OpenAI beats maintaining a list
+     * in config that drifts out of date and offers firms models they cannot
+     * call.
+     *
+     * @return array<int, string>
+     */
+    public function availableModels(): array
+    {
+        try {
+            $response = Http::withToken($this->apiKey)
+                ->timeout($this->timeoutSeconds)
+                ->connectTimeout($this->connectTimeoutSeconds)
+                ->acceptJson()
+                ->get(rtrim($this->baseUri, '/').'/models');
+        } catch (ConnectionException) {
+            throw new OpenAiProviderException(OpenAiFailureReason::Timeout);
+        }
+
+        if ($response->failed()) {
+            throw new OpenAiProviderException(
+                OpenAiFailureReason::fromStatus($response->status()),
+                $response->status(),
+            );
+        }
+
+        $ids = [];
+
+        foreach ((array) $response->json('data', []) as $model) {
+            $id = is_array($model) ? ($model['id'] ?? null) : null;
+
+            if (is_string($id) && $id !== '') {
+                $ids[] = $id;
+            }
+        }
+
+        sort($ids);
+
+        return $ids;
+    }
+
     public function provider(): AiProvider
     {
         return AiProvider::OpenAi;

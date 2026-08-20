@@ -126,6 +126,7 @@ class FirmAiSettingsPage extends Page implements HasSchemas
         $this->form->fill([
             'ai_mode' => $status->configuredMode->value,
             'intake_ai_assist_enabled' => $status->intakeAssistEnabled,
+            'model' => $status->model,
         ]);
     }
 
@@ -262,6 +263,19 @@ class FirmAiSettingsPage extends Page implements HasSchemas
                             ->label('AI-assisted intake')
                             ->helperText('When off, the public intake questionnaire still works — it simply never calls OpenAI.')
                             ->disabled(fn (): bool => ! static::canManageAi()),
+                        Select::make('model')
+                            ->label('Model')
+                            // Options come from the firm's OWN credential: an
+                            // OpenAI key is scoped to a project, and a project
+                            // is granted specific models. A fixed list in
+                            // config would offer firms models they cannot call
+                            // — which is exactly how this firm ended up
+                            // configured for a model its project had no access
+                            // to, and only found out at Test Connection.
+                            ->options(fn (): array => $this->modelOptions())
+                            ->helperText('Only the models this firm\'s API key can actually use are listed. Add a key first to populate this.')
+                            ->disabled(fn (): bool => ! static::canManageAi())
+                            ->native(false),
                     ]),
 
                 Section::make('Provider')
@@ -328,6 +342,12 @@ class FirmAiSettingsPage extends Page implements HasSchemas
 
         app(FirmAiConfigurationService::class)->setMode($firm, $mode);
         app(FirmAiConfigurationService::class)->setIntakeAssistEnabled($firm, (bool) ($state['intake_ai_assist_enabled'] ?? false));
+
+        $model = is_string($state['model'] ?? null) ? trim($state['model']) : '';
+
+        if ($model !== '') {
+            app(FirmAiConfigurationService::class)->setModel($firm, $model);
+        }
 
         $this->forgetStatus();
 
@@ -426,6 +446,42 @@ class FirmAiSettingsPage extends Page implements HasSchemas
     private function forgetStatus(): void
     {
         $this->statusCache = null;
+        $this->modelOptionsCache = null;
+    }
+
+    /**
+     * @var array<string, string>|null
+     */
+    private ?array $modelOptionsCache = null;
+
+    /**
+     * @return array<string, string>
+     */
+    private function modelOptions(): array
+    {
+        if ($this->modelOptionsCache !== null) {
+            return $this->modelOptionsCache;
+        }
+
+        // Only ask OpenAI for the catalog on behalf of someone who could act
+        // on it. Every other role sees the field disabled, and a read-only
+        // page view should not reach out to a third party.
+        $models = static::canManageAi()
+            ? app(FirmAiConfigurationService::class)->availableModels($this->currentFirm())
+            : [];
+
+        // Whatever the firm is configured for stays selectable even if the
+        // lookup failed or the project no longer grants it — otherwise saving
+        // any other field would silently blank the model.
+        $current = $this->status()->model;
+
+        if ($current !== null && ! in_array($current, $models, true)) {
+            $models[] = $current;
+        }
+
+        sort($models);
+
+        return $this->modelOptionsCache = array_combine($models, $models) ?: [];
     }
 
     private function currentFirm(): Firm

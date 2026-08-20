@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Ai\OpenAi\OpenAiProviderAdapter;
 use App\Enums\AiMode;
 use App\Enums\AiProvider;
 use App\Models\Firm;
@@ -73,6 +74,59 @@ final readonly class FirmAiConfigurationService
 
             $settings->update(['intake_ai_assist_enabled' => $enabled]);
         });
+    }
+
+    /**
+     * Point this firm at a specific model.
+     *
+     * Stored in firm_ai_settings.allowed_models_json, which AiProviderResolver
+     * already reads in preference to the configured default — so a firm whose
+     * OpenAI project is granted a different model than the platform default
+     * can say so without a config change or a deployment.
+     */
+    public function setModel(Firm $firm, string $model): void
+    {
+        $model = trim($model);
+
+        if ($model === '') {
+            throw new \InvalidArgumentException('A model is required.');
+        }
+
+        $this->tenantContext->runWithFirmContext($firm, function () use ($firm, $model): void {
+            $settings = $firm->aiSettings()->first();
+
+            if ($settings === null) {
+                throw new \RuntimeException('This firm has no AI settings row.');
+            }
+
+            $settings->update(['allowed_models_json' => [$model]]);
+        });
+    }
+
+    /**
+     * The models this firm's own credential may use, for the settings page's
+     * model selector.
+     *
+     * Returns an empty array rather than throwing when the credential is
+     * missing, revoked, or OpenAI cannot be reached: a settings page must still
+     * render when the provider is having a bad day. The caller falls back to
+     * whatever the firm already has configured.
+     *
+     * @return array<int, string>
+     */
+    public function availableModels(Firm $firm): array
+    {
+        $adapter = $this->resolver->adapterFor($firm);
+
+        if (! $adapter instanceof OpenAiProviderAdapter) {
+            return [];
+        }
+
+        try {
+            return $adapter->availableModels();
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     /**
