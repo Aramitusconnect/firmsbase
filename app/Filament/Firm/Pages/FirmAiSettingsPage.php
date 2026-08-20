@@ -134,69 +134,111 @@ class FirmAiSettingsPage extends Page implements HasSchemas
         return $schema->components([
             EmbeddedSchema::make('form'),
             SchemaActions::make([
+                // Safe as a string handler: save() takes no arguments and needs
+                // no modal. Every action that DOES need either one lives in
+                // getHeaderActions() below — see the note there.
                 Action::make('save')
                     ->label('Save AI Settings')
                     ->action('save')
                     ->visible(fn (): bool => static::canManageAi()),
-
-                StepUpAuthentication::mergeInto(
-                    Action::make('addApiKey')
-                        ->label(fn (): string => $this->status()->credentialStatus === AiProviderKeyStatus::Active
-                            ? 'Replace API Key'
-                            : 'Add API Key')
-                        ->modalDescription('The key is encrypted with this firm\'s own encryption key and can never be read back from this page.')
-                        ->action('addApiKey')
-                        ->visible(fn (): bool => static::canManageAi()),
-                    [
-                        TextInput::make('apiKey')
-                            ->label('OpenAI API key')
-                            ->password()
-                            ->required()
-                            ->autocomplete('off')
-                            // Never dehydrated into $this->data: the secret
-                            // lives in the action's own argument array for the
-                            // duration of the call and nowhere else.
-                            ->helperText('Starts with sk-. FirmsVault stores it encrypted and never displays it again.'),
-                        TextInput::make('label')
-                            ->label('Label (optional)')
-                            ->maxLength(255)
-                            ->helperText('Only to help you recognise this key later. Never sent to OpenAI.'),
-                    ],
-                    'web',
-                ),
-
-                Action::make('testConnection')
-                    ->label('Test Connection')
-                    ->action('testConnection')
-                    ->visible(fn (): bool => static::canManageAi()),
-
-                StepUpAuthentication::mergeInto(
-                    Action::make('rotateApiKey')
-                        ->label('Rotate API Key')
-                        ->modalDescription('Stores a new key and marks the current one Rotated. The old key is kept for audit history but is never used again.')
-                        ->action('rotateApiKey')
-                        ->visible(fn (): bool => static::canManageAi() && $this->status()->credentialStatus === AiProviderKeyStatus::Active),
-                    [
-                        TextInput::make('apiKey')
-                            ->label('New OpenAI API key')
-                            ->password()
-                            ->required()
-                            ->autocomplete('off'),
-                    ],
-                    'web',
-                ),
-
-                StepUpAuthentication::protect(
-                    Action::make('revokeApiKey')
-                        ->label('Revoke API Key')
-                        ->color('danger')
-                        ->modalDescription('Turns AI off for this firm with no replacement. Intake continues without AI assistance. You can add a new key at any time.')
-                        ->action('revokeApiKey')
-                        ->visible(fn (): bool => static::canManageAi() && $this->status()->credentialStatus === AiProviderKeyStatus::Active),
-                    'web',
-                ),
             ]),
         ]);
+    }
+
+    /**
+     * The credential actions, as header actions with closure handlers.
+     *
+     * Both details matter and neither is stylistic:
+     *
+     * A STRING passed to Action::action() is returned verbatim as the button's
+     * wire:click handler (Filament\Actions\Action::getLivewireClickHandler()
+     * short-circuits on is_string). The click then calls that Livewire method
+     * DIRECTLY — no action mounting, and therefore no modal. For these actions
+     * that meant the step-up password field was never rendered and never
+     * validated, and a handler expecting the modal's $data crashed on an empty
+     * argument list. A closure keeps the action on Filament's mount → fill →
+     * validate → call path, which is where step-up actually runs.
+     *
+     * The handlers are closures rather than public methods for the same
+     * reason: every public method on a Livewire component is callable from the
+     * browser by name. A public revokeApiKey() would be reachable directly,
+     * skipping the confirmation modal that carries the step-up check.
+     */
+    protected function getHeaderActions(): array
+    {
+        return [
+            StepUpAuthentication::mergeInto(
+                Action::make('addApiKey')
+                    ->label(fn (): string => $this->status()->credentialStatus === AiProviderKeyStatus::Active
+                        ? 'Replace API Key'
+                        : 'Add API Key')
+                    ->modalDescription('The key is encrypted with this firm\'s own encryption key and can never be read back from this page.')
+                    ->modalSubmitActionLabel('Save API key')
+                    ->action(function (array $data): void {
+                        $this->storeCredential($data, 'API key saved');
+                    })
+                    ->visible(fn (): bool => static::canManageAi()),
+                [
+                    TextInput::make('apiKey')
+                        ->label('OpenAI API key')
+                        ->password()
+                        ->required()
+                        ->autocomplete('off')
+                        // Lives in the action's own $data for the duration of
+                        // the call. Never dehydrated into $this->data, so it
+                        // never reaches the component's Livewire snapshot.
+                        ->helperText('Starts with sk-. FirmsVault stores it encrypted and never displays it again.'),
+                    TextInput::make('label')
+                        ->label('Label (optional)')
+                        ->maxLength(255)
+                        ->helperText('Only to help you recognise this key later. Never sent to OpenAI.'),
+                ],
+                'web',
+            ),
+
+            Action::make('testConnection')
+                ->label('Test Connection')
+                ->action(function (): void {
+                    $this->performTestConnection();
+                })
+                ->visible(fn (): bool => static::canManageAi()),
+
+            StepUpAuthentication::mergeInto(
+                Action::make('rotateApiKey')
+                    ->label('Rotate API Key')
+                    ->modalDescription('Stores a new key and marks the current one Rotated. The old key is kept for audit history but is never used again.')
+                    ->modalSubmitActionLabel('Rotate key')
+                    ->action(function (array $data): void {
+                        // Rotation IS an import: import() marks the previous
+                        // Active key Rotated and inserts the replacement in one
+                        // firm-scoped call. A separate rotate path would be a
+                        // second way to reach the same invariant.
+                        $this->storeCredential($data, 'API key rotated');
+                    })
+                    ->visible(fn (): bool => static::canManageAi() && $this->status()->credentialStatus === AiProviderKeyStatus::Active),
+                [
+                    TextInput::make('apiKey')
+                        ->label('New OpenAI API key')
+                        ->password()
+                        ->required()
+                        ->autocomplete('off'),
+                ],
+                'web',
+            ),
+
+            StepUpAuthentication::protect(
+                Action::make('revokeApiKey')
+                    ->label('Revoke API Key')
+                    ->color('danger')
+                    ->modalDescription('Turns AI off for this firm with no replacement. Intake continues without AI assistance. You can add a new key at any time.')
+                    ->modalSubmitActionLabel('Revoke key')
+                    ->action(function (): void {
+                        $this->performRevoke();
+                    })
+                    ->visible(fn (): bool => static::canManageAi() && $this->status()->credentialStatus === AiProviderKeyStatus::Active),
+                'web',
+            ),
+        ];
     }
 
     public function form(Schema $schema): Schema
@@ -292,26 +334,7 @@ class FirmAiSettingsPage extends Page implements HasSchemas
         Notification::make()->title('AI settings saved')->success()->send();
     }
 
-    /**
-     * @param  array<string, mixed>  $data
-     */
-    public function addApiKey(array $data): void
-    {
-        $this->storeCredential($data, 'API key saved');
-    }
-
-    /**
-     * @param  array<string, mixed>  $data
-     */
-    public function rotateApiKey(array $data): void
-    {
-        // Rotation IS an import: import() marks the previous Active key Rotated
-        // and inserts the replacement, in one firm-scoped call. A separate
-        // rotate path would be a second way to reach the same invariant.
-        $this->storeCredential($data, 'API key rotated');
-    }
-
-    public function revokeApiKey(): void
+    private function performRevoke(): void
     {
         $firm = $this->authorizedFirmForManagement();
 
@@ -328,7 +351,7 @@ class FirmAiSettingsPage extends Page implements HasSchemas
             ->send();
     }
 
-    public function testConnection(): void
+    private function performTestConnection(): void
     {
         $firm = $this->authorizedFirmForManagement();
         $actor = Auth::user();

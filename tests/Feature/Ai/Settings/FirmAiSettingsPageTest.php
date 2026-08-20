@@ -17,6 +17,7 @@ use App\Models\User;
 use App\Services\AiProviderKeyService;
 use App\Services\FirmAiConfigurationService;
 use App\Services\Security\StepUpAuthenticationService;
+use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -113,10 +114,18 @@ final class FirmAiSettingsPageTest extends TestCase
         Livewire::test(FirmAiSettingsPage::class)->assertOk();
 
         Livewire::test(FirmAiSettingsPage::class)
-            ->call('addApiKey', ['apiKey' => 'sk-should-never-be-stored'])
+            ->assertActionHidden('addApiKey')
+            ->assertActionHidden('testConnection');
+
+        // save() is the one handler reachable by name, so it carries its own
+        // server-side check rather than relying on the button being hidden.
+        Livewire::test(FirmAiSettingsPage::class)
+            ->set('data.ai_mode', AiMode::Disabled->value)
+            ->call('save')
             ->assertForbidden();
 
         $this->assertSame([], $this->statuses($firm));
+        $this->assertSame(AiMode::FirmOwned, $firm->fresh()->firmSettings->ai_mode);
     }
 
     public function test_a_paralegal_cannot_revoke_the_firms_credential(): void
@@ -126,8 +135,8 @@ final class FirmAiSettingsPageTest extends TestCase
         $this->actingAsFirmRole(FirmUserRole::Paralegal, $firm);
 
         Livewire::test(FirmAiSettingsPage::class)
-            ->call('revokeApiKey')
-            ->assertForbidden();
+            ->assertActionHidden('revokeApiKey')
+            ->assertActionHidden('rotateApiKey');
 
         $this->assertSame([AiProviderKeyStatus::Active], $this->statuses($firm));
     }
@@ -159,7 +168,7 @@ final class FirmAiSettingsPageTest extends TestCase
         [$firm] = $this->actingAsFirmRole(FirmUserRole::FirmOwner);
         app(AiProviderKeyService::class)->import($firm, AiProvider::OpenAi, 'own-key');
 
-        Livewire::test(FirmAiSettingsPage::class)->call('revokeApiKey');
+        Livewire::test(FirmAiSettingsPage::class)->callAction('revokeApiKey');
 
         $this->assertSame([AiProviderKeyStatus::Revoked], $this->statuses($firm));
         $this->assertSame([AiProviderKeyStatus::Active], $this->statuses($otherFirm));
@@ -237,7 +246,7 @@ final class FirmAiSettingsPageTest extends TestCase
         [$firm] = $this->actingAsFirmRole(FirmUserRole::FirmOwner);
 
         Livewire::test(FirmAiSettingsPage::class)
-            ->call('addApiKey', ['apiKey' => 'sk-a-secret-that-must-never-be-echoed', 'label' => 'Main key']);
+            ->callAction('addApiKey', ['apiKey' => 'sk-a-secret-that-must-never-be-echoed', 'label' => 'Main key']);
 
         $this->assertSame([AiProviderKeyStatus::Active], $this->statuses($firm));
 
@@ -254,7 +263,7 @@ final class FirmAiSettingsPageTest extends TestCase
     {
         [$firm] = $this->actingAsFirmRole(FirmUserRole::FirmOwner);
 
-        Livewire::test(FirmAiSettingsPage::class)->call('addApiKey', ['apiKey' => '   ']);
+        Livewire::test(FirmAiSettingsPage::class)->callAction('addApiKey', ['apiKey' => '   ']);
 
         $this->assertSame([], $this->statuses($firm));
     }
@@ -264,7 +273,7 @@ final class FirmAiSettingsPageTest extends TestCase
         [$firm] = $this->actingAsFirmRole(FirmUserRole::FirmOwner);
         app(AiProviderKeyService::class)->import($firm, AiProvider::OpenAi, 'first-key');
 
-        Livewire::test(FirmAiSettingsPage::class)->call('rotateApiKey', ['apiKey' => 'second-key']);
+        Livewire::test(FirmAiSettingsPage::class)->callAction('rotateApiKey', ['apiKey' => 'second-key']);
 
         $this->assertSame([AiProviderKeyStatus::Rotated, AiProviderKeyStatus::Active], $this->statuses($firm));
     }
@@ -275,7 +284,7 @@ final class FirmAiSettingsPageTest extends TestCase
         app(AiProviderKeyService::class)->import($firm, AiProvider::OpenAi, 'only-key');
 
         Livewire::test(FirmAiSettingsPage::class)
-            ->call('revokeApiKey')
+            ->callAction('revokeApiKey')
             ->assertOk()
             ->assertSee('Revoked — no replacement stored');
 
@@ -293,7 +302,7 @@ final class FirmAiSettingsPageTest extends TestCase
         $this->fakeSuccessfulOpenAi();
 
         Livewire::test(FirmAiSettingsPage::class)
-            ->call('testConnection')
+            ->callAction('testConnection')
             ->assertSet('connectionSucceeded', true);
     }
 
@@ -303,7 +312,7 @@ final class FirmAiSettingsPageTest extends TestCase
         app(AiProviderKeyService::class)->import($firm, AiProvider::OpenAi, 'bad-key');
         Http::fake(['*/responses' => Http::response(['error' => ['message' => 'Incorrect API key provided: sk-leak']], 401)]);
 
-        $page = Livewire::test(FirmAiSettingsPage::class)->call('testConnection');
+        $page = Livewire::test(FirmAiSettingsPage::class)->callAction('testConnection');
 
         $page->assertSet('connectionSucceeded', false);
         $this->assertStringNotContainsString('sk-leak', $page->get('connectionMessage'));
@@ -317,8 +326,7 @@ final class FirmAiSettingsPageTest extends TestCase
         Http::fake();
 
         Livewire::test(FirmAiSettingsPage::class)
-            ->call('testConnection')
-            ->assertForbidden();
+            ->assertActionHidden('testConnection');
 
         Http::assertNothingSent();
     }
@@ -355,5 +363,154 @@ final class FirmAiSettingsPageTest extends TestCase
             ->assertDontSee('Platform Managed')
             ->assertDontSee('Anthropic')
             ->assertDontSee('Azure');
+    }
+    // -----------------------------------------------------------------
+    // Onboarding state: Firm Owned, provider chosen, no credential yet
+    // -----------------------------------------------------------------
+    //
+    // This is where a firm necessarily starts, and it is the state that broke
+    // in staging: the buttons were rendered with STRING action handlers, which
+    // Filament turns into a direct wire:click on a Livewire method — no
+    // mounting, no modal, no step-up. Clicking "Add API Key" called a handler
+    // that expected the modal's $data with no arguments at all, and the page
+    // answered 500. The tests below pin every part of that.
+
+    public function test_a_firm_owned_firm_with_no_credential_yet_renders_cleanly(): void
+    {
+        $this->actingAsFirmRole(FirmUserRole::FirmOwner);
+
+        Livewire::test(FirmAiSettingsPage::class)
+            ->assertOk()
+            ->assertSee('None stored')
+            ->assertSee('No active API key is stored for this firm.')
+            ->assertActionVisible('addApiKey')
+            ->assertActionVisible('testConnection')
+            ->assertActionHidden('rotateApiKey')
+            ->assertActionHidden('revokeApiKey');
+    }
+
+    public function test_the_add_api_key_action_mounts_its_modal_with_no_credential_present(): void
+    {
+        $this->actingAsFirmRole(FirmUserRole::FirmOwner);
+
+        Livewire::test(FirmAiSettingsPage::class)
+            ->mountAction('addApiKey')
+            ->assertOk()
+            ->assertActionMounted('addApiKey');
+    }
+
+    public function test_test_connection_with_no_credential_answers_gracefully_instead_of_erroring(): void
+    {
+        $this->actingAsFirmRole(FirmUserRole::FirmOwner);
+        Http::fake();
+
+        Livewire::test(FirmAiSettingsPage::class)
+            ->callAction('testConnection')
+            ->assertOk()
+            ->assertSet('connectionSucceeded', false)
+            ->assertSet('connectionMessage', 'This firm has no active API key. Add one before testing the connection.');
+
+        Http::assertNothingSent();
+    }
+
+    public function test_no_credential_action_is_wired_to_a_string_handler(): void
+    {
+        // The structural guard. A string handler is returned verbatim as the
+        // button's wire:click, which skips mounting entirely — so the modal
+        // that carries the step-up password field never renders. Asserted on
+        // the action objects rather than on rendered HTML so it holds however
+        // Filament chooses to draw the button.
+        $this->actingAsFirmRole(FirmUserRole::FirmOwner);
+
+        $page = Livewire::test(FirmAiSettingsPage::class)->instance();
+
+        foreach (['addApiKey', 'testConnection', 'rotateApiKey', 'revokeApiKey'] as $name) {
+            $action = $page->getAction($name);
+
+            $this->assertNotNull($action, "The {$name} action must exist.");
+            $this->assertInstanceOf(
+                \Closure::class,
+                (new \ReflectionProperty(Action::class, 'action'))->getValue($action),
+                "The {$name} action must use a closure handler: a string handler bypasses the modal, and with it the step-up check.",
+            );
+        }
+    }
+
+    public function test_the_page_exposes_no_public_method_that_requires_an_argument(): void
+    {
+        // Every public method on a Livewire component is callable from the
+        // browser by name. One requiring an argument answers 500 when called
+        // with none — which is precisely how the staging page failed — and one
+        // that mutates state is reachable without its confirmation modal.
+        $offenders = [];
+
+        $reflection = new \ReflectionClass(FirmAiSettingsPage::class);
+
+        foreach ($reflection->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
+            // getDeclaringClass() names the USING class for a trait method, so
+            // the file is what actually distinguishes this page's own code from
+            // Filament's traits.
+            if ($method->getFileName() !== $reflection->getFileName()) {
+                continue;
+            }
+
+            if ($method->getNumberOfRequiredParameters() === 0) {
+                continue;
+            }
+
+            // Filament/Livewire lifecycle methods are invoked by the framework
+            // with their arguments, never by a bare client-side name call.
+            if (in_array($method->getName(), ['content', 'form'], true)) {
+                continue;
+            }
+
+            $offenders[] = $method->getName();
+        }
+
+        $this->assertSame([], $offenders, 'These public methods are client-callable and would fail or bypass their modal.');
+    }
+
+    public function test_adding_a_key_without_a_fresh_step_up_verification_demands_the_password(): void
+    {
+        [$firm] = $this->actingAsFirmRole(FirmUserRole::FirmOwner);
+        app(StepUpAuthenticationService::class)->forget('web');
+
+        Livewire::test(FirmAiSettingsPage::class)
+            ->callAction('addApiKey', ['apiKey' => 'sk-must-not-be-stored-without-step-up'])
+            ->assertHasActionErrors(['stepUpCurrentPassword']);
+
+        $this->assertSame([], $this->statuses($firm), 'No credential may be stored by an action that skipped step-up.');
+    }
+
+    public function test_a_correct_password_satisfies_step_up_and_stores_the_key(): void
+    {
+        $firm = $this->makeAiEntitledFirm(AiMode::FirmOwned);
+        $password = 'a-real-password-2026';
+        $user = User::factory()->create(['is_active' => true, 'password' => bcrypt($password)]);
+        $this->runWithFirmContext(
+            $firm,
+            fn () => FirmUser::factory()->forFirm($firm)->forUser($user)->role(FirmUserRole::FirmOwner)->create(),
+        );
+        $this->actingAs($user);
+        app(StepUpAuthenticationService::class)->forget('web');
+
+        Livewire::test(FirmAiSettingsPage::class)
+            ->callAction('addApiKey', [
+                'apiKey' => 'sk-stored-only-after-step-up',
+                'stepUpCurrentPassword' => $password,
+            ])
+            ->assertHasNoActionErrors();
+
+        $this->assertSame([AiProviderKeyStatus::Active], $this->statuses($firm));
+    }
+
+    public function test_an_unauthenticated_visitor_gets_a_redirect_not_a_raw_error(): void
+    {
+        // A session that expired mid-visit must land on the login page rather
+        // than a 500 the user reads as "the product is broken".
+        $response = $this->get($this->firmAppUrl('/ai-automation'));
+
+        $response->assertRedirect();
+        $this->assertStringContainsString('/login', $response->headers->get('Location'));
     }
 }
