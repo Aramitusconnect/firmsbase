@@ -13,6 +13,7 @@ use App\Http\Controllers\MyAttorney\MarketplaceIntakeStartController;
 use App\Http\Controllers\MyAttorney\SitemapController;
 use App\Http\Controllers\PublicSignup\RegistrationRequestController;
 use App\Http\Controllers\Seo\RobotsTxtController;
+use App\Http\Controllers\SignatureRecipientController;
 use App\Http\Middleware\ApplyTenantDatabaseContext;
 use App\Http\Middleware\ConfigurePanelSessionCookie;
 use App\Http\Middleware\EstablishClientPortalTenantContext;
@@ -132,6 +133,57 @@ Route::get('/pay/{uuid}', PublicPaymentPage::class)
     ->where('uuid', '[0-9a-fA-F-]{36}')
     ->middleware(['signed', 'throttle:30,1'])
     ->name('public.payment-requests.show');
+
+/*
+|--------------------------------------------------------------------------
+| Public Signature Recipient page (Non-payment completion program —
+| e-signature signer-facing flow)
+|--------------------------------------------------------------------------
+|
+| Deliberately NOT wrapped in a Route::domain() group, mirroring
+| public.payment-requests.show immediately above — this is a link
+| shared with a Firm's own external signer (not a Firm-internal or
+| platform-internal surface), and the canonical host it should live
+| under is not resolved by this workstream. TrustHosts (see
+| bootstrap/app.php) still requires the request arrive on one of the
+| six canonical hostnames; only the domain-routing layer leaves this
+| one unconstrained among those six.
+|
+| Deliberately NOT `signed` middleware, unlike public.payment-requests.show:
+| the access secret here is the signer's OWN hashed
+| signature_request_recipients.access_token_hash (a per-recipient,
+| CSPRNG-derived, hash_equals()-compared bearer token minted by
+| SignatureRequestWorkflowService::send()), not a Laravel URL signature
+| — SignatureRecipientController itself is the authorization boundary,
+| never this route's middleware alone. `{uuid}` is the recipient's own
+| public uuid (HasPublicUuid); the raw bearer token travels separately,
+| as a `?token=` query parameter, and is never accepted as a route
+| segment (so it is never captured by generic uuid-shaped route-pattern
+| assumptions elsewhere in the app). throttle:30,1 mirrors
+| public.payment-requests.show's own generous-but-bounded allowance for
+| a genuinely public, unauthenticated surface.
+*/
+Route::middleware(['throttle:30,1'])->group(function () {
+    Route::get('/sign/{uuid}', [SignatureRecipientController::class, 'show'])
+        ->where('uuid', '[0-9a-fA-F-]{36}')
+        ->name('public.signature-recipients.show');
+
+    Route::get('/sign/{uuid}/document', [SignatureRecipientController::class, 'document'])
+        ->where('uuid', '[0-9a-fA-F-]{36}')
+        ->name('public.signature-recipients.document');
+
+    Route::post('/sign/{uuid}/consent', [SignatureRecipientController::class, 'consent'])
+        ->where('uuid', '[0-9a-fA-F-]{36}')
+        ->name('public.signature-recipients.consent');
+
+    Route::post('/sign/{uuid}/sign', [SignatureRecipientController::class, 'sign'])
+        ->where('uuid', '[0-9a-fA-F-]{36}')
+        ->name('public.signature-recipients.sign');
+
+    Route::post('/sign/{uuid}/decline', [SignatureRecipientController::class, 'decline'])
+        ->where('uuid', '[0-9a-fA-F-]{36}')
+        ->name('public.signature-recipients.decline');
+});
 
 /*
 |--------------------------------------------------------------------------

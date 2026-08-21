@@ -42,6 +42,22 @@ use App\Models\SignatureRequestRecipient;
  * subsequent statements. SignatureEventLogger::log()/logConsentCaptured()
  * must remain plain/leaf for the identical reason — both are always
  * called from inside an already-established caller wrap.
+ *
+ * Non-payment completion program: sign() closes the request→certificate
+ * gap by calling SignatureCertificateService::generate() once the
+ * parent SignatureRequest's recomputed status is Signed. That call is
+ * made AFTER sign()'s own runWithFirmContext() wrap above has fully
+ * returned — never from inside it — for the identical nesting reason
+ * documented in the paragraph above: generate() itself opens four of
+ * its own sibling runWithFirmContext() calls, and nesting those inside
+ * sign()'s outer wrap would reproduce the same decoy-wrap bug (the
+ * inner finally clearing app.current_firm_id out from under the
+ * outer wrap's remaining statements). The SignatureRequest instance
+ * passed to generate() is captured from inside the wrap (via
+ * recompute()'s own return value) while context was active, then used
+ * as a plain PHP object afterward — generate() re-establishes its own
+ * context from $request->firm_id and needs no ambient context from the
+ * caller.
  */
 class SignatureRecipientWorkflowService
 {
@@ -49,6 +65,7 @@ class SignatureRecipientWorkflowService
         private readonly SignatureWorkflowTransitionService $transitions,
         private readonly SignatureEventLogger $eventLogger,
         private readonly SignatureRequestAggregationService $aggregation,
+        private readonly SignatureCertificateService $certificates,
     ) {
     }
 
@@ -127,7 +144,9 @@ class SignatureRecipientWorkflowService
 
         $this->transitions->assertTransitionAllowed($recipient->status->value, SignatureRequestStatus::Signed->value);
 
-        return (new TenantContextService())->runWithFirmContext($recipient->firm_id, function () use ($recipient) {
+        $requestReadyForCertificate = null;
+
+        $signedRecipient = (new TenantContextService())->runWithFirmContext($recipient->firm_id, function () use ($recipient, &$requestReadyForCertificate) {
             $recipient->update(['status' => SignatureRequestStatus::Signed, 'signed_at' => now()]);
 
             $this->eventLogger->log(
@@ -138,10 +157,27 @@ class SignatureRecipientWorkflowService
                 recipient: $recipient,
             );
 
-            $this->aggregation->recompute($recipient->signatureRequest);
+            $recomputedRequest = $this->aggregation->recompute($recipient->signatureRequest);
+
+            if ($recomputedRequest->status === SignatureRequestStatus::Signed) {
+                $requestReadyForCertificate = $recomputedRequest;
+            }
 
             return $recipient->fresh();
         });
+
+        // Sibling to the wrap above, never nested inside it — see this
+        // class's own docblock. $requestReadyForCertificate is only
+        // non-null when every active recipient has now signed, so
+        // generate() is called at most once per unanimous completion;
+        // its own DB-unique constraint on signature_certificates.signature_request_id
+        // makes a second certificate for the same request structurally
+        // impossible regardless.
+        if ($requestReadyForCertificate !== null) {
+            $this->certificates->generate($requestReadyForCertificate);
+        }
+
+        return $signedRecipient;
     }
 
     /**

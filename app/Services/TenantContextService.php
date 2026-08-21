@@ -120,6 +120,24 @@ class TenantContextService
      */
     private const CLIENT_PORTAL_INVITATION_SELF_LOOKUP_SESSION_SETTING_NAME = 'app.current_client_portal_invitation_token';
 
+    /**
+     * Non-payment completion program, e-signature signer-facing flow —
+     * the same RLS bootstrap problem as PAYMENT_REQUEST_SELF_LOOKUP
+     * above, for a genuinely anonymous signer resolving their own
+     * signature_request_recipients row via a link that carries only the
+     * recipient's own uuid plus a separate raw bearer token (verified
+     * independently, in PHP, via hash_equals() against the resolved
+     * row's access_token_hash — this session setting proves nothing
+     * about the token, only about the uuid). Set ONLY from the
+     * already-resolved uuid the caller itself supplies (the route
+     * parameter, never trusted further than that) — see
+     * withSignatureRecipientSelfLookupContext() below. See
+     * database/migrations/2026_11_25_100001_add_self_lookup_clause_to_signature_request_recipients_rls_policy.php
+     * for the corresponding FOR SELECT-only policy this setting
+     * satisfies.
+     */
+    private const SIGNATURE_RECIPIENT_SELF_LOOKUP_SESSION_SETTING_NAME = 'app.current_signature_recipient_uuid';
+
     public function setFirmContext(Firm|int|string $firm): void
     {
         (new TenantContextResolver)->activateForFirm($this->resolveFirm($firm));
@@ -473,6 +491,35 @@ class TenantContextService
             });
         } finally {
             DB::select('select set_config(?, ?, ?)', [self::CLIENT_PORTAL_INVITATION_SELF_LOOKUP_SESSION_SETTING_NAME, '', $this->isLocalScoped()]);
+        }
+    }
+
+    /**
+     * Non-payment completion program, e-signature signer-facing flow.
+     * Identical in shape to withPaymentRequestSelfLookupContext() —
+     * activates ONLY the narrow app.current_signature_recipient_uuid
+     * session setting the signature_request_recipients_self_lookup RLS
+     * policy reads, runs the callback, and always clears it afterward.
+     * Never touches app.current_firm_id or PHP-memory firm context.
+     * $uuid must be a value the caller already has independently (the
+     * public route's own uuid parameter) — this method grants no more
+     * than "find the one signature_request_recipients row with this
+     * exact uuid," never a listing or any other table. The raw bearer
+     * token presented alongside the uuid is verified separately, in
+     * PHP, via hash_equals() against the resolved row's own
+     * access_token_hash — this method establishes no opinion about the
+     * token at all.
+     */
+    public function withSignatureRecipientSelfLookupContext(string $uuid, callable $callback): mixed
+    {
+        try {
+            return DB::transaction(function () use ($uuid, $callback) {
+                DB::select('select set_config(?, ?, ?)', [self::SIGNATURE_RECIPIENT_SELF_LOOKUP_SESSION_SETTING_NAME, $uuid, $this->isLocalScoped()]);
+
+                return $callback();
+            });
+        } finally {
+            DB::select('select set_config(?, ?, ?)', [self::SIGNATURE_RECIPIENT_SELF_LOOKUP_SESSION_SETTING_NAME, '', $this->isLocalScoped()]);
         }
     }
 

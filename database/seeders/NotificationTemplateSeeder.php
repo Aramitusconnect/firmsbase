@@ -98,6 +98,12 @@ class NotificationTemplateSeeder extends Seeder
                 'subject' => 'A new invoice is available',
                 'body' => 'A new invoice has been issued for your matter. Please log in to your client portal to review the details.',
             ],
+            [
+                'key' => 'signature_request_sent',
+                'channel' => ConsentChannel::Email,
+                'subject' => 'A document requires your electronic signature',
+                'body' => 'You have been asked to review and sign a document. Use the secure link below to open it, review its contents, and provide your electronic signature. This link is unique to you and should not be shared.',
+            ],
         ];
     }
 

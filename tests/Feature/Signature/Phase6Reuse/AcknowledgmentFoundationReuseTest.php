@@ -6,6 +6,9 @@ use App\Enums\SignatureRequestStatus;
 use App\Models\SignatureRequest;
 use App\Models\SignatureRequestRecipient;
 use App\Services\AcknowledgmentSignatureFoundationService;
+use App\Services\Automation\DomainEventRecorderService;
+use App\Services\DocumentHashService;
+use App\Services\SignatureCertificateService;
 use App\Services\SignatureEventLogger;
 use App\Services\SignatureRecipientWorkflowService;
 use App\Services\SignatureRequestAggregationService;
@@ -67,6 +70,12 @@ class AcknowledgmentFoundationReuseTest extends TestCase
             $transitions,
             new SignatureEventLogger(new AcknowledgmentSignatureFoundationService()),
             new SignatureRequestAggregationService($transitions),
+            new SignatureCertificateService(
+                $transitions,
+                new DocumentHashService(),
+                new SignatureEventLogger(new AcknowledgmentSignatureFoundationService()),
+                new DomainEventRecorderService(),
+            ),
         );
 
         $request = SignatureRequest::factory()->status(SignatureRequestStatus::Sent)->create();

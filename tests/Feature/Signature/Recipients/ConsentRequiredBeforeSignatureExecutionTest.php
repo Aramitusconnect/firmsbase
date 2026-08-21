@@ -3,9 +3,13 @@
 namespace Tests\Feature\Signature\Recipients;
 
 use App\Enums\SignatureRequestStatus;
+use App\Models\DocumentHash;
 use App\Models\SignatureRequest;
 use App\Models\SignatureRequestRecipient;
 use App\Services\AcknowledgmentSignatureFoundationService;
+use App\Services\Automation\DomainEventRecorderService;
+use App\Services\DocumentHashService;
+use App\Services\SignatureCertificateService;
 use App\Services\SignatureEventLogger;
 use App\Services\SignatureRecipientWorkflowService;
 use App\Services\SignatureRequestAggregationService;
@@ -36,6 +40,12 @@ class ConsentRequiredBeforeSignatureExecutionTest extends TestCase
             $this->transitions,
             new SignatureEventLogger(new AcknowledgmentSignatureFoundationService()),
             new SignatureRequestAggregationService($this->transitions),
+            new SignatureCertificateService(
+                $this->transitions,
+                new DocumentHashService(),
+                new SignatureEventLogger(new AcknowledgmentSignatureFoundationService()),
+                new DomainEventRecorderService(),
+            ),
         );
     }
 
@@ -66,6 +76,11 @@ class ConsentRequiredBeforeSignatureExecutionTest extends TestCase
     public function test_sign_succeeds_only_once_consented_at_is_set(): void
     {
         $request = SignatureRequest::factory()->status(SignatureRequestStatus::Sent)->create();
+        // Real precondition of SignatureCertificateService::generate(),
+        // reached here because this recipient is the request's only
+        // recipient -- signing them is unanimous and advances the
+        // request straight to Signed, gating certificate generation.
+        DocumentHash::factory()->forDocument($request->document)->create();
         $recipient = SignatureRequestRecipient::factory()
             ->forRequest($request)
             ->status(SignatureRequestStatus::Viewed)
@@ -83,6 +98,7 @@ class ConsentRequiredBeforeSignatureExecutionTest extends TestCase
     public function test_no_signature_event_of_type_recipient_signed_exists_without_a_prior_consent_captured_event(): void
     {
         $request = SignatureRequest::factory()->status(SignatureRequestStatus::Sent)->create();
+        DocumentHash::factory()->forDocument($request->document)->create();
         $recipient = SignatureRequestRecipient::factory()
             ->forRequest($request)
             ->status(SignatureRequestStatus::Viewed)
