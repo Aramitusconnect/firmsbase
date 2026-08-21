@@ -460,8 +460,21 @@ class LoginPolicyFirewallTest extends TestCase
         // narrow exception: a pure infra health-check endpoint with no
         // login/session/auth logic of any kind — orthogonal to this
         // test's actual concern (no auth controller was introduced).
+        //
+        // SignatureRecipientController.php (non-payment completion
+        // program, e-signature signer-facing flow) is a second reviewed,
+        // narrow exception: the sole public, unauthenticated entry point
+        // onto a signature_request_recipients row. It never touches
+        // Laravel's auth system — every action resolves the recipient via
+        // a two-phase check (a narrow self-lookup RLS policy by uuid,
+        // then an explicit hash_equals() comparison of the caller-supplied
+        // raw token against the row's own access_token_hash), collapsing
+        // any unknown uuid or wrong token to the same generic 404. See the
+        // controller's own docblock and
+        // tests/Feature/Signature/SignatureRecipientPublicAccessTest.php
+        // for the full security review.
         $controllerFiles = glob(app_path('Http/Controllers/*.php')) ?: [];
-        $this->assertSame(['Controller.php', 'ReadinessController.php'], array_map('basename', $controllerFiles));
+        $this->assertSame(['Controller.php', 'ReadinessController.php', 'SignatureRecipientController.php'], array_map('basename', $controllerFiles));
     }
 
     public function test_no_protected_domain_behavior_files_were_modified(): void

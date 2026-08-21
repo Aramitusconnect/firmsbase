@@ -244,6 +244,14 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
         'home.blade.php',
         'show.blade.php',
         'report-correction.blade.php',
+        // "Ask MyAttorney visitors what they need help with, at intake
+        // start" — start-intake.blade.php. Reviewed: a real <h1>, a
+        // <ul>/<li> list of practice-area choices each submitted via a
+        // genuine <form>/<button type="submit"> (never a clickable
+        // <div> or icon-only control), with a visible focus-visible
+        // outline on the button, and a real <a href> "back" link. All
+        // dynamic output is escaped through {{ }}.
+        'start-intake.blade.php',
     ];
 
     /**
@@ -342,6 +350,47 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
         'past-sessions.blade.php',
     ];
 
+    /**
+     * "Give each MyAttorney concern its own rate-limit budget" —
+     * resources/views/errors/429.blade.php, the friendly rate-limit
+     * page replacing Symfony's bare "429 Too Many Requests". Reviewed:
+     * fully self-contained plain HTML (no layout/asset dependency, by
+     * design — a throttled page must not itself issue more requests),
+     * no interactive controls of any kind, meaning is conveyed entirely
+     * through real visible text (never colour alone).
+     */
+    private const MYATTORNEY_RATE_LIMIT_ALLOWED_BLADE_BASENAMES = [
+        '429.blade.php',
+    ];
+
+    /**
+     * "Add signup entry points to the Firm and Client Portal login
+     * pages" + "Turn the signup entry points into real
+     * registration-request forms" — the public, unauthenticated
+     * Firm/Client-Portal registration-request flow.
+     * register-cta.blade.php (Firm and Client Portal variants) is
+     * additive markup rendered through
+     * PanelsRenderHook::AUTH_LOGIN_FORM_AFTER, leaving the stock
+     * Filament login form untouched; its only interactive element is a
+     * real <a href> link with genuine visible text, and its purely
+     * decorative divider is correctly marked aria-hidden="true".
+     * request-card.blade.php (the shared shell) and its two extending
+     * views client-access-request.blade.php/
+     * firm-registration-request.blade.php were reviewed together: every
+     * <input> has a real <label for="..."> explicitly associated by a
+     * matching id, the submit control is a genuine <button
+     * type="submit"> with visible text, the "Sign in" link is a real
+     * <a href>, and a validation error is conveyed through actual
+     * message text (not colour alone) inside a plain element. All
+     * dynamic output is escaped through {{ }}.
+     */
+    private const SIGNUP_ENTRY_POINTS_ALLOWED_BLADE_BASENAMES = [
+        'register-cta.blade.php',
+        'request-card.blade.php',
+        'client-access-request.blade.php',
+        'firm-registration-request.blade.php',
+    ];
+
     public function test_no_blade_filament_livewire_frontend_or_browser_accessibility_files_exist(): void
     {
         $bladeFiles = [];
@@ -373,7 +422,9 @@ class AccessibilityCoverageMappingServiceTest extends TestCase
                 && ! in_array(basename($path), self::MARKETPLACE_INTAKE_SESSION_RESUME_ALLOWED_BLADE_BASENAMES, true)
                 && ! in_array(basename($path), self::CLIENT_PORTAL_INVITATION_ACCEPTANCE_ALLOWED_BLADE_BASENAMES, true)
                 && ! in_array(basename($path), self::CORE_SUPERADMIN_REQUIRES_ATTENTION_WIDGET_ALLOWED_BLADE_BASENAMES, true)
-                && ! in_array(basename($path), self::PROMPT_SIX_SUPPORT_ACCESS_ALLOWED_BLADE_BASENAMES, true),
+                && ! in_array(basename($path), self::PROMPT_SIX_SUPPORT_ACCESS_ALLOWED_BLADE_BASENAMES, true)
+                && ! in_array(basename($path), self::MYATTORNEY_RATE_LIMIT_ALLOWED_BLADE_BASENAMES, true)
+                && ! in_array(basename($path), self::SIGNUP_ENTRY_POINTS_ALLOWED_BLADE_BASENAMES, true),
         ));
 
         $this->assertEmpty($nonDefaultBladeFiles, 'Found unexpected Blade files: '.implode(', ', $nonDefaultBladeFiles));

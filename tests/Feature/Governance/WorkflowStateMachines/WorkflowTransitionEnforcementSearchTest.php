@@ -173,6 +173,18 @@ class WorkflowTransitionEnforcementSearchTest extends TestCase
         // go through SignatureRecipientController ->
         // SignatureRecipientWorkflowService, both already covered by
         // the controller-allowlist assertion above.
+        // Narrowly updated AGAIN by "Give each MyAttorney concern its own
+        // rate-limit budget" and the signup-entry-points work --
+        // resources/views/errors/429.blade.php and the three
+        // resources/views/auth/*.blade.php files are a reviewed, narrow
+        // exception of the same shape: 429.blade.php is fully
+        // self-contained with no model/enum reference of any kind;
+        // request-card.blade.php (the shared shell) and its two
+        // extending views client-access-request.blade.php/
+        // firm-registration-request.blade.php only ever render plain
+        // form fields and session-flash text -- none references any of
+        // the 14 tracked workflow-state-machine enums, and none writes
+        // a status/license_status field.
         $bladeFiles = glob(resource_path('views/**/*.blade.php')) ?: [];
         $bladeFiles = array_values(array_filter(
             $bladeFiles,
@@ -181,6 +193,10 @@ class WorkflowTransitionEnforcementSearchTest extends TestCase
                 && $path !== resource_path('views/layouts/public-intake.blade.php')
                 && $path !== resource_path('views/livewire/marketplace/public-intake-page.blade.php')
                 && $path !== resource_path('views/signature-recipients/show.blade.php')
+                && $path !== resource_path('views/errors/429.blade.php')
+                && $path !== resource_path('views/auth/request-card.blade.php')
+                && $path !== resource_path('views/auth/client-access-request.blade.php')
+                && $path !== resource_path('views/auth/firm-registration-request.blade.php')
                 && ! str_starts_with($path, resource_path('views/myattorney/'))
         ));
         $this->assertEmpty($bladeFiles, 'No Blade views should exist that could write workflow status directly.');

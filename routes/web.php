@@ -313,8 +313,8 @@ Route::domain($hosts->clientPortalHost())
 | Signup entry points — Firm host and Client Portal host
 |--------------------------------------------------------------------------
 |
-| The login pages now offer "Register your firm" / "Create client account".
-| These are the pages those buttons land on.
+| The panel sign-in pages now offer "Register your firm" / "Create client
+| account". These are the pages those buttons land on.
 |
 | They are REQUEST forms, not account creation. Both record a PlatformLead via
 | the canonical PlatformSalesLeadService and stop there — no Firm, User,
