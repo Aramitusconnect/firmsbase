@@ -7,6 +7,8 @@ namespace App\Marketplace\Services;
 use App\Marketplace\Enums\MarketplaceCapability;
 use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\ValueObjects\MarketplaceIntakeEligibility;
+use App\Models\PracticeArea;
+use Illuminate\Support\Collection;
 
 /**
  * MarketplaceIntakeEligibilityService — Mission 3 (MyAttorney
@@ -40,6 +42,51 @@ class MarketplaceIntakeEligibilityService
     public function __construct(
         private readonly MarketplaceCapabilityService $capabilityService = new MarketplaceCapabilityService,
     ) {}
+
+    /**
+     * The practice areas a visitor may start an intake in for this listing.
+     *
+     * Drawn from the firm's OWN published associations
+     * (directory_firm_practice_areas, which MyAttorneyProfilePage writes as
+     * `firm_submitted`) — never from the platform-wide taxonomy. A firm that
+     * has not said it practices in an area must never receive an intake filed
+     * under it.
+     *
+     * Filtered to active AND marketplace-visible. The firm-side selector only
+     * offers marketplace-visible areas today, so the second filter is
+     * belt-and-braces against imported or historical rows; is_active matters
+     * on its own because matter types hang off the practice area, and an
+     * inactive area would produce an intake nothing can be converted into.
+     *
+     * @return Collection<int, PracticeArea>
+     */
+    public function eligiblePracticeAreas(DirectoryFirm $directoryFirm): Collection
+    {
+        return $directoryFirm->practiceAreas()
+            ->where('practice_areas.is_active', true)
+            ->where('practice_areas.is_marketplace_visible', true)
+            ->orderBy('practice_areas.sort_order')
+            ->orderBy('practice_areas.name')
+            ->get();
+    }
+
+    /**
+     * Resolve a visitor-supplied practice area against what this listing
+     * actually offers.
+     *
+     * Returns null for anything the firm does not publish — a forged id, an
+     * unpublished area, another firm's area, or a non-existent one. The caller
+     * treats null as a refusal; this never falls back to "close enough".
+     */
+    public function resolveEligiblePracticeArea(DirectoryFirm $directoryFirm, mixed $practiceAreaId): ?PracticeArea
+    {
+        if (! is_numeric($practiceAreaId)) {
+            return null;
+        }
+
+        return $this->eligiblePracticeAreas($directoryFirm)
+            ->firstWhere('id', (int) $practiceAreaId);
+    }
 
     public function evaluate(DirectoryFirm $directoryFirm): MarketplaceIntakeEligibility
     {

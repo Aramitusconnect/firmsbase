@@ -74,7 +74,13 @@ class ConvertIntakeAction extends Action
                 })
                 ->searchable()
                 ->required()
-                ->helperText('Only types belonging to this intake\'s own practice area are shown.'),
+                ->helperText(fn (MarketplaceIntake $record): string => $record->practice_area_id === null
+                    // Historical rows only: intakes created before the public
+                    // flow asked for a practice area. Matter types hang off a
+                    // practice area, so there is nothing to offer — say so
+                    // instead of showing an empty required select.
+                    ? 'This intake was created before MyAttorney asked visitors what they need help with, so it has no practice area and no matter types can be listed. Contact support to set one.'
+                    : 'Only types belonging to this intake\'s own practice area are shown.'),
 
             Select::make('assigned_attorney_id')
                 ->label('Responsible Attorney')

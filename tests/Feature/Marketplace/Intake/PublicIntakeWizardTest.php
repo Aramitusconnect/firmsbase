@@ -56,6 +56,14 @@ class PublicIntakeWizardTest extends TestCase
         app(IntakeTemplateService::class)->createQuestion($template, 'notes', 'Anything else?', 'textarea', isRequired: false, sortOrder: 30);
 
         $directoryFirm = DirectoryFirm::factory()->member()->create(['firm_id' => $firm->id, 'accepting_inquiries' => true]);
+
+        // Publish the area on the listing too, so the public POST route can
+        // start an intake without asking. Passing it to the service alone is
+        // not enough any more: the route derives the area from what the firm
+        // actually publishes, never from the caller.
+        $practiceArea->update(['is_active' => true, 'is_marketplace_visible' => true]);
+        $directoryFirm->practiceAreas()->sync([$practiceArea->id => ['source_type' => 'firm_submitted']]);
+
         $intake = app(MarketplaceIntakeService::class)->startForDirectoryFirm($directoryFirm, $practiceArea);
 
         return [$firm, $directoryFirm, $intake];
@@ -80,9 +88,18 @@ class PublicIntakeWizardTest extends TestCase
         app(IntakeTemplateService::class)->createQuestion($template, 'state', 'Your state', 'text', isRequired: true, sortOrder: 20);
 
         $directoryFirm = DirectoryFirm::factory()->member()->create(['firm_id' => $firm->id, 'accepting_inquiries' => true]);
+
+        // Publish the area on the listing too, so the public POST route can
+        // start an intake without asking. Passing it to the service alone is
+        // not enough any more: the route derives the area from what the firm
+        // actually publishes, never from the caller.
+        $practiceArea->update(['is_active' => true, 'is_marketplace_visible' => true]);
+        $directoryFirm->practiceAreas()->sync([$practiceArea->id => ['source_type' => 'firm_submitted']]);
+
         $intake = app(MarketplaceIntakeService::class)->startForDirectoryFirm($directoryFirm, $practiceArea);
 
         return [$firm, $directoryFirm, $intake];
+
     }
 
     /**
@@ -110,6 +127,13 @@ class PublicIntakeWizardTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $directoryFirm = DirectoryFirm::factory()->member()->create(['firm_id' => $firm->id, 'accepting_inquiries' => true]);
+
+        // One published practice area, so the visitor is not asked to choose.
+        // A listing that publishes none can no longer start an intake at all —
+        // that case has its own coverage in StartIntakePracticeAreaTest.
+        $practiceArea = PracticeArea::factory()->create(['is_active' => true, 'is_marketplace_visible' => true]);
+        $directoryFirm->practiceAreas()->sync([$practiceArea->id => ['source_type' => 'firm_submitted']]);
+        IntakeTemplate::factory()->marketplaceDefault()->create(['is_active' => true]);
 
         $response = $this->post($this->myAttorneyUrl('/firms/'.$directoryFirm->slug.'/start-intake'));
 

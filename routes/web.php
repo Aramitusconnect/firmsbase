@@ -361,6 +361,16 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
         Route::post('/firms/{slug}/start-intake', [MarketplaceIntakeStartController::class, 'store'])->name('myattorney.firms.start-intake');
     });
 
+    // "What do you need help with?" — shown only when the firm publishes more
+    // than one practice area. A GET, and deliberately read-only: no intake row
+    // exists until the visitor answers, so backing out leaves nothing behind.
+    // Carries the myattorney session cookie for the same reason the profile
+    // does — it renders a CSRF-protected form that posts to start-intake.
+    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:20,1'])->group(function () {
+        Route::get('/firms/{slug}/start-intake', [MarketplaceIntakeStartController::class, 'choose'])
+            ->name('myattorney.firms.start-intake.choose');
+    });
+
     // Mission 3 (MyAttorney Conversion + AI Intake), checkpoint 2 —
     // the one public, unauthenticated page a prospect's resumable
     // intake link resolves to. 'signed' verifies the uuid/expiry

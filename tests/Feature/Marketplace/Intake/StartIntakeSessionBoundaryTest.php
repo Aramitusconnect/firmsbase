@@ -10,6 +10,7 @@ use App\Marketplace\Models\DirectoryFirm;
 use App\Marketplace\ViewModels\PublicFirmProfile;
 use App\Models\Firm;
 use App\Models\IntakeTemplate;
+use App\Models\PracticeArea;
 use App\Services\CanonicalUrlService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Route;
@@ -46,11 +47,19 @@ final class StartIntakeSessionBoundaryTest extends TestCase
     {
         IntakeTemplate::factory()->marketplaceDefault()->create(['is_active' => true]);
 
-        return DirectoryFirm::factory()->member()->create([
+        $directoryFirm = DirectoryFirm::factory()->member()->create([
             'firm_id' => Firm::factory()->create()->id,
             'slug' => $slug,
             'accepting_inquiries' => true,
         ]);
+
+        // Exactly one published practice area: the intake starts without
+        // asking, which keeps these tests about the session boundary rather
+        // than about the chooser.
+        $practiceArea = PracticeArea::factory()->create(['is_active' => true, 'is_marketplace_visible' => true]);
+        $directoryFirm->practiceAreas()->sync([$practiceArea->id => ['source_type' => 'firm_submitted']]);
+
+        return $directoryFirm;
     }
 
     private function cookieNamesOn($response): array
@@ -235,7 +244,7 @@ final class StartIntakeSessionBoundaryTest extends TestCase
         // session cookie on the sitemaps or the home page would cost
         // cacheability on the routes that genuinely are pure reads.
         $host = app(CanonicalUrlService::class)->myAttorneyHost();
-        $formBearing = ['firms/{slug}', 'firms/{slug}/report-correction', 'intake/{uuid}'];
+        $formBearing = ['firms/{slug}', 'firms/{slug}/start-intake', 'firms/{slug}/report-correction', 'intake/{uuid}'];
         $unexpected = [];
 
         foreach (Route::getRoutes() as $route) {
