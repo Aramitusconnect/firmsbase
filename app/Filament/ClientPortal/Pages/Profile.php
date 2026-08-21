@@ -46,6 +46,19 @@ use Illuminate\Validation\Rules\Password;
  * `is_active` is NEVER exposed as a field here — not in `form()`, not
  * read by `save()` — a client cannot re-activate or deactivate their
  * own portal account from their own profile page.
+ *
+ * PORTAL-007: a "Log Out of Other Sessions" header Action, calling
+ * Laravel's built-in `Auth::guard('client')->logoutOtherDevices()`.
+ * The modal's password field mirrors this page's own "Change Password"
+ * section field styling exactly (`->password()->revealable()->
+ * autocomplete(...)`) rather than a new UI pattern — see
+ * `getHeaderActions()`. This works end-to-end because
+ * `ClientPortalPanelProvider` already includes Filament's
+ * `AuthenticateSession` middleware, which is what actually enforces
+ * the per-session password-hash check `logoutOtherDevices()` relies on
+ * to invalidate every OTHER session while leaving the current one
+ * intact (the current session's stored hash is refreshed on the very
+ * next request via that same middleware).
  */
 class Profile extends Page implements HasSchemas
 {
@@ -95,6 +108,45 @@ class Profile extends Page implements HasSchemas
                     ->action('save'),
             ]),
         ]);
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('logoutOtherSessions')
+                ->label('Log Out of Other Sessions')
+                ->color('danger')
+                ->icon(Heroicon::OutlinedArrowRightOnRectangle)
+                ->requiresConfirmation()
+                ->modalHeading('Log Out of Other Sessions')
+                ->modalDescription('Enter your current password to sign this account out of every other active session. This browser stays signed in.')
+                ->modalSubmitActionLabel('Log Out Other Sessions')
+                ->schema([
+                    TextInput::make('currentPassword')
+                        ->label('Current Password')
+                        ->password()
+                        ->revealable()
+                        ->autocomplete('current-password')
+                        ->required(),
+                ])
+                ->action(function (array $data): void {
+                    $portalUser = $this->currentPortalUser();
+
+                    abort_unless($portalUser !== null, 403);
+
+                    $currentPassword = (string) $data['currentPassword'];
+
+                    if (! Hash::check($currentPassword, $portalUser->password)) {
+                        Notification::make()->title('Incorrect password')->danger()->send();
+
+                        return;
+                    }
+
+                    Auth::guard('client')->logoutOtherDevices($currentPassword);
+
+                    Notification::make()->title('Logged out of all other sessions')->success()->send();
+                }),
+        ];
     }
 
     public function form(Schema $schema): Schema
