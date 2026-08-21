@@ -7,7 +7,6 @@ namespace App\Filament\ClientPortal\Resources;
 use App\Filament\ClientPortal\Resources\MatterResource\Pages\ListMatters;
 use App\Filament\ClientPortal\Resources\MatterResource\Pages\ViewMatter;
 use App\Filament\ClientPortal\Resources\MatterResource\RelationManagers\DeadlinesRelationManager;
-use App\Filament\ClientPortal\Resources\MatterResource\RelationManagers\MessagesRelationManager;
 use App\Models\ClientPortalUser;
 use App\Models\Matter;
 use App\Services\ClientPortalMatterAccessPolicyService;
@@ -112,20 +111,27 @@ class MatterResource extends Resource
     }
 
     /**
-     * Non-payment completion program, matter-scoped secure messaging
-     * v1 — the FIRST getRelations() override on this resource. Both
-     * relation managers re-check their own real per-record boundary
-     * (ClientPortalMatterAccessPolicyService, directly or via
-     * MatterMessagingPolicyService) in canViewForRecord() — never
-     * trusting this resource's own getEloquentQuery() list-level filter
-     * alone, the same "list is UX filter, resolve step is the
-     * boundary" split this resource's own docblock already documents.
+     * Non-payment completion program — the FIRST getRelations()
+     * override on this resource. DeadlinesRelationManager re-checks
+     * its own real per-record boundary (ClientPortalMatterAccessPolicyService)
+     * in canViewForRecord() — never trusting this resource's own
+     * getEloquentQuery() list-level filter alone, the same "list is UX
+     * filter, resolve step is the boundary" split this resource's own
+     * docblock already documents.
+     *
+     * Reconciliation note: the candidate commit (201ee358) also added
+     * MessagesRelationManager here, backed by the new matter_messages/
+     * matter_message_reads tables. Those two migrations are held
+     * pending separate owner approval (Category E), so
+     * MessagesRelationManager and its supporting model/policy/factory/
+     * test files were excluded from this cherry-pick; only the
+     * independent DeadlinesRelationManager (no dependency on the held
+     * tables) was ported.
      */
     public static function getRelations(): array
     {
         return [
             DeadlinesRelationManager::class,
-            MessagesRelationManager::class,
         ];
     }
 
