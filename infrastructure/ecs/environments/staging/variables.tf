@@ -230,35 +230,13 @@ variable "enable_custom_metric_alarms" {
 
 # --- SES bounce/complaint SQS consumer (ses-consumer role) — see
 # docs/ecs/container-architecture.md and docs/ecs/iam-matrix.md. -----------
-variable "ses_events_queue_url" {
-  description = "The SES bounce/complaint SQS queue URL (SES_EVENTS_QUEUE_URL). Plain, non-secret environment — a queue URL is an identifier, not a credential."
-  type        = string
-
-  validation {
-    condition     = length(var.ses_events_queue_url) > 0 && can(regex("^https://sqs\\.[a-z0-9-]+\\.amazonaws\\.com/[0-9]{12}/[a-zA-Z0-9_-]+$", var.ses_events_queue_url))
-    error_message = "ses_events_queue_url must be a non-empty, structurally plausible SQS queue URL: https://sqs.<region>.amazonaws.com/<12-digit-account-id>/<queue-name>."
-  }
-}
-
-variable "ses_events_queue_arn" {
-  description = "ARN of the same SQS queue ses_events_queue_url points at. Passed to the iam module so the ses_consumer task role's policy references var.ses_events_queue_arn rather than a hardcoded ARN — see infrastructure/ecs/modules/iam/main.tf."
-  type        = string
-
-  validation {
-    condition     = can(regex("^arn:aws:sqs:[a-z0-9-]+:[0-9]{12}:[a-zA-Z0-9_-]+$", var.ses_events_queue_arn))
-    error_message = "ses_events_queue_arn must be a valid SQS ARN: arn:aws:sqs:<region>:<12-digit-account-id>:<queue-name>."
-  }
-}
-
-variable "ses_events_dlq_arn" {
-  description = "ARN of the SES bounce/complaint dead-letter queue — used ONLY for the DLQ-backlog CloudWatch alarm (infrastructure/ecs/modules/cloudwatch_alarms). Never passed to the iam module and never granted to any task role: SQS's own redrive policy delivers to the DLQ automatically, and ses-consumer has no need to read from, or delete from, it directly."
-  type        = string
-
-  validation {
-    condition     = can(regex("^arn:aws:sqs:[a-z0-9-]+:[0-9]{12}:[a-zA-Z0-9_-]+$", var.ses_events_dlq_arn))
-    error_message = "ses_events_dlq_arn must be a valid SQS ARN: arn:aws:sqs:<region>:<12-digit-account-id>:<queue-name>."
-  }
-}
+#
+# The events queue, its DLQ, the SNS topic between them and SES, and the SES
+# configuration set/event destination are now fully Terraform-managed (see
+# modules/ses_events_pipeline) rather than externally-supplied identifiers —
+# ses_events_queue_url/ses_events_queue_arn/ses_events_dlq_arn were removed
+# from here for exactly that reason; every caller now reads
+# module.ses_events_pipeline's own outputs directly.
 
 variable "ses_sending_identity_arn" {
   description = "ARN of the verified SES identity (domain or email address) web sends outbound mail from — arn:aws:ses:<region>:<account-id>:identity/<domain>. Passed to the iam module so ONLY the web task role's policy references var.ses_sending_identity_arn rather than a hardcoded ARN. Confirmed by direct code inspection (Illuminate\\Mail\\Transport\\SesTransport, synchronous from the request path — no ShouldQueue mailable/notification exists) that web is the only role that sends mail; see infrastructure/ecs/modules/iam/main.tf and docs/ecs/iam-matrix.md."

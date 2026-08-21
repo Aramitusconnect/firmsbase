@@ -18,6 +18,18 @@ variable "cloudwatch_logs_log_group_arn_pattern" {
   default     = null
 }
 
+variable "sqs_queue_arn_pattern" {
+  description = "ArnLike pattern this key's policy will scope the SQS service principal's cryptographic grant to, via the kms:EncryptionContext:aws:sqs:arn condition key SQS itself supplies on every Encrypt/Decrypt/GenerateDataKey call it makes for a KMS-encrypted (SSE-KMS) queue — the exact same shape as cloudwatch_logs_log_group_arn_pattern above, for the identical reason (a KMS-encrypted AWS-managed resource authenticates to KMS via its own service-linked trust, never the calling operator's IAM permissions). Null (default) omits the SQS statement entirely."
+  type        = string
+  default     = null
+}
+
+variable "sns_topic_arn_pattern" {
+  description = "ArnLike pattern this key's policy will scope the SNS service principal's cryptographic grant to, via the kms:EncryptionContext:aws:sns:topicArn condition key SNS itself supplies on every Encrypt/Decrypt/GenerateDataKey call it makes for a KMS-encrypted (SSE-KMS) topic — the identical shape as sqs_queue_arn_pattern above. Null (default) omits the SNS statement entirely."
+  type        = string
+  default     = null
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

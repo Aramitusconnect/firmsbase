@@ -234,7 +234,15 @@ resource "aws_iam_role_policy" "task_metrics" {
 # ConsumeSesEventsCommand or SesEventConsumerService.
 # ---------------------------------------------------------------------------
 data "aws_iam_policy_document" "task_ses_consumer_sqs" {
-  count = var.ses_events_queue_arn == null ? 0 : 1
+  # Literal 1, never derived from var.ses_events_queue_arn's nullability —
+  # the events queue is now unconditionally provisioned by
+  # module.ses_events_pipeline (see environments/staging/main.tf), so its
+  # ARN is unknown-until-apply on a brand-new environment; deriving count
+  # from a `== null` check against an unknown value collapses this
+  # instance set to unknown at plan time, exactly the same class of
+  # problem environments/staging/main.tf's own kms_encryption_enabled/
+  # s3_documents_enabled comment already documents and avoids the same way.
+  count = 1
 
   statement {
     sid       = "ReceiveAndDeleteSesEventQueueMessages"
@@ -244,7 +252,7 @@ data "aws_iam_policy_document" "task_ses_consumer_sqs" {
 }
 
 resource "aws_iam_role_policy" "task_ses_consumer_sqs" {
-  count = var.ses_events_queue_arn == null ? 0 : 1
+  count = 1
 
   name   = "${var.name_prefix}-task-ses-consumer-sqs"
   role   = aws_iam_role.task["ses_consumer"].id

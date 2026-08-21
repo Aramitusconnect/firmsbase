@@ -71,6 +71,69 @@ data "aws_iam_policy_document" "this" {
       }
     }
   }
+
+  # Same shape as the CloudWatch Logs statement above, for the SQS-managed
+  # SES bounce/complaint events queue and its DLQ (see
+  # modules/ses_events_pipeline). Omitted entirely when
+  # var.sqs_queue_arn_pattern is null.
+  dynamic "statement" {
+    for_each = var.sqs_queue_arn_pattern == null ? [] : [var.sqs_queue_arn_pattern]
+    content {
+      sid    = "AllowSqsEncryption"
+      effect = "Allow"
+
+      principals {
+        type        = "Service"
+        identifiers = ["sqs.amazonaws.com"]
+      }
+
+      actions = [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:Describe*",
+      ]
+      resources = ["*"]
+
+      condition {
+        test     = "ArnLike"
+        variable = "kms:EncryptionContext:aws:sqs:arn"
+        values   = [statement.value]
+      }
+    }
+  }
+
+  # Same shape again, for the SES bounce/complaint SNS topic (see
+  # modules/ses_events_pipeline). Omitted entirely when
+  # var.sns_topic_arn_pattern is null.
+  dynamic "statement" {
+    for_each = var.sns_topic_arn_pattern == null ? [] : [var.sns_topic_arn_pattern]
+    content {
+      sid    = "AllowSnsEncryption"
+      effect = "Allow"
+
+      principals {
+        type        = "Service"
+        identifiers = ["sns.amazonaws.com"]
+      }
+
+      actions = [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:Describe*",
+      ]
+      resources = ["*"]
+
+      condition {
+        test     = "ArnLike"
+        variable = "kms:EncryptionContext:aws:sns:topicArn"
+        values   = [statement.value]
+      }
+    }
+  }
 }
 
 resource "aws_kms_key" "this" {

@@ -43,6 +43,24 @@ module "kms" {
   # incident this fixes (CloudWatch Logs' AccessDeniedException against
   # AWS's own default, root-only key policy).
   cloudwatch_logs_log_group_arn_pattern = "arn:aws:logs:${var.aws_region}:${var.aws_account_id}:log-group:/ecs/${var.name_prefix}/*"
+
+  # module.ses_events_pipeline's queue+DLQ (both "${var.name_prefix}-ses-events*")
+  # and topic — see that module for why SQS/SNS need the identical
+  # service-linked-trust statement CloudWatch Logs already needed above.
+  sqs_queue_arn_pattern = "arn:aws:sqs:${var.aws_region}:${var.aws_account_id}:${var.name_prefix}-ses-events*"
+  sns_topic_arn_pattern = "arn:aws:sns:${var.aws_region}:${var.aws_account_id}:${var.name_prefix}-ses-events"
+}
+
+module "ses_events_pipeline" {
+  source      = "../../modules/ses_events_pipeline"
+  name_prefix = var.name_prefix
+  kms_key_arn = module.kms.key_arn
+
+  # Must match SES_EVENTS_VISIBILITY_TIMEOUT_SECONDS (local.ses_events_environment
+  # below) exactly — the queue's own actual visibility timeout and the
+  # value the consumer's SQS client is configured to assume are the same
+  # real setting seen from two sides, not independently chosen.
+  visibility_timeout_seconds = var.ses_events_visibility_timeout_seconds
 }
 
 module "ecr" {
@@ -186,7 +204,7 @@ module "iam" {
   kms_key_arn             = module.kms.key_arn
   s3_documents_bucket_arn = module.s3_documents.bucket_arn
 
-  ses_events_queue_arn        = var.ses_events_queue_arn
+  ses_events_queue_arn        = module.ses_events_pipeline.queue_arn
   ses_sending_identity_arn    = var.ses_sending_identity_arn
   ses_authorized_from_address = var.ses_authorized_from_address
 }
@@ -365,11 +383,23 @@ locals {
   # use it) intentionally excluded; only ses-consumer's own environment
   # merges this in, below.
   ses_events_environment = {
-    SES_EVENTS_QUEUE_URL                  = var.ses_events_queue_url
+    SES_EVENTS_QUEUE_URL                  = module.ses_events_pipeline.queue_url
     SES_EVENTS_QUEUE_REGION               = var.aws_region
     SES_EVENTS_WAIT_TIME_SECONDS          = tostring(var.ses_events_wait_time_seconds)
     SES_EVENTS_VISIBILITY_TIMEOUT_SECONDS = tostring(var.ses_events_visibility_timeout_seconds)
     SES_EVENTS_MAX_MESSAGES               = tostring(var.ses_events_max_messages)
+  }
+
+  # config/mail.php's 'ses' transport always attaches a ConfigurationSetName
+  # (see that file's own docblock: without one, SES never publishes
+  # Bounce/Complaint/Reject/RenderingFailure/DeliveryDelay events to the SNS
+  # topic feeding ses-consumer's queue at all). web is the only role that
+  # sends mail (Illuminate\Mail\Transport\SesTransport, synchronous from the
+  # request path — no ShouldQueue mailable/notification exists), so this is
+  # web-only, mirroring the identical PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY
+  # scoping precedent above.
+  ses_configuration_set_environment = {
+    SES_CONFIGURATION_SET = module.ses_events_pipeline.configuration_set_name
   }
 }
 
@@ -387,7 +417,7 @@ module "web" {
   execution_role_arn = module.iam.task_execution_role_arn
   task_role_arn      = module.iam.task_role_arns["web"]
 
-  environment = local.shared_environment
+  environment = merge(local.shared_environment, local.ses_configuration_set_environment)
   secrets     = merge(local.shared_secrets, local.hmac_secret)
 
   log_group_name = aws_cloudwatch_log_group.app["web"].name
@@ -740,8 +770,8 @@ module "cloudwatch_alarms" {
   # the per-service alarm for_each's key set to unknown during import).
   ses_consumer_enabled        = true
   ses_consumer_service_name   = module.ses_consumer.service_name
-  ses_events_queue_name       = element(split("/", var.ses_events_queue_url), length(split("/", var.ses_events_queue_url)) - 1)
-  ses_events_dlq_name         = element(split(":", var.ses_events_dlq_arn), 5)
+  ses_events_queue_name       = module.ses_events_pipeline.queue_name
+  ses_events_dlq_name         = module.ses_events_pipeline.dlq_name
   ses_consumer_log_group_name = aws_cloudwatch_log_group.app["ses-consumer"].name
 
   enable_custom_metric_alarms = var.enable_custom_metric_alarms
