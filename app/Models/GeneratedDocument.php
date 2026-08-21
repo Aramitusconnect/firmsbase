@@ -14,8 +14,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * GeneratedDocument — firm-owned workflow root. used_sample_content
  * (final correction) is refreshed LIVE by DocumentReviewService::
  * approve() against the CURRENT document_template_version.content_status
- * — never trusted as a permanent generation-time snapshot. simulated_
- * storage_path is metadata only; nothing is ever written there.
+ * — never trusted as a permanent generation-time snapshot.
+ * simulated_storage_path remains a descriptive metadata string kept for
+ * backward compatibility (its exact format is asserted on elsewhere);
+ * storage_disk/storage_path are the real Storage::disk(...) location of
+ * the Dompdf-rendered PDF written by DocumentGenerationService::generate().
  */
 class GeneratedDocument extends Model
 {
@@ -28,6 +31,8 @@ class GeneratedDocument extends Model
         'document_template_version_id',
         'status',
         'simulated_storage_path',
+        'storage_disk',
+        'storage_path',
         'used_sample_content',
         'generated_by_firm_user_id',
         'reviewed_by_firm_user_id',

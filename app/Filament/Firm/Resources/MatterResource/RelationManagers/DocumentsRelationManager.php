@@ -7,6 +7,7 @@ namespace App\Filament\Firm\Resources\MatterResource\RelationManagers;
 use App\Jobs\ScanDocumentJob;
 use App\Models\Document;
 use App\Models\Matter;
+use App\Services\DocumentHashService;
 use App\Services\DocumentSecurityService;
 use App\Services\MatterAccessPolicyService;
 use App\Services\TenantContextService;
@@ -206,6 +207,8 @@ class DocumentsRelationManager extends RelationManager
                 client: $matter->client,
                 uploadedBy: $uploader,
             ));
+
+            (new DocumentHashService)->recordForDocument($document, $fileHash, $uploader?->activeFirmUser());
 
             ScanDocumentJob::dispatch($document->id, $matter->firm_id);
         } catch (InvalidArgumentException $e) {

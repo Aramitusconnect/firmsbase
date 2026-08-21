@@ -6,6 +6,8 @@ use App\Enums\DocumentTemplateContentStatus;
 use App\Enums\DocumentTemplateVersionStatus;
 use App\Enums\FirmUserRole;
 use App\Enums\GeneratedDocumentStatus;
+use App\Enums\HashAlgorithm;
+use App\Enums\SignatureSourceDocumentType;
 use App\Models\Client;
 use App\Models\DocumentTemplateVersion;
 use App\Models\Firm;
@@ -14,6 +16,7 @@ use App\Models\Matter;
 use App\Services\DeterministicFieldResolutionService;
 use App\Services\DocumentGenerationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class DocumentGenerationServiceTest extends TestCase
@@ -25,6 +28,7 @@ class DocumentGenerationServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        Storage::fake('local');
         $this->service = new DocumentGenerationService(new DeterministicFieldResolutionService());
     }
 
@@ -92,5 +96,65 @@ class DocumentGenerationServiceTest extends TestCase
         $result = $this->service->generate($version, $actor, $firm->id, null, null);
 
         $this->assertNull($result->resolvedMergeValues['client_name']);
+    }
+
+    public function test_generate_writes_a_real_rendered_pdf_to_storage(): void
+    {
+        $firm = Firm::factory()->create();
+        $matter = Matter::factory()->forFirm($firm)->create();
+        $client = Client::factory()->forFirm($firm)->create(['display_name' => 'Jordan Lee']);
+        $actor = FirmUser::factory()->role(FirmUserRole::Attorney)->create(['firm_id' => $firm->id]);
+        $version = DocumentTemplateVersion::factory()->create([
+            'status' => DocumentTemplateVersionStatus::Active->value,
+            'content_status' => DocumentTemplateContentStatus::ReviewedApproved->value,
+            'body_template' => 'Dear {{client_name}}, this is a real generated document.',
+            'merge_fields_schema' => [
+                ['token' => 'client_name', 'source_entity' => 'client', 'source_path' => 'client.display_name', 'transform' => 'none'],
+            ],
+        ]);
+
+        $result = $this->service->generate($version, $actor, $firm->id, $matter, $client);
+
+        $document = \App\Models\GeneratedDocument::find($result->generatedDocumentId);
+
+        $this->assertSame('local', $document->storage_disk);
+        $this->assertNotNull($document->storage_path);
+        $this->assertStringStartsWith("generated-documents/{$firm->id}/{$matter->id}/", $document->storage_path);
+        $this->assertStringEndsWith('.pdf', $document->storage_path);
+
+        Storage::disk($document->storage_disk)->assertExists($document->storage_path);
+        $bytes = Storage::disk($document->storage_disk)->get($document->storage_path);
+        $this->assertNotEmpty($bytes);
+        $this->assertStringStartsWith('%PDF', $bytes);
+
+        // simulated_storage_path is preserved, in its original format,
+        // and remains distinct from the real storage_path.
+        $this->assertStringContainsString('generated-documents/firm-'.$firm->id, $document->simulated_storage_path);
+        $this->assertNotSame($document->simulated_storage_path, $document->storage_path);
+    }
+
+    public function test_generate_records_a_real_sha256_hash_of_the_rendered_bytes(): void
+    {
+        $firm = Firm::factory()->create();
+        $actor = FirmUser::factory()->role(FirmUserRole::Attorney)->create(['firm_id' => $firm->id]);
+        $version = DocumentTemplateVersion::factory()->create([
+            'status' => DocumentTemplateVersionStatus::Active->value,
+            'content_status' => DocumentTemplateContentStatus::ReviewedApproved->value,
+            'merge_fields_schema' => [],
+        ]);
+
+        $result = $this->service->generate($version, $actor, $firm->id);
+
+        $document = \App\Models\GeneratedDocument::find($result->generatedDocumentId);
+        $bytes = Storage::disk($document->storage_disk)->get($document->storage_path);
+        $expectedHash = hash('sha256', $bytes);
+
+        $this->assertDatabaseHas('document_hashes', [
+            'generated_document_id' => $document->id,
+            'hash_value' => $expectedHash,
+            'algorithm' => HashAlgorithm::Sha256->value,
+            'source_document_type' => SignatureSourceDocumentType::GeneratedDocument->value,
+            'recorded_by_firm_user_id' => $actor->id,
+        ]);
     }
 }
