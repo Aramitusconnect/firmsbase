@@ -55,6 +55,39 @@ resource "aws_sns_topic" "ses_events" {
   tags = var.tags
 }
 
+# SES may only publish into this topic on behalf of ITS OWN configuration
+# set (aws:SourceArn) from THIS account (aws:SourceAccount) — the same
+# "never a bare service-principal grant" discipline the SQS queue policy
+# below already applies for SNS's own publish into the queue. Without
+# this, SES accepts the event destination configuration but every publish
+# attempt fails silently server-side (SES has no user-facing error path
+# for "the topic refused the publish") — see config/mail.php's own
+# docblock on why the configuration set matters at all.
+resource "aws_sns_topic_policy" "ses_events_allow_ses_publish" {
+  arn = aws_sns_topic.ses_events.arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowSesConfigurationSetPublish"
+        Effect    = "Allow"
+        Principal = { Service = "ses.amazonaws.com" }
+        Action    = "sns:Publish"
+        Resource  = aws_sns_topic.ses_events.arn
+        Condition = {
+          StringEquals = {
+            "AWS:SourceAccount" = var.aws_account_id
+          }
+          ArnEquals = {
+            "AWS:SourceArn" = "arn:aws:ses:${var.aws_region}:${var.aws_account_id}:configuration-set/${aws_sesv2_configuration_set.staging.configuration_set_name}"
+          }
+        }
+      }
+    ]
+  })
+}
+
 # SNS may only publish into this queue on behalf of THIS topic — not "any
 # SNS topic in the account," which is the mistake a bare
 # Principal=sns.amazonaws.com statement without the SourceArn condition

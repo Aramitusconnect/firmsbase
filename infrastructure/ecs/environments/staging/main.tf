@@ -52,9 +52,11 @@ module "kms" {
 }
 
 module "ses_events_pipeline" {
-  source      = "../../modules/ses_events_pipeline"
-  name_prefix = var.name_prefix
-  kms_key_arn = module.kms.key_arn
+  source         = "../../modules/ses_events_pipeline"
+  name_prefix    = var.name_prefix
+  kms_key_arn    = module.kms.key_arn
+  aws_account_id = var.aws_account_id
+  aws_region     = var.aws_region
 
   # Must match SES_EVENTS_VISIBILITY_TIMEOUT_SECONDS (local.ses_events_environment
   # below) exactly — the queue's own actual visibility timeout and the

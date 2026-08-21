@@ -2,6 +2,16 @@ variable "name_prefix" {
   type = string
 }
 
+variable "aws_account_id" {
+  description = "AWS account ID that owns this topic/queue/configuration set. Used only to build the SNS topic policy's aws:SourceAccount condition and the SES configuration-set ARN referenced by aws:SourceArn — no default, deliberately, mirroring modules/kms's and modules/iam's identical aws_account_id variable, since this reusable module must never derive the account from the ambient AWS identity running `terraform apply`."
+  type        = string
+}
+
+variable "aws_region" {
+  description = "AWS region this topic/queue/configuration set live in. Used only to build the SES configuration-set ARN referenced by the SNS topic policy's aws:SourceArn condition."
+  type        = string
+}
+
 variable "kms_key_arn" {
   description = "Customer-managed KMS key for SSE-KMS encryption of the events queue, its DLQ, and the SNS topic — the same key module.kms already provides for Secrets Manager/S3/CloudWatch Logs. The caller must also grant this key's policy the matching sqs_queue_arn_pattern/sns_topic_arn_pattern statements (see modules/kms) or queue/topic creation succeeds but every Encrypt/Decrypt call against it fails at send/receive time."
   type        = string
