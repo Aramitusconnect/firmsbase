@@ -6,6 +6,8 @@ namespace App\Filament\ClientPortal\Resources;
 
 use App\Filament\ClientPortal\Resources\MatterResource\Pages\ListMatters;
 use App\Filament\ClientPortal\Resources\MatterResource\Pages\ViewMatter;
+use App\Filament\ClientPortal\Resources\MatterResource\RelationManagers\DeadlinesRelationManager;
+use App\Filament\ClientPortal\Resources\MatterResource\RelationManagers\MessagesRelationManager;
 use App\Models\ClientPortalUser;
 use App\Models\Matter;
 use App\Services\ClientPortalMatterAccessPolicyService;
@@ -107,6 +109,24 @@ class MatterResource extends Resource
             ->recordActions([])
             ->toolbarActions([])
             ->emptyStateHeading('No matters shared with you yet');
+    }
+
+    /**
+     * Non-payment completion program, matter-scoped secure messaging
+     * v1 — the FIRST getRelations() override on this resource. Both
+     * relation managers re-check their own real per-record boundary
+     * (ClientPortalMatterAccessPolicyService, directly or via
+     * MatterMessagingPolicyService) in canViewForRecord() — never
+     * trusting this resource's own getEloquentQuery() list-level filter
+     * alone, the same "list is UX filter, resolve step is the
+     * boundary" split this resource's own docblock already documents.
+     */
+    public static function getRelations(): array
+    {
+        return [
+            DeadlinesRelationManager::class,
+            MessagesRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

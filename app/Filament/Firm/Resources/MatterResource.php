@@ -18,6 +18,7 @@ use App\Filament\Firm\Resources\MatterResource\RelationManagers\DocumentRequests
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\DocumentsRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\ExpensesRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\FinancialEvidenceRelationManager;
+use App\Filament\Firm\Resources\MatterResource\RelationManagers\MessagesRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\PartiesRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\PaymentsRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\TasksRelationManager;
@@ -180,6 +181,7 @@ class MatterResource extends Resource
             ActivityRelationManager::class,
             ConflictChecksRelationManager::class,
             ConflictCheckResultsRelationManager::class,
+            MessagesRelationManager::class,
         ];
     }
 
