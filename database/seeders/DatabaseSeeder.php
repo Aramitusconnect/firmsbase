@@ -31,5 +31,13 @@ class DatabaseSeeder extends Seeder
             'name' => 'Test User',
             'email' => 'test@example.com',
         ]);
+
+        // Mission 6: ensures the template-driven notification pathway
+        // (Send Invoice, dunning, document-request-chase reminders) has
+        // something to resolve in local/testing. Idempotent — see its
+        // own docblock for why this call is guarded to local/testing
+        // only and why staging/production seeding is a separate,
+        // documented ops decision, not resolved by this call.
+        $this->call(NotificationTemplateSeeder::class);
     }
 }

@@ -11,6 +11,8 @@ use App\Models\Client;
 use App\Models\ClientCommunicationPreference;
 use App\Models\CommunicationConsent;
 use App\Models\Firm;
+use App\Models\NotificationEvent;
+use App\Models\NotificationProviderCorrelation;
 use App\Models\NotificationTemplate;
 use App\Services\ConsentService;
 use App\Services\NotificationDispatchService;
@@ -19,6 +21,8 @@ use App\Services\NotificationTemplateService;
 use App\Services\SenderDomainVerificationService;
 use App\Services\SuppressionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Mail\Events\MessageSent;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -33,9 +37,9 @@ class NotificationDispatchServiceTest extends TestCase
         parent::setUp();
 
         $this->service = new NotificationDispatchService(
-            new NotificationTemplateService(),
-            new SenderDomainVerificationService(),
-            new NotificationEligibilityService(new ConsentService(), new SuppressionService()),
+            new NotificationTemplateService,
+            new SenderDomainVerificationService,
+            new NotificationEligibilityService(new ConsentService, new SuppressionService),
         );
     }
 
@@ -96,7 +100,7 @@ class NotificationDispatchServiceTest extends TestCase
         // correctness.
         $blockedEvent = $this->runWithFirmContext(
             $firm,
-            fn () => \App\Models\NotificationEvent::query()
+            fn () => NotificationEvent::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', NotificationEventStatus::Blocked->value)
                 ->first(),
@@ -208,12 +212,62 @@ class NotificationDispatchServiceTest extends TestCase
         // context before returning, so this read must be explicit.
         $count = $this->runWithFirmContext(
             $firm,
-            fn () => \App\Models\NotificationEvent::query()
+            fn () => NotificationEvent::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', NotificationEventStatus::Attempted->value)
                 ->count(),
         );
 
         $this->assertSame(1, $count);
+    }
+
+    /**
+     * Mission 6 (Real Communications & Notification Delivery) — the
+     * end-to-end proof that dispatch() now results in a REAL mail send
+     * attempt, not merely a queued-and-forgotten job. Deliberately does
+     * NOT fake the Queue or Notification/Mail facades: phpunit.xml sets
+     * QUEUE_CONNECTION=sync (DispatchNotificationJob::dispatch() below
+     * runs its handle() synchronously, in-process) and MAIL_MAILER=array
+     * (a real, un-faked Symfony transport that genuinely dispatches
+     * Illuminate\Mail\Events\MessageSent — this is the same real event
+     * OutboundMailCorrelationService's own listener reacts to in
+     * production, just observed here directly instead of via a
+     * hand-built synthetic one).
+     *
+     * The array transport does not set the SES-specific X-Message-ID
+     * header OutboundMailCorrelationService's listener looks for, so
+     * (correctly, per that service's own documented contract) no
+     * notification_events "Sent" row is recorded and no
+     * provider_message_id is confirmed here — this test intentionally
+     * does not assert either. That is the expected, honest behavior of
+     * a non-SES mailer, not a gap in this test.
+     */
+    public function test_dispatch_reaches_a_real_mail_send_through_to_laravels_mail_system(): void
+    {
+        $firm = Firm::factory()->create();
+        $client = Client::factory()->forFirm($firm)->create(['email' => 'client@example.com']);
+        $this->grantConsent($firm, $client, ConsentChannel::Email);
+
+        NotificationTemplate::factory()->domainVerified()->create([
+            'firm_id' => null,
+            'key' => 'document_reminder',
+            'channel' => ConsentChannel::Email,
+            'status' => NotificationTemplateStatus::Active,
+            'subject' => 'A document is waiting on you',
+            'body' => 'Please log in to your portal to upload the requested document.',
+        ]);
+
+        $capturedSubjects = [];
+        Event::listen(MessageSent::class, function (MessageSent $event) use (&$capturedSubjects): void {
+            $capturedSubjects[] = $event->message->getSubject();
+        });
+
+        $result = $this->service->dispatch($firm, $client, ConsentChannel::Email, $client->email, 'document_reminder');
+
+        $this->assertTrue($result->accepted);
+        $this->assertContains('A document is waiting on you', $capturedSubjects, 'DispatchNotificationJob::handle() must reach a real Illuminate\Mail\Events\MessageSent dispatch, not silently no-op.');
+
+        $correlation = NotificationProviderCorrelation::query()->where('firm_id', $firm->id)->sole();
+        $this->assertSame('client@example.com', $correlation->recipient_normalized);
     }
 }
