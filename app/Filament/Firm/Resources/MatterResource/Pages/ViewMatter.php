@@ -7,11 +7,17 @@ namespace App\Filament\Firm\Resources\MatterResource\Pages;
 use App\Filament\Firm\Resources\ClientResource;
 use App\Filament\Firm\Resources\MatterResource;
 use App\Filament\Firm\Resources\MatterResource\Actions\ApplyMatterBudgetTemplateAction;
+use App\Filament\Firm\Resources\MatterResource\Actions\ArchiveMatterAction;
+use App\Filament\Firm\Resources\MatterResource\Actions\CloseMatterAction;
 use App\Filament\Firm\Resources\MatterResource\Actions\OpenMatterAction;
 use App\Models\Matter;
+use App\Models\TrustLedger;
 use App\Services\Leverage\LeverageAnalysisService;
 use App\Services\MatterAccessPolicyService;
 use App\Services\MatterBudget\MatterBudgetAccessPolicyService;
+use App\Services\TenantContextService;
+use App\Services\TrustBalanceService;
+use App\Services\TrustEligibilityService;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Section;
@@ -32,6 +38,14 @@ use Illuminate\Support\Facades\Auth;
  * otherwise stays exclusively in its existing services
  * (MatterOpeningService, MatterReadinessService, etc.); this page still
  * has no `form()`/editable fields of its own.
+ *
+ * Mission 5A addition: "Close Matter"/"Archive Matter" header actions
+ * (CloseMatterAction/ArchiveMatterAction, wired to the new
+ * MatterClosingService::close()/archive() — same "never a status field
+ * on a form" discipline as OpenMatterAction). Also adds a read-only
+ * Trust Balance section (trustBalanceSection() below) — a cached read
+ * via TrustBalanceService::matterBalanceCentsAggregate(), never a
+ * recompute/lock; this page still writes nothing trust-related.
  */
 class ViewMatter extends ViewRecord
 {
@@ -41,6 +55,8 @@ class ViewMatter extends ViewRecord
     {
         return [
             OpenMatterAction::make(),
+            CloseMatterAction::make(),
+            ArchiveMatterAction::make(),
             ApplyMatterBudgetTemplateAction::make(),
         ];
     }
@@ -121,6 +137,7 @@ class ViewMatter extends ViewRecord
                 ]),
 
             $this->budgetSection(),
+            $this->trustBalanceSection(),
             $this->leverageSection(),
         ]);
     }
@@ -220,6 +237,83 @@ class ViewMatter extends ViewRecord
                     ->dateTime()
                     ->columnSpanFull()
                     ->visible($hasAnalysis),
+            ]);
+    }
+
+    /**
+     * Mission 5A, item 5.3 — MatterTrustBalance had zero Filament
+     * references before this addition. Reads ONLY
+     * TrustBalanceService::matterBalanceCentsAggregate() (a cached
+     * read across every trust ledger this matter has a balance row
+     * in) — never recomputes or locks anything, and never touches
+     * TrustLedgerService/TrustBalanceService's own write paths (Mission
+     * 1 territory). Wrapped in TenantContextService::runWithFirmContext()
+     * since matter_trust_balances (and trust_ledgers, read here to
+     * distinguish "no ledger" from "zero balance") are both FORCE-RLS
+     * protected.
+     *
+     * Three honest states, matching budgetSection()'s own
+     * "No Budget Configured" placeholder convention rather than
+     * fabricating a zero:
+     *   - Firm not trust-eligible (TrustEligibilityService::isEligible()
+     *     is false) -> "Not applicable — trust accounting is not
+     *     enabled for this firm."
+     *   - Firm eligible, but this matter's client has no trust ledger
+     *     at all -> "Not applicable — no trust ledger exists for this
+     *     matter's client."
+     *   - A ledger exists -> the real aggregate balance (which may
+     *     legitimately be $0.00 — a true zero, not a placeholder).
+     */
+    private function trustBalanceSection(): Section
+    {
+        $canView = fn (): bool => Auth::user()?->activeFirmUser() !== null;
+
+        $state = function (Matter $record): array {
+            $firm = $record->firm;
+
+            if (! app(TrustEligibilityService::class)->isEligible($firm)) {
+                return ['eligible' => false, 'has_ledger' => false, 'balance_cents' => null];
+            }
+
+            return app(TenantContextService::class)->runWithFirmContext($firm, function () use ($firm, $record): array {
+                $hasLedger = TrustLedger::query()
+                    ->where('firm_id', $firm->id)
+                    ->where('client_id', $record->client_id)
+                    ->exists();
+
+                if (! $hasLedger) {
+                    return ['eligible' => true, 'has_ledger' => false, 'balance_cents' => null];
+                }
+
+                return [
+                    'eligible' => true,
+                    'has_ledger' => true,
+                    'balance_cents' => app(TrustBalanceService::class)->matterBalanceCentsAggregate($firm, $record),
+                ];
+            });
+        };
+
+        $cache = [];
+        $resolved = function (Matter $record) use (&$cache, $state): array {
+            return $cache[$record->id] ??= $state($record);
+        };
+
+        return Section::make('Trust Balance')
+            ->columns(1)
+            ->visible($canView)
+            ->schema([
+                TextEntry::make('trust_not_applicable')
+                    ->label('')
+                    ->state(fn (Matter $record): string => $resolved($record)['eligible']
+                        ? 'Not applicable — no trust ledger exists for this matter\'s client.'
+                        : 'Not applicable — trust accounting is not enabled for this firm.')
+                    ->visible(fn (Matter $record): bool => ! $resolved($record)['has_ledger']),
+
+                TextEntry::make('trust_balance_cents')
+                    ->label('Matter Trust Balance')
+                    ->state(fn (Matter $record) => $resolved($record)['balance_cents'])
+                    ->formatStateUsing(fn ($state): string => '$'.number_format(((int) $state) / 100, 2))
+                    ->visible(fn (Matter $record): bool => $resolved($record)['has_ledger']),
             ]);
     }
 

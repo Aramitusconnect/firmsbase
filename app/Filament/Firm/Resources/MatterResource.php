@@ -8,6 +8,7 @@ use App\Enums\FirmUserRole;
 use App\Filament\Firm\Resources\MatterResource\Pages\ListMatters;
 use App\Filament\Firm\Resources\MatterResource\Pages\ViewMatter;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\ActivityRelationManager;
+use App\Filament\Firm\Resources\MatterResource\RelationManagers\AssignmentsRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\BudgetAlertsRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\ConflictCheckResultsRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\ConflictChecksRelationManager;
@@ -17,6 +18,7 @@ use App\Filament\Firm\Resources\MatterResource\RelationManagers\DocumentRequests
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\DocumentsRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\ExpensesRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\FinancialEvidenceRelationManager;
+use App\Filament\Firm\Resources\MatterResource\RelationManagers\PartiesRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\PaymentsRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\TasksRelationManager;
 use App\Filament\Firm\Resources\MatterResource\RelationManagers\TimeEntriesRelationManager;
@@ -164,6 +166,8 @@ class MatterResource extends Resource
     {
         return [
             ContactsRelationManager::class,
+            AssignmentsRelationManager::class,
+            PartiesRelationManager::class,
             TasksRelationManager::class,
             DeadlinesRelationManager::class,
             TimeEntriesRelationManager::class,
