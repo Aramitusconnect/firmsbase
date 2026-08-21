@@ -278,6 +278,27 @@ class SecretPatternScanTest extends TestCase
             // real, already-existing, terminal rows past the configured
             // retention window — never inserts a new row.
             'SweepMarketplaceIntakeRetentionCommand.php',
+            // Non-Payment Completion Program (reconciliation branch)
+            // added three reviewed, safe commands. SweepTaskOverdueStatusCommand
+            // and ExpireStaleMarketplaceClaimsCommand create no data at
+            // all — they only update the status/state field of real,
+            // already-existing Task/DirectoryClaim rows whose own
+            // due_at/expires_at has genuinely passed, never inserting a
+            // new row. EnsureNotificationTemplatesCommand DOES insert
+            // rows (via NotificationTemplateSeeder::run() ->
+            // NotificationTemplateService::createGlobalDefault()), but
+            // they are not demo/placeholder/synthetic data — they are
+            // the real, genuine global-default notification template
+            // content (subject/body copy) this application requires in
+            // every environment, including production, for
+            // NotificationDispatchService::dispatch() to resolve at
+            // all (that seeder's own docblock documents this exact
+            // requirement). Idempotent by construction (checks for an
+            // existing Active row with the same key/channel/language
+            // before creating), so re-running it never duplicates rows.
+            'SweepTaskOverdueStatusCommand.php',
+            'EnsureNotificationTemplatesCommand.php',
+            'ExpireStaleMarketplaceClaimsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

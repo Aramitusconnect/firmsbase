@@ -234,6 +234,19 @@ class QueueConsoleTenantContextTest extends TestCase
             // own identical review note (per-firm sweep, same shape as
             // SweepDocumentRequestRemindersCommand above).
             'SweepMarketplaceIntakeRetentionCommand.php',
+            // Non-Payment Completion Program (reconciliation branch)
+            // added SweepTaskOverdueStatusCommand/
+            // EnsureNotificationTemplatesCommand/
+            // ExpireStaleMarketplaceClaimsCommand — reviewed and safe:
+            // see QueueConsoleContextRolloutTest's own full review note
+            // (per-firm TenantContextService::runWithFirmContext()
+            // sweep; a thin wrapper around the already-hardened
+            // NotificationTemplateService::createGlobalDefault() write
+            // path; and a per-claim runWithFirmContext() write against
+            // a table with no FORCE RLS migration at all, respectively).
+            'SweepTaskOverdueStatusCommand.php',
+            'EnsureNotificationTemplatesCommand.php',
+            'ExpireStaleMarketplaceClaimsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);

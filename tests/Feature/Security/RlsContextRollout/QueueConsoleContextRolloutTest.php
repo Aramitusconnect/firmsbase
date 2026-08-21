@@ -287,6 +287,49 @@ class QueueConsoleContextRolloutTest extends TestCase
             // variable. Calls only the existing, unmodified
             // MarketplaceIntakeService::purgeExpiredPii().
             'SweepMarketplaceIntakeRetentionCommand.php',
+            // Non-Payment Completion Program (reconciliation branch)
+            // added three reviewed, safe commands:
+            // SweepTaskOverdueStatusCommand (automation:sweep:task-overdue)
+            // — the SAME per-firm sweep shape as
+            // SweepDeadlineEventsCommand/SweepDocumentRequestRemindersCommand
+            // above: enumerates only the non-RLS `firms` table
+            // (activation_status = Activated), then wraps each firm's
+            // ENTIRE Task query + refreshOverdueStatus() sweep in a
+            // single TenantContextService::runWithFirmContext($firm,
+            // ...) call — no raw SQL, no BYPASSRLS, no superuser role,
+            // no set_config manipulation of any RLS-relevant session
+            // variable.
+            // EnsureNotificationTemplatesCommand
+            // (firmsvault:ensure-notification-templates) — a thin
+            // wrapper calling only NotificationTemplateSeeder::run(),
+            // which itself calls
+            // NotificationTemplateService::createGlobalDefault() — both
+            // already reviewed and hardened by the notification_templates
+            // FORCE RLS migration (2026_08_25_930031), which explicitly
+            // documents wrapping this exact write path in
+            // TenantContextService::runWithoutFirmContext() so it
+            // satisfies that table's own asymmetric write policy (a
+            // firm_id=NULL row may only be written with NO tenant
+            // context active). This command introduces no new write
+            // logic of its own.
+            // ExpireStaleMarketplaceClaimsCommand
+            // (marketplace:claims:expire-stale) — calls only
+            // MarketplaceClaimService::expireStaleClaims(). Its initial
+            // DirectoryClaim::query() enumeration is unscoped, but
+            // directory_claims has no FORCE RLS migration at all (see
+            // database/migrations/2026_11_10_100013_create_directory_claims_table.php
+            // — a platform-wide marketplace claim table, not a
+            // per-firm-owned FORCE-RLS resource) — there is no RLS to
+            // bypass on the read. The one real mutation
+            // (`->update(['state' => ClaimState::Expired])`) is wrapped
+            // in TenantContextService::runWithFirmContext($firm, ...)
+            // for the claim's own resolved firm, inside a transaction
+            // with a row lock — no raw SQL, no BYPASSRLS, no superuser
+            // role, no set_config manipulation of any RLS-relevant
+            // session variable.
+            'SweepTaskOverdueStatusCommand.php',
+            'EnsureNotificationTemplatesCommand.php',
+            'ExpireStaleMarketplaceClaimsCommand.php',
         ];
 
         $files = array_map('basename', glob($commandsDir.'/*.php') ?: []);
