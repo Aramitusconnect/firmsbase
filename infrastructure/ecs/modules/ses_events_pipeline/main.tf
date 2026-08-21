@@ -83,6 +83,15 @@ resource "aws_sns_topic_subscription" "ses_events_to_sqs" {
   topic_arn = aws_sns_topic.ses_events.arn
   protocol  = "sqs"
   endpoint  = aws_sqs_queue.ses_events.arn
+
+  # Must be true: SesEventConsumerService::process()'s own docblock states
+  # its primary/expected message shape is raw SES event JSON, not SNS's
+  # Notification envelope — the envelope-unwrap branch it also carries is
+  # explicitly documented there as a defensive fallback ("if raw message
+  # delivery were ever disabled upstream"), not the intended path. Leaving
+  # this at its default (false) would still work, via that fallback, but
+  # would not match what the consumer was actually built to expect.
+  raw_message_delivery = true
 }
 
 # SESv2, not the classic v1 aws_ses_configuration_set/aws_ses_event_destination
