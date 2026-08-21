@@ -20,6 +20,7 @@ use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -74,6 +75,45 @@ final class DocumentUploadFlowTest extends TestCase
             $this->assertTrue(Storage::disk('local')->exists($document->storage_path), 'The uploaded file must be moved to its final durable path.');
 
             Bus::assertDispatched(ScanDocumentJob::class, fn (ScanDocumentJob $job): bool => $job->documentId === $document->id && $job->firmId === $firm->id);
+        });
+    }
+
+    /**
+     * Non-payment completion program (staging deployment mission):
+     * proves handleUpload() writes to the app's CONFIGURED default disk
+     * (config('filesystems.default')), never a hardcoded 'local'
+     * literal — a hardcoded literal both fails to find Livewire's own
+     * temp upload (which already resolves to config('filesystems.default'))
+     * whenever FILESYSTEM_DISK is anything else, and would otherwise
+     * pin the final stored copy to the ECS task's own non-durable
+     * filesystem.
+     */
+    public function test_the_upload_action_uses_the_configured_default_disk_not_a_hardcoded_local_literal(): void
+    {
+        Config::set('filesystems.default', 's3');
+        Storage::fake('s3');
+        Storage::fake('local');
+        Bus::fake([ScanDocumentJob::class]);
+
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
+
+        $this->runWithFirmContext($firm, function () use ($matter): void {
+            $test = Livewire::test(DocumentsRelationManager::class, [
+                'ownerRecord' => $matter,
+                'pageClass' => ViewMatter::class,
+            ]);
+
+            $test->callAction(TestAction::make('upload')->table(), data: ['file' => UploadedFile::fake()->createWithContent('evidence.pdf', str_repeat('A', 2048))]);
+            $test->assertHasNoActionErrors();
+
+            $document = Document::query()->where('matter_id', $matter->id)->latest('id')->first();
+
+            $this->assertNotNull($document);
+            $this->assertSame('s3', $document->storage_disk, 'The uploaded document must be recorded on the CONFIGURED default disk, not a hardcoded local literal.');
+            Storage::disk('s3')->assertExists($document->storage_path);
+            Storage::disk('local')->assertMissing($document->storage_path);
         });
     }
 

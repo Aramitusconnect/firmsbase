@@ -28,16 +28,16 @@ class SignatureRecipientWorkflowServiceTest extends TestCase
     {
         parent::setUp();
 
-        $transitions = new SignatureWorkflowTransitionService();
+        $transitions = new SignatureWorkflowTransitionService;
         $this->service = new SignatureRecipientWorkflowService(
             $transitions,
-            new SignatureEventLogger(new AcknowledgmentSignatureFoundationService()),
+            new SignatureEventLogger(new AcknowledgmentSignatureFoundationService),
             new SignatureRequestAggregationService($transitions),
             new SignatureCertificateService(
                 $transitions,
-                new DocumentHashService(),
-                new SignatureEventLogger(new AcknowledgmentSignatureFoundationService()),
-                new DomainEventRecorderService(),
+                new DocumentHashService,
+                new SignatureEventLogger(new AcknowledgmentSignatureFoundationService),
+                new DomainEventRecorderService,
             ),
         );
     }

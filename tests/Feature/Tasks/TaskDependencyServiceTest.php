@@ -6,6 +6,7 @@ use App\Enums\TaskStatus;
 use App\Exceptions\TenantIsolationException;
 use App\Models\Firm;
 use App\Models\Task;
+use App\Models\TaskDependency;
 use App\Services\TaskDependencyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -19,7 +20,7 @@ class TaskDependencyServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new TaskDependencyService();
+        $this->service = new TaskDependencyService;
     }
 
     public function test_a_task_cannot_depend_on_itself(): void
@@ -50,7 +51,7 @@ class TaskDependencyServiceTest extends TestCase
         } finally {
             $this->assertSame(
                 0,
-                \App\Models\TaskDependency::query()
+                TaskDependency::query()
                     ->where('task_id', $task->id)
                     ->where('blocked_by_task_id', $blockedByTask->id)
                     ->count(),
@@ -92,7 +93,7 @@ class TaskDependencyServiceTest extends TestCase
         } finally {
             $this->assertSame(
                 0,
-                \App\Models\TaskDependency::query()
+                TaskDependency::query()
                     ->where('task_id', $taskC->id)
                     ->where('blocked_by_task_id', $taskA->id)
                     ->count(),
@@ -146,7 +147,7 @@ class TaskDependencyServiceTest extends TestCase
         $a = Task::factory()->create(['firm_id' => $firm->id, 'status' => TaskStatus::Completed, 'completed_at' => now()]);
         $b = Task::factory()->create(['firm_id' => $firm->id]);
 
-        \App\Models\TaskDependency::factory()->between($a, $b)->create();
+        TaskDependency::factory()->between($a, $b)->create();
 
         $this->service->refreshBlockedStatus($this->runWithFirmContext($firm, fn () => $a->fresh()));
 

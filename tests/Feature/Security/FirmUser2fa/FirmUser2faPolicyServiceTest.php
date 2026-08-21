@@ -29,7 +29,7 @@ class FirmUser2faPolicyServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new FirmUser2faPolicyService();
+        $this->service = new FirmUser2faPolicyService;
     }
 
     private function firmWithMode(TwoFactorMode $mode): Firm
@@ -238,7 +238,7 @@ class FirmUser2faPolicyServiceTest extends TestCase
         $this->assertFalse($summary['ready_for_pilot_data']);
     }
 
-    public function test_isRequiredForFirmUser_matches_isRequiredForFirm(): void
+    public function test_is_required_for_firm_user_matches_is_required_for_firm(): void
     {
         $firm = $this->firmWithMode(TwoFactorMode::Required);
         $firmUser = FirmUser::factory()->forFirm($firm)->create(['status' => FirmUserStatus::Active]);

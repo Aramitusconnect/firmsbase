@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Enums\DocumentTemplateContentStatus;
+use App\Enums\FormMappingSourceEntity;
+use App\Enums\FormMappingTransform;
 use App\Enums\GeneratedDocumentStatus;
 use App\Models\Client;
 use App\Models\DocumentTemplateVersion;
@@ -56,9 +58,7 @@ use Illuminate\Support\Str;
  */
 class DocumentGenerationService
 {
-    public function __construct(private readonly DeterministicFieldResolutionService $resolver)
-    {
-    }
+    public function __construct(private readonly DeterministicFieldResolutionService $resolver) {}
 
     public function generate(
         DocumentTemplateVersion $version,
@@ -86,7 +86,17 @@ class DocumentGenerationService
 
         $pdfBytes = Pdf::loadHTML($this->renderHtml($version->body_template, $resolvedMergeValues))->output();
 
-        $storageDisk = 'local';
+        // Non-Payment Completion Program (staging deployment mission):
+        // the app's own configured default disk (FILESYSTEM_DISK — 's3'
+        // in staging/production, 'local' in dev/test, unchanged) is the
+        // canonical durable private storage path every other upload
+        // pathway in this codebase now uses (see DocumentsRelationManager::handleUpload()/
+        // PlaidUploadFallbackPage::handleUpload()/MarketplaceIntakeDocumentService::upload(),
+        // and HealthCheckRegistry::probeStorage()'s identical pattern) —
+        // never a hardcoded 'local' literal, which would permanently
+        // pin every generated document to the ECS task's own ephemeral
+        // filesystem, lost on the next task replacement.
+        $storageDisk = (string) config('filesystems.default');
         $storagePath = sprintf(
             'generated-documents/%d/%s/%s.pdf',
             $firmId,
@@ -96,7 +106,7 @@ class DocumentGenerationService
         Storage::disk($storageDisk)->put($storagePath, $pdfBytes);
         $fileHash = hash('sha256', $pdfBytes);
 
-        $document = (new TenantContextService())->runWithFirmContext($firmId, fn () => GeneratedDocument::create([
+        $document = (new TenantContextService)->runWithFirmContext($firmId, fn () => GeneratedDocument::create([
             'firm_id' => $firmId,
             'matter_id' => $matter?->id,
             'client_id' => $client?->id,
@@ -109,7 +119,7 @@ class DocumentGenerationService
             'generated_by_firm_user_id' => $actor->id,
         ]));
 
-        (new DocumentHashService())->recordForGeneratedDocument($document, $fileHash, $actor);
+        (new DocumentHashService)->recordForGeneratedDocument($document, $fileHash, $actor);
 
         return new DocumentGenerationResult(
             generatedDocumentId: $document->id,
@@ -141,9 +151,9 @@ class DocumentGenerationService
 
         foreach ($version->merge_fields_schema as $fieldSchema) {
             $token = $fieldSchema['token'] ?? null;
-            $sourceEntity = \App\Enums\FormMappingSourceEntity::tryFrom($fieldSchema['source_entity'] ?? '');
+            $sourceEntity = FormMappingSourceEntity::tryFrom($fieldSchema['source_entity'] ?? '');
             $sourcePath = $fieldSchema['source_path'] ?? null;
-            $transform = \App\Enums\FormMappingTransform::tryFrom($fieldSchema['transform'] ?? 'none') ?? \App\Enums\FormMappingTransform::None;
+            $transform = FormMappingTransform::tryFrom($fieldSchema['transform'] ?? 'none') ?? FormMappingTransform::None;
 
             if ($token === null || $sourceEntity === null || $sourcePath === null) {
                 continue;

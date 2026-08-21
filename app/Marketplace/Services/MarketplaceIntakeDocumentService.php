@@ -42,8 +42,6 @@ use Illuminate\Support\Str;
  */
 class MarketplaceIntakeDocumentService
 {
-    private const STORAGE_DISK = 'local';
-
     public function __construct(
         private readonly DocumentUploadPolicyService $uploadPolicy = new DocumentUploadPolicyService,
         private readonly DocumentSecurityService $documentSecurity = new DocumentSecurityService(new DocumentUploadPolicyService, new DomainEventRecorderService),
@@ -85,7 +83,18 @@ class MarketplaceIntakeDocumentService
             $originalFilename,
         );
 
-        Storage::disk(self::STORAGE_DISK)->putFileAs(
+        // Non-Payment Completion Program (staging deployment mission):
+        // the app's own configured default disk — never a hardcoded
+        // 'local' literal, which would permanently pin every
+        // MyAttorney intake upload to the ECS task's own ephemeral
+        // filesystem. $file here is a raw Illuminate\Http\UploadedFile
+        // (a direct HTTP upload, not a Livewire temp-file reference),
+        // so unlike DocumentsRelationManager/PlaidUploadFallbackPage
+        // there is no separate "temp disk" to keep in sync — only this
+        // one write target.
+        $storageDisk = (string) config('filesystems.default');
+
+        Storage::disk($storageDisk)->putFileAs(
             dirname($storagePath),
             $file,
             basename($storagePath),
@@ -93,13 +102,13 @@ class MarketplaceIntakeDocumentService
 
         $fileHash = hash_file('sha256', $file->getRealPath()) ?: '';
 
-        return $this->tenantContext->runWithFirmContext($firm, function () use ($firm, $intake, $originalFilename, $file, $storagePath, $fileHash, $sizeBytes, $ipAddress) {
+        return $this->tenantContext->runWithFirmContext($firm, function () use ($firm, $intake, $originalFilename, $file, $storagePath, $storageDisk, $fileHash, $sizeBytes, $ipAddress) {
             $document = $this->documentSecurity->upload(
                 firm: $firm,
                 originalFilename: $originalFilename,
                 mimeType: (string) ($file->getMimeType() ?? 'application/octet-stream'),
                 sizeBytes: $sizeBytes,
-                storageDisk: self::STORAGE_DISK,
+                storageDisk: $storageDisk,
                 storagePath: $storagePath,
                 fileHash: $fileHash,
                 intake: $intake,

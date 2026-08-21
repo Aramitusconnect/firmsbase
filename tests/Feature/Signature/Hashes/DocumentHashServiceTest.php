@@ -20,7 +20,7 @@ class DocumentHashServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new DocumentHashService();
+        $this->service = new DocumentHashService;
     }
 
     public function test_record_for_document_persists_the_caller_supplied_hash_value(): void

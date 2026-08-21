@@ -22,7 +22,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class GeneratedDocument extends Model
 {
-    use HasFactory, HasPublicUuid, BelongsToTenant;
+    use BelongsToTenant, HasFactory, HasPublicUuid;
 
     protected $fillable = [
         'firm_id',

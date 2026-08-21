@@ -66,14 +66,13 @@ class SignatureRecipientWorkflowService
         private readonly SignatureEventLogger $eventLogger,
         private readonly SignatureRequestAggregationService $aggregation,
         private readonly SignatureCertificateService $certificates,
-    ) {
-    }
+    ) {}
 
     public function view(SignatureRequestRecipient $recipient, string $ipAddress, string $userAgent): SignatureRequestRecipient
     {
         $this->transitions->assertTransitionAllowed($recipient->status->value, SignatureRequestStatus::Viewed->value);
 
-        return (new TenantContextService())->runWithFirmContext($recipient->firm_id, function () use ($recipient, $ipAddress, $userAgent) {
+        return (new TenantContextService)->runWithFirmContext($recipient->firm_id, function () use ($recipient, $ipAddress, $userAgent) {
             $recipient->update(['status' => SignatureRequestStatus::Viewed, 'viewed_at' => now()]);
 
             $this->eventLogger->log(
@@ -107,7 +106,7 @@ class SignatureRecipientWorkflowService
     ): SignatureRequestRecipient {
         $this->transitions->assertTransitionAllowed($recipient->status->value, SignatureRequestStatus::Consented->value);
 
-        return (new TenantContextService())->runWithFirmContext($recipient->firm_id, function () use ($recipient, $acknowledgerType, $acknowledgerId, $textVersion, $ipAddress, $userAgent) {
+        return (new TenantContextService)->runWithFirmContext($recipient->firm_id, function () use ($recipient, $acknowledgerType, $acknowledgerId, $textVersion, $ipAddress, $userAgent) {
             $request = $recipient->signatureRequest;
 
             $this->eventLogger->logConsentCaptured(
@@ -146,7 +145,7 @@ class SignatureRecipientWorkflowService
 
         $requestReadyForCertificate = null;
 
-        $signedRecipient = (new TenantContextService())->runWithFirmContext($recipient->firm_id, function () use ($recipient, &$requestReadyForCertificate) {
+        $signedRecipient = (new TenantContextService)->runWithFirmContext($recipient->firm_id, function () use ($recipient, &$requestReadyForCertificate) {
             $recipient->update(['status' => SignatureRequestStatus::Signed, 'signed_at' => now()]);
 
             $this->eventLogger->log(
@@ -189,7 +188,7 @@ class SignatureRecipientWorkflowService
     {
         $this->transitions->assertTransitionAllowed($recipient->status->value, SignatureRequestStatus::Declined->value);
 
-        return (new TenantContextService())->runWithFirmContext($recipient->firm_id, function () use ($recipient, $reason) {
+        return (new TenantContextService)->runWithFirmContext($recipient->firm_id, function () use ($recipient, $reason) {
             $recipient->update([
                 'status' => SignatureRequestStatus::Declined,
                 'declined_at' => now(),
@@ -215,7 +214,7 @@ class SignatureRecipientWorkflowService
     {
         $this->transitions->assertTransitionAllowed($recipient->status->value, SignatureRequestStatus::Expired->value);
 
-        return (new TenantContextService())->runWithFirmContext($recipient->firm_id, function () use ($recipient) {
+        return (new TenantContextService)->runWithFirmContext($recipient->firm_id, function () use ($recipient) {
             $recipient->update(['status' => SignatureRequestStatus::Expired]);
 
             $this->eventLogger->log(

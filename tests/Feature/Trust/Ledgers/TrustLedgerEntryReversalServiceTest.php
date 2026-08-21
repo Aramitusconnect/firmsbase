@@ -7,7 +7,11 @@ use App\Enums\TrustLedgerStatus;
 use App\Exceptions\TrustLedgerNotActiveException;
 use App\Models\Client;
 use App\Models\Matter;
+use App\Models\MatterTrustBalance;
+use App\Models\TrustLedgerEntry;
+use App\Services\TenantContextService;
 use App\Services\TrustAccountService;
+use App\Services\TrustBalanceService;
 use App\Services\TrustLedgerEntryReversalService;
 use App\Services\TrustLedgerService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -33,14 +37,14 @@ class TrustLedgerEntryReversalServiceTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
 
-        $original = \App\Models\TrustLedgerEntry::create([
+        $original = TrustLedgerEntry::create([
             'firm_id' => $firm->id,
             'trust_ledger_id' => $ledger->id,
             'entry_type' => TrustLedgerEntryType::Deposit,
             'amount_cents' => 10000,
             'posted_at' => now(),
         ]);
-        app(\App\Services\TrustBalanceService::class)->recomputeForLedger($ledger);
+        app(TrustBalanceService::class)->recomputeForLedger($ledger);
         $originalAttributesBefore = $original->fresh()->getAttributes();
 
         $reversal = $this->service->reverse($firm, $ledger, $original->fresh());
@@ -59,14 +63,14 @@ class TrustLedgerEntryReversalServiceTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
 
-        $original = \App\Models\TrustLedgerEntry::create([
+        $original = TrustLedgerEntry::create([
             'firm_id' => $firm->id,
             'trust_ledger_id' => $ledger->id,
             'entry_type' => TrustLedgerEntryType::Deposit,
             'amount_cents' => 10000,
             'posted_at' => now(),
         ]);
-        app(\App\Services\TrustBalanceService::class)->recomputeForLedger($ledger);
+        app(TrustBalanceService::class)->recomputeForLedger($ledger);
 
         $this->service->reverse($firm, $ledger, $original->fresh());
 
@@ -81,14 +85,14 @@ class TrustLedgerEntryReversalServiceTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
 
-        $original = \App\Models\TrustLedgerEntry::create([
+        $original = TrustLedgerEntry::create([
             'firm_id' => $firm->id,
             'trust_ledger_id' => $ledger->id,
             'entry_type' => TrustLedgerEntryType::Deposit,
             'amount_cents' => 10000,
             'posted_at' => now(),
         ]);
-        app(\App\Services\TrustBalanceService::class)->recomputeForLedger($ledger);
+        app(TrustBalanceService::class)->recomputeForLedger($ledger);
         $reversal = $this->service->reverse($firm, $ledger, $original->fresh());
 
         $this->expectException(\RuntimeException::class);
@@ -128,7 +132,7 @@ class TrustLedgerEntryReversalServiceTest extends TestCase
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
         $matter = Matter::factory()->forClient($client)->create();
 
-        $original = \App\Models\TrustLedgerEntry::create([
+        $original = TrustLedgerEntry::create([
             'firm_id' => $firm->id,
             'trust_ledger_id' => $ledger->id,
             'matter_id' => $matter->id,
@@ -136,8 +140,8 @@ class TrustLedgerEntryReversalServiceTest extends TestCase
             'amount_cents' => 10000,
             'posted_at' => now(),
         ]);
-        app(\App\Services\TrustBalanceService::class)->recomputeForLedger($ledger);
-        app(\App\Services\TrustBalanceService::class)->recomputeForMatter($ledger, $matter);
+        app(TrustBalanceService::class)->recomputeForLedger($ledger);
+        app(TrustBalanceService::class)->recomputeForMatter($ledger, $matter);
 
         // Resolve the fresh copy of $original BEFORE clearing context.
         // trust_ledger_entries is now (Wave 10) FORCE-RLS'd and this
@@ -160,7 +164,7 @@ class TrustLedgerEntryReversalServiceTest extends TestCase
         // no-context condition reverse() must fail-closed/succeed
         // correctly under, rather than accidentally inheriting a
         // still-active session setting.
-        (new \App\Services\TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $reversal = $this->service->reverse($firm, $ledger, $originalFresh);
 
@@ -178,7 +182,7 @@ class TrustLedgerEntryReversalServiceTest extends TestCase
         $ledgerBalance = $this->runWithFirmContext($firm, fn () => $ledger->balance()->firstOrFail());
         $this->assertSame(0, $ledgerBalance->balance_cents);
 
-        $matterBalance = $this->runWithFirmContext($firm, fn () => \App\Models\MatterTrustBalance::query()
+        $matterBalance = $this->runWithFirmContext($firm, fn () => MatterTrustBalance::query()
             ->where('trust_ledger_id', $ledger->id)
             ->where('matter_id', $matter->id)
             ->firstOrFail());
@@ -199,14 +203,14 @@ class TrustLedgerEntryReversalServiceTest extends TestCase
         $client = Client::factory()->forFirm($firm)->create();
         $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
 
-        $original = \App\Models\TrustLedgerEntry::create([
+        $original = TrustLedgerEntry::create([
             'firm_id' => $firm->id,
             'trust_ledger_id' => $ledger->id,
             'entry_type' => TrustLedgerEntryType::Deposit,
             'amount_cents' => 10000,
             'posted_at' => now(),
         ]);
-        app(\App\Services\TrustBalanceService::class)->recomputeForLedger($ledger);
+        app(TrustBalanceService::class)->recomputeForLedger($ledger);
 
         app(TrustLedgerService::class)->freeze($firm, $ledger->fresh());
 

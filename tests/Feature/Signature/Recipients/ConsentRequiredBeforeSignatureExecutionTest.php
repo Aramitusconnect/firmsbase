@@ -29,22 +29,23 @@ class ConsentRequiredBeforeSignatureExecutionTest extends TestCase
     use RefreshDatabase;
 
     private SignatureRecipientWorkflowService $service;
+
     private SignatureWorkflowTransitionService $transitions;
 
     protected function setUp(): void
     {
         parent::setUp();
 
-        $this->transitions = new SignatureWorkflowTransitionService();
+        $this->transitions = new SignatureWorkflowTransitionService;
         $this->service = new SignatureRecipientWorkflowService(
             $this->transitions,
-            new SignatureEventLogger(new AcknowledgmentSignatureFoundationService()),
+            new SignatureEventLogger(new AcknowledgmentSignatureFoundationService),
             new SignatureRequestAggregationService($this->transitions),
             new SignatureCertificateService(
                 $this->transitions,
-                new DocumentHashService(),
-                new SignatureEventLogger(new AcknowledgmentSignatureFoundationService()),
-                new DomainEventRecorderService(),
+                new DocumentHashService,
+                new SignatureEventLogger(new AcknowledgmentSignatureFoundationService),
+                new DomainEventRecorderService,
             ),
         );
     }

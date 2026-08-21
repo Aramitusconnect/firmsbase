@@ -117,7 +117,18 @@ class DocumentsRelationManager extends RelationManager
                     ->form([
                         FileUpload::make('file')
                             ->label('Document')
-                            ->disk('local')
+                            // Non-Payment Completion Program (staging deployment
+                            // mission): must match handleUpload()'s own disk
+                            // resolution below — Filament's own unset-disk
+                            // default (config('filament.default_filesystem_disk'))
+                            // already resolves from the same FILESYSTEM_DISK env
+                            // var as config('filesystems.default'), so a
+                            // hardcoded 'local' literal here silently orphaned
+                            // the temp upload on the 'local' disk in
+                            // staging/production (FILESYSTEM_DISK=s3) while
+                            // handleUpload() looked for it on 's3' — a
+                            // guaranteed "Uploaded file could not be found."
+                            ->disk((string) config('filesystems.default'))
                             ->directory('documents-tmp')
                             ->visibility('private')
                             ->acceptedFileTypes([
@@ -170,7 +181,23 @@ class DocumentsRelationManager extends RelationManager
             return;
         }
 
-        if (! Storage::disk('local')->exists($file)) {
+        // Non-Payment Completion Program (staging deployment mission):
+        // Livewire's own temporary-upload disk (FileUploadConfiguration::disk())
+        // already resolves to config('filesystems.default') whenever
+        // config/livewire.php (not published in this app) leaves
+        // temporary_file_upload.disk unset — confirmed directly against
+        // Livewire's own source. A hardcoded 'local' literal here was
+        // therefore reading the WRONG disk the moment FILESYSTEM_DISK
+        // is anything other than 'local' (i.e. real staging/production,
+        // where it is 's3') — every real upload would silently fail
+        // "could not be found" before ever reaching the durable-storage
+        // concern at all. Using the same config-driven disk everywhere
+        // in this method both fixes that and makes the final stored
+        // copy durable — no cross-disk copy is needed since both the
+        // temp file and the final destination are the same disk.
+        $disk = (string) config('filesystems.default');
+
+        if (! Storage::disk($disk)->exists($file)) {
             Notification::make()->title('Uploaded file could not be found.')->danger()->send();
 
             return;
@@ -180,11 +207,16 @@ class DocumentsRelationManager extends RelationManager
         $matter = $this->getOwnerRecord();
         $uploader = Auth::user();
 
-        $absolutePath = Storage::disk('local')->path($file);
+        // Reads the file's bytes through the Storage facade (never
+        // ->path() + hash_file()) so this works identically regardless
+        // of which disk driver is configured — ->path() only makes
+        // sense for the local driver and is not implemented the same
+        // way for 's3', which real staging/production always run.
         $originalFilename = basename($file);
-        $mimeType = Storage::disk('local')->mimeType($file) ?: 'application/octet-stream';
-        $sizeBytes = Storage::disk('local')->size($file);
-        $fileHash = hash_file('sha256', $absolutePath) ?: hash('sha256', $file);
+        $mimeType = Storage::disk($disk)->mimeType($file) ?: 'application/octet-stream';
+        $sizeBytes = Storage::disk($disk)->size($file);
+        $fileContents = Storage::disk($disk)->get($file);
+        $fileHash = $fileContents !== null ? hash('sha256', $fileContents) : hash('sha256', $file);
 
         // Move into a durable, matter-scoped path — the temporary
         // Livewire upload path is not the final storage location.
@@ -192,7 +224,7 @@ class DocumentsRelationManager extends RelationManager
         // "temp dir, then move" pattern, keyed to firm_id/matter_id
         // instead of client-portal-uploads.
         $finalPath = 'documents/'.$matter->firm_id.'/'.$matter->id.'/'.Str::uuid7().'-'.$originalFilename;
-        Storage::disk('local')->move($file, $finalPath);
+        Storage::disk($disk)->move($file, $finalPath);
 
         try {
             $document = (new TenantContextService)->runWithFirmContext($matter->firm_id, fn () => app(DocumentSecurityService::class)->upload(
@@ -200,7 +232,7 @@ class DocumentsRelationManager extends RelationManager
                 originalFilename: $originalFilename,
                 mimeType: $mimeType,
                 sizeBytes: (int) $sizeBytes,
-                storageDisk: 'local',
+                storageDisk: $disk,
                 storagePath: $finalPath,
                 fileHash: $fileHash,
                 matter: $matter,

@@ -12,10 +12,12 @@ use App\Models\Client;
 use App\Models\DocumentTemplateVersion;
 use App\Models\Firm;
 use App\Models\FirmUser;
+use App\Models\GeneratedDocument;
 use App\Models\Matter;
 use App\Services\DeterministicFieldResolutionService;
 use App\Services\DocumentGenerationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -29,7 +31,7 @@ class DocumentGenerationServiceTest extends TestCase
     {
         parent::setUp();
         Storage::fake('local');
-        $this->service = new DocumentGenerationService(new DeterministicFieldResolutionService());
+        $this->service = new DocumentGenerationService(new DeterministicFieldResolutionService);
     }
 
     public function test_generate_blocks_a_non_active_template_version(): void
@@ -62,7 +64,7 @@ class DocumentGenerationServiceTest extends TestCase
         $this->assertSame(GeneratedDocumentStatus::Draft, $result->status);
         $this->assertStringContainsString('generated-documents/firm-'.$firm->id, $result->simulatedStoragePath);
 
-        $document = \App\Models\GeneratedDocument::find($result->generatedDocumentId);
+        $document = GeneratedDocument::find($result->generatedDocumentId);
         $this->assertTrue($document->used_sample_content);
         $this->assertSame($firm->id, $document->firm_id);
     }
@@ -115,7 +117,7 @@ class DocumentGenerationServiceTest extends TestCase
 
         $result = $this->service->generate($version, $actor, $firm->id, $matter, $client);
 
-        $document = \App\Models\GeneratedDocument::find($result->generatedDocumentId);
+        $document = GeneratedDocument::find($result->generatedDocumentId);
 
         $this->assertSame('local', $document->storage_disk);
         $this->assertNotNull($document->storage_path);
@@ -133,6 +135,39 @@ class DocumentGenerationServiceTest extends TestCase
         $this->assertNotSame($document->simulated_storage_path, $document->storage_path);
     }
 
+    /**
+     * Non-payment completion program (staging deployment mission):
+     * proves generate() writes to the app's CONFIGURED default disk
+     * (config('filesystems.default')), never a hardcoded 'local'
+     * literal — a hardcoded literal would permanently pin every
+     * generated document to the ECS task's own non-durable filesystem
+     * regardless of what FILESYSTEM_DISK is actually set to in
+     * staging/production ('s3').
+     */
+    public function test_generate_writes_to_the_configured_default_disk_not_a_hardcoded_local_literal(): void
+    {
+        Config::set('filesystems.default', 's3');
+        Storage::fake('s3');
+
+        $firm = Firm::factory()->create();
+        $matter = Matter::factory()->forFirm($firm)->create();
+        $actor = FirmUser::factory()->role(FirmUserRole::Attorney)->create(['firm_id' => $firm->id]);
+        $version = DocumentTemplateVersion::factory()->create([
+            'status' => DocumentTemplateVersionStatus::Active->value,
+            'content_status' => DocumentTemplateContentStatus::ReviewedApproved->value,
+            'body_template' => 'Configured-disk proof.',
+            'merge_fields_schema' => [],
+        ]);
+
+        $result = $this->service->generate($version, $actor, $firm->id, $matter);
+
+        $document = GeneratedDocument::find($result->generatedDocumentId);
+
+        $this->assertSame('s3', $document->storage_disk, 'The generated document must be recorded on the CONFIGURED default disk, not a hardcoded local literal.');
+        Storage::disk('s3')->assertExists($document->storage_path);
+        Storage::disk('local')->assertMissing($document->storage_path);
+    }
+
     public function test_generate_records_a_real_sha256_hash_of_the_rendered_bytes(): void
     {
         $firm = Firm::factory()->create();
@@ -145,7 +180,7 @@ class DocumentGenerationServiceTest extends TestCase
 
         $result = $this->service->generate($version, $actor, $firm->id);
 
-        $document = \App\Models\GeneratedDocument::find($result->generatedDocumentId);
+        $document = GeneratedDocument::find($result->generatedDocumentId);
         $bytes = Storage::disk($document->storage_disk)->get($document->storage_path);
         $expectedHash = hash('sha256', $bytes);
 

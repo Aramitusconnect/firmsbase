@@ -95,7 +95,15 @@ class PlaidUploadFallbackPage extends Page implements HasSchemas, HasTable
             ->components([
                 FileUpload::make('file')
                     ->label('Document')
-                    ->disk('local')
+                    // Non-Payment Completion Program (staging deployment
+                    // mission): must match handleUpload()'s own disk
+                    // resolution below — same reasoning as
+                    // DocumentsRelationManager's identical field fix. A
+                    // hardcoded 'local' literal here orphaned the temp
+                    // upload on 'local' while handleUpload() looked for it
+                    // on config('filesystems.default') ('s3' in
+                    // staging/production).
+                    ->disk((string) config('filesystems.default'))
                     ->directory('client-portal-uploads')
                     ->visibility('private')
                     ->acceptedFileTypes(['application/pdf', 'text/csv', 'image/jpeg', 'image/png', 'image/tiff', 'text/plain'])
@@ -119,22 +127,35 @@ class PlaidUploadFallbackPage extends Page implements HasSchemas, HasTable
             return;
         }
 
-        if (! Storage::disk('local')->exists($file)) {
+        // Non-Payment Completion Program (staging deployment mission):
+        // same config-driven disk fix as DocumentsRelationManager::handleUpload()
+        // — Livewire's own temp-upload disk already resolves to
+        // config('filesystems.default'), so a hardcoded 'local' literal
+        // here reads the WRONG disk whenever FILESYSTEM_DISK is 's3'
+        // (real staging/production), and permanently pins the final
+        // stored copy to the ECS task's own ephemeral filesystem either
+        // way.
+        $disk = (string) config('filesystems.default');
+
+        if (! Storage::disk($disk)->exists($file)) {
             Notification::make()->title('Uploaded file could not be found.')->danger()->send();
 
             return;
         }
 
-        $absolutePath = Storage::disk('local')->path($file);
+        // Reads bytes through the Storage facade (never ->path() +
+        // hash_file()) so this works identically for the 's3' driver,
+        // which does not support ->path().
         $originalFilename = basename($file);
-        $mimeType = Storage::disk('local')->mimeType($file) ?: 'application/octet-stream';
-        $sizeBytes = Storage::disk('local')->size($file);
-        $fileHash = hash_file('sha256', $absolutePath) ?: hash('sha256', $file);
+        $mimeType = Storage::disk($disk)->mimeType($file) ?: 'application/octet-stream';
+        $sizeBytes = Storage::disk($disk)->size($file);
+        $fileContents = Storage::disk($disk)->get($file);
+        $fileHash = $fileContents !== null ? hash('sha256', $fileContents) : hash('sha256', $file);
 
         // Move into a durable, matter-scoped path — the temporary
         // Livewire upload path is not the final storage location.
         $finalPath = 'client-portal-uploads/'.$matterModel->firm_id.'/'.$matterModel->id.'/'.Str::uuid7().'-'.$originalFilename;
-        Storage::disk('local')->move($file, $finalPath);
+        Storage::disk($disk)->move($file, $finalPath);
 
         try {
             $document = (new TenantContextService)->runWithFirmContext($matterModel->firm_id, fn () => app(DocumentSecurityService::class)->upload(
@@ -142,7 +163,7 @@ class PlaidUploadFallbackPage extends Page implements HasSchemas, HasTable
                 originalFilename: $originalFilename,
                 mimeType: $mimeType,
                 sizeBytes: (int) $sizeBytes,
-                storageDisk: 'local',
+                storageDisk: $disk,
                 storagePath: $finalPath,
                 fileHash: $fileHash,
                 matter: $matterModel,

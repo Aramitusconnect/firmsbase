@@ -21,6 +21,7 @@ use App\Services\VirusScan\VirusScanner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -74,6 +75,29 @@ class MarketplaceIntakeDocumentServiceTest extends TestCase
         $this->assertSame(DocumentStatus::Uploaded, $document->status);
         $this->assertSame(DocumentScanStatus::Pending, $document->scan_status);
         Storage::disk('local')->assertExists($document->storage_path);
+    }
+
+    /**
+     * Non-payment completion program (staging deployment mission):
+     * proves upload() writes to the app's CONFIGURED default disk
+     * (config('filesystems.default')), never a hardcoded 'local'
+     * literal — a hardcoded literal would permanently pin every
+     * anonymous MyAttorney intake upload to the ECS task's own
+     * non-durable filesystem.
+     */
+    public function test_upload_uses_the_configured_default_disk_not_a_hardcoded_local_literal(): void
+    {
+        Config::set('filesystems.default', 's3');
+        Storage::fake('s3');
+
+        [, $intake] = $this->setUpIntake();
+        $file = UploadedFile::fake()->create('contract.pdf', 100, 'application/pdf');
+
+        $document = $this->service()->upload($intake, $file);
+
+        $this->assertSame('s3', $document->storage_disk, 'The uploaded document must be recorded on the CONFIGURED default disk, not a hardcoded local literal.');
+        Storage::disk('s3')->assertExists($document->storage_path);
+        Storage::disk('local')->assertMissing($document->storage_path);
     }
 
     public function test_upload_never_uses_the_visitors_filename_as_the_storage_path(): void

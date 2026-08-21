@@ -2,10 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Enums\FirmUserRole;
 use App\Models\DocumentTemplateVersion;
 use App\Models\Firm;
 use App\Models\FirmUser;
-use App\Enums\FirmUserRole;
+use App\Models\GeneratedDocument;
 use App\Services\DeterministicFieldResolutionService;
 use App\Services\DocumentGenerationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -92,7 +93,7 @@ class Phase10NoRealRenderingOrFilingTest extends TestCase
         $actor = FirmUser::factory()->role(FirmUserRole::Attorney)->create(['firm_id' => $firm->id]);
         $version = DocumentTemplateVersion::factory()->create(['merge_fields_schema' => []]);
 
-        $service = new DocumentGenerationService(new DeterministicFieldResolutionService());
+        $service = new DocumentGenerationService(new DeterministicFieldResolutionService);
         $result = $service->generate($version, $actor, $firm->id);
 
         // simulated_storage_path is kept in its original format for
@@ -103,7 +104,7 @@ class Phase10NoRealRenderingOrFilingTest extends TestCase
         // read must run inside the same firm's tenant context.
         $generatedDocument = $this->runWithFirmContext(
             $firm,
-            fn () => \App\Models\GeneratedDocument::query()->findOrFail($result->generatedDocumentId)
+            fn () => GeneratedDocument::query()->findOrFail($result->generatedDocumentId)
         );
         $this->assertNotNull($generatedDocument->storage_disk);
         $this->assertNotNull($generatedDocument->storage_path);

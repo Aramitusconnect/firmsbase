@@ -7,7 +7,9 @@ use App\Enums\TrustLedgerEntryType;
 use App\Enums\TrustLedgerStatus;
 use App\Exceptions\TrustLedgerNotActiveException;
 use App\Models\Client;
+use App\Models\Firm;
 use App\Models\FirmUser;
+use App\Models\TrustLedger;
 use App\Services\TrustAccountService;
 use App\Services\TrustDepositService;
 use App\Services\TrustLedgerService;
@@ -90,11 +92,11 @@ class TrustDepositServiceTest extends TestCase
 
     public function test_deposit_is_blocked_for_an_ineligible_firm(): void
     {
-        $firm = \App\Models\Firm::factory()->create();
+        $firm = Firm::factory()->create();
         $requester = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
 
         $this->expectException(\RuntimeException::class);
-        $this->service->requestDeposit($firm, \App\Models\TrustLedger::factory()->create(['firm_id' => $firm->id]), $requester, 1000);
+        $this->service->requestDeposit($firm, TrustLedger::factory()->create(['firm_id' => $firm->id]), $requester, 1000);
     }
 
     /**

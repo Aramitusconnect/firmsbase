@@ -34,7 +34,7 @@ class TaskDependencyService
             );
         }
 
-        return (new TenantContextService())->runWithFirmContext($task->firm_id, function () use ($task, $blockedByTask) {
+        return (new TenantContextService)->runWithFirmContext($task->firm_id, function () use ($task, $blockedByTask) {
             return DB::transaction(function () use ($task, $blockedByTask) {
                 $dependency = TaskDependency::firstOrCreate([
                     'task_id' => $task->id,
@@ -50,7 +50,7 @@ class TaskDependencyService
 
     public function removeDependency(Task $task, Task $blockedByTask): void
     {
-        (new TenantContextService())->runWithFirmContext($task->firm_id, function () use ($task, $blockedByTask) {
+        (new TenantContextService)->runWithFirmContext($task->firm_id, function () use ($task, $blockedByTask) {
             TaskDependency::query()
                 ->where('task_id', $task->id)
                 ->where('blocked_by_task_id', $blockedByTask->id)
@@ -124,7 +124,7 @@ class TaskDependencyService
             return $task;
         }
 
-        return (new TenantContextService())->runWithFirmContext($task->firm_id, function () use ($task) {
+        return (new TenantContextService)->runWithFirmContext($task->firm_id, function () use ($task) {
             $hasUnresolvedDependency = $task->dependencies()
                 ->whereHas('blockedByTask', fn ($q) => $q->whereNotIn('status', [
                     TaskStatus::Completed->value,

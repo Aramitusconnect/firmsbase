@@ -54,7 +54,7 @@ class AcknowledgmentFoundationReuseTest extends TestCase
 
     public function test_acknowledgment_service_still_returns_a_pure_value_object_and_persists_nothing_itself(): void
     {
-        $service = new AcknowledgmentSignatureFoundationService();
+        $service = new AcknowledgmentSignatureFoundationService;
 
         $record = $service->record('App\\Models\\User', 99, 'terms-v1', true);
 
@@ -65,16 +65,16 @@ class AcknowledgmentFoundationReuseTest extends TestCase
 
     public function test_consent_captured_event_carries_exactly_the_fields_the_phase_6_service_would_produce(): void
     {
-        $transitions = new SignatureWorkflowTransitionService();
+        $transitions = new SignatureWorkflowTransitionService;
         $service = new SignatureRecipientWorkflowService(
             $transitions,
-            new SignatureEventLogger(new AcknowledgmentSignatureFoundationService()),
+            new SignatureEventLogger(new AcknowledgmentSignatureFoundationService),
             new SignatureRequestAggregationService($transitions),
             new SignatureCertificateService(
                 $transitions,
-                new DocumentHashService(),
-                new SignatureEventLogger(new AcknowledgmentSignatureFoundationService()),
-                new DomainEventRecorderService(),
+                new DocumentHashService,
+                new SignatureEventLogger(new AcknowledgmentSignatureFoundationService),
+                new DomainEventRecorderService,
             ),
         );
 
@@ -86,7 +86,7 @@ class AcknowledgmentFoundationReuseTest extends TestCase
 
         // Independently construct the expected AcknowledgmentRecord via
         // the real Phase 6 service, to compare against what got persisted.
-        $expected = (new AcknowledgmentSignatureFoundationService())->record(
+        $expected = (new AcknowledgmentSignatureFoundationService)->record(
             'App\\Models\\FirmUser', $recipient->id, 'consent-v2', true
         );
 

@@ -25,9 +25,9 @@ class HealthCheckRegistryTest extends TestCase
     {
         parent::setUp();
         $this->registry = new HealthCheckRegistry(
-            new QueueHealthService(),
-            new SchedulerHealthService(),
-            new TenantIsolationAnomalyService(),
+            new QueueHealthService,
+            new SchedulerHealthService,
+            new TenantIsolationAnomalyService,
         );
     }
 
