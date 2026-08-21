@@ -63,11 +63,16 @@ use Illuminate\Support\Str;
  *     not a free byproduct of this checkpoint. `client_2fa_mode` has no
  *     equivalent enrollment-safety work at all yet (Client Portal was
  *     explicitly out of that mission's scope) — still genuinely unsafe
- *     to toggle. Neither column is bound to a form field, an Action, or
- *     even a `TextEntry`/`Text` display component anywhere below — the
- *     one line that even acknowledges they exist ("2FA policy: managed
- *     separately") is plain, non-interactive `Text`, not bound to any
- *     model attribute.
+ *     to toggle. Neither column is bound to a form field or an Action
+ *     anywhere below — flipping either policy from this page remains
+ *     impossible. `firm_user_2fa_mode` still has no display component at
+ *     all. `client_2fa_mode` now has a single read-only `Text` display
+ *     (SET-001) mirroring the `payment_mode`/`ai_mode` platform-managed
+ *     entries below it — it renders the firm's live
+ *     `client_2fa_mode` value for visibility only, reading
+ *     `FirmSettings::$attributes` via the same mount()-time snapshot
+ *     pattern as the other platform-managed columns; it is never part of
+ *     `$this->data` and never read by `save()`.
  *
  *   - `payment_mode` / `trust_iolta_protection` / `ai_mode`: real
  *     downstream effects on other gated services (Trust eligibility,
@@ -143,18 +148,24 @@ class FirmSettingsPage extends Page implements HasSchemas
     public ?array $data = [];
 
     /**
-     * Plain-scalar snapshots of the three platform-managed FirmSettings
-     * columns, captured once in mount() — never re-derived per Text
-     * closure render, and never stored as a hydrated Eloquent model on
-     * this Livewire component (keeps hydration simple and avoids a
-     * second, redundant runWithFirmContext() call per render pass).
-     * Never read by save() — display only.
+     * Plain-scalar snapshots of the five platform-managed FirmSettings
+     * columns (payment_mode/trust_iolta_protection/ai_mode plus the two
+     * SET-001/SET-003 visibility-only additions below), captured once
+     * in mount() — never re-derived per Text closure render, and never
+     * stored as a hydrated Eloquent model on this Livewire component
+     * (keeps hydration simple and avoids a second, redundant
+     * runWithFirmContext() call per render pass). Never read by save()
+     * — display only.
      */
     public ?string $paymentModeDisplay = null;
 
     public bool $trustIoltaProtectionDisplay = false;
 
     public ?string $aiModeDisplay = null;
+
+    public ?string $client2faModeDisplay = null;
+
+    public ?string $portalFrontendModeDisplay = null;
 
     public static function canAccess(): bool
     {
@@ -187,6 +198,8 @@ class FirmSettingsPage extends Page implements HasSchemas
         $this->paymentModeDisplay = $settings?->payment_mode?->value;
         $this->trustIoltaProtectionDisplay = (bool) $settings?->trust_iolta_protection;
         $this->aiModeDisplay = $settings?->ai_mode?->value;
+        $this->client2faModeDisplay = $settings?->client_2fa_mode?->value;
+        $this->portalFrontendModeDisplay = $settings?->portal_frontend_mode;
 
         $this->form->fill([
             // Firm — profile fields.
@@ -281,7 +294,8 @@ class FirmSettingsPage extends Page implements HasSchemas
                         Text::make(fn (): string => 'Trust/IOLTA Protection: '.($this->trustIoltaProtectionDisplay ? 'Enabled' : 'Disabled')),
                         Text::make(fn (): string => 'AI Mode: '.($this->aiModeDisplay ?? '—')),
                         Text::make('Contact platform support to change any of the three values above.'),
-                        Text::make('2FA policy: managed separately.'),
+                        Text::make(fn (): string => 'Client 2FA Policy: '.($this->client2faModeDisplay ?? '—')),
+                        Text::make(fn (): string => 'Portal Frontend Mode: '.($this->portalFrontendModeDisplay ?? '—').' (not currently used as a live toggle anywhere in the app)'),
                     ]),
             ]);
     }

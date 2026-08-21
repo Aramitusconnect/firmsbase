@@ -7,6 +7,7 @@ namespace Tests\Feature\FirmSettings;
 use App\Enums\AiMode;
 use App\Enums\FirmUserRole;
 use App\Enums\PaymentMode;
+use App\Enums\TwoFactorMode;
 use App\Filament\Firm\Pages\FirmSettingsPage;
 use App\Models\Firm;
 use App\Models\FirmSettings;
@@ -89,6 +90,8 @@ final class FirmSettingsPageAccessTest extends TestCase
             'payment_mode' => PaymentMode::OperatingAndTrust,
             'trust_iolta_protection' => true,
             'ai_mode' => AiMode::PlatformManaged,
+            'client_2fa_mode' => TwoFactorMode::Required,
+            'portal_frontend_mode' => 'legacy',
         ]));
 
         $this->actingAsRole($firm, FirmUserRole::FirmOwner);
@@ -108,11 +111,20 @@ final class FirmSettingsPageAccessTest extends TestCase
         $test->assertSet('paymentModeDisplay', PaymentMode::OperatingAndTrust->value);
         $test->assertSet('trustIoltaProtectionDisplay', true);
         $test->assertSet('aiModeDisplay', AiMode::PlatformManaged->value);
+        // SET-001: client_2fa_mode is now a live, mount()-captured
+        // display value (previously a static, unbound "managed
+        // separately" label).
+        $test->assertSet('client2faModeDisplay', TwoFactorMode::Required->value);
+        // SET-003: portal_frontend_mode is a plain nullable string
+        // column (no enum cast on FirmSettings) — displayed as its raw
+        // value for visibility/parity only, same as client_2fa_mode.
+        $test->assertSet('portalFrontendModeDisplay', 'legacy');
 
         $test->assertSee('Payment Mode: operating_and_trust');
         $test->assertSee('Trust/IOLTA Protection: Enabled');
         $test->assertSee('AI Mode: platform_managed');
-        $test->assertSee('2FA policy: managed separately.');
+        $test->assertSee('Client 2FA Policy: required');
+        $test->assertSee('Portal Frontend Mode: legacy');
 
         unset($settings);
     }
@@ -128,6 +140,29 @@ final class FirmSettingsPageAccessTest extends TestCase
         foreach (['address_line1', 'address_line2', 'city', 'postal_code', 'phone_number'] as $field) {
             $test->assertSet("data.{$field}", null);
         }
+    }
+
+    /**
+     * SET-001/SET-003: when client_2fa_mode is at its factory default
+     * (TwoFactorMode::Optional, never null) and portal_frontend_mode is
+     * genuinely unset (factory default null), the page still renders a
+     * live display for the former and an em-dash fallback for the
+     * latter — never the old static "managed separately" placeholder.
+     */
+    public function test_client_2fa_mode_and_portal_frontend_mode_render_with_their_live_values(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->runWithFirmContext($firm, fn () => FirmSettings::factory()->forFirm($firm)->create());
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+
+        $test = $this->runWithFirmContext($firm, fn () => Livewire::test(FirmSettingsPage::class));
+
+        $test->assertSet('client2faModeDisplay', TwoFactorMode::Optional->value);
+        $test->assertSet('portalFrontendModeDisplay', null);
+
+        $test->assertSee('Client 2FA Policy: optional');
+        $test->assertSee('Portal Frontend Mode: —');
+        $test->assertDontSee('2FA policy: managed separately.');
     }
 
     // ------------------------------------------------------------

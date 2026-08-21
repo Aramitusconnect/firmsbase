@@ -15,7 +15,10 @@ use Tests\TestCase;
  * `firm_user_2fa_mode`/`client_2fa_mode` have NO form field anywhere on
  * this page — total exclusion, per this task's explicit instruction —
  * and that `payment_mode`/`trust_iolta_protection`/`ai_mode` are never
- * bound to a writable form component either.
+ * bound to a writable form component either. `client_2fa_mode` (SET-001)
+ * and `portal_frontend_mode` (SET-003) each got a live, read-only Text
+ * display in a later pass — still no form field, still never read by
+ * `save()`, which this file also still proves.
  */
 class FirmSettingsPageForbiddenFieldsTest extends TestCase
 {
@@ -30,6 +33,18 @@ class FirmSettingsPageForbiddenFieldsTest extends TestCase
         'payment_mode',
         'trust_iolta_protection',
         'ai_mode',
+    ];
+
+    /**
+     * SET-003: portal_frontend_mode is a plain nullable string column
+     * with no live consumer anywhere in the codebase (confirmed dead/
+     * write-only scaffolding — see FirmSettingsPage's own updated
+     * docblock). Same treatment as the platform-managed columns above:
+     * a read-only Text display only, never a writable form component,
+     * never read by save().
+     */
+    private const DISPLAY_ONLY_COLUMNS = [
+        'portal_frontend_mode',
     ];
 
     /**
@@ -97,21 +112,30 @@ class FirmSettingsPageForbiddenFieldsTest extends TestCase
         );
     }
 
-    public function test_the_firm_settings_page_mentions_2fa_at_most_once_as_plain_noninteractive_text(): void
+    public function test_the_firm_settings_page_mentions_2fa_at_most_once_as_a_readonly_text_display(): void
     {
         $source = $this->pageSource();
 
-        // The one permitted acknowledgement is a single plain Text::make
-        // string, never a form field, Select, Toggle, or Action.
+        // SET-001: the one permitted "2FA" mention is now a live,
+        // read-only Text display bound to client2faModeDisplay (a plain
+        // scalar snapshot captured in mount(), mirroring
+        // paymentModeDisplay/aiModeDisplay) — never a form field,
+        // Select, Toggle, or Action, and never the old static
+        // "managed separately" placeholder string.
         $this->assertSame(
             1,
             substr_count($source, '2FA'),
-            'FirmSettingsPage may mention "2FA" at most once — a single plain-text acknowledgement, nothing interactive.'
+            'FirmSettingsPage may mention "2FA" at most once — a single read-only display, nothing interactive.'
         );
         $this->assertStringContainsString(
+            "Text::make(fn (): string => 'Client 2FA Policy: '.(\$this->client2faModeDisplay ?? '—'))",
+            $source,
+            'The one permitted 2FA mention must be a read-only Text component bound to the live client_2fa_mode value.'
+        );
+        $this->assertStringNotContainsString(
             "Text::make('2FA policy: managed separately.')",
             $source,
-            'The one permitted 2FA mention must be a plain, non-interactive Text component.'
+            'The old static, unbound 2FA placeholder text must be gone now that client_2fa_mode has a live display.'
         );
     }
 
@@ -119,7 +143,7 @@ class FirmSettingsPageForbiddenFieldsTest extends TestCase
     {
         $source = $this->pageSource();
 
-        foreach (self::PLATFORM_MANAGED_COLUMNS as $column) {
+        foreach ([...self::PLATFORM_MANAGED_COLUMNS, ...self::DISPLAY_ONLY_COLUMNS] as $column) {
             foreach (['TextInput::make', 'Select::make', 'Toggle::make', 'Checkbox::make', 'Textarea::make'] as $writableComponent) {
                 $this->assertStringNotContainsString(
                     "{$writableComponent}('{$column}'",
@@ -128,6 +152,17 @@ class FirmSettingsPageForbiddenFieldsTest extends TestCase
                 );
             }
         }
+    }
+
+    public function test_the_firm_settings_page_shows_a_readonly_text_display_for_portal_frontend_mode(): void
+    {
+        $source = $this->pageSource();
+
+        $this->assertStringContainsString(
+            "Text::make(fn (): string => 'Portal Frontend Mode: '",
+            $source,
+            'FirmSettingsPage must show a read-only Text display for portal_frontend_mode (SET-003 visibility fix).'
+        );
     }
 
     public function test_save_never_reads_a_platform_managed_or_2fa_key_off_form_state(): void
@@ -145,7 +180,7 @@ class FirmSettingsPageForbiddenFieldsTest extends TestCase
 
         $this->assertNotSame('', $saveBody, 'Could not isolate save() method body for scanning.');
 
-        foreach ([...self::PLATFORM_MANAGED_COLUMNS, ...self::FORBIDDEN_2FA_COLUMNS] as $column) {
+        foreach ([...self::PLATFORM_MANAGED_COLUMNS, ...self::FORBIDDEN_2FA_COLUMNS, ...self::DISPLAY_ONLY_COLUMNS] as $column) {
             $this->assertStringNotContainsString(
                 "state['{$column}'",
                 $saveBody,
