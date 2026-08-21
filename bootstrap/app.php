@@ -230,6 +230,19 @@ return Application::configure(basePath: dirname(__DIR__))
             ->dailyAt('06:30')
             ->withoutOverlapping();
 
+        // Mission 2 (MyAttorney Marketplace Core), sections 20-23.
+        // MarketplaceClaimService::expireStaleClaims() already existed,
+        // was already idempotent, and already correctly derived
+        // staleness from expires_at — it was simply never wired to a
+        // scheduled command (see that method's own docblock, which
+        // explicitly disclosed this as a deliberate prior-checkpoint
+        // deferral). Same daily cadence/slot family as the Invoice/
+        // Deadline/Task-overdue/Document-request sweeps above, at
+        // 06:35 so it does not collide with any of them.
+        $schedule->command('marketplace:claims:expire-stale')
+            ->dailyAt('06:35')
+            ->withoutOverlapping();
+
         // Payment Plan installment scheduling remains INTENTIONALLY
         // DEFERRED (Phase 14b, decision F — see
         // PaymentPlanInstallmentDueDeferredTest, which structurally
