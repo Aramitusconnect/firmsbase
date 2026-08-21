@@ -412,9 +412,25 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
             ->name('public.marketplace-intakes.documents.store');
     });
 
+    // The catch-all. It is domain-scoped, and Laravel resolves a domain-scoped
+    // route ahead of a domain-less one regardless of file order (the same
+    // precedence the robots.txt note above relies on) — so without the
+    // exclusion below it also swallows framework routes registered without a
+    // domain, and answers them with this placeholder.
+    //
+    // That is not hypothetical. It served `MyAttorney — coming soon.` as
+    // text/html for /livewire/livewire.min.js, so Livewire never booted on the
+    // public intake wizard: the page rendered, and every wire:click was inert
+    // HTML — no request, no error, no message. It survived testing because
+    // /livewire/update is a POST and this route is GET-only, so server-side
+    // tests kept passing against an endpoint no browser could reach.
+    //
+    // Excluded by prefix rather than by listing today's asset paths, so a
+    // Livewire upgrade that renames or adds a GET route cannot silently
+    // reintroduce this.
     Route::get('/{any?}', function () {
         return response('MyAttorney — coming soon.', 200);
-    })->where('any', '.*');
+    })->where('any', '(?!livewire/).*');
 });
 
 /*
