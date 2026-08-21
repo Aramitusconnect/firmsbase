@@ -6,8 +6,12 @@ namespace App\Filament\Firm\Resources\ClientResource\RelationManagers;
 
 use App\Filament\Firm\Resources\MatterResource;
 use App\Models\Client;
+use App\Models\ClientPortalMatterGrant;
 use App\Models\Matter;
+use App\Services\ClientPortalMatterAccessGrantService;
+use App\Services\TenantContextService;
 use Filament\Actions\Action;
+use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
@@ -79,6 +83,11 @@ class MattersRelationManager extends RelationManager
                 TextColumn::make('assignedAttorney.name')->label('Attorney')->placeholder('—'),
                 TextColumn::make('opened_at')->dateTime()->placeholder('—'),
                 TextColumn::make('created_at')->dateTime(),
+                TextColumn::make('portalAccess')
+                    ->label('Portal Access')
+                    ->badge()
+                    ->state(fn (Matter $record): string => static::activeGrant($record) !== null ? 'Granted' : 'Not granted')
+                    ->color(fn (Matter $record): string => static::activeGrant($record) !== null ? 'success' : 'gray'),
             ])
             ->defaultSort('created_at', 'desc')
             ->headerActions([])
@@ -88,7 +97,105 @@ class MattersRelationManager extends RelationManager
                     ->icon(Heroicon::OutlinedEye)
                     ->color('gray')
                     ->url(fn (Matter $record): string => MatterResource::getUrl('view', ['record' => $record])),
+                // Mission 4 (Client Portal Activation), finding 4.1 —
+                // client_portal_matter_grants had zero production
+                // writers before this. Routes exclusively through
+                // ClientPortalMatterAccessGrantService::grant(), never a
+                // bare mutation. Visible only when no active grant
+                // exists for this matter.
+                Action::make('grantPortalAccess')
+                    ->label('Grant Portal Access')
+                    ->icon(Heroicon::OutlinedEye)
+                    ->color('success')
+                    ->requiresConfirmation()
+                    ->modalDescription('This client will be able to see this matter (status, practice area, attorney, opened/closed dates) inside their Client Portal.')
+                    ->visible(fn (Matter $record): bool => static::activeGrant($record) === null)
+                    ->action(function (Matter $record): void {
+                        $firmUser = Auth::user()?->activeFirmUser();
+
+                        if ($firmUser === null) {
+                            Notification::make()->title('Not permitted')->danger()->send();
+
+                            return;
+                        }
+
+                        $client = $this->getOwnerRecord();
+
+                        if (! $client instanceof Client) {
+                            Notification::make()->title('Not permitted')->danger()->send();
+
+                            return;
+                        }
+
+                        try {
+                            app(ClientPortalMatterAccessGrantService::class)->grant(
+                                $firmUser->firm,
+                                $client,
+                                $record,
+                                $firmUser,
+                            );
+
+                            Notification::make()->title('Portal access granted')->success()->send();
+                        } catch (\RuntimeException $e) {
+                            Notification::make()->title('Could not grant portal access')->body($e->getMessage())->danger()->send();
+                        }
+                    }),
+                // Visible only when an active grant exists. Routes
+                // exclusively through
+                // ClientPortalMatterAccessGrantService::revoke() —
+                // revoked_at is stamped, the row is never deleted.
+                Action::make('revokePortalAccess')
+                    ->label('Revoke Portal Access')
+                    ->icon(Heroicon::OutlinedEyeSlash)
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->modalDescription('This client will no longer be able to see this matter inside their Client Portal.')
+                    ->visible(fn (Matter $record): bool => static::activeGrant($record) !== null)
+                    ->action(function (Matter $record): void {
+                        $firmUser = Auth::user()?->activeFirmUser();
+
+                        if ($firmUser === null) {
+                            Notification::make()->title('Not permitted')->danger()->send();
+
+                            return;
+                        }
+
+                        $grant = static::activeGrant($record);
+
+                        if ($grant === null) {
+                            Notification::make()->title('No active portal access grant found for this matter.')->danger()->send();
+
+                            return;
+                        }
+
+                        try {
+                            app(ClientPortalMatterAccessGrantService::class)->revoke($firmUser->firm, $grant, $firmUser);
+
+                            Notification::make()->title('Portal access revoked')->success()->send();
+                        } catch (\RuntimeException $e) {
+                            Notification::make()->title('Could not revoke portal access')->body($e->getMessage())->danger()->send();
+                        }
+                    }),
             ])
             ->toolbarActions([]);
+    }
+
+    /**
+     * Resolves the currently active (non-revoked)
+     * ClientPortalMatterGrant for this matter, if any — used by both
+     * the "Portal Access" status column and the grant/revoke Actions'
+     * own visibility checks. Wrapped in runWithFirmContext() per this
+     * mission's own instruction, matching every other query against a
+     * FORCE-RLS'd table elsewhere in this codebase.
+     */
+    private static function activeGrant(Matter $record): ?ClientPortalMatterGrant
+    {
+        return (new TenantContextService)->runWithFirmContext(
+            $record->firm_id,
+            fn () => ClientPortalMatterGrant::query()
+                ->where('matter_id', $record->id)
+                ->whereNull('revoked_at')
+                ->first(),
+        );
     }
 }

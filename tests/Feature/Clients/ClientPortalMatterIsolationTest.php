@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Clients;
 
+use App\Exceptions\TenantIsolationException;
 use App\Models\Client;
 use App\Models\ClientPortalMatterGrant;
 use App\Models\ClientPortalUser;
 use App\Models\Firm;
+use App\Models\FirmUser;
 use App\Models\Matter;
+use App\Services\ClientPortalMatterAccessGrantService;
 use App\Services\ClientPortalMatterAccessPolicyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -199,6 +202,180 @@ class ClientPortalMatterIsolationTest extends TestCase
 
         $this->assertContains($grantA->id, $visibleUnderFirmA);
         $this->assertNotContains($grantB->id, $visibleUnderFirmA);
+    }
+
+    // ------------------------------------------------------------
+    // ClientPortalMatterAccessGrantService::grant()/revoke() — Mission
+    // 4 (Client Portal Activation), finding 4.1. Before this service
+    // existed, client_portal_matter_grants had zero production
+    // writers — these tests prove the sole writer behaves correctly
+    // and never weakens the explicit-grant isolation model proven
+    // above.
+    // ------------------------------------------------------------
+
+    public function test_grant_creates_an_active_grant_that_immediately_authorizes_access(): void
+    {
+        $firm = Firm::factory()->create();
+        [$client, $matter, $firmUser] = $this->runWithFirmContext($firm, function () use ($firm) {
+            $client = Client::factory()->forFirm($firm)->create();
+            $matter = Matter::factory()->forFirm($firm)->forClient($client)->create();
+            $firmUser = FirmUser::factory()->forFirm($firm)->create();
+
+            return [$client, $matter, $firmUser];
+        });
+        $portalUser = $this->makePortalUser($client);
+
+        $grant = $this->runWithFirmContext(
+            $firm,
+            fn () => app(ClientPortalMatterAccessGrantService::class)->grant($firm, $client, $matter, $firmUser),
+        );
+
+        $this->assertNotNull($grant);
+        $this->assertTrue($grant->isActive());
+        $this->assertSame($client->id, $grant->client_id);
+        $this->assertSame($matter->id, $grant->matter_id);
+        $this->assertSame($firm->id, $grant->firm_id);
+        $this->assertSame($firmUser->user_id, $grant->granted_by);
+
+        $allowed = $this->runWithFirmContext(
+            $firm,
+            fn () => app(ClientPortalMatterAccessPolicyService::class)->canAccessMatter($portalUser, $matter),
+        );
+
+        $this->assertTrue($allowed, 'grant() must immediately authorize access via canAccessMatter().');
+    }
+
+    public function test_grant_re_opens_a_previously_revoked_grant_for_the_same_client_and_matter(): void
+    {
+        $firm = Firm::factory()->create();
+        [$client, $matter, $firmUser] = $this->runWithFirmContext($firm, function () use ($firm) {
+            $client = Client::factory()->forFirm($firm)->create();
+            $matter = Matter::factory()->forFirm($firm)->forClient($client)->create();
+            $firmUser = FirmUser::factory()->forFirm($firm)->create();
+
+            return [$client, $matter, $firmUser];
+        });
+        $revoked = $this->runWithFirmContext($firm, fn () => ClientPortalMatterGrant::factory()->forClientAndMatter($client, $matter)->revoked()->create());
+
+        $grant = $this->runWithFirmContext(
+            $firm,
+            fn () => app(ClientPortalMatterAccessGrantService::class)->grant($firm, $client, $matter, $firmUser),
+        );
+
+        // updateOrCreate() keyed on (client_id, matter_id) — this is
+        // the SAME row re-opened, not a second row (the partial unique
+        // index on (client_id, matter_id) WHERE revoked_at IS NULL
+        // would reject a second concurrently-active row anyway).
+        $this->assertSame($revoked->id, $grant->id);
+        $this->assertNull($grant->revoked_at);
+
+        $count = $this->runWithFirmContext($firm, fn () => ClientPortalMatterGrant::query()
+            ->where('client_id', $client->id)
+            ->where('matter_id', $matter->id)
+            ->count());
+
+        $this->assertSame(1, $count, 'Re-granting must re-open the same row, never create a second one.');
+    }
+
+    public function test_grant_rejects_a_matter_that_does_not_belong_to_the_given_firm(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $client = $this->runWithFirmContext($firmA, fn () => Client::factory()->forFirm($firmA)->create());
+        $matterInFirmB = $this->runWithFirmContext($firmB, fn () => Matter::factory()->forFirm($firmB)->create());
+        $firmUser = $this->runWithFirmContext($firmA, fn () => FirmUser::factory()->forFirm($firmA)->create());
+
+        $this->expectException(TenantIsolationException::class);
+
+        app(ClientPortalMatterAccessGrantService::class)->grant($firmA, $client, $matterInFirmB, $firmUser);
+    }
+
+    public function test_grant_rejects_a_matter_that_does_not_belong_to_the_given_client(): void
+    {
+        $firm = Firm::factory()->create();
+        [$client, $otherClientsMatter, $firmUser] = $this->runWithFirmContext($firm, function () use ($firm) {
+            $client = Client::factory()->forFirm($firm)->create();
+            $otherClient = Client::factory()->forFirm($firm)->create();
+            $matter = Matter::factory()->forFirm($firm)->forClient($otherClient)->create();
+            $firmUser = FirmUser::factory()->forFirm($firm)->create();
+
+            return [$client, $matter, $firmUser];
+        });
+
+        $this->expectException(TenantIsolationException::class);
+
+        app(ClientPortalMatterAccessGrantService::class)->grant($firm, $client, $otherClientsMatter, $firmUser);
+    }
+
+    public function test_revoke_stamps_revoked_at_and_immediately_denies_access(): void
+    {
+        $firm = Firm::factory()->create();
+        [$client, $matter, $firmUser] = $this->runWithFirmContext($firm, function () use ($firm) {
+            $client = Client::factory()->forFirm($firm)->create();
+            $matter = Matter::factory()->forFirm($firm)->forClient($client)->create();
+            $firmUser = FirmUser::factory()->forFirm($firm)->create();
+
+            return [$client, $matter, $firmUser];
+        });
+        $portalUser = $this->makePortalUser($client);
+        $grant = $this->runWithFirmContext($firm, fn () => ClientPortalMatterGrant::factory()->forClientAndMatter($client, $matter)->create());
+
+        $revoked = $this->runWithFirmContext(
+            $firm,
+            fn () => app(ClientPortalMatterAccessGrantService::class)->revoke($firm, $grant, $firmUser),
+        );
+
+        $this->assertNotNull($revoked->revoked_at);
+        $this->assertFalse($revoked->isActive());
+
+        $allowed = $this->runWithFirmContext(
+            $firm,
+            fn () => app(ClientPortalMatterAccessPolicyService::class)->canAccessMatter($portalUser, $matter),
+        );
+
+        $this->assertFalse($allowed, 'revoke() must immediately deny access via canAccessMatter().');
+
+        // The row is never deleted — revoked_at is stamped, history preserved.
+        $stillExists = $this->runWithFirmContext($firm, fn () => ClientPortalMatterGrant::query()->find($grant->id));
+        $this->assertNotNull($stillExists);
+    }
+
+    public function test_revoke_rejects_a_grant_that_does_not_belong_to_the_given_firm(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $grantInFirmB = $this->runWithFirmContext($firmB, fn () => ClientPortalMatterGrant::factory()->forFirm($firmB)->create());
+        $firmUserA = $this->runWithFirmContext($firmA, fn () => FirmUser::factory()->forFirm($firmA)->create());
+
+        $this->expectException(TenantIsolationException::class);
+
+        app(ClientPortalMatterAccessGrantService::class)->revoke($firmA, $grantInFirmB, $firmUserA);
+    }
+
+    public function test_client_a_still_cannot_see_client_bs_matter_even_after_client_b_is_granted_access_via_the_service(): void
+    {
+        $firm = Firm::factory()->create();
+        [$clientA, $clientB, $matterB, $firmUser] = $this->runWithFirmContext($firm, function () use ($firm) {
+            $clientA = Client::factory()->forFirm($firm)->create();
+            $clientB = Client::factory()->forFirm($firm)->create();
+            $matterB = Matter::factory()->forFirm($firm)->forClient($clientB)->create();
+            $firmUser = FirmUser::factory()->forFirm($firm)->create();
+
+            return [$clientA, $clientB, $matterB, $firmUser];
+        });
+        $portalUserA = $this->makePortalUser($clientA);
+
+        $this->runWithFirmContext(
+            $firm,
+            fn () => app(ClientPortalMatterAccessGrantService::class)->grant($firm, $clientB, $matterB, $firmUser),
+        );
+
+        $allowed = $this->runWithFirmContext(
+            $firm,
+            fn () => app(ClientPortalMatterAccessPolicyService::class)->canAccessMatter($portalUserA, $matterB),
+        );
+
+        $this->assertFalse($allowed, 'Granting Client B access to their own matter must never leak visibility to Client A.');
     }
 
     // ------------------------------------------------------------

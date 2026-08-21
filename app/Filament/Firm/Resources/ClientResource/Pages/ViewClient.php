@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Firm\Resources\ClientResource\Pages;
 
 use App\Filament\Firm\Resources\ClientResource;
+use App\Filament\Firm\Resources\ClientResource\Actions\InvitePortalAccessAction;
 use App\Models\Client;
 use Filament\Actions\EditAction;
 use Filament\Infolists\Components\TextEntry;
@@ -19,6 +20,13 @@ class ViewClient extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            // Mission 4 (Client Portal Activation), finding 4.2 — the
+            // one production entry point for inviting an already-
+            // existing client to the Client Portal from ClientResource
+            // itself. Routes exclusively through
+            // ClientPortalService::invite(); see that action's own
+            // docblock.
+            InvitePortalAccessAction::make(),
             EditAction::make(),
         ];
     }

@@ -55,7 +55,7 @@ class ClientPortalInvitationNotification extends Notification
     {
         $message = (new MailMessage)
             ->subject("You've been invited to {$this->firmDisplayName}'s secure client portal")
-            ->line("{$this->firmDisplayName} has invited you to their secure online client portal, where you can view your matter and communicate securely.")
+            ->line("{$this->firmDisplayName} has invited you to their secure online client portal, where you can view your matter.")
             ->action('Set Up Your Portal Access', $this->invitationUrl)
             ->line('This link is unique to you and will expire — if it has expired, please contact the firm directly for a new one.')
             ->line('If you were not expecting this invitation, you can safely ignore this email.');
