@@ -7,6 +7,7 @@ namespace App\Filament\Firm\Resources\FirmLeadResource\Actions;
 use App\Enums\FirmLeadStatus;
 use App\Models\FirmLead;
 use App\Services\ClientCrmAccessPolicyService;
+use App\Services\FirmLeadWorkflowService;
 use App\Services\TenantContextService;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -17,10 +18,12 @@ use Illuminate\Support\Facades\Auth;
  * MarkLeadContactedAction — Mission 5B (5.6, internal lead lifecycle).
  * Of FirmLeadStatus's 7 cases, only New/Converted were ever actually
  * written anywhere before this mission (confirmed by exhaustive grep);
- * this is the first real writer of Contacted. Deliberately as narrow
- * as ConvertLeadToClientAction/CompleteDeadlineAction/
- * CancelDeadlineAction: a plain `$lead->update(['status' => ...])`
- * inside runWithFirmContext(), no side effects, no new service class.
+ * this is the first real writer of Contacted. The actual status write
+ * lives in FirmLeadWorkflowService::markContacted() (Governance
+ * Section 25+ WorkflowTransitionEnforcementSearchTest requires every
+ * direct write of a catalog workflow status enum to live in
+ * app/Services) — this action's own job is auth/tenant-context/
+ * notification only.
  *
  * Only ever fires from New — a lead that has already moved further
  * along (Contacted or beyond) has nothing left for this specific
@@ -80,14 +83,12 @@ class MarkLeadContactedAction extends Action
                         return;
                     }
 
-                    if ($fresh->status !== FirmLeadStatus::New) {
-                        Notification::make()->title('This lead is no longer New')->danger()->send();
-
-                        return;
+                    try {
+                        app(FirmLeadWorkflowService::class)->markContacted($fresh);
+                        Notification::make()->title('Lead marked as Contacted')->success()->send();
+                    } catch (\RuntimeException $e) {
+                        Notification::make()->title('This lead is no longer New')->body($e->getMessage())->danger()->send();
                     }
-
-                    $fresh->update(['status' => FirmLeadStatus::Contacted]);
-                    Notification::make()->title('Lead marked as Contacted')->success()->send();
                 },
             );
         });

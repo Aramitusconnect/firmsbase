@@ -7,6 +7,7 @@ namespace App\Filament\Firm\Resources\FirmLeadResource\Actions;
 use App\Enums\FirmLeadStatus;
 use App\Models\FirmLead;
 use App\Services\ClientCrmAccessPolicyService;
+use App\Services\FirmLeadWorkflowService;
 use App\Services\TenantContextService;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -22,10 +23,13 @@ use Illuminate\Support\Facades\Auth;
  * available once a lead is Converted (a real client relationship
  * cannot retroactively become "lost") or already Lost/Archived.
  *
- * Same plain `$lead->update(['status' => ...])` inside
- * runWithFirmContext() shape as MarkLeadContactedAction — no retention
- * or purge behavior lives here (that is explicitly Phase 17's job per
- * FirmLeadStatus's own docblock; this action only records the status).
+ * The actual status write lives in FirmLeadWorkflowService::markLost()
+ * (Governance Section 25+ WorkflowTransitionEnforcementSearchTest
+ * requires every direct write of a catalog workflow status enum to
+ * live in app/Services), same as MarkLeadContactedAction — no
+ * retention or purge behavior lives here (that is explicitly Phase
+ * 17's job per FirmLeadStatus's own docblock; this action only records
+ * the status).
  * Reuses ClientCrmAccessPolicyService::canManageLead() unchanged.
  */
 class MarkLeadLostAction extends Action
@@ -85,14 +89,12 @@ class MarkLeadLostAction extends Action
                         return;
                     }
 
-                    if (! in_array($fresh->status, self::NON_TERMINAL_STATUSES, true)) {
-                        Notification::make()->title('This lead can no longer be marked Lost')->danger()->send();
-
-                        return;
+                    try {
+                        app(FirmLeadWorkflowService::class)->markLost($fresh);
+                        Notification::make()->title('Lead marked as Lost')->success()->send();
+                    } catch (\RuntimeException $e) {
+                        Notification::make()->title('This lead can no longer be marked Lost')->body($e->getMessage())->danger()->send();
                     }
-
-                    $fresh->update(['status' => FirmLeadStatus::Lost]);
-                    Notification::make()->title('Lead marked as Lost')->success()->send();
                 },
             );
         });

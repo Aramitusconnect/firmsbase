@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\Filament\Firm\Resources\FirmLeadResource\Actions;
 
 use App\Enums\FirmLeadStatus;
-use App\Models\Consultation;
 use App\Models\FirmLead;
 use App\Services\ClientCrmAccessPolicyService;
+use App\Services\FirmLeadWorkflowService;
 use App\Services\TenantContextService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DateTimePicker;
@@ -110,15 +110,12 @@ class ScheduleConsultationAction extends Action
                         return;
                     }
 
-                    Consultation::create([
-                        'firm_id' => $fresh->firm_id,
-                        'firm_lead_id' => $fresh->id,
-                        'scheduled_at' => $data['scheduled_at'],
-                        'notes' => $data['notes'] ?? null,
-                    ]);
-
-                    $fresh->update(['status' => FirmLeadStatus::ConsultationScheduled]);
-                    Notification::make()->title('Consultation scheduled')->success()->send();
+                    try {
+                        app(FirmLeadWorkflowService::class)->scheduleConsultation($fresh, $data['scheduled_at'], $data['notes'] ?? null);
+                        Notification::make()->title('Consultation scheduled')->success()->send();
+                    } catch (\RuntimeException $e) {
+                        Notification::make()->title('Could not schedule consultation')->body($e->getMessage())->danger()->send();
+                    }
                 },
             );
         });

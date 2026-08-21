@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Filament\Firm\Resources\FirmLeadResource\RelationManagers;
 
-use App\Enums\FirmLeadStatus;
 use App\Models\Consultation;
 use App\Models\ConsultationOutcome;
 use App\Models\FirmLead;
 use App\Services\ClientCrmAccessPolicyService;
+use App\Services\FirmLeadWorkflowService;
 use App\Services\TenantContextService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DateTimePicker;
@@ -150,24 +150,12 @@ class ConsultationsRelationManager extends RelationManager
                             return;
                         }
 
-                        if ($lead->isConverted()) {
-                            Notification::make()->title('This lead has already been converted')->danger()->send();
-
-                            return;
+                        try {
+                            app(FirmLeadWorkflowService::class)->scheduleConsultation($lead, $data['scheduled_at'], $data['notes'] ?? null);
+                            Notification::make()->title('Consultation scheduled')->success()->send();
+                        } catch (\RuntimeException $e) {
+                            Notification::make()->title('Could not schedule consultation')->body($e->getMessage())->danger()->send();
                         }
-
-                        Consultation::create([
-                            'firm_id' => $lead->firm_id,
-                            'firm_lead_id' => $lead->id,
-                            'scheduled_at' => $data['scheduled_at'],
-                            'notes' => $data['notes'] ?? null,
-                        ]);
-
-                        if (in_array($lead->status, [FirmLeadStatus::New, FirmLeadStatus::Contacted], true)) {
-                            $lead->update(['status' => FirmLeadStatus::ConsultationScheduled]);
-                        }
-
-                        Notification::make()->title('Consultation scheduled')->success()->send();
                     },
                 );
             });
@@ -232,19 +220,17 @@ class ConsultationsRelationManager extends RelationManager
                             return;
                         }
 
-                        $fresh->update([
-                            'held_at' => $data['held_at'],
-                            'consultation_outcome_id' => $data['consultation_outcome_id'] ?? null,
-                            'converted' => (bool) ($data['converted'] ?? false),
-                        ]);
-
-                        $lead = FirmLead::query()->where('id', $fresh->firm_lead_id)->first();
-
-                        if ($lead !== null && ! in_array($lead->status, [FirmLeadStatus::Converted, FirmLeadStatus::Lost, FirmLeadStatus::Archived], true)) {
-                            $lead->update(['status' => FirmLeadStatus::ConsultationHeld]);
+                        try {
+                            app(FirmLeadWorkflowService::class)->markConsultationHeld(
+                                $fresh,
+                                $data['held_at'],
+                                $data['consultation_outcome_id'] ?? null,
+                                (bool) ($data['converted'] ?? false),
+                            );
+                            Notification::make()->title('Consultation marked as held')->success()->send();
+                        } catch (\RuntimeException $e) {
+                            Notification::make()->title('Could not mark consultation held')->body($e->getMessage())->danger()->send();
                         }
-
-                        Notification::make()->title('Consultation marked as held')->success()->send();
                     },
                 );
             });
