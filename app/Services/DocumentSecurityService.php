@@ -304,4 +304,48 @@ class DocumentSecurityService
                 ->exists(),
         );
     }
+
+    /**
+     * Mission 3 (Document Center Completion), section 3.4 — the Client
+     * Portal document-visibility boundary. `client_visible` alone is
+     * never sufficient (a firm-side "share with client" toggle is not
+     * itself an access grant) — this mirrors canBeDownloadedBy()'s own
+     * "compose the field with the real matter-grant policy" shape:
+     * both the explicit flag AND a live
+     * ClientPortalMatterAccessPolicyService grant on the document's
+     * matter must hold. A document with no matter_id can never be
+     * portal-visible, same rule canBeDownloadedBy() already applies to
+     * Client Portal actors — no matter-independent grant concept
+     * exists for a Client Portal user.
+     */
+    public function canBeViewedInPortalBy(Document $document, ClientPortalUser $actor): bool
+    {
+        if ($document->client_visible !== true) {
+            return false;
+        }
+
+        if ($document->matter_id === null) {
+            return false;
+        }
+
+        return app(ClientPortalMatterAccessPolicyService::class)->canAccessMatter($actor, $document->matter);
+    }
+
+    /**
+     * Mission 3 (Document Center Completion), section 3.4 — the single
+     * place `client_visible` is ever written, mirroring approve()/
+     * reject()'s own shape exactly (runWithFirmContext-wrapped update,
+     * no separate domain event — neither of those two sibling mutation
+     * methods records one either). `client_visible` is deliberately not
+     * in Document's $fillable list (this method is the only intended
+     * writer), so forceFill() is used here rather than update().
+     */
+    public function setClientVisibility(Document $document, bool $visible): Document
+    {
+        return (new TenantContextService)->runWithFirmContext($document->firm_id, function () use ($document, $visible) {
+            $document->forceFill(['client_visible' => $visible])->save();
+
+            return $document->fresh();
+        });
+    }
 }

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ClientPortal\PlaidExchangeController;
+use App\Http\Controllers\Firm\DocumentDownloadController;
 use App\Http\Controllers\Integrations\OAuthConnectionController;
 use App\Http\Controllers\MyAttorney\AttorneyProfileController;
 use App\Http\Controllers\MyAttorney\CorrectionRequestController;
@@ -162,6 +163,34 @@ Route::domain($hosts->firmAppHost())->middleware(['auth', 'throttle:20,1'])->pre
     Route::get('{firmIntegration}/initiate', [OAuthConnectionController::class, 'initiate'])->name('initiate');
     Route::get('callback', [OAuthConnectionController::class, 'callback'])->name('callback');
 });
+
+/*
+|--------------------------------------------------------------------------
+| Document download — Firm app host
+|--------------------------------------------------------------------------
+|
+| Mission 3 (Document Center Completion), section 3.5. Session-
+| authenticated (the same 'auth' web guard + firmAppHost domain the
+| OAuth group above already uses for this panel — deliberately NOT a
+| 'signed' public URL, matching Document's own "never a public URL"
+| project rule). `{document}` is intentionally a plain string (the
+| document's public uuid), not an implicit Eloquent-bound parameter —
+| see DocumentDownloadController's own docblock for why: `documents`
+| carries permanent FORCE ROW LEVEL SECURITY, and this app's global
+| middleware-priority order (bootstrap/app.php, frozen for this
+| mission) runs route-model-binding substitution ahead of any tenant-
+| context middleware, so an implicit binding would always resolve the
+| row before any context exists. The controller resolves firm context
+| from the authenticated user itself instead — the same shape
+| OAuthConnectionController already established for this exact
+| problem. DocumentSecurityService::canBeDownloadedBy() remains the
+| real, finer-grained authorization boundary; this route's middleware
+| only proves "some authenticated firm user."
+*/
+Route::domain($hosts->firmAppHost())
+    ->middleware(['auth', 'throttle:60,1'])
+    ->get('documents/{document}/download', [DocumentDownloadController::class, 'show'])
+    ->name('firm.documents.download');
 
 /*
 |--------------------------------------------------------------------------

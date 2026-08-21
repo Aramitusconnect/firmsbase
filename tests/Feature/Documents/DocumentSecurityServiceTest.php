@@ -4,14 +4,19 @@ namespace Tests\Feature\Documents;
 
 use App\Enums\DocumentScanStatus;
 use App\Enums\DocumentStatus;
+use App\Models\Client;
+use App\Models\ClientPortalMatterGrant;
+use App\Models\ClientPortalUser;
 use App\Models\Document;
 use App\Models\Firm;
+use App\Models\Matter;
 use App\Models\User;
 use App\Services\Automation\DomainEventRecorderService;
 use App\Services\DocumentSecurityService;
 use App\Services\DocumentUploadPolicyService;
 use App\Services\VirusScan\FakeVirusScanner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
 class DocumentSecurityServiceTest extends TestCase
@@ -155,5 +160,111 @@ class DocumentSecurityServiceTest extends TestCase
 
         $this->assertTrue($this->service->canAccess($document, $firm));
         $this->assertFalse($this->service->canAccess($document, $otherFirm));
+    }
+
+    // ------------------------------------------------------------
+    // canBeViewedInPortalBy() — Mission 3 (Document Center
+    // Completion), section 3.4.
+    // ------------------------------------------------------------
+
+    public function test_a_visible_document_on_a_granted_matter_can_be_viewed_in_the_portal(): void
+    {
+        $firm = Firm::factory()->create();
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
+        $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create([
+            'firm_id' => $firm->id,
+            'matter_id' => $matter->id,
+            'client_visible' => true,
+        ]));
+        $portalUser = $this->makePortalUser($client);
+        $this->runWithFirmContext($firm, fn () => ClientPortalMatterGrant::factory()->forClientAndMatter($client, $matter)->create());
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeViewedInPortalBy($document, $portalUser));
+
+        $this->assertTrue($allowed);
+    }
+
+    public function test_a_visible_document_without_a_matter_grant_cannot_be_viewed_in_the_portal(): void
+    {
+        $firm = Firm::factory()->create();
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
+        $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create([
+            'firm_id' => $firm->id,
+            'matter_id' => $matter->id,
+            'client_visible' => true,
+        ]));
+        $portalUser = $this->makePortalUser($client);
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeViewedInPortalBy($document, $portalUser));
+
+        $this->assertFalse($allowed, 'client_visible=true alone must never authorize portal access — a real matter grant is still required.');
+    }
+
+    public function test_a_granted_but_not_shared_document_cannot_be_viewed_in_the_portal(): void
+    {
+        $firm = Firm::factory()->create();
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
+        $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create([
+            'firm_id' => $firm->id,
+            'matter_id' => $matter->id,
+            'client_visible' => false,
+        ]));
+        $portalUser = $this->makePortalUser($client);
+        $this->runWithFirmContext($firm, fn () => ClientPortalMatterGrant::factory()->forClientAndMatter($client, $matter)->create());
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeViewedInPortalBy($document, $portalUser));
+
+        $this->assertFalse($allowed, 'A matter grant alone must never expose a document the firm has not explicitly shared.');
+    }
+
+    public function test_a_matterless_document_can_never_be_viewed_in_the_portal_even_if_marked_visible(): void
+    {
+        $firm = Firm::factory()->create();
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create([
+            'firm_id' => $firm->id,
+            'matter_id' => null,
+            'client_id' => $client->id,
+            'client_visible' => true,
+        ]));
+        $portalUser = $this->makePortalUser($client);
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeViewedInPortalBy($document, $portalUser));
+
+        $this->assertFalse($allowed);
+    }
+
+    // ------------------------------------------------------------
+    // setClientVisibility() — Mission 3, section 3.4.
+    // ------------------------------------------------------------
+
+    public function test_set_client_visibility_toggles_and_persists_the_flag(): void
+    {
+        $firm = Firm::factory()->create();
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create([
+            'firm_id' => $firm->id,
+            'client_visible' => false,
+        ]));
+
+        $shared = $this->runWithFirmContext($firm, fn () => $this->service->setClientVisibility($document, true));
+        $this->assertTrue($shared->client_visible);
+        $this->assertTrue($this->runWithFirmContext($firm, fn () => $document->fresh())->client_visible);
+
+        $unshared = $this->runWithFirmContext($firm, fn () => $this->service->setClientVisibility($document, false));
+        $this->assertFalse($unshared->client_visible);
+        $this->assertFalse($this->runWithFirmContext($firm, fn () => $document->fresh())->client_visible);
+    }
+
+    private function makePortalUser(Client $client, array $overrides = []): ClientPortalUser
+    {
+        return $this->runWithFirmContext($client->firm_id, fn () => ClientPortalUser::query()->create(array_merge([
+            'client_id' => $client->id,
+            'email' => $client->email,
+            'password' => Hash::make('Sup3rSecret!Pass'),
+            'is_active' => true,
+        ], $overrides)));
     }
 }
