@@ -46,6 +46,23 @@ class UserFactory extends Factory
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
+            // Mirrors PlatformAdminFactory's own default exactly:
+            // FirmUser2faPolicyService's platform-minimum MFA floor
+            // (Non-Payment Completion Program, Workstream 7) now
+            // requires 2FA confirmation for every FirmOwner/Attorney
+            // regardless of a firm's own firm_user_2fa_mode setting,
+            // and EnsureFirmUserMfaComplianceOrRedirectToEnrollment
+            // redirects any non-compliant actor away from every Firm
+            // panel route. A factory-created User with no explicit
+            // override is therefore already 2FA-compliant by default
+            // — the same "tests get a working actor unless they
+            // deliberately ask for the non-compliant path" convention
+            // PlatformAdminFactory already established. The 2FA-specific
+            // test suites (tests/Feature/Security/FirmUser2fa/*) always
+            // set this field explicitly for both the compliant and
+            // non-compliant cases, so this default never masks what
+            // those tests are actually proving.
+            'two_factor_confirmed_at' => now(),
         ];
     }
 
@@ -56,6 +73,20 @@ class UserFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'email_verified_at' => null,
+        ]);
+    }
+
+    /**
+     * Indicate that the model has never confirmed 2FA — the explicit
+     * opt-out from this factory's own compliant-by-default state, for
+     * tests that specifically need to exercise the non-compliant path
+     * (e.g. EnsureFirmUserMfaComplianceOrRedirectToEnrollment's own
+     * redirect behavior).
+     */
+    public function withoutTwoFactorConfirmed(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'two_factor_confirmed_at' => null,
         ]);
     }
 }
