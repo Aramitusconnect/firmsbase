@@ -6,7 +6,9 @@ use App\Enums\FirmUserRole;
 use App\Enums\InvoiceStatus;
 use App\Enums\PaymentClassification;
 use App\Enums\TrustLedgerEntryType;
+use App\Enums\TrustLedgerStatus;
 use App\Enums\TrustTransferRequestStatus;
+use App\Exceptions\TrustLedgerNotActiveException;
 use App\Models\Client;
 use App\Models\FirmUser;
 use App\Models\Invoice;
@@ -146,5 +148,65 @@ class TrustTransferRequestServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->service->approveTransfer($firm, $request, $requester);
+    }
+
+    /**
+     * Trust & Accounting Integrity Hardening, Mission 1.1: an Approved
+     * transfer request must not be applicable once its ledger has been
+     * frozen or closed after approval — the exact race the prior audit
+     * flagged (an approved-but-unapplied request could otherwise post
+     * against a non-Active ledger).
+     */
+    public function test_an_approved_transfer_cannot_be_applied_to_a_frozen_ledger(): void
+    {
+        [$firm, $ledger, $matter, $invoice, $requester, $approver] = $this->setupFundedLedgerAndInvoice(20000);
+        $request = $this->service->requestTransfer($firm, $ledger, $matter, $invoice, $requester, 15000);
+        $this->service->approveTransfer($firm, $request, $approver);
+
+        app(TrustLedgerService::class)->freeze($firm, $ledger->fresh());
+
+        try {
+            $this->service->apply($firm, $request->fresh(), $approver);
+            $this->fail('Expected a TrustLedgerNotActiveException.');
+        } catch (TrustLedgerNotActiveException $e) {
+            $this->assertSame(TrustLedgerStatus::Frozen, $e->status);
+        }
+
+        $this->assertSame(TrustTransferRequestStatus::Approved, $request->fresh()->status);
+        $this->assertSame(20000, $ledger->balance->fresh()->balance_cents);
+    }
+
+    /**
+     * requestTransfer()/approveTransfer() intentionally do not check
+     * ledger status (they move no money) — only apply() does, since
+     * that is the step that actually posts a TrustLedgerEntry. This
+     * test proves that gate holds even when a request was validly
+     * approved before the ledger closed: a never-funded (zero-balance)
+     * ledger can close immediately, a transfer can still be requested
+     * and approved against it (no funds move yet), but apply() must
+     * refuse.
+     */
+    public function test_an_approved_transfer_cannot_be_applied_to_a_closed_ledger(): void
+    {
+        $firm = $this->makeTrustEligibleFirm();
+        $account = app(TrustAccountService::class)->open($firm, 'Firm IOLTA Trust Account');
+        $client = Client::factory()->forFirm($firm)->create();
+        $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
+        app(TrustLedgerService::class)->close($firm, $ledger->fresh());
+
+        $matter = Matter::factory()->forClient($client)->create();
+        $invoice = Invoice::factory()->forClient($client)->status(InvoiceStatus::Sent)->create([
+            'matter_id' => $matter->id,
+            'subtotal_cents' => 1000,
+            'total_cents' => 1000,
+        ]);
+        $requester = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $approver = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+
+        $request = $this->service->requestTransfer($firm, $ledger->fresh(), $matter, $invoice, $requester, 1000);
+        $this->service->approveTransfer($firm, $request, $approver);
+
+        $this->expectException(TrustLedgerNotActiveException::class);
+        $this->service->apply($firm, $request->fresh(), $approver);
     }
 }

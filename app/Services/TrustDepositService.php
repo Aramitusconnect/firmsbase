@@ -141,9 +141,11 @@ class TrustDepositService
 
             $amountCents = $depositApprovedEvent->amount_cents;
 
-            return $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance) use (
+            return $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance, $lockedLedger) use (
                 $firm, $ledger, $matter, $amountCents, $depositApprovedEvent
             ) {
+                $this->tenantSafePolicy->assertLedgerAllowsMoneyMovement($lockedLedger);
+
                 $entry = TrustLedgerEntry::create([
                     'firm_id' => $firm->id,
                     'trust_ledger_id' => $ledger->id,

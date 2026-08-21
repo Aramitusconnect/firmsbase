@@ -26,16 +26,32 @@ use Illuminate\Support\Facades\DB;
 class TrustConcurrencyLockService
 {
     /**
-     * Locks the ledger's TrustBalance row (and, when a matter is
-     * given, that matter's MatterTrustBalance row too) for the
-     * duration of one transaction, then hands both locked rows to the
-     * caller's callback. The callback is responsible for validating
-     * sufficient balance and performing the write(s) — this class only
-     * owns the lock/transaction boundary, not the business rule.
+     * Locks the TrustLedger row itself, its TrustBalance row, and
+     * (when a matter is given) that matter's MatterTrustBalance row,
+     * all for the duration of one transaction, then hands the locked
+     * rows to the caller's callback as ($lockedBalance,
+     * $lockedMatterBalance, $lockedLedger). The callback is
+     * responsible for validating sufficient balance/ledger status and
+     * performing the write(s) — this class only owns the lock/
+     * transaction boundary, not the business rule.
+     *
+     * Locking the TrustLedger row too (Trust & Accounting Integrity
+     * Hardening, Mission 1.1/1.2) is what makes every money-moving
+     * write and every TrustLedgerService::freeze()/close() transition
+     * mutually exclusive for the same ledger: whichever transaction
+     * acquires this lock first sees — and the other must wait to see —
+     * the ledger's true, current status, closing the race where a
+     * deposit/transfer/refund/adjustment could post in the same
+     * instant a ledger is being frozen or closed.
      */
     public function withLockedBalances(TrustLedger $ledger, ?Matter $matter, \Closure $callback): mixed
     {
         return DB::transaction(function () use ($ledger, $matter, $callback) {
+            $lockedLedger = TrustLedger::query()
+                ->whereKey($ledger->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
             $lockedBalance = TrustBalance::query()
                 ->where('trust_ledger_id', $ledger->id)
                 ->lockForUpdate()
@@ -51,7 +67,7 @@ class TrustConcurrencyLockService
                     ->first();
             }
 
-            return $callback($lockedBalance, $lockedMatterBalance);
+            return $callback($lockedBalance, $lockedMatterBalance, $lockedLedger);
         });
     }
 }

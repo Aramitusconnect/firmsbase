@@ -185,9 +185,11 @@ class TrustTransferRequestService
 
             $amountCents = $request->amount_cents;
 
-            $payment = $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance) use (
+            $payment = $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance, $lockedLedger) use (
                 $firm, $ledger, $matter, $invoice, $request, $amountCents, $appliedBy
             ) {
+                $this->tenantSafePolicy->assertLedgerAllowsMoneyMovement($lockedLedger);
+
                 if ($lockedBalance->balance_cents < $amountCents) {
                     throw new \RuntimeException('Trust ledger balance is insufficient for this transfer.');
                 }

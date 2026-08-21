@@ -4,6 +4,8 @@ namespace Tests\Feature\Trust\Deposits;
 
 use App\Enums\FirmUserRole;
 use App\Enums\TrustLedgerEntryType;
+use App\Enums\TrustLedgerStatus;
+use App\Exceptions\TrustLedgerNotActiveException;
 use App\Models\Client;
 use App\Models\FirmUser;
 use App\Services\TrustAccountService;
@@ -93,5 +95,43 @@ class TrustDepositServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->service->requestDeposit($firm, \App\Models\TrustLedger::factory()->create(['firm_id' => $firm->id]), $requester, 1000);
+    }
+
+    /**
+     * Trust & Accounting Integrity Hardening, Mission 1.1: none of the
+     * money-moving trust services previously checked TrustLedger.status
+     * at all — a Frozen or Closed ledger could still receive a posted
+     * deposit. post() must now refuse.
+     */
+    public function test_a_deposit_cannot_be_posted_to_a_frozen_ledger(): void
+    {
+        [$firm, $ledger] = $this->makeLedger();
+        $requester = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $approver = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $approved = $this->service->approveDeposit($firm, $this->service->requestDeposit($firm, $ledger, $requester, 5000), $approver);
+
+        app(TrustLedgerService::class)->freeze($firm, $ledger);
+
+        try {
+            $this->service->post($firm, $ledger->fresh(), $approved);
+            $this->fail('Expected a TrustLedgerNotActiveException.');
+        } catch (TrustLedgerNotActiveException $e) {
+            $this->assertSame(TrustLedgerStatus::Frozen, $e->status);
+        }
+
+        $this->assertSame(0, $ledger->balance->fresh()->balance_cents);
+    }
+
+    public function test_a_deposit_cannot_be_posted_to_a_closed_ledger(): void
+    {
+        [$firm, $ledger] = $this->makeLedger();
+        $requester = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $approver = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $approved = $this->service->approveDeposit($firm, $this->service->requestDeposit($firm, $ledger, $requester, 5000), $approver);
+
+        app(TrustLedgerService::class)->close($firm, $ledger);
+
+        $this->expectException(TrustLedgerNotActiveException::class);
+        $this->service->post($firm, $ledger->fresh(), $approved);
     }
 }

@@ -4,7 +4,9 @@ namespace Tests\Feature\Trust\Refunds;
 
 use App\Enums\FirmUserRole;
 use App\Enums\TrustLedgerEntryType;
+use App\Enums\TrustLedgerStatus;
 use App\Enums\TrustRefundRequestStatus;
+use App\Exceptions\TrustLedgerNotActiveException;
 use App\Models\Client;
 use App\Models\FirmUser;
 use App\Models\Matter;
@@ -188,5 +190,45 @@ class TrustRefundRequestServiceTest extends TestCase
             ->where('matter_id', $matter->id)
             ->firstOrFail());
         $this->assertSame(1000, $matterBalance->balance_cents);
+    }
+
+    /**
+     * Trust & Accounting Integrity Hardening, Mission 1.1: complete()
+     * must refuse to post against a Frozen or Closed ledger.
+     */
+    public function test_an_approved_refund_cannot_be_completed_against_a_frozen_ledger(): void
+    {
+        [$firm, $ledger, $requester, $approver] = $this->setupFundedLedger(10000);
+        $request = $this->service->requestRefund($firm, $ledger, $requester, 4000);
+        $this->service->approveRefund($firm, $request, $approver);
+
+        app(TrustLedgerService::class)->freeze($firm, $ledger->fresh());
+
+        try {
+            $this->service->complete($firm, $request->fresh(), $approver);
+            $this->fail('Expected a TrustLedgerNotActiveException.');
+        } catch (TrustLedgerNotActiveException $e) {
+            $this->assertSame(TrustLedgerStatus::Frozen, $e->status);
+        }
+
+        $this->assertSame(TrustRefundRequestStatus::Approved, $request->fresh()->status);
+        $this->assertSame(10000, $ledger->balance->fresh()->balance_cents);
+    }
+
+    public function test_an_approved_refund_cannot_be_completed_against_a_closed_ledger(): void
+    {
+        $firm = $this->makeTrustEligibleFirm();
+        $account = app(TrustAccountService::class)->open($firm, 'Firm IOLTA Trust Account');
+        $client = Client::factory()->forFirm($firm)->create();
+        $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
+        app(TrustLedgerService::class)->close($firm, $ledger->fresh());
+
+        $requester = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $approver = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $request = $this->service->requestRefund($firm, $ledger->fresh(), $requester, 1000);
+        $this->service->approveRefund($firm, $request, $approver);
+
+        $this->expectException(TrustLedgerNotActiveException::class);
+        $this->service->complete($firm, $request->fresh(), $approver);
     }
 }

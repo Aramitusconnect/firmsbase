@@ -3,6 +3,8 @@
 namespace Tests\Feature\Trust\Ledgers;
 
 use App\Enums\TrustLedgerEntryType;
+use App\Enums\TrustLedgerStatus;
+use App\Exceptions\TrustLedgerNotActiveException;
 use App\Models\Client;
 use App\Models\Matter;
 use App\Services\TrustAccountService;
@@ -181,5 +183,40 @@ class TrustLedgerEntryReversalServiceTest extends TestCase
             ->where('matter_id', $matter->id)
             ->firstOrFail());
         $this->assertSame(0, $matterBalance->balance_cents);
+    }
+
+    /**
+     * Trust & Accounting Integrity Hardening, Mission 1.1: reverse()
+     * must refuse to post against a Frozen or Closed ledger, applying
+     * the same uniform rule as every other money-moving entry point —
+     * this codebase has no governed exception carving out reversals
+     * during a freeze.
+     */
+    public function test_an_entry_cannot_be_reversed_once_its_ledger_is_frozen(): void
+    {
+        $firm = $this->makeTrustEligibleFirm();
+        $account = app(TrustAccountService::class)->open($firm, 'Firm IOLTA Trust Account');
+        $client = Client::factory()->forFirm($firm)->create();
+        $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
+
+        $original = \App\Models\TrustLedgerEntry::create([
+            'firm_id' => $firm->id,
+            'trust_ledger_id' => $ledger->id,
+            'entry_type' => TrustLedgerEntryType::Deposit,
+            'amount_cents' => 10000,
+            'posted_at' => now(),
+        ]);
+        app(\App\Services\TrustBalanceService::class)->recomputeForLedger($ledger);
+
+        app(TrustLedgerService::class)->freeze($firm, $ledger->fresh());
+
+        try {
+            $this->service->reverse($firm, $ledger->fresh(), $original->fresh());
+            $this->fail('Expected a TrustLedgerNotActiveException.');
+        } catch (TrustLedgerNotActiveException $e) {
+            $this->assertSame(TrustLedgerStatus::Frozen, $e->status);
+        }
+
+        $this->assertSame(10000, $ledger->balance->fresh()->balance_cents);
     }
 }

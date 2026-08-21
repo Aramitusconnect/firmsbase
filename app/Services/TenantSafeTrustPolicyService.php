@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Enums\TrustLedgerStatus;
 use App\Exceptions\TenantIsolationException;
+use App\Exceptions\TrustLedgerNotActiveException;
 use App\Models\Firm;
 use App\Models\Matter;
 use App\Models\MatterTrustBalance;
@@ -36,6 +38,24 @@ class TenantSafeTrustPolicyService
     {
         if ($ledger->firm_id !== $firm->id) {
             throw new TenantIsolationException("TrustLedger [id={$ledger->id}] does not belong to firm [id={$firm->id}].");
+        }
+    }
+
+    /**
+     * The single canonical invariant every money-moving trust operation
+     * (deposit posting, trust-to-invoice transfer, refund, high-risk
+     * adjustment, reversal/chargeback-reversal) must check before
+     * writing a TrustLedgerEntry — Trust & Accounting Integrity
+     * Hardening, Mission 1.1. Always called against a TrustLedger row
+     * already locked by TrustConcurrencyLockService::withLockedBalances()
+     * (its third callback argument), so this reads the current,
+     * race-safe status rather than one captured before the lock was
+     * acquired — a concurrent freeze()/close() cannot slip past it.
+     */
+    public function assertLedgerAllowsMoneyMovement(TrustLedger $ledger): void
+    {
+        if ($ledger->status !== TrustLedgerStatus::Active) {
+            throw new TrustLedgerNotActiveException($ledger, $ledger->status);
         }
     }
 

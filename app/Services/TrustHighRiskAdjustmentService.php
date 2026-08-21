@@ -34,8 +34,7 @@ class TrustHighRiskAdjustmentService
         private readonly TrustCrossMatterProtectionService $crossMatterProtection,
         private readonly TrustConcurrencyLockService $lockService,
         private readonly TrustBalanceService $balanceService,
-    ) {
-    }
+    ) {}
 
     public function requestAdjustment(
         Firm $firm,
@@ -58,7 +57,7 @@ class TrustHighRiskAdjustmentService
             throw new \RuntimeException('Adjustment amount cannot be zero.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
             'firm_id' => $firm->id,
             'event_type' => TrustApprovalEventType::AdjustmentRequested,
             'actor_firm_user_id' => $requestedBy->id,
@@ -81,7 +80,7 @@ class TrustHighRiskAdjustmentService
             throw new \RuntimeException('This event is not a pending adjustment request.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
             'firm_id' => $firm->id,
             'event_type' => TrustApprovalEventType::AdjustmentFirstApproved,
             'actor_firm_user_id' => $firstApprover->id,
@@ -103,7 +102,7 @@ class TrustHighRiskAdjustmentService
             throw new \RuntimeException('This event is not a pending adjustment awaiting a decision.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
             'firm_id' => $firm->id,
             'event_type' => TrustApprovalEventType::AdjustmentDenied,
             'actor_firm_user_id' => $deniedBy->id,
@@ -143,8 +142,8 @@ class TrustHighRiskAdjustmentService
         // trust_ledger_entries directly and would otherwise silently
         // fail closed under FORCE RLS, masking a real duplicate-adjustment
         // attempt as "never posted" instead of correctly detecting it).
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $firstApprovedEvent, $secondApprover) {
-            [$firstApprover, $ledger, $matter] = (new TenantContextService())->runWithFirmContext($firm, fn () => [
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $firstApprovedEvent, $secondApprover) {
+            [$firstApprover, $ledger, $matter] = (new TenantContextService)->runWithFirmContext($firm, fn () => [
                 $firstApprovedEvent->actor,
                 $firstApprovedEvent->trustLedger,
                 $firstApprovedEvent->matter,
@@ -162,9 +161,11 @@ class TrustHighRiskAdjustmentService
                 $this->crossMatterProtection->assertMatterEligibleForLedger($matter, $ledger);
             }
 
-            $entry = $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance) use (
+            $entry = $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance, $lockedLedger) use (
                 $firm, $ledger, $matter, $amountCentsDelta, $firstApprovedEvent
             ) {
+                $this->tenantSafePolicy->assertLedgerAllowsMoneyMovement($lockedLedger);
+
                 if ($lockedBalance->balance_cents + $amountCentsDelta < 0) {
                     throw new \RuntimeException('This adjustment would draw the trust ledger balance below zero.');
                 }

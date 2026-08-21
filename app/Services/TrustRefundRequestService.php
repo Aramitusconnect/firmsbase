@@ -150,9 +150,11 @@ class TrustRefundRequestService
 
             $amountCents = $request->amount_cents;
 
-            $entry = $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance) use (
+            $entry = $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance, $lockedLedger) use (
                 $firm, $ledger, $matter, $request, $amountCents
             ) {
+                $this->tenantSafePolicy->assertLedgerAllowsMoneyMovement($lockedLedger);
+
                 if ($lockedBalance->balance_cents < $amountCents) {
                     throw new \RuntimeException('Trust ledger balance is insufficient for this refund.');
                 }

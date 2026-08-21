@@ -24,8 +24,7 @@ class TrustLedgerEntryReversalService
         private readonly TenantSafeTrustPolicyService $tenantSafePolicy,
         private readonly TrustConcurrencyLockService $lockService,
         private readonly TrustBalanceService $balanceService,
-    ) {
-    }
+    ) {}
 
     public function reverse(
         Firm $firm,
@@ -56,17 +55,19 @@ class TrustLedgerEntryReversalService
         // TrustHighRiskAdjustmentService::secondApprove(). The
         // pre-existing narrow matters-read wrap survives unchanged as a
         // nested child — same $firm throughout.
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $ledger, $originalEntry, $entryTypeOverride) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $ledger, $originalEntry, $entryTypeOverride) {
             if (TrustLedgerEntry::query()->where('reverses_entry_id', $originalEntry->id)->exists()) {
                 throw new \RuntimeException('This entry has already been reversed.');
             }
 
-            $matter = (new TenantContextService())->runWithFirmContext($firm, fn () => $originalEntry->matter);
+            $matter = (new TenantContextService)->runWithFirmContext($firm, fn () => $originalEntry->matter);
             $oppositeAmount = -1 * $originalEntry->amount_cents;
 
-            return $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance) use (
+            return $this->lockService->withLockedBalances($ledger, $matter, function ($lockedBalance, $lockedMatterBalance, $lockedLedger) use (
                 $firm, $ledger, $matter, $originalEntry, $oppositeAmount, $entryTypeOverride
             ) {
+                $this->tenantSafePolicy->assertLedgerAllowsMoneyMovement($lockedLedger);
+
                 $reversal = TrustLedgerEntry::create([
                     'firm_id' => $firm->id,
                     'trust_ledger_id' => $ledger->id,

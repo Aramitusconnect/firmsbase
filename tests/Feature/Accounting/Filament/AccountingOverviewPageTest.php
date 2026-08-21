@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace Tests\Feature\Accounting\Filament;
 
 use App\Enums\AccountingPeriodStatus;
+use App\Enums\ChartOfAccountPurpose;
+use App\Enums\ChartOfAccountType;
 use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
 use App\Filament\Firm\Pages\AccountingOverviewPage;
 use App\Filament\Firm\Pages\AccountingOverviewPage\Actions\ClosePeriodAction;
 use App\Models\AccountingPeriod;
+use App\Models\ChartOfAccount;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\User;
@@ -91,5 +94,58 @@ final class AccountingOverviewPageTest extends TestCase
         $response = $this->runWithFirmContext($firm, fn () => $this->get(AccountingOverviewPage::getUrl()));
 
         $response->assertForbidden();
+    }
+
+    /**
+     * Trust & Accounting Integrity Hardening, Mission 1.4: a firm with
+     * no Chart of Accounts configured must see, on the page real
+     * posting code actually gates on, exactly which required purposes
+     * are missing.
+     */
+    public function test_the_page_lists_missing_required_chart_of_accounts_purposes(): void
+    {
+        $firm = Firm::factory()->create();
+        app(EntitlementService::class)->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, true);
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+
+        $this->runWithFirmContext($firm, function (): void {
+            $test = Livewire::test(AccountingOverviewPage::class);
+            $test->assertSuccessful();
+            $test->assertSeeText('Missing required accounts for');
+            $test->assertSeeText('Operating Cash');
+        });
+    }
+
+    public function test_the_page_confirms_all_required_purposes_once_configured(): void
+    {
+        $firm = Firm::factory()->create();
+        app(EntitlementService::class)->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, true);
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+
+        $requiredPurposes = [
+            ChartOfAccountPurpose::OperatingCash,
+            ChartOfAccountPurpose::LegalFeeRevenue,
+            ChartOfAccountPurpose::CostReimbursementRevenue,
+            ChartOfAccountPurpose::GeneralOperatingExpense,
+            ChartOfAccountPurpose::UnappliedOperatingFundsLiability,
+            ChartOfAccountPurpose::OpeningBalanceEquity,
+        ];
+
+        $this->runWithFirmContext($firm, function () use ($firm, $requiredPurposes): void {
+            foreach ($requiredPurposes as $index => $purpose) {
+                ChartOfAccount::factory()->create([
+                    'firm_id' => $firm->id,
+                    'account_code' => (string) (1000 + $index),
+                    'account_name' => $purpose->value,
+                    'account_type' => ChartOfAccountType::Asset,
+                    'purpose' => $purpose,
+                    'is_active' => true,
+                ]);
+            }
+
+            $test = Livewire::test(AccountingOverviewPage::class);
+            $test->assertSuccessful();
+            $test->assertSeeText('All required accounting purposes are configured.');
+        });
     }
 }

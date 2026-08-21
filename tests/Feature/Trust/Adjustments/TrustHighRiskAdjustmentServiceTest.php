@@ -4,6 +4,8 @@ namespace Tests\Feature\Trust\Adjustments;
 
 use App\Enums\FirmUserRole;
 use App\Enums\TrustLedgerEntryType;
+use App\Enums\TrustLedgerStatus;
+use App\Exceptions\TrustLedgerNotActiveException;
 use App\Models\Client;
 use App\Models\FirmUser;
 use App\Services\TrustAccountService;
@@ -96,5 +98,48 @@ class TrustHighRiskAdjustmentServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->service->secondApprove($firm, $firstApproved, $billingStaffSecond);
+    }
+
+    /**
+     * Trust & Accounting Integrity Hardening, Mission 1.1: secondApprove()
+     * must refuse to post against a Frozen or Closed ledger, even though
+     * the two-person approval itself completed validly before the freeze.
+     */
+    public function test_a_first_approved_adjustment_cannot_be_posted_against_a_frozen_ledger(): void
+    {
+        [$firm, $ledger, $requester] = $this->setupFundedLedger(10000);
+        $firstApprover = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $secondApprover = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::Attorney]);
+        $requested = $this->service->requestAdjustment($firm, $ledger, $requester, 500, 'Correction.');
+        $firstApproved = $this->service->firstApprove($firm, $requested, $firstApprover);
+
+        app(TrustLedgerService::class)->freeze($firm, $ledger->fresh());
+
+        try {
+            $this->service->secondApprove($firm, $firstApproved, $secondApprover);
+            $this->fail('Expected a TrustLedgerNotActiveException.');
+        } catch (TrustLedgerNotActiveException $e) {
+            $this->assertSame(TrustLedgerStatus::Frozen, $e->status);
+        }
+
+        $this->assertSame(10000, $ledger->balance->fresh()->balance_cents);
+    }
+
+    public function test_a_first_approved_adjustment_cannot_be_posted_against_a_closed_ledger(): void
+    {
+        $firm = $this->makeTrustEligibleFirm();
+        $account = app(TrustAccountService::class)->open($firm, 'Firm IOLTA Trust Account');
+        $client = Client::factory()->forFirm($firm)->create();
+        $ledger = app(TrustLedgerService::class)->open($firm, $account, $client);
+        app(TrustLedgerService::class)->close($firm, $ledger->fresh());
+
+        $requester = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $firstApprover = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::FirmOwner]);
+        $secondApprover = FirmUser::factory()->create(['firm_id' => $firm->id, 'role' => FirmUserRole::Attorney]);
+        $requested = $this->service->requestAdjustment($firm, $ledger->fresh(), $requester, 500, 'Correction.');
+        $firstApproved = $this->service->firstApprove($firm, $requested, $firstApprover);
+
+        $this->expectException(TrustLedgerNotActiveException::class);
+        $this->service->secondApprove($firm, $firstApproved, $secondApprover);
     }
 }

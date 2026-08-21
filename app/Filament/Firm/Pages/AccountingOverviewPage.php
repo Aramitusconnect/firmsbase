@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Filament\Firm\Pages;
 
+use App\Enums\ChartOfAccountPurpose;
 use App\Filament\Firm\Pages\AccountingOverviewPage\Actions\ClosePeriodAction;
 use App\Services\AccountingEntitlementPolicyService;
 use App\Services\AccountingReportingService;
+use App\Services\ChartOfAccountsService;
 use BackedEnum;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
@@ -75,9 +77,34 @@ class AccountingOverviewPage extends Page implements HasSchemas
         ];
     }
 
+    /**
+     * The purposes real posting code (OperatingJournalRecorderService,
+     * AccountingOpeningBalanceService) actually throws
+     * AccountingSetupIncompleteException for when unconfigured — Trust &
+     * Accounting Integrity Hardening, Mission 1.4. Kept here, not
+     * duplicated inside ChartOfAccountsService or the enum itself, since
+     * this list is "what does this firm need today for the flows it can
+     * reach," a UI-onboarding concern, not a domain rule.
+     */
+    private const REQUIRED_PURPOSES = [
+        ChartOfAccountPurpose::OperatingCash,
+        ChartOfAccountPurpose::LegalFeeRevenue,
+        ChartOfAccountPurpose::CostReimbursementRevenue,
+        ChartOfAccountPurpose::GeneralOperatingExpense,
+        ChartOfAccountPurpose::UnappliedOperatingFundsLiability,
+        ChartOfAccountPurpose::OpeningBalanceEquity,
+    ];
+
     public function content(Schema $schema): Schema
     {
         return $schema->components([
+            Section::make('Chart of Accounts Setup')
+                ->description('These purposes are required by real accounting/billing activity. A missing purpose blocks the specific action that needs it (e.g. applying a payment) until it is configured.')
+                ->schema([
+                    Text::make(fn (): string => $this->chartOfAccountsSetupSummary())
+                        ->size(TextSize::Medium)
+                        ->weight(fn (): FontWeight => $this->hasMissingRequiredPurposes() ? FontWeight::Bold : FontWeight::Normal),
+                ]),
             Section::make('Accounts Receivable Aging')
                 ->schema([
                     Text::make(fn (): string => $this->arAgingSummary())
@@ -148,5 +175,39 @@ class AccountingOverviewPage extends Page implements HasSchemas
         }
 
         return app(AccountingReportingService::class)->reconciliationExceptions($firmUser->firm)->data->isNotEmpty();
+    }
+
+    private function missingRequiredPurposes(): array
+    {
+        $firmUser = Auth::user()?->activeFirmUser();
+
+        if ($firmUser === null) {
+            return [];
+        }
+
+        $chartOfAccounts = app(ChartOfAccountsService::class);
+
+        return collect(self::REQUIRED_PURPOSES)
+            ->reject(fn (ChartOfAccountPurpose $purpose): bool => $chartOfAccounts->resolveByPurpose($firmUser->firm, $purpose) !== null)
+            ->values()
+            ->all();
+    }
+
+    private function hasMissingRequiredPurposes(): bool
+    {
+        return $this->missingRequiredPurposes() !== [];
+    }
+
+    private function chartOfAccountsSetupSummary(): string
+    {
+        $missing = $this->missingRequiredPurposes();
+
+        if ($missing === []) {
+            return 'All required accounting purposes are configured.';
+        }
+
+        $labels = collect($missing)->map(fn (ChartOfAccountPurpose $purpose): string => (string) str($purpose->value)->headline())->implode(', ');
+
+        return "Missing required accounts for: {$labels}. Go to Accounting → Chart of Accounts to create them.";
     }
 }
