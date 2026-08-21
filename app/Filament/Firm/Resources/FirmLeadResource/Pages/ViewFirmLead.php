@@ -6,6 +6,9 @@ namespace App\Filament\Firm\Resources\FirmLeadResource\Pages;
 
 use App\Filament\Firm\Resources\FirmLeadResource;
 use App\Filament\Firm\Resources\FirmLeadResource\Actions\ConvertLeadToClientAction;
+use App\Filament\Firm\Resources\FirmLeadResource\Actions\MarkLeadContactedAction;
+use App\Filament\Firm\Resources\FirmLeadResource\Actions\MarkLeadLostAction;
+use App\Filament\Firm\Resources\FirmLeadResource\Actions\ScheduleConsultationAction;
 use Filament\Actions\EditAction;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Pages\ViewRecord;
@@ -19,7 +22,10 @@ class ViewFirmLead extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            MarkLeadContactedAction::make(),
+            ScheduleConsultationAction::make(),
             ConvertLeadToClientAction::make(),
+            MarkLeadLostAction::make(),
             EditAction::make(),
         ];
     }

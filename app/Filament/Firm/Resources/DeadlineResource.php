@@ -40,12 +40,13 @@ use Filament\Tables\Table;
  * CancelDeadlineAction, each calling DeadlineService directly.
  *
  * Missed-status honesty note (same reasoning as TaskResource's own
- * docblock): `DeadlineService::refreshMissedStatus()` is never called
- * by any scheduler, so a Deadline still shown as `Upcoming` may
- * already be past due in reality. The table below adds an honest,
- * purely-computed "Due" column colored by comparing `due_at` to
- * `now()` — it never writes back to `status` and never overrides a
- * terminal status.
+ * docblock): `DeadlineService::refreshMissedStatus()` IS now called
+ * daily by `automation:sweep:deadlines` (see bootstrap/app.php's
+ * `withSchedule()`), so `status` itself is no longer stale by more
+ * than a day. The table below still adds an honest, purely-computed
+ * "Due" column colored by comparing `due_at` to `now()` — it never
+ * writes back to `status` and never overrides a terminal status — to
+ * cover the window between scheduled sweeps.
  */
 class DeadlineResource extends Resource
 {

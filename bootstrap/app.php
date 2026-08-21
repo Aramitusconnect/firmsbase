@@ -181,6 +181,18 @@ return Application::configure(basePath: dirname(__DIR__))
             ->dailyAt('06:15')
             ->withoutOverlapping();
 
+        // Mission 5B — Task Overdue derivation (Firm Daily-Workflow
+        // Completion, item 5.9). TaskService::refreshOverdueStatus()
+        // existed and was already correct/idempotent but had no
+        // scheduler wiring it up (unlike Deadline's own
+        // refreshMissedStatus() above); this is that first caller.
+        // Same daily cadence/slot family as the Invoice/Deadline
+        // sweeps immediately above, at 06:20 so it does not collide
+        // with either.
+        $schedule->command('automation:sweep:task-overdue')
+            ->dailyAt('06:20')
+            ->withoutOverlapping();
+
         // Predictive Matter Budget Alerts — recomputes budget-vs-actual
         // for every Matter that has a budget configured and raises any
         // newly-crossed threshold alert (never a repeat for a tier

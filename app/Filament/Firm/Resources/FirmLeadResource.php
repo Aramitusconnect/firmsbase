@@ -6,10 +6,14 @@ namespace App\Filament\Firm\Resources;
 
 use App\Enums\FirmLeadStatus;
 use App\Filament\Firm\Resources\FirmLeadResource\Actions\ConvertLeadToClientAction;
+use App\Filament\Firm\Resources\FirmLeadResource\Actions\MarkLeadContactedAction;
+use App\Filament\Firm\Resources\FirmLeadResource\Actions\MarkLeadLostAction;
+use App\Filament\Firm\Resources\FirmLeadResource\Actions\ScheduleConsultationAction;
 use App\Filament\Firm\Resources\FirmLeadResource\Pages\CreateFirmLead;
 use App\Filament\Firm\Resources\FirmLeadResource\Pages\EditFirmLead;
 use App\Filament\Firm\Resources\FirmLeadResource\Pages\ListFirmLeads;
 use App\Filament\Firm\Resources\FirmLeadResource\Pages\ViewFirmLead;
+use App\Filament\Firm\Resources\FirmLeadResource\RelationManagers\ConsultationsRelationManager;
 use App\Models\FirmLead;
 use App\Models\LeadSource;
 use App\Models\PracticeArea;
@@ -128,8 +132,18 @@ class FirmLeadResource extends Resource
                         ->all()),
             ])
             ->recordActions([
+                MarkLeadContactedAction::make(),
+                ScheduleConsultationAction::make(),
                 ConvertLeadToClientAction::make(),
+                MarkLeadLostAction::make(),
             ]);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            ConsultationsRelationManager::class,
+        ];
     }
 
     public static function getPages(): array
