@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\TaskStatus;
+use App\Exceptions\TenantIsolationException;
 use App\Models\Task;
 use App\Models\TaskDependency;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +25,8 @@ class TaskDependencyService
         if ($task->id === $blockedByTask->id) {
             throw new \InvalidArgumentException('A task cannot depend on itself.');
         }
+
+        $this->assertSameFirm($task, $blockedByTask);
 
         if ($this->wouldCreateCycle($task, $blockedByTask)) {
             throw new \RuntimeException(
@@ -55,6 +58,24 @@ class TaskDependencyService
 
             $this->refreshBlockedStatus($task->fresh());
         });
+    }
+
+    /**
+     * Defense-in-depth tenant-isolation guard, following the same
+     * pattern as TenantSafeTrustPolicyService::assertMatterMatchesLedger().
+     * This service is the ONLY place task_dependencies rows are created
+     * (see class docblock), so it must not itself trust callers to have
+     * already verified both tasks belong to the same firm — the one
+     * existing Filament caller does check this, but the service has no
+     * defense-in-depth of its own without this assertion.
+     */
+    private function assertSameFirm(Task $task, Task $blockedByTask): void
+    {
+        if ($task->firm_id !== $blockedByTask->firm_id) {
+            throw new TenantIsolationException(
+                "Task [id={$task->id}] and Task [id={$blockedByTask->id}] do not belong to the same firm."
+            );
+        }
     }
 
     /**

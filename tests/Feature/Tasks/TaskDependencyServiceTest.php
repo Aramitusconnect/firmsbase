@@ -3,6 +3,7 @@
 namespace Tests\Feature\Tasks;
 
 use App\Enums\TaskStatus;
+use App\Exceptions\TenantIsolationException;
 use App\Models\Firm;
 use App\Models\Task;
 use App\Services\TaskDependencyService;
@@ -27,6 +28,35 @@ class TaskDependencyServiceTest extends TestCase
 
         $this->expectException(\InvalidArgumentException::class);
         $this->service->addDependency($task, $task);
+    }
+
+    /**
+     * Mission 2 finding 2.2: addDependency() must itself reject a
+     * cross-firm pairing before doing any cycle-detection graph walk or
+     * insert — defense-in-depth independent of the one existing
+     * Filament caller's own same-firm check.
+     */
+    public function test_adding_a_dependency_between_tasks_from_different_firms_is_rejected(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $task = Task::factory()->create(['firm_id' => $firmA->id]);
+        $blockedByTask = Task::factory()->create(['firm_id' => $firmB->id]);
+
+        $this->expectException(TenantIsolationException::class);
+
+        try {
+            $this->service->addDependency($task, $blockedByTask);
+        } finally {
+            $this->assertSame(
+                0,
+                \App\Models\TaskDependency::query()
+                    ->where('task_id', $task->id)
+                    ->where('blocked_by_task_id', $blockedByTask->id)
+                    ->count(),
+                'no cross-firm dependency row must ever be inserted'
+            );
+        }
     }
 
     public function test_adding_a_direct_dependency_marks_the_dependent_task_blocked(): void
