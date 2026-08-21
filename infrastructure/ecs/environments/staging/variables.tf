@@ -45,6 +45,110 @@ variable "app_url" {
   }
 }
 
+# --- Canonical per-surface hostnames (config/hosts.php) ---------------------
+# PREPARED, NOT YET WIRED INTO A DEPLOY. Reconciliation-branch finding:
+# config/hosts.php's six canonical hostname keys (marketing_url/firm_app_url/
+# client_portal_url/admin_url/myattorney_url/api_url — consumed by
+# CanonicalUrlService, TrustHosts in bootstrap/app.php, each Filament panel's
+# ->domain(...) call, and MyAttorney link generation) have no corresponding
+# Terraform-managed env var anywhere in this environment's shared_environment
+# block (see local.shared_environment in main.tf) — only the older, separate
+# APP_URL is wired, which those six keys do not read at all. On ECS today,
+# config/hosts.php silently falls back to its local *.firmsvault.test
+# defaults. Each variable below is null by default, matching
+# canonical_hostnames's own "null (default) until real hostnames are
+# DNS-provisioned — passing it through unset changes nothing about the
+# currently-deployed environment" pattern immediately below in this file —
+# so adding these variables alone, with tfvars left unset, produces NO plan
+# diff. Real values should match whatever hostnames var.canonical_hostnames
+# routes on the ALB (infrastructure/ecs/modules/alb), so the DNS/ALB-routing
+# layer and the Laravel-side env vars agree — set both together, not this
+# one alone. NOT applied by this reconciliation pass; kept separately
+# identifiable here for the later infra gate to review and populate.
+variable "marketing_url" {
+  description = "Public HTTPS URL for the marketing surface (config/hosts.php marketing_url / MARKETING_URL). Null (default) until DNS-provisioned — see the block comment above."
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.marketing_url == null || (
+      can(regex("^https://[^[:space:]]+$", var.marketing_url)) &&
+      !endswith(var.marketing_url, "/")
+    )
+    error_message = "marketing_url must be null or an HTTPS URL without whitespace or a trailing slash."
+  }
+}
+
+variable "firm_app_url" {
+  description = "Public HTTPS URL for the Firm panel (config/hosts.php firm_app_url / FIRM_APP_URL). Null (default) until DNS-provisioned — see the block comment above."
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.firm_app_url == null || (
+      can(regex("^https://[^[:space:]]+$", var.firm_app_url)) &&
+      !endswith(var.firm_app_url, "/")
+    )
+    error_message = "firm_app_url must be null or an HTTPS URL without whitespace or a trailing slash."
+  }
+}
+
+variable "client_portal_url" {
+  description = "Public HTTPS URL for the Client Portal panel (config/hosts.php client_portal_url / CLIENT_PORTAL_URL). Null (default) until DNS-provisioned — see the block comment above."
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.client_portal_url == null || (
+      can(regex("^https://[^[:space:]]+$", var.client_portal_url)) &&
+      !endswith(var.client_portal_url, "/")
+    )
+    error_message = "client_portal_url must be null or an HTTPS URL without whitespace or a trailing slash."
+  }
+}
+
+variable "admin_url" {
+  description = "Public HTTPS URL for the Admin panel (config/hosts.php admin_url / ADMIN_URL). Null (default) until DNS-provisioned — see the block comment above."
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.admin_url == null || (
+      can(regex("^https://[^[:space:]]+$", var.admin_url)) &&
+      !endswith(var.admin_url, "/")
+    )
+    error_message = "admin_url must be null or an HTTPS URL without whitespace or a trailing slash."
+  }
+}
+
+variable "myattorney_url" {
+  description = "Public HTTPS URL for the MyAttorney marketplace surface (config/hosts.php myattorney_url / MYATTORNEY_URL). Null (default) until DNS-provisioned — see the block comment above."
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.myattorney_url == null || (
+      can(regex("^https://[^[:space:]]+$", var.myattorney_url)) &&
+      !endswith(var.myattorney_url, "/")
+    )
+    error_message = "myattorney_url must be null or an HTTPS URL without whitespace or a trailing slash."
+  }
+}
+
+variable "api_url" {
+  description = "Public HTTPS URL for the API surface (config/hosts.php api_url / API_URL). Null (default) until DNS-provisioned — see the block comment above."
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.api_url == null || (
+      can(regex("^https://[^[:space:]]+$", var.api_url)) &&
+      !endswith(var.api_url, "/")
+    )
+    error_message = "api_url must be null or an HTTPS URL without whitespace or a trailing slash."
+  }
+}
+
 # --- RDS — existing instance, not created by this mission ------------------
 variable "rds_instance_id" {
   type = string

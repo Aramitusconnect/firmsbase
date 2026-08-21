@@ -237,42 +237,64 @@ locals {
   # Shared, non-secret environment for every role. Role-specific env vars
   # are merged in per ecs_service call below. See docs/ecs/env.ecs.example
   # for the full annotated reference this mirrors.
-  shared_environment = {
-    APP_NAME                = "FirmsBase"
-    APP_ENV                 = "staging"
-    APP_URL                 = var.app_url
-    APP_DEBUG               = "false"
-    APP_MAINTENANCE_DRIVER  = "cache"
-    APP_MAINTENANCE_STORE   = "redis"
-    DB_CONNECTION           = "pgsql"
-    DB_HOST                 = var.db_host
-    DB_PORT                 = "5432"
-    DB_DATABASE             = var.db_database
-    DB_USERNAME             = "firmsbase_app"
-    DB_SSLMODE              = "require"
-    REDIS_CLIENT            = "phpredis"
-    REDIS_HOST              = module.elasticache.primary_endpoint_address
-    REDIS_PORT              = tostring(module.elasticache.port)
-    REDIS_CACHE_DB          = "1"
-    REDIS_QUEUE_DB          = "2"
-    CACHE_STORE             = "redis"
-    SESSION_DRIVER          = "redis"
-    SESSION_SECURE_COOKIE   = "true"
-    QUEUE_CONNECTION        = "redis"
-    REDIS_QUEUE_CONNECTION  = "queue"
-    REDIS_QUEUE_RETRY_AFTER = "150"
-    FILESYSTEM_DISK         = "s3"
-    AWS_DEFAULT_REGION      = var.aws_region
-    # Keep mail configuration consistent across all ECS services.
-    # AWS credentials are supplied by the ECS task role.
-    AWS_REGION        = var.aws_region
-    AWS_BUCKET        = module.s3_documents.bucket_name
-    LOG_CHANNEL       = "stderr"
-    LOG_LEVEL         = "info"
-    MAIL_MAILER       = "ses"
-    MAIL_FROM_ADDRESS = "no-reply@staging-mail.firmsvault.com"
-    MAIL_FROM_NAME    = "FirmsVault"
-  }
+  shared_environment = merge(
+    {
+      APP_NAME                = "FirmsBase"
+      APP_ENV                 = "staging"
+      APP_URL                 = var.app_url
+      APP_DEBUG               = "false"
+      APP_MAINTENANCE_DRIVER  = "cache"
+      APP_MAINTENANCE_STORE   = "redis"
+      DB_CONNECTION           = "pgsql"
+      DB_HOST                 = var.db_host
+      DB_PORT                 = "5432"
+      DB_DATABASE             = var.db_database
+      DB_USERNAME             = "firmsbase_app"
+      DB_SSLMODE              = "require"
+      REDIS_CLIENT            = "phpredis"
+      REDIS_HOST              = module.elasticache.primary_endpoint_address
+      REDIS_PORT              = tostring(module.elasticache.port)
+      REDIS_CACHE_DB          = "1"
+      REDIS_QUEUE_DB          = "2"
+      CACHE_STORE             = "redis"
+      SESSION_DRIVER          = "redis"
+      SESSION_SECURE_COOKIE   = "true"
+      QUEUE_CONNECTION        = "redis"
+      REDIS_QUEUE_CONNECTION  = "queue"
+      REDIS_QUEUE_RETRY_AFTER = "150"
+      FILESYSTEM_DISK         = "s3"
+      AWS_DEFAULT_REGION      = var.aws_region
+      # Keep mail configuration consistent across all ECS services.
+      # AWS credentials are supplied by the ECS task role.
+      AWS_REGION        = var.aws_region
+      AWS_BUCKET        = module.s3_documents.bucket_name
+      LOG_CHANNEL       = "stderr"
+      LOG_LEVEL         = "info"
+      MAIL_MAILER       = "ses"
+      MAIL_FROM_ADDRESS = "no-reply@staging-mail.firmsvault.com"
+      MAIL_FROM_NAME    = "FirmsVault"
+    },
+    local.canonical_hostname_environment,
+  )
+
+  # Canonical per-surface hostname env vars consumed by config/hosts.php
+  # (CanonicalUrlService, TrustHosts, each Filament panel's ->domain(...),
+  # MyAttorney link generation) — see variables.tf's own block comment
+  # for the full reconciliation-branch finding this closes. Built as a
+  # filtered map, not a flat literal, so a null (unset) variable is
+  # OMITTED from shared_environment entirely rather than merged in as a
+  # literal "null" string — leaving every one of these six variables at
+  # its default produces this local as an empty map and therefore NO
+  # plan diff, the identical safety property var.canonical_hostnames
+  # already has below.
+  canonical_hostname_environment = { for key, value in {
+    MARKETING_URL     = var.marketing_url
+    FIRM_APP_URL      = var.firm_app_url
+    CLIENT_PORTAL_URL = var.client_portal_url
+    ADMIN_URL         = var.admin_url
+    MYATTORNEY_URL    = var.myattorney_url
+    API_URL           = var.api_url
+  } : key => value if value != null }
 
   # Each live secret is a JSON blob with multiple keys — ECS's `secrets`
   # `valueFrom` needs the exact ":<json-key>::" selector appended, while
