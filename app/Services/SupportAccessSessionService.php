@@ -19,6 +19,27 @@ use Illuminate\Support\Facades\DB;
  * places that enforce this, and SupportAccessSession::isCurrentlyValid()
  * independently re-checks expires_at rather than trusting the status
  * column alone.
+ *
+ * Scope (Non-Payment Completion Program, Workstream 8 — confirmed,
+ * documented decision, not an oversight): today the only production
+ * consumer that gates read/mutation access behind an active session
+ * from this service is
+ * PlatformFirmIntegrationBoundedAccessService::assertCanAccessFirm(),
+ * scoping this mechanism to the Integration Platform Oversight
+ * surface (PlatformFirmIntegrationsPage /
+ * PlatformFirmIntegrationDetailPage). This is intentional, not a
+ * partial rollout — every other platform-admin Filament resource that
+ * reads firm-scoped data (ConflictResource, MigrationProjectResource,
+ * NotificationTemplateResource, AuditLogResource, and siblings)
+ * enforces its own independent, role-based
+ * PlatformStaffAccessPolicyService gate and does not consult this
+ * session mechanism, matching those resources' own documented
+ * architecture (see e.g. FirmResource's own docblock). A future
+ * surface that legitimately needs governed, time-boxed support access
+ * should route through this same service rather than inventing a
+ * parallel mechanism — but expanding its scope beyond Integration
+ * Oversight is a deliberate, separate decision, not something this
+ * service's mere existence implies.
  */
 class SupportAccessSessionService
 {

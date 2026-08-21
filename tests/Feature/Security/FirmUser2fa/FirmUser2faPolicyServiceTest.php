@@ -54,26 +54,77 @@ class FirmUser2faPolicyServiceTest extends TestCase
         $this->assertFalse($this->service->isCompliant($nonCompliantFirmUser));
     }
 
-    public function test_optional_mode_treats_firm_users_as_compliant_without_confirmed_2fa(): void
+    public function test_optional_mode_treats_a_non_privileged_firm_user_as_compliant_without_confirmed_2fa(): void
     {
         $firm = $this->firmWithMode(TwoFactorMode::Optional);
 
         $unconfirmedUser = User::factory()->create(['two_factor_confirmed_at' => null]);
-        $firmUser = FirmUser::factory()->forFirm($firm)->forUser($unconfirmedUser)->create(['status' => FirmUserStatus::Active]);
+        $firmUser = FirmUser::factory()->forFirm($firm)->forUser($unconfirmedUser)->role(FirmUserRole::Paralegal)->create(['status' => FirmUserStatus::Active]);
 
         $this->assertFalse($this->service->isRequiredForFirm($firm));
         $this->assertTrue($this->service->isCompliant($firmUser));
     }
 
-    public function test_disabled_mode_treats_firm_users_as_compliant_without_confirmed_2fa(): void
+    public function test_disabled_mode_treats_a_non_privileged_firm_user_as_compliant_without_confirmed_2fa(): void
     {
         $firm = $this->firmWithMode(TwoFactorMode::Disabled);
 
         $unconfirmedUser = User::factory()->create(['two_factor_confirmed_at' => null]);
-        $firmUser = FirmUser::factory()->forFirm($firm)->forUser($unconfirmedUser)->create(['status' => FirmUserStatus::Active]);
+        $firmUser = FirmUser::factory()->forFirm($firm)->forUser($unconfirmedUser)->role(FirmUserRole::Paralegal)->create(['status' => FirmUserStatus::Active]);
 
         $this->assertFalse($this->service->isRequiredForFirm($firm));
         $this->assertTrue($this->service->isCompliant($firmUser));
+    }
+
+    /**
+     * Non-Payment Completion Program, Workstream 7: FirmOwner and
+     * Attorney hold trust-approval, financial-integration-approval,
+     * and/or API-credential authority, so they must enroll in 2FA
+     * regardless of the firm's own firm_user_2fa_mode setting.
+     */
+    public function test_platform_minimum_requires_2fa_for_firm_owner_and_attorney_even_when_firm_mode_is_optional(): void
+    {
+        $firm = $this->firmWithMode(TwoFactorMode::Optional);
+
+        foreach ([FirmUserRole::FirmOwner, FirmUserRole::Attorney] as $privilegedRole) {
+            $unconfirmedUser = User::factory()->create(['two_factor_confirmed_at' => null]);
+            $firmUser = FirmUser::factory()->forFirm($firm)->forUser($unconfirmedUser)->role($privilegedRole)->create(['status' => FirmUserStatus::Active]);
+
+            $this->assertTrue($this->service->isRequiredForFirmUser($firmUser), "Role {$privilegedRole->value} must be required by the platform minimum.");
+            $this->assertFalse($this->service->isCompliant($firmUser), "Role {$privilegedRole->value} must not be compliant without confirmed 2FA.");
+            $this->assertTrue($this->service->isRequiredOnlyByPlatformMinimum($firmUser));
+        }
+
+        $confirmedUser = User::factory()->create(['two_factor_confirmed_at' => now()]);
+        $compliantFirmUser = FirmUser::factory()->forFirm($firm)->forUser($confirmedUser)->role(FirmUserRole::FirmOwner)->create(['status' => FirmUserStatus::Active]);
+        $this->assertTrue($this->service->isCompliant($compliantFirmUser));
+    }
+
+    public function test_platform_minimum_does_not_apply_to_non_privileged_roles(): void
+    {
+        $firm = $this->firmWithMode(TwoFactorMode::Optional);
+
+        foreach ([FirmUserRole::Paralegal, FirmUserRole::LegalAssistant, FirmUserRole::Receptionist, FirmUserRole::BillingStaff] as $role) {
+            $unconfirmedUser = User::factory()->create(['two_factor_confirmed_at' => null]);
+            $firmUser = FirmUser::factory()->forFirm($firm)->forUser($unconfirmedUser)->role($role)->create(['status' => FirmUserStatus::Active]);
+
+            $this->assertFalse($this->service->isRequiredForFirmUser($firmUser), "Role {$role->value} must not be required by the platform minimum.");
+            $this->assertFalse($this->service->isRequiredOnlyByPlatformMinimum($firmUser));
+        }
+    }
+
+    public function test_requirement_summary_flags_platform_minimum_applies_when_firm_mode_would_not_have_required_it(): void
+    {
+        $firm = $this->firmWithMode(TwoFactorMode::Optional);
+
+        $unconfirmedUser = User::factory()->create(['two_factor_confirmed_at' => null]);
+        FirmUser::factory()->forFirm($firm)->forUser($unconfirmedUser)->role(FirmUserRole::FirmOwner)->create(['status' => FirmUserStatus::Active]);
+
+        $summary = $this->service->requirementSummary($firm);
+
+        $this->assertFalse($summary['required']);
+        $this->assertTrue($summary['platform_minimum_applies']);
+        $this->assertSame(1, $summary['non_compliant_count']);
     }
 
     public function test_no_firm_role_is_exempt_from_required_2fa(): void

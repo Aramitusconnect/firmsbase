@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Security\FirmUser2fa;
 
+use App\Enums\FirmUserRole;
 use App\Enums\FirmUserStatus;
 use App\Enums\TwoFactorMode;
 use App\Models\Firm;
@@ -100,15 +101,33 @@ class FirmUser2faLoginEnforcementTest extends TestCase
         $response->assertOk();
     }
 
-    public function test_http_login_gate_allows_panel_access_when_2fa_optional(): void
+    public function test_http_login_gate_allows_panel_access_when_2fa_optional_for_a_non_privileged_role(): void
     {
         $firm = Firm::factory()->create();
         FirmSettings::factory()->forFirm($firm)->create(['firm_user_2fa_mode' => TwoFactorMode::Optional]);
         $user = User::factory()->create(['is_active' => true, 'two_factor_confirmed_at' => null]);
-        FirmUser::factory()->forFirm($firm)->forUser($user)->create(['status' => FirmUserStatus::Active]);
+        FirmUser::factory()->forFirm($firm)->forUser($user)->role(FirmUserRole::Paralegal)->create(['status' => FirmUserStatus::Active]);
 
         $response = $this->actingAs($user, 'web')->get($this->firmAppUrl());
 
         $response->assertOk();
+    }
+
+    /**
+     * Non-Payment Completion Program, Workstream 7: even when the firm
+     * itself has 2FA set to Optional, an Attorney or FirmOwner is
+     * still redirected to enroll — the platform-minimum floor cannot
+     * be weakened by a firm's own setting.
+     */
+    public function test_http_login_gate_redirects_a_privileged_role_to_enroll_even_when_firm_mode_is_optional(): void
+    {
+        $firm = Firm::factory()->create();
+        FirmSettings::factory()->forFirm($firm)->create(['firm_user_2fa_mode' => TwoFactorMode::Optional]);
+        $user = User::factory()->create(['is_active' => true, 'two_factor_confirmed_at' => null]);
+        FirmUser::factory()->forFirm($firm)->forUser($user)->role(FirmUserRole::Attorney)->create(['status' => FirmUserStatus::Active]);
+
+        $response = $this->actingAs($user, 'web')->get($this->firmAppUrl());
+
+        $response->assertRedirect((string) Filament::getPanel('firm')->getProfileUrl());
     }
 }

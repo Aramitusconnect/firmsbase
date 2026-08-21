@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\FirmUserRole;
 use App\Enums\FirmUserStatus;
 use App\Enums\TwoFactorMode;
 use App\Models\Firm;
@@ -36,9 +37,30 @@ use Illuminate\Support\Collection;
  * FirmUser with no related User row is treated as non-compliant
  * whenever the firm requires 2FA (there is nothing to check, so it
  * cannot be assumed compliant).
+ *
+ * Platform-minimum MFA floor (Non-Payment Completion Program,
+ * Workstream 7): FirmOwner and Attorney hold every trust-approval,
+ * financial-integration-approval, and API-credential authority in
+ * this codebase (see TrustAccessPolicyService,
+ * FinancialIntegrationAccessPolicyService, ApiAccessPolicyService),
+ * and FirmOwner alone additionally holds user administration
+ * (FirmMembershipAccessPolicyService). isRequiredForFirmUser() now
+ * requires 2FA for either role regardless of the firm's own
+ * firm_user_2fa_mode setting — a firm's policy may be stricter
+ * (Required mode still applies to every role, per the doc above) but
+ * can never be weaker than this platform floor for these two roles.
+ * isRequiredForFirm(Firm $firm) itself is intentionally left
+ * unchanged (firm-setting-only) — it is consumed by
+ * Section40LimitedPilotSafetyGateService and requirementSummary()'s
+ * 'required' field, neither of which should silently change meaning.
  */
 class FirmUser2faPolicyService
 {
+    /**
+     * @var list<FirmUserRole>
+     */
+    private const PLATFORM_MINIMUM_MFA_ROLES = [FirmUserRole::FirmOwner, FirmUserRole::Attorney];
+
     public function isRequiredForFirm(Firm $firm): bool
     {
         $mode = $firm->firmSettings?->firm_user_2fa_mode;
@@ -48,7 +70,20 @@ class FirmUser2faPolicyService
 
     public function isRequiredForFirmUser(FirmUser $firmUser): bool
     {
-        return $this->isRequiredForFirm($firmUser->firm);
+        return $this->isRequiredForFirm($firmUser->firm)
+            || in_array($firmUser->role, self::PLATFORM_MINIMUM_MFA_ROLES, true);
+    }
+
+    /**
+     * True when this firm user is only required to enroll because of
+     * the platform-minimum floor (their firm's own setting would not
+     * have required it). Used to give a privileged user an accurate
+     * reason, distinct from "your firm requires this for everyone."
+     */
+    public function isRequiredOnlyByPlatformMinimum(FirmUser $firmUser): bool
+    {
+        return ! $this->isRequiredForFirm($firmUser->firm)
+            && in_array($firmUser->role, self::PLATFORM_MINIMUM_MFA_ROLES, true);
     }
 
     public function isCompliant(FirmUser $firmUser): bool
@@ -81,7 +116,13 @@ class FirmUser2faPolicyService
     }
 
     /**
-     * @return array{mode: ?string, required: bool, active_firm_user_count: int, compliant_count: int, non_compliant_count: int, non_compliant_firm_user_ids: array<int, int>, ready_for_pilot_data: bool}
+     * 'required' reflects firm-policy only (isRequiredForFirm), not
+     * the platform-minimum role floor — a FirmOwner/Attorney can be
+     * individually required (see isRequiredForFirmUser) even when
+     * 'required' is false here. 'platform_minimum_applies' surfaces
+     * that distinction explicitly rather than leaving it implicit.
+     *
+     * @return array{mode: ?string, required: bool, platform_minimum_applies: bool, active_firm_user_count: int, compliant_count: int, non_compliant_count: int, non_compliant_firm_user_ids: array<int, int>, ready_for_pilot_data: bool}
      */
     public function requirementSummary(Firm $firm): array
     {
@@ -91,6 +132,8 @@ class FirmUser2faPolicyService
         return [
             'mode' => $firm->firmSettings?->firm_user_2fa_mode?->value,
             'required' => $this->isRequiredForFirm($firm),
+            'platform_minimum_applies' => ! $this->isRequiredForFirm($firm)
+                && $activeFirmUsers->contains(fn (FirmUser $firmUser) => in_array($firmUser->role, self::PLATFORM_MINIMUM_MFA_ROLES, true)),
             'active_firm_user_count' => $activeFirmUsers->count(),
             'compliant_count' => $activeFirmUsers->count() - $nonCompliant->count(),
             'non_compliant_count' => $nonCompliant->count(),

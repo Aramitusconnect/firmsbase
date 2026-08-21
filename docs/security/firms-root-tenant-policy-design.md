@@ -1,6 +1,6 @@
 # `firms` Root Tenant Table — RLS Policy Design Record
 
-**Status:** Design decision recorded 2026-07-13. **No implementation yet.** This document is a design record for whichever future agent/task implements this policy — likely Wave 3/4.
+**Status:** Design decision recorded 2026-07-13. **Resolved 2026-08-20: EXPLICITLY APPROVED ROOT-TENANT EXEMPTION — see "Resolution" section below.** This document remains a full design record in case a future mission revisits the exemption.
 **Table:** `firms` (`database/migrations/2026_07_04_100003_create_firms_table.php`).
 **Primary key:** confirmed `bigint` auto-increment (`$table->id()`), with a separate `uuid` column (`$table->uuid('uuid')->unique()`) that exists as a public-facing identifier but is **not** the primary key. The eventual policy predicate should use the primary key (`id`), not `uuid`, unless a future review deliberately decides otherwise — this document records the decision as PK-based per the primary key actually in use.
 
@@ -42,3 +42,15 @@ Whoever implements this policy must prove all five of the following, matching th
 ## Non-goals of this document
 
 This document does not implement the policy, the migration, the administrative execution path, or the tests above. It exists solely so that whoever picks up this work (expected Wave 3/4) has the decision, its rationale, and its required proof obligations already settled rather than re-litigated.
+
+---
+
+## Resolution (Non-Payment Completion Program, Workstream 9 — 2026-08-20)
+
+**Status: EXPLICITLY APPROVED ROOT-TENANT EXEMPTION.** Implementing RLS on `firms` now is not adopted, and is not merely deferred-for-size — re-verification found the true blast radius is materially larger than this document originally scoped, for a reason the original design did not anticipate:
+
+1. **The tenant-context bootstrap hazard.** `TenantContextService::resolveFirm()` — the single bootstrap hop every `runWithFirmContext($firmId, ...)` call funnels through when passed a bare id/uuid rather than a pre-loaded `Firm` object — issues a raw `Firm::query()->findOrFail($firm)` **before** `app.current_firm_id` is set. If `firms` carried this document's proposed policy (`id = current_setting('app.current_firm_id')::bigint`), that exact call would see zero rows during the very operation meant to establish tenant context — breaking `runWithFirmContext()` application-wide (192 call sites, many passing a bare id/uuid), not merely platform-admin cross-firm reads. A correct fix would require a self-lookup-style bootstrap clause in the policy (the same pattern already used for `firm_users`/`clients`/`payment_requests`/`marketplace_intakes`/`client_portal_invitations`), which this document did not scope or design.
+2. **Confirmed blast radius.** 39 platform-admin Filament files perform raw, un-wrapped `Firm::query()`/`find()`/`where()` reads with no per-firm loop and no tenant context (chiefly to populate "Firm" filter dropdowns and resolve uuid↔id). The per-firm-loop pattern used elsewhere in the platform-admin surface (e.g. `PlatformFirmUserDirectoryService`) does **not** constitute the "separate, distinct, audited administrative execution path" this document requires, because it is itself seeded by an unrestricted `Firm::query()->get()` — the loop iterates firms discovered by exactly the kind of read RLS-on-`firms` would remove. No such administrative path exists anywhere in the codebase today; building one was out of scope for a narrow completion pass.
+3. **Compensating controls already in force.** `firms` carries only administrative/organizational metadata (name, legal_name, customer_type, deployment_mode, region/timezone/currency, activation_status) — no secrets, no client-privileged legal content, no trust/financial data. Every genuinely sensitive tenant-owned table (167+, per `RowLevelSecurityCoverageMappingService::forcedTables()`) remains under FORCE RLS regardless of `firms`' own RLS status. Every platform-admin surface reading `firms` already requires an independent `PlatformStaffAccessPolicyService` role gate before it can reach the query at all. `FirmResource`'s own docblock already documents `firms`' un-scoped `->query()` table as an intentional consequence of `firms` being the tenancy root, not an oversight.
+
+Given (1)-(3), this is recorded as a permanent architectural decision, not a rolling "too large this pass" punt. Revisiting it would require, at minimum: designing and shipping the self-lookup bootstrap clause for `resolveFirm()`, migrating all 39 identified call sites to a genuine audited administrative execution path, and the five proof tests already specified above — a dedicated mission in its own right, not a narrow hardening pass.
