@@ -12,20 +12,27 @@ use Tests\TestCase;
  * TrustFilamentForbiddenMutationsTest's/ClientResourceAccessTest's own
  * static-scan technique (Firm Feature Manifest §13, Tier 3-C scope
  * boundary): a source-text scan over FirmSettingsPage.php proving
- * `firm_user_2fa_mode`/`client_2fa_mode` have NO form field anywhere on
- * this page — total exclusion, per this task's explicit instruction —
- * and that `payment_mode`/`trust_iolta_protection`/`ai_mode` are never
- * bound to a writable form component either. `client_2fa_mode` (SET-001)
- * and `portal_frontend_mode` (SET-003) each got a live, read-only Text
- * display in a later pass — still no form field, still never read by
- * `save()`, which this file also still proves.
+ * `client_2fa_mode` has NO form field anywhere on this page — total
+ * exclusion, since Client Portal has no equivalent enrollment-safety
+ * work yet — and that `payment_mode`/`trust_iolta_protection`/`ai_mode`
+ * are never bound to a writable form component either. `client_2fa_mode`
+ * (SET-001) and `portal_frontend_mode` (SET-003) each got a live,
+ * read-only Text display in a later pass — still no form field, still
+ * never read by `save()`, which this file also still proves.
+ *
+ * `firm_user_2fa_mode` was deliberately excluded through SET-001, but
+ * SET-002 (Non-Payment Completion Program, Workstream 11) made it a
+ * real, FirmOwner-only editable field now that the platform-minimum MFA
+ * floor removes the lockout risk that justified the original exclusion
+ * — see FirmSettingsPageAccessTest for the positive coverage proving it
+ * now saves correctly and is gated by the same MANAGE ceiling as every
+ * other field on this page.
  */
 class FirmSettingsPageForbiddenFieldsTest extends TestCase
 {
     use RefreshDatabase;
 
     private const FORBIDDEN_2FA_COLUMNS = [
-        'firm_user_2fa_mode',
         'client_2fa_mode',
     ];
 
@@ -101,36 +108,43 @@ class FirmSettingsPageForbiddenFieldsTest extends TestCase
         }
     }
 
-    public function test_the_firm_settings_page_never_references_the_two_factor_mode_enum(): void
+    public function test_the_firm_settings_page_references_two_factor_mode_only_for_the_firm_user_select(): void
     {
         $source = $this->pageSource();
 
-        $this->assertStringNotContainsString(
-            'TwoFactorMode',
+        // SET-002: TwoFactorMode is now legitimately referenced, but
+        // only to power firm_user_2fa_mode's Select options — never in
+        // a way that implies client_2fa_mode is configurable here.
+        $this->assertStringContainsString(
+            'use App\Enums\TwoFactorMode;',
             $source,
-            'FirmSettingsPage must never reference TwoFactorMode at all — it must not imply either 2FA column is configurable here.'
+            'FirmSettingsPage must import TwoFactorMode to power the firm_user_2fa_mode Select.'
+        );
+        $this->assertStringContainsString(
+            "Select::make('firm_user_2fa_mode')",
+            $source,
+            'firm_user_2fa_mode must be a real Select field now (SET-002).'
+        );
+        $this->assertStringNotContainsString(
+            "Select::make('client_2fa_mode')",
+            $source,
+            'client_2fa_mode must never become a form field — no equivalent enrollment-safety work exists for Client Portal yet.'
         );
     }
 
-    public function test_the_firm_settings_page_mentions_2fa_at_most_once_as_a_readonly_text_display(): void
+    public function test_the_firm_settings_page_shows_a_readonly_text_display_for_client_2fa_mode(): void
     {
         $source = $this->pageSource();
 
-        // SET-001: the one permitted "2FA" mention is now a live,
-        // read-only Text display bound to client2faModeDisplay (a plain
-        // scalar snapshot captured in mount(), mirroring
+        // SET-001: client_2fa_mode's one permitted "2FA" display mention
+        // is a live, read-only Text bound to client2faModeDisplay (a
+        // plain scalar snapshot captured in mount(), mirroring
         // paymentModeDisplay/aiModeDisplay) — never a form field,
-        // Select, Toggle, or Action, and never the old static
-        // "managed separately" placeholder string.
-        $this->assertSame(
-            1,
-            substr_count($source, '2FA'),
-            'FirmSettingsPage may mention "2FA" at most once — a single read-only display, nothing interactive.'
-        );
+        // Select, Toggle, or Action.
         $this->assertStringContainsString(
             "Text::make(fn (): string => 'Client 2FA Policy: '.(\$this->client2faModeDisplay ?? '—'))",
             $source,
-            'The one permitted 2FA mention must be a read-only Text component bound to the live client_2fa_mode value.'
+            'client_2fa_mode must be shown as a read-only Text component bound to its live value.'
         );
         $this->assertStringNotContainsString(
             "Text::make('2FA policy: managed separately.')",

@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Filament\Firm\Pages;
 
+use App\Enums\TwoFactorMode;
 use App\Models\Firm;
 use App\Models\FirmSettings;
 use App\Services\FirmSettingsAccessPolicyService;
 use App\Services\TenantContextService;
 use BackedEnum;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
@@ -49,30 +51,33 @@ use Illuminate\Support\Str;
  * DELIBERATELY EXCLUDED FROM THIS FORM — SCOPE BOUNDARY, NOT AN
  * OVERSIGHT:
  *
- *   - `firm_user_2fa_mode` / `client_2fa_mode`: Mission 1C (Security
- *     Validation, Activation & Staging Proof), section 5 built the
- *     enrollment/lockout-safety piece this comment used to say was
- *     "not-yet-built" — `firm_user_2fa_mode = Required` no longer
- *     permanently locks a non-compliant user out (see
+ *   - `firm_user_2fa_mode`: Mission 1C (Security Validation, Activation
+ *     & Staging Proof), section 5 built the enrollment/lockout-safety
+ *     piece this comment used to say was "not-yet-built" —
+ *     `firm_user_2fa_mode = Required` no longer permanently locks a
+ *     non-compliant user out (see
  *     `EnsureFirmUserMfaComplianceOrRedirectToEnrollment` and
- *     `User::canAccessPanel()`'s own updated docblock). Still
- *     deliberately excluded from THIS form, though: that mission
- *     scoped "make enrollment safe" and "prove it's safe" separately
- *     from "expose the enforcement toggle to firms" — flipping a real
- *     firm's policy is a distinct, more cautious follow-up decision,
- *     not a free byproduct of this checkpoint. `client_2fa_mode` has no
- *     equivalent enrollment-safety work at all yet (Client Portal was
- *     explicitly out of that mission's scope) — still genuinely unsafe
- *     to toggle. Neither column is bound to a form field or an Action
- *     anywhere below — flipping either policy from this page remains
- *     impossible. `firm_user_2fa_mode` still has no display component at
- *     all. `client_2fa_mode` now has a single read-only `Text` display
- *     (SET-001) mirroring the `payment_mode`/`ai_mode` platform-managed
- *     entries below it — it renders the firm's live
- *     `client_2fa_mode` value for visibility only, reading
- *     `FirmSettings::$attributes` via the same mount()-time snapshot
- *     pattern as the other platform-managed columns; it is never part of
- *     `$this->data` and never read by `save()`.
+ *     `User::canAccessPanel()`'s own updated docblock). SET-002
+ *     (Non-Payment Completion Program, Workstream 11): now that
+ *     FirmUser2faPolicyService also enforces a platform-minimum MFA
+ *     floor for FirmOwner/Attorney regardless of this setting, flipping
+ *     this to Required for the rest of the firm's roles carries no
+ *     additional lockout risk beyond what the safe enrollment-redirect
+ *     already handles — this is now a real, FirmOwner-only editable
+ *     `Select` field below, backed by the existing `TwoFactorMode`
+ *     enum (no new enum, no new column).
+ *
+ *   - `client_2fa_mode`: still deliberately excluded. Client Portal has
+ *     no equivalent enrollment-safety work at all yet (it was explicitly
+ *     out of Mission 1C's scope) — genuinely unsafe to toggle. Not bound
+ *     to a form field or an Action anywhere below. It has a single
+ *     read-only `Text` display (SET-001) mirroring the
+ *     `payment_mode`/`ai_mode` platform-managed entries below it — it
+ *     renders the firm's live `client_2fa_mode` value for visibility
+ *     only, reading `FirmSettings::$attributes` via the same
+ *     mount()-time snapshot pattern as the other platform-managed
+ *     columns; it is never part of `$this->data` and never read by
+ *     `save()`.
  *
  *   - `payment_mode` / `trust_iolta_protection` / `ai_mode`: real
  *     downstream effects on other gated services (Trust eligibility,
@@ -217,6 +222,7 @@ class FirmSettingsPage extends Page implements HasSchemas
             // FirmSettings — editable fields.
             'default_language' => $settings?->default_language,
             'state_jurisdiction' => $settings?->state_jurisdiction,
+            'firm_user_2fa_mode' => $settings?->firm_user_2fa_mode?->value,
             // FirmSettings.branding_settings_json — narrow, safe subset.
             'branding_display_name_override' => $branding['display_name_override'] ?? null,
             'branding_primary_color' => $branding['primary_color'] ?? null,
@@ -270,6 +276,16 @@ class FirmSettingsPage extends Page implements HasSchemas
                         TextInput::make('default_language')->label('Default Language')->maxLength(255)->nullable()
                             ->helperText('e.g. en.'),
                         TextInput::make('state_jurisdiction')->label('State Jurisdiction')->maxLength(255)->nullable(),
+                        Select::make('firm_user_2fa_mode')
+                            ->label('Staff 2FA Policy')
+                            ->options([
+                                TwoFactorMode::Optional->value => 'Optional',
+                                TwoFactorMode::Required->value => 'Required',
+                                TwoFactorMode::Disabled->value => 'Disabled',
+                            ])
+                            ->native(false)
+                            ->required()
+                            ->helperText('FirmOwner and Attorney must confirm 2FA regardless of this setting — this policy governs every other role.'),
                     ]),
                 Section::make('Branding')
                     ->description('A small, safe subset of firm_settings.branding_settings_json — no logo upload (no file storage pipeline exists yet).')
@@ -339,6 +355,7 @@ class FirmSettingsPage extends Page implements HasSchemas
                 $settings->update([
                     'default_language' => $state['default_language'] ?? null,
                     'state_jurisdiction' => $state['state_jurisdiction'] ?? null,
+                    'firm_user_2fa_mode' => TwoFactorMode::tryFrom($state['firm_user_2fa_mode'] ?? '') ?? $settings->firm_user_2fa_mode,
                     'branding_settings_json' => $branding,
                 ]);
             },

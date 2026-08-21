@@ -43,17 +43,24 @@ use App\Enums\FirmUserRole;
  *     change firm-wide state" question in the Firm Team cluster.
  *
  * Deliberately has NO method for payment_mode/trust_iolta_protection/
- * ai_mode/firm_user_2fa_mode/client_2fa_mode — none of those five
- * columns is ever submittable through this page (see
- * `FirmSettingsPage`'s own docblock): payment_mode/trust_iolta_
- * protection/ai_mode are READ-ONLY display text here (manifest §13:
- * "have real downstream effects on other gated services... likely
- * belong behind a stricter gate" — changing them is a platform-support
- * operation, not a self-service one, and is out of this task's scope
- * entirely); firm_user_2fa_mode/client_2fa_mode are excluded from this
- * page ENTIRELY (a separate, not-yet-built 2FA enrollment task owns
- * them — toggling either to Required today, with no enrollment/recovery
- * UI, would permanently lock users out).
+ * ai_mode/client_2fa_mode — none of those four columns is ever
+ * submittable through this page (see `FirmSettingsPage`'s own
+ * docblock): payment_mode/trust_iolta_protection/ai_mode are READ-ONLY
+ * display text here (manifest §13: "have real downstream effects on
+ * other gated services... likely belong behind a stricter gate" —
+ * changing them is a platform-support operation, not a self-service
+ * one, and is out of this task's scope entirely); client_2fa_mode is
+ * excluded from this page ENTIRELY (Client Portal has no equivalent
+ * enrollment-safety work yet — toggling it to Required today, with no
+ * enrollment/recovery UI, would permanently lock clients out).
+ *
+ * firm_user_2fa_mode (SET-002, Non-Payment Completion Program) IS now
+ * submittable through this page, gated by the same MANAGE ceiling as
+ * every other field here — no dedicated method was added for it,
+ * since the enrollment-safety concern that justified excluding it no
+ * longer applies (Mission 1C's safe redirect-not-lockout enforcement,
+ * plus the platform-minimum MFA floor FirmUser2faPolicyService now
+ * applies to FirmOwner/Attorney regardless of this setting).
  */
 class FirmSettingsAccessPolicyService
 {

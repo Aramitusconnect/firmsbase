@@ -16,6 +16,7 @@ use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
 
 /**
@@ -295,22 +296,65 @@ final class FirmSettingsPageAccessTest extends TestCase
         });
     }
 
-    public function test_forging_a_2fa_mode_value_via_data_has_no_effect_on_save(): void
+    public function test_forging_a_client_2fa_mode_value_via_data_has_no_effect_on_save(): void
     {
         $firm = Firm::factory()->create();
         $this->runWithFirmContext($firm, fn () => FirmSettings::factory()->forFirm($firm)->create());
-        $originalFirmUser2fa = $this->runWithFirmContext($firm, fn () => FirmSettings::query()->where('firm_id', $firm->id)->first()->firm_user_2fa_mode);
+        $originalClient2fa = $this->runWithFirmContext($firm, fn () => FirmSettings::query()->where('firm_id', $firm->id)->first()->client_2fa_mode);
         $this->actingAsRole($firm, FirmUserRole::FirmOwner);
 
-        $this->runWithFirmContext($firm, function () use ($firm, $originalFirmUser2fa): void {
+        $this->runWithFirmContext($firm, function () use ($firm, $originalClient2fa): void {
             $test = Livewire::test(FirmSettingsPage::class);
-            $test->set('data.firm_user_2fa_mode', 'required');
             $test->set('data.client_2fa_mode', 'required');
             $test->call('save');
             $test->assertHasNoErrors();
 
             $fresh = FirmSettings::query()->where('firm_id', $firm->id)->first();
-            $this->assertSame($originalFirmUser2fa, $fresh->firm_user_2fa_mode, 'firm_user_2fa_mode must never be settable through this page.');
+            $this->assertSame($originalClient2fa, $fresh->client_2fa_mode, 'client_2fa_mode must never be settable through this page.');
+        });
+    }
+
+    /**
+     * SET-002 (Non-Payment Completion Program, Workstream 11):
+     * firm_user_2fa_mode is now a real, FirmOwner-only editable field —
+     * safe now that the platform-minimum MFA floor removes the lockout
+     * risk that previously justified excluding it entirely.
+     */
+    public function test_firm_owner_can_set_firm_user_2fa_mode_to_required(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->runWithFirmContext($firm, fn () => FirmSettings::factory()->forFirm($firm)->create(['firm_user_2fa_mode' => TwoFactorMode::Optional]));
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+
+        $this->runWithFirmContext($firm, function () use ($firm): void {
+            $test = Livewire::test(FirmSettingsPage::class);
+            $test->set('data.firm_user_2fa_mode', TwoFactorMode::Required->value);
+            $test->call('save');
+            $test->assertHasNoErrors();
+
+            $fresh = FirmSettings::query()->where('firm_id', $firm->id)->first();
+            $this->assertSame(TwoFactorMode::Required, $fresh->firm_user_2fa_mode, 'firm_user_2fa_mode must be settable by a FirmOwner through this page.');
+        });
+    }
+
+    public function test_a_non_owner_role_cannot_change_firm_user_2fa_mode_even_via_a_forced_save_call(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->runWithFirmContext($firm, fn () => FirmSettings::factory()->forFirm($firm)->create(['firm_user_2fa_mode' => TwoFactorMode::Optional]));
+        $this->actingAsRole($firm, FirmUserRole::Attorney);
+
+        $this->runWithFirmContext($firm, function () use ($firm): void {
+            $test = Livewire::test(FirmSettingsPage::class);
+            $test->set('data.firm_user_2fa_mode', TwoFactorMode::Required->value);
+
+            try {
+                $test->call('save');
+            } catch (HttpException $e) {
+                $this->assertSame(403, $e->getStatusCode());
+            }
+
+            $fresh = FirmSettings::query()->where('firm_id', $firm->id)->first();
+            $this->assertSame(TwoFactorMode::Optional, $fresh->firm_user_2fa_mode, 'A non-owner must never be able to change firm_user_2fa_mode, even by forcing the save action.');
         });
     }
 
