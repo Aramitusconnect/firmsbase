@@ -36,7 +36,7 @@ final class DocumentDownloadControllerTest extends TestCase
 
         $firm = Firm::factory()->create();
         $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
-        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create([
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create([
             'firm_id' => $firm->id,
             'matter_id' => $matter->id,
             'original_filename' => 'evidence.pdf',

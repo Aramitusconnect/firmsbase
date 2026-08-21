@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Documents;
 
+use App\Enums\DocumentStatus;
 use App\Enums\FirmUserRole;
 use App\Enums\FirmUserStatus;
 use App\Models\Client;
@@ -31,6 +32,17 @@ use Tests\TestCase;
  * than only proving firm-boundary membership the way canAccess() does.
  * No route, controller, or storage-layer code is added — this is the
  * primitive itself, not the feature.
+ *
+ * Non-payment completion program, finding DOC-005 — canBeDownloadedBy()
+ * now also enforces $document->isUsable() (scan_status Clean AND status
+ * !== Rejected), mirroring canBeViewedInPortalBy()'s own gate. Every
+ * fixture below that is meant to prove an *access* outcome (matter
+ * assignment, matter grant, firm membership) explicitly marks its
+ * document clean() so that dimension isn't confounded with usability;
+ * the "Usability gate" section further down proves the new check itself
+ * — that an Infected, Pending, or Rejected document is denied for every
+ * actor/scenario combination the access-only tests above show would
+ * otherwise be authorized.
  */
 class DocumentDownloadAuthorizationTest extends TestCase
 {
@@ -52,7 +64,7 @@ class DocumentDownloadAuthorizationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
-        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
         $owner = $this->makeFirmUser($firm, FirmUserRole::FirmOwner);
 
         $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $owner->user));
@@ -64,7 +76,7 @@ class DocumentDownloadAuthorizationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
-        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
         $paralegal = $this->makeFirmUser($firm, FirmUserRole::Paralegal);
 
         $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $paralegal->user));
@@ -76,7 +88,7 @@ class DocumentDownloadAuthorizationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
-        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
         $paralegal = $this->makeFirmUser($firm, FirmUserRole::Paralegal);
         $this->runWithFirmContext($firm, fn () => MatterAssignment::factory()->forMatter($matter)->forUser($paralegal->user)->create());
 
@@ -89,7 +101,7 @@ class DocumentDownloadAuthorizationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
-        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
         $paralegal = $this->makeFirmUser($firm, FirmUserRole::Paralegal);
         $this->runWithFirmContext($firm, fn () => MatterAssignment::factory()->forMatter($matter)->forUser($paralegal->user)->create(['removed_at' => now()]));
 
@@ -103,7 +115,7 @@ class DocumentDownloadAuthorizationTest extends TestCase
         $firmA = Firm::factory()->create();
         $firmB = Firm::factory()->create();
         $matterB = $this->runWithFirmContext($firmB, fn () => Matter::factory()->forFirm($firmB)->create());
-        $documentB = $this->runWithFirmContext($firmB, fn () => Document::factory()->create(['firm_id' => $firmB->id, 'matter_id' => $matterB->id]));
+        $documentB = $this->runWithFirmContext($firmB, fn () => Document::factory()->clean()->create(['firm_id' => $firmB->id, 'matter_id' => $matterB->id]));
         $ownerOfA = $this->makeFirmUser($firmA, FirmUserRole::FirmOwner);
 
         $allowed = $this->runWithFirmContext($firmB, fn () => $this->service->canBeDownloadedBy($documentB, $ownerOfA->user));
@@ -118,7 +130,7 @@ class DocumentDownloadAuthorizationTest extends TestCase
     public function test_any_active_firm_staff_member_can_download_a_matterless_document_in_their_own_firm(): void
     {
         $firm = Firm::factory()->create();
-        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create(['firm_id' => $firm->id, 'matter_id' => null]));
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create(['firm_id' => $firm->id, 'matter_id' => null]));
         $receptionist = $this->makeFirmUser($firm, FirmUserRole::Receptionist);
 
         $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $receptionist->user));
@@ -130,7 +142,7 @@ class DocumentDownloadAuthorizationTest extends TestCase
     {
         $firmA = Firm::factory()->create();
         $firmB = Firm::factory()->create();
-        $documentB = $this->runWithFirmContext($firmB, fn () => Document::factory()->create(['firm_id' => $firmB->id, 'matter_id' => null]));
+        $documentB = $this->runWithFirmContext($firmB, fn () => Document::factory()->clean()->create(['firm_id' => $firmB->id, 'matter_id' => null]));
         $userOfA = $this->makeFirmUser($firmA, FirmUserRole::FirmOwner);
 
         $allowed = $this->runWithFirmContext($firmB, fn () => $this->service->canBeDownloadedBy($documentB, $userOfA->user));
@@ -147,7 +159,7 @@ class DocumentDownloadAuthorizationTest extends TestCase
         $firm = Firm::factory()->create();
         $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
         $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
-        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
         $portalUser = $this->makePortalUser($client);
         $this->runWithFirmContext($firm, fn () => ClientPortalMatterGrant::factory()->forClientAndMatter($client, $matter)->create());
 
@@ -161,7 +173,7 @@ class DocumentDownloadAuthorizationTest extends TestCase
         $firm = Firm::factory()->create();
         $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
         $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forClient($client)->create());
-        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
         $portalUser = $this->makePortalUser($client);
 
         $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $portalUser));
@@ -175,7 +187,7 @@ class DocumentDownloadAuthorizationTest extends TestCase
         $clientA = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
         $clientB = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
         $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
-        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
         $portalUserA = $this->makePortalUser($clientA);
         $this->runWithFirmContext($firm, fn () => ClientPortalMatterGrant::factory()->forClientAndMatter($clientB, $matter)->create());
 
@@ -189,7 +201,7 @@ class DocumentDownloadAuthorizationTest extends TestCase
         $firm = Firm::factory()->create();
         $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
         $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
-        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
         $portalUser = $this->makePortalUser($client);
         $this->runWithFirmContext($firm, fn () => ClientPortalMatterGrant::factory()->forClientAndMatter($client, $matter)->revoked()->create());
 
@@ -206,12 +218,189 @@ class DocumentDownloadAuthorizationTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
-        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create(['firm_id' => $firm->id, 'matter_id' => null, 'client_id' => $client->id]));
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create(['firm_id' => $firm->id, 'matter_id' => null, 'client_id' => $client->id]));
         $portalUser = $this->makePortalUser($client);
 
         $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $portalUser));
 
         $this->assertFalse($allowed, 'No matter-independent grant concept exists for Client Portal users — a matterless document must never be downloadable by a portal user, even one tied to the same client_id.');
+    }
+
+    // ------------------------------------------------------------
+    // Usability gate (finding DOC-005) — an Infected, Pending, or
+    // Rejected-status document must be denied download for every
+    // actor/scenario the tests above show would otherwise be
+    // authorized purely on access grounds.
+    // ------------------------------------------------------------
+
+    public function test_firm_owner_cannot_download_an_infected_matter_scoped_document(): void
+    {
+        $firm = Firm::factory()->create();
+        $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->infected()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
+        $owner = $this->makeFirmUser($firm, FirmUserRole::FirmOwner);
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $owner->user));
+
+        $this->assertFalse($allowed, 'An Infected document must never be downloadable, even by a Firm Owner who otherwise passes every access check.');
+    }
+
+    public function test_firm_owner_cannot_download_a_pending_scan_matter_scoped_document(): void
+    {
+        $firm = Firm::factory()->create();
+        $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
+        $owner = $this->makeFirmUser($firm, FirmUserRole::FirmOwner);
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $owner->user));
+
+        $this->assertFalse($allowed, 'A document still awaiting its virus scan (scan_status Pending) must never be downloadable, even by a Firm Owner who otherwise passes every access check.');
+    }
+
+    public function test_firm_owner_cannot_download_a_rejected_matter_scoped_document(): void
+    {
+        $firm = Firm::factory()->create();
+        $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create([
+            'firm_id' => $firm->id,
+            'matter_id' => $matter->id,
+            'status' => DocumentStatus::Rejected,
+            'rejected_reason' => 'Rejected on review.',
+        ]));
+        $owner = $this->makeFirmUser($firm, FirmUserRole::FirmOwner);
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $owner->user));
+
+        $this->assertFalse($allowed, 'A Rejected-status document must never be downloadable, even with a Clean scan_status and even by a Firm Owner who otherwise passes every access check.');
+    }
+
+    public function test_paralegal_with_an_active_matter_assignment_cannot_download_an_infected_document(): void
+    {
+        $firm = Firm::factory()->create();
+        $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->infected()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
+        $paralegal = $this->makeFirmUser($firm, FirmUserRole::Paralegal);
+        $this->runWithFirmContext($firm, fn () => MatterAssignment::factory()->forMatter($matter)->forUser($paralegal->user)->create());
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $paralegal->user));
+
+        $this->assertFalse($allowed, 'An Infected document must never be downloadable, even by a Paralegal with an active MatterAssignment.');
+    }
+
+    public function test_paralegal_with_an_active_matter_assignment_cannot_download_a_pending_scan_document(): void
+    {
+        $firm = Firm::factory()->create();
+        $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
+        $paralegal = $this->makeFirmUser($firm, FirmUserRole::Paralegal);
+        $this->runWithFirmContext($firm, fn () => MatterAssignment::factory()->forMatter($matter)->forUser($paralegal->user)->create());
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $paralegal->user));
+
+        $this->assertFalse($allowed, 'A document still awaiting its virus scan must never be downloadable, even by a Paralegal with an active MatterAssignment.');
+    }
+
+    public function test_paralegal_with_an_active_matter_assignment_cannot_download_a_rejected_document(): void
+    {
+        $firm = Firm::factory()->create();
+        $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create([
+            'firm_id' => $firm->id,
+            'matter_id' => $matter->id,
+            'status' => DocumentStatus::Rejected,
+            'rejected_reason' => 'Rejected on review.',
+        ]));
+        $paralegal = $this->makeFirmUser($firm, FirmUserRole::Paralegal);
+        $this->runWithFirmContext($firm, fn () => MatterAssignment::factory()->forMatter($matter)->forUser($paralegal->user)->create());
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $paralegal->user));
+
+        $this->assertFalse($allowed, 'A Rejected-status document must never be downloadable, even by a Paralegal with an active MatterAssignment.');
+    }
+
+    public function test_active_firm_staff_member_cannot_download_an_infected_matterless_document(): void
+    {
+        $firm = Firm::factory()->create();
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->infected()->create(['firm_id' => $firm->id, 'matter_id' => null]));
+        $receptionist = $this->makeFirmUser($firm, FirmUserRole::Receptionist);
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $receptionist->user));
+
+        $this->assertFalse($allowed, 'An Infected matterless document must never be downloadable, even by an active firm-staff member of the owning firm.');
+    }
+
+    public function test_active_firm_staff_member_cannot_download_a_pending_scan_matterless_document(): void
+    {
+        $firm = Firm::factory()->create();
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create(['firm_id' => $firm->id, 'matter_id' => null]));
+        $receptionist = $this->makeFirmUser($firm, FirmUserRole::Receptionist);
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $receptionist->user));
+
+        $this->assertFalse($allowed, 'A matterless document still awaiting its virus scan must never be downloadable, even by an active firm-staff member of the owning firm.');
+    }
+
+    public function test_active_firm_staff_member_cannot_download_a_rejected_matterless_document(): void
+    {
+        $firm = Firm::factory()->create();
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create([
+            'firm_id' => $firm->id,
+            'matter_id' => null,
+            'status' => DocumentStatus::Rejected,
+            'rejected_reason' => 'Rejected on review.',
+        ]));
+        $receptionist = $this->makeFirmUser($firm, FirmUserRole::Receptionist);
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $receptionist->user));
+
+        $this->assertFalse($allowed, 'A Rejected-status matterless document must never be downloadable, even by an active firm-staff member of the owning firm.');
+    }
+
+    public function test_client_portal_user_with_a_matter_grant_cannot_download_an_infected_document(): void
+    {
+        $firm = Firm::factory()->create();
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
+        $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->infected()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
+        $portalUser = $this->makePortalUser($client);
+        $this->runWithFirmContext($firm, fn () => ClientPortalMatterGrant::factory()->forClientAndMatter($client, $matter)->create());
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $portalUser));
+
+        $this->assertFalse($allowed, 'An Infected document must never be downloadable, even by a Client Portal user with an active matter grant.');
+    }
+
+    public function test_client_portal_user_with_a_matter_grant_cannot_download_a_pending_scan_document(): void
+    {
+        $firm = Firm::factory()->create();
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
+        $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create(['firm_id' => $firm->id, 'matter_id' => $matter->id]));
+        $portalUser = $this->makePortalUser($client);
+        $this->runWithFirmContext($firm, fn () => ClientPortalMatterGrant::factory()->forClientAndMatter($client, $matter)->create());
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $portalUser));
+
+        $this->assertFalse($allowed, 'A document still awaiting its virus scan must never be downloadable, even by a Client Portal user with an active matter grant.');
+    }
+
+    public function test_client_portal_user_with_a_matter_grant_cannot_download_a_rejected_document(): void
+    {
+        $firm = Firm::factory()->create();
+        $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
+        $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create([
+            'firm_id' => $firm->id,
+            'matter_id' => $matter->id,
+            'status' => DocumentStatus::Rejected,
+            'rejected_reason' => 'Rejected on review.',
+        ]));
+        $portalUser = $this->makePortalUser($client);
+        $this->runWithFirmContext($firm, fn () => ClientPortalMatterGrant::factory()->forClientAndMatter($client, $matter)->create());
+
+        $allowed = $this->runWithFirmContext($firm, fn () => $this->service->canBeDownloadedBy($document, $portalUser));
+
+        $this->assertFalse($allowed, 'A Rejected-status document must never be downloadable, even with a Clean scan_status and even by a Client Portal user with an active matter grant.');
     }
 
     // ------------------------------------------------------------

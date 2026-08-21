@@ -135,7 +135,22 @@ class AppServiceProvider extends ServiceProvider
         // was a wiring bug, not a decision to fake scanning; a real scanner
         // implementation remains a separate, later decision (see the final
         // report).
-        $this->app->bind(VirusScanner::class, FakeVirusScanner::class);
+        //
+        // Non-payment completion program, finding DOC-001 — this binding
+        // is now a config-gated factory, mirroring the StripeGateway
+        // binding above exactly: `services.clamav.socket` (CLAMAV_SOCKET,
+        // unset by default everywhere) is the single source of truth. When
+        // it is configured, the container resolves the real, already-
+        // tested ClamAvVirusScanner (see ClamAvVirusScannerLocalProofTest)
+        // instead of silently continuing to fake scan results forever.
+        // With no socket configured — every environment today — this
+        // resolves to FakeVirusScanner exactly as before; behavior is
+        // unchanged until an operator deliberately opts in.
+        $this->app->bind(VirusScanner::class, function () {
+            return filled(config('services.clamav.socket'))
+                ? $this->app->make(ClamAvVirusScanner::class)
+                : new FakeVirusScanner;
+        });
 
         // Mission 1C (Security Validation, Activation & Staging Proof),
         // section 15: registers the concrete real-engine implementation

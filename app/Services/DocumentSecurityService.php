@@ -280,9 +280,22 @@ class DocumentSecurityService
      * ClientPortalMatterAccessPolicyService's own docblock), and no
      * equivalent matter-independent grant concept exists for a Client
      * Portal user, so this method does not invent one.
+     *
+     * Non-payment completion program, finding DOC-005 — mirrors the
+     * isUsable() gate canBeViewedInPortalBy() already enforces below.
+     * The service method is the real authorization boundary, not a
+     * button's ->visible() guard (DocumentsRelationManager's download
+     * action already hides itself for a non-usable document, but that
+     * UI convenience must never be the only thing stopping a still-
+     * scanning, infected, or rejected document from being fetched
+     * directly through DocumentDownloadController).
      */
     public function canBeDownloadedBy(Document $document, User|ClientPortalUser $actor): bool
     {
+        if (! $document->isUsable()) {
+            return false;
+        }
+
         if ($actor instanceof ClientPortalUser) {
             if ($document->matter_id === null) {
                 return false;
