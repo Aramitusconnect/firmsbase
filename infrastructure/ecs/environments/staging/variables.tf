@@ -313,6 +313,12 @@ variable "ses_consumer_desired_count" {
   }
 }
 
+variable "ecs_autoscaling_enabled" {
+  description = "Whether web/worker get an Application Auto Scaling target + CPU-target-tracking policy (module.web/module.worker's enable_autoscaling). Defaults to true — this module's original design intent, matching production's own architecture. This staging environment's own terraform.tfvars sets it to false: production-equivalent ARCHITECTURE does not require production-equivalent CAPACITY, and staging's own fixed desired_count (see web_desired_count/worker_desired_count below) is deliberately left as the only capacity control here, avoiding the autoscaling_min_capacity/max_capacity values (2-6 for web, 1-6 for worker) that would otherwise apply. critical_worker/scheduler/migrate/maintenance/ses_consumer already hardcode enable_autoscaling = false directly in main.tf, unaffected by this variable — they were never autoscaled to begin with."
+  type        = bool
+  default     = true
+}
+
 variable "web_desired_count" {
   description = "web ECS service desired task count. Defaults to 2 (this module's original design intent — a load-balanced HTTP service with more than one task for availability). This staging environment's live service currently runs 1 (confirmed via aws ecs describe-services) — see docs/ecs/state-adoption-plan.md §9.10/§9.11. Left at its 2 default, applying after import would scale the live service up; set to 1 in terraform.tfvars to match live exactly before any apply."
   type        = number

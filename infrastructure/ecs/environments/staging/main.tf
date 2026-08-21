@@ -449,7 +449,7 @@ module "web" {
 
   readonly_root_filesystem = var.readonly_root_filesystem_enabled
 
-  enable_autoscaling             = true
+  enable_autoscaling             = var.ecs_autoscaling_enabled
   autoscaling_min_capacity       = 2
   autoscaling_max_capacity       = 6
   autoscaling_cpu_target_percent = 60
@@ -510,7 +510,7 @@ module "worker" {
   enable_ecs_managed_tags = true
   propagate_tags          = "TASK_DEFINITION"
 
-  enable_autoscaling             = true
+  enable_autoscaling             = var.ecs_autoscaling_enabled
   autoscaling_min_capacity       = 1
   autoscaling_max_capacity       = 6
   autoscaling_cpu_target_percent = 70
