@@ -122,7 +122,16 @@ final class PlatformServiceHealthPageTest extends TestCase
         $response = $this->actingAs($admin, 'platform_admin')->get(PlatformServiceHealthPage::getUrl());
         $response->assertOk();
         $response->assertSee('9 check type(s) registered in total');
-        $response->assertSee('5 not monitored');
+        // Non-Payment Completion Program real-probe wave: Storage and
+        // DocumentScanning became real LiveProbe checks, EmailDelivery
+        // became a real ConfigurationCheck check -- only WebUptime and
+        // PaymentWebhooks remain NotMonitored now (2, not the original
+        // 5), matching HealthCheckRegistry's own current
+        // registerDefaults(). This count is fully derived from
+        // HealthCheckRegistry::monitoringTypeCounts() (see this page's
+        // own class docblock), so this assertion tracks the registry's
+        // actual current state rather than a hand-maintained number.
+        $response->assertSee('2 not monitored');
     }
 
     /**

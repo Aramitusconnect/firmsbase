@@ -161,6 +161,18 @@ class WorkflowTransitionEnforcementSearchTest extends TestCase
         // WORKFLOW_ENUMS catalog either -- Mission 3's own domain, out
         // of this test's scope by construction, matching Mission 2's
         // own marketplace-lifecycle-enum exclusion reasoning above.
+        // Narrowly updated AGAIN by the Non-Payment Completion Program,
+        // e-signature signer-facing flow -- resources/views/signature-recipients/show.blade.php
+        // is a reviewed, narrow exception of the same shape: it DOES
+        // reference SignatureRequestStatus (one of the 14 tracked
+        // enums, unlike the marketplace enums above), but only ever
+        // reads `$recipient->status->value` inside @if conditionals to
+        // pick which read-only message to display (signed/completed,
+        // declined, expired/voided) -- never an assignment, never a
+        // write. The page's real transitions (consent/sign/decline) all
+        // go through SignatureRecipientController ->
+        // SignatureRecipientWorkflowService, both already covered by
+        // the controller-allowlist assertion above.
         $bladeFiles = glob(resource_path('views/**/*.blade.php')) ?: [];
         $bladeFiles = array_values(array_filter(
             $bladeFiles,
@@ -168,6 +180,7 @@ class WorkflowTransitionEnforcementSearchTest extends TestCase
                 && $path !== resource_path('views/layouts/public.blade.php')
                 && $path !== resource_path('views/layouts/public-intake.blade.php')
                 && $path !== resource_path('views/livewire/marketplace/public-intake-page.blade.php')
+                && $path !== resource_path('views/signature-recipients/show.blade.php')
                 && ! str_starts_with($path, resource_path('views/myattorney/'))
         ));
         $this->assertEmpty($bladeFiles, 'No Blade views should exist that could write workflow status directly.');
