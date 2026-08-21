@@ -61,6 +61,40 @@ class ClamAvVirusScanner implements VirusScanner
         return $this->interpretResponse($response);
     }
 
+    /**
+     * ping() — lightweight liveness probe for
+     * HealthCheckRegistry::DocumentScanning (Operations Control Plane,
+     * real-probe wave). Reuses this class's own low-level socket-
+     * connection mechanism rather than duplicating it: connects the
+     * same way sendInstream() does, sends clamd's `zPING\0` command,
+     * and checks for the `PONG` reply. Deliberately does NOT call
+     * scan() or touch any Storage disk — this only proves the daemon
+     * is reachable and responsive, nothing about scanning itself.
+     * Never throws for an unreachable/unresponsive daemon — returns
+     * false so callers can report Unhealthy without fabricating a
+     * Healthy result.
+     */
+    public function ping(): bool
+    {
+        $connection = @stream_socket_client($this->socket, $errno, $errstr, $this->timeoutSeconds);
+
+        if ($connection === false) {
+            return false;
+        }
+
+        stream_set_timeout($connection, (int) $this->timeoutSeconds);
+
+        try {
+            fwrite($connection, "zPING\0");
+
+            $response = trim((string) fread($connection, 4096), "\0 \n\r");
+
+            return $response === 'PONG';
+        } finally {
+            fclose($connection);
+        }
+    }
+
     private function sendInstream(string $contents): string
     {
         $connection = @stream_socket_client($this->socket, $errno, $errstr, $this->timeoutSeconds);

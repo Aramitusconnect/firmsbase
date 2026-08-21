@@ -5,7 +5,12 @@ namespace App\Services;
 use App\Enums\HealthCheckMonitoringType;
 use App\Enums\HealthCheckStatus;
 use App\Enums\HealthCheckType;
+use App\Services\VirusScan\ClamAvVirusScanner;
 use App\ValueObjects\HealthCheckResult;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * HealthCheckRegistry — pluggable, mirrors Phase 4's
@@ -43,11 +48,30 @@ use App\ValueObjects\HealthCheckResult;
  * dynamic fact (see monitoringTypeCounts()) rather than a hand-
  * maintained sentence in a Blade file that silently goes stale.
  *
- * No real external monitoring provider is introduced here (project
- * rule, and an explicit stop gate for this mission): making WebUptime/
- * Storage/EmailDelivery/PaymentWebhooks/DocumentScanning genuinely
- * monitored requires a new external dependency and owner approval.
- * Until then they are reported honestly as unmonitored.
+ * No NEW external monitoring provider is introduced here (project
+ * rule, and an explicit stop gate): WebUptime genuinely needs one this
+ * program does not add, and PaymentWebhooks is Finix-adjacent and out
+ * of scope — those two remain honestly reported as NotMonitored.
+ * Storage, EmailDelivery, and DocumentScanning, however, each already
+ * have real infrastructure configured elsewhere in this codebase
+ * (the default filesystem disk, the configured mailer, and the
+ * optional clamd daemon already used by ClamAvVirusScanner::scan()
+ * respectively) — probing them is not a new dependency, just finally
+ * looking at ones that already exist:
+ *  - Storage does a genuine write+read+delete round-trip against
+ *    `config('filesystems.default')` — HealthCheckMonitoringType::LiveProbe.
+ *  - EmailDelivery resolves (never sends through) the configured
+ *    mailer — this proves configuration only, never a live delivery
+ *    path, so it is stamped HealthCheckMonitoringType::ConfigurationCheck,
+ *    not LiveProbe.
+ *  - DocumentScanning pings a configured clamd daemon via
+ *    ClamAvVirusScanner::ping() when `services.clamav.socket` is set
+ *    (HealthCheckMonitoringType::LiveProbe), or honestly reports
+ *    Unknown when no daemon is configured — independent of whether
+ *    VirusScanner::class happens to be bound to ClamAvVirusScanner
+ *    (see AppServiceProvider's own binding comment: binding activation
+ *    and daemon availability are two separate things).
+ * None of the three ever fabricates Healthy on doubt or exception.
  */
 class HealthCheckRegistry
 {
@@ -228,14 +252,16 @@ class HealthCheckRegistry
             );
         }, HealthCheckMonitoringType::InternalMetric);
 
-        $this->registerUnmonitored(
+        $this->register(
             HealthCheckType::Storage,
-            'No storage provider probe is configured. Object-storage availability is not observed by this platform.',
+            fn () => $this->probeStorage(),
+            HealthCheckMonitoringType::LiveProbe,
         );
 
-        $this->registerUnmonitored(
+        $this->register(
             HealthCheckType::EmailDelivery,
-            'No email delivery probe is configured. Outbound mail deliverability is not observed by this platform.',
+            fn () => $this->probeEmailDelivery(),
+            HealthCheckMonitoringType::ConfigurationCheck,
         );
 
         $this->registerUnmonitored(
@@ -243,15 +269,204 @@ class HealthCheckRegistry
             'No payment-webhook probe is configured. Payment webhook delivery is not observed by this platform.',
         );
 
-        $this->registerUnmonitored(
+        $this->register(
             HealthCheckType::DocumentScanning,
-            'No document-scanning probe is configured. Malware-scanning availability is not observed by this platform.',
+            fn () => $this->probeDocumentScanning(),
+            HealthCheckMonitoringType::LiveProbe,
         );
 
         $this->register(
             HealthCheckType::TenantIsolationAnomalies,
             fn () => $this->tenantIsolationAnomaly->checkForKnownAnomalyPatterns(),
             HealthCheckMonitoringType::InternalMetric,
+        );
+    }
+
+    /**
+     * probeStorage() — writes a randomly-named, randomly-keyed marker
+     * file to `config('filesystems.default')`, reads it back, and
+     * verifies the content round-trips exactly, then deletes it.
+     * `Healthy` only on a clean write+read+delete+match cycle;
+     * `Unhealthy` on any exception, content mismatch, OR falsy return
+     * value — this codebase's own local/public disk config sets
+     * `'throw' => false` (see config/filesystems.php), meaning
+     * Flysystem failures surface as `false`/`null` return values
+     * rather than exceptions, so a bare try/catch alone would silently
+     * miss them. This check must never fabricate Healthy. Cleanup is
+     * always attempted, even when the read/verify step fails, so a
+     * failed run doesn't leave litter on the disk.
+     */
+    private function probeStorage(): HealthCheckResult
+    {
+        $disk = (string) config('filesystems.default');
+        $path = 'health-checks/'.Str::random(24).'.txt';
+        $marker = Str::random(32);
+
+        try {
+            $written = Storage::disk($disk)->put($path, $marker);
+        } catch (Throwable $e) {
+            return new HealthCheckResult(
+                HealthCheckType::Storage,
+                HealthCheckStatus::Unhealthy,
+                "write to disk [{$disk}] failed: {$e->getMessage()}",
+            );
+        }
+
+        if (! $written) {
+            return new HealthCheckResult(
+                HealthCheckType::Storage,
+                HealthCheckStatus::Unhealthy,
+                "write to disk [{$disk}] returned a failure result",
+            );
+        }
+
+        try {
+            $readBack = Storage::disk($disk)->get($path);
+
+            if ($readBack !== $marker) {
+                return new HealthCheckResult(
+                    HealthCheckType::Storage,
+                    HealthCheckStatus::Unhealthy,
+                    "content mismatch reading back from disk [{$disk}]",
+                );
+            }
+
+            return new HealthCheckResult(
+                HealthCheckType::Storage,
+                HealthCheckStatus::Healthy,
+                "write+read+delete round-trip succeeded on disk [{$disk}]",
+            );
+        } catch (Throwable $e) {
+            return new HealthCheckResult(
+                HealthCheckType::Storage,
+                HealthCheckStatus::Unhealthy,
+                "read from disk [{$disk}] failed: {$e->getMessage()}",
+            );
+        } finally {
+            try {
+                Storage::disk($disk)->delete($path);
+            } catch (Throwable) {
+                // Best-effort cleanup only — a delete failure here does
+                // not change the status already determined above; it
+                // does not warrant fabricating a different result, and
+                // there is nothing more this check can safely do about
+                // it.
+            }
+        }
+    }
+
+    /**
+     * probeEmailDelivery() — resolves `Mail::mailer(config('mail.mailer'))`
+     * inside a try/catch to prove the mailer is at least instantiable/
+     * configured correctly. This does NOT send any real email and does
+     * NOT prove delivery actually works — only that config resolves
+     * cleanly, which is exactly why this check is registered as
+     * HealthCheckMonitoringType::ConfigurationCheck rather than
+     * LiveProbe. `log`/`array` mailers resolve cleanly but are not a
+     * real delivery transport, so they report `Degraded`, never
+     * `Healthy` — matching this codebase's "technically working but
+     * not really live" convention (see QueueWorkers above). `ses`
+     * additionally requires `services.ses.region` (the one field the
+     * AWS SDK's default credential provider chain cannot supply on its
+     * own — without it, the SDK itself refuses to construct a client,
+     * so a missing region reports `Unhealthy`, a real failure, not
+     * merely "not live"); `key`/`secret` are legitimately left empty
+     * in this codebase's ECS-task-role deployments (see
+     * config/services.php's own comment on the `ses` block), so their
+     * absence alone is not treated as a failure.
+     */
+    private function probeEmailDelivery(): HealthCheckResult
+    {
+        $mailer = config('mail.mailer');
+
+        if (blank($mailer)) {
+            return new HealthCheckResult(
+                HealthCheckType::EmailDelivery,
+                HealthCheckStatus::Unknown,
+                'mail.mailer is not configured',
+            );
+        }
+
+        // Checked before resolution, not after: the AWS SDK's SesClient
+        // validates 'region' eagerly at construction time, so a missing
+        // region actually makes Mail::mailer('ses') below throw anyway
+        // (verified against this app's real AWS SDK dependency) — this
+        // explicit check just makes that failure deterministic and its
+        // message specific, rather than depending on SDK-internal
+        // exception wording.
+        if ($mailer === 'ses' && blank(config('services.ses.region'))) {
+            return new HealthCheckResult(
+                HealthCheckType::EmailDelivery,
+                HealthCheckStatus::Unhealthy,
+                'ses mailer selected but services.ses.region is not configured',
+            );
+        }
+
+        try {
+            Mail::mailer($mailer);
+        } catch (Throwable $e) {
+            return new HealthCheckResult(
+                HealthCheckType::EmailDelivery,
+                HealthCheckStatus::Unhealthy,
+                "mailer [{$mailer}] failed to resolve: {$e->getMessage()}",
+            );
+        }
+
+        if (in_array($mailer, ['log', 'array'], true)) {
+            return new HealthCheckResult(
+                HealthCheckType::EmailDelivery,
+                HealthCheckStatus::Degraded,
+                "mailer [{$mailer}] resolves but is not a real delivery transport",
+            );
+        }
+
+        return new HealthCheckResult(
+            HealthCheckType::EmailDelivery,
+            HealthCheckStatus::Healthy,
+            "mailer [{$mailer}] resolves cleanly (config resolution only — not a live delivery proof)",
+        );
+    }
+
+    /**
+     * probeDocumentScanning() — conditional by design: `Unknown` when
+     * `services.clamav.socket` is empty (honest — no daemon is
+     * expected in that environment), regardless of whether
+     * VirusScanner::class happens to be bound to ClamAvVirusScanner —
+     * binding activation and daemon availability are two separate
+     * things (see AppServiceProvider's own VirusScanner binding
+     * comment). When a socket IS configured, pings clamd over that
+     * same socket using ClamAvVirusScanner::ping(), which reuses that
+     * class's own low-level socket-connection mechanism rather than
+     * duplicating it. `Healthy` only on a genuine `PONG`; `Unhealthy`
+     * on anything else (connection refused, timeout, unexpected
+     * response, or an exception) — never a fabricated Healthy.
+     */
+    private function probeDocumentScanning(): HealthCheckResult
+    {
+        $socket = config('services.clamav.socket');
+
+        if (blank($socket)) {
+            return new HealthCheckResult(
+                HealthCheckType::DocumentScanning,
+                HealthCheckStatus::Unknown,
+                'services.clamav.socket is empty, no clamd daemon expected in this environment',
+            );
+        }
+
+        try {
+            $healthy = app(ClamAvVirusScanner::class)->ping();
+        } catch (Throwable $e) {
+            return new HealthCheckResult(
+                HealthCheckType::DocumentScanning,
+                HealthCheckStatus::Unhealthy,
+                "clamd ping at [{$socket}] raised an exception: {$e->getMessage()}",
+            );
+        }
+
+        return new HealthCheckResult(
+            HealthCheckType::DocumentScanning,
+            $healthy ? HealthCheckStatus::Healthy : HealthCheckStatus::Unhealthy,
+            $healthy ? "clamd responded PONG at [{$socket}]" : "clamd did not respond PONG at [{$socket}]",
         );
     }
 
