@@ -330,10 +330,23 @@ class DocumentSecurityService
      * portal-visible, same rule canBeDownloadedBy() already applies to
      * Client Portal actors — no matter-independent grant concept
      * exists for a Client Portal user.
+     *
+     * Follow-up 1 (Client Portal Documents) hardening: also requires
+     * $document->isUsable() (scan_status Clean AND status !== Rejected)
+     * — the flag alone is not sufficient to expose a still-scanning or
+     * rejected/infected document, mirroring approve()'s own
+     * isUsable()-gated rule above. Without this check, a firm user who
+     * shares a not-yet-clean document (nothing previously stopped that
+     * at this boundary) would have made it prematurely visible the
+     * instant a matter grant existed.
      */
     public function canBeViewedInPortalBy(Document $document, ClientPortalUser $actor): bool
     {
         if ($document->client_visible !== true) {
+            return false;
+        }
+
+        if (! $document->isUsable()) {
             return false;
         }
 

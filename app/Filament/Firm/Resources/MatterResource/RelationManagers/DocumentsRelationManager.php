@@ -148,7 +148,7 @@ class DocumentsRelationManager extends RelationManager
                     ->label(fn (Document $record): string => $record->client_visible ? 'Unshare from client' : 'Share with client')
                     ->icon(fn (Document $record) => $record->client_visible ? Heroicon::OutlinedEyeSlash : Heroicon::OutlinedEye)
                     ->color(fn (Document $record): string => $record->client_visible ? 'gray' : 'success')
-                    ->visible(fn (Document $record): bool => $record->matter_id !== null)
+                    ->visible(fn (Document $record): bool => $record->matter_id !== null && $record->isUsable())
                     ->requiresConfirmation()
                     ->action(function (Document $record): void {
                         $updated = app(DocumentSecurityService::class)->setClientVisibility($record, ! $record->client_visible);

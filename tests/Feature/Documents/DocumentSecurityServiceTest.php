@@ -172,7 +172,13 @@ class DocumentSecurityServiceTest extends TestCase
         $firm = Firm::factory()->create();
         $client = $this->runWithFirmContext($firm, fn () => Client::factory()->forFirm($firm)->create());
         $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->forFirm($firm)->create());
-        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->create([
+        // Follow-up 1 (Client Portal Documents) hardening: ->clean()
+        // is required here — canBeViewedInPortalBy() now also gates on
+        // isUsable() (scan_status Clean AND status !== Rejected), so a
+        // document representing the genuine "visible, granted, usable"
+        // happy path must actually be usable, not merely
+        // client_visible.
+        $document = $this->runWithFirmContext($firm, fn () => Document::factory()->clean()->create([
             'firm_id' => $firm->id,
             'matter_id' => $matter->id,
             'client_visible' => true,

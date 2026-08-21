@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ClientPortal\DocumentDownloadController as ClientPortalDocumentDownloadController;
 use App\Http\Controllers\ClientPortal\PlaidExchangeController;
 use App\Http\Controllers\Firm\DocumentDownloadController;
 use App\Http\Controllers\Integrations\OAuthConnectionController;
@@ -212,6 +213,27 @@ Route::domain($hosts->clientPortalHost())
     ->middleware(['auth:client', EstablishClientPortalTenantContext::class, ApplyTenantDatabaseContext::class, 'throttle:10,1'])
     ->post('plaid/exchange', [PlaidExchangeController::class, 'exchange'])
     ->name('client-portal.plaid.exchange');
+
+/*
+|--------------------------------------------------------------------------
+| Client Portal document download — Client Portal host
+|--------------------------------------------------------------------------
+|
+| Follow-up 1 (Client Portal Documents). Mirrors firm.documents.
+| download's own middleware minimalism (auth + throttle only — no
+| ambient tenant-context middleware) and its "the controller
+| establishes context itself, never trusting the route parameter as a
+| context source" discipline; see
+| App\Http\Controllers\ClientPortal\DocumentDownloadController's own
+| docblock for the full reasoning. Session-authenticated (auth:client)
+| — deliberately never a public signed URL, same "documents are
+| private by default" project rule the Firm-side route already
+| documents.
+*/
+Route::domain($hosts->clientPortalHost())
+    ->middleware(['auth:client', 'throttle:60,1'])
+    ->get('documents/{document}/download', [ClientPortalDocumentDownloadController::class, 'show'])
+    ->name('client-portal.documents.download');
 
 /*
 |--------------------------------------------------------------------------
