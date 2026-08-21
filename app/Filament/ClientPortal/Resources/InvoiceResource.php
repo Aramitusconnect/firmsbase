@@ -38,6 +38,22 @@ use Illuminate\Support\Facades\Auth;
  * `getEloquentQuery()` is the list-level UX filter;
  * `ViewInvoice::resolveRecord()` re-checks the identical rule as the
  * real per-record boundary — never trusting the list query alone.
+ *
+ * canViewAny()/canView() overrides: `App\Models\Invoice` already has a
+ * Firm-panel-scoped `App\Policies\InvoicePolicy` (viewAny(User $user)/
+ * view(User $user, Invoice $invoice)), auto-discovered by Laravel's
+ * standard model-to-policy naming convention. Left to Filament's
+ * default Gate-based authorization, the Client Portal sidebar's own
+ * navigation-visibility check would invoke that SAME policy against
+ * the currently-authenticated `client`-guard actor — a
+ * `ClientPortalUser`, not the `User` that policy's own type-hint
+ * requires — crashing every authenticated Client Portal page render
+ * with a TypeError the instant this resource is registered. Overriding
+ * both methods here to defer entirely to this resource's own real
+ * boundary (canAccess()/isVisibleToPortalUser()) bypasses that shared
+ * policy — the same "list is UX filter, resolve step is the boundary"
+ * split this class's own docblock already documents, just extended to
+ * cover navigation/list-page reachability too.
  */
 class InvoiceResource extends Resource
 {
@@ -56,6 +72,31 @@ class InvoiceResource extends Resource
     public static function canAccess(): bool
     {
         return Auth::guard('client')->check() && parent::canAccess();
+    }
+
+    /**
+     * Deliberately NOT `return static::canAccess();` — Filament's own
+     * default canAccess() (Concerns/HasAuthorization.php) is
+     * `return static::canViewAny();`, and this class's own canAccess()
+     * above calls `parent::canAccess()` — so canViewAny() delegating
+     * back to canAccess() would be infinite mutual recursion
+     * (canAccess -> canViewAny -> canAccess -> ...), hanging every
+     * request that reaches either method. Checks the guard directly
+     * instead, matching canAccess()'s own logic without calling it.
+     */
+    public static function canViewAny(): bool
+    {
+        return Auth::guard('client')->check();
+    }
+
+    public static function canView($record): bool
+    {
+        /** @var ClientPortalUser|null $portalUser */
+        $portalUser = Auth::guard('client')->user();
+
+        return $portalUser !== null
+            && $record instanceof Invoice
+            && static::isVisibleToPortalUser($record, $portalUser);
     }
 
     public static function getEloquentQuery(): Builder
