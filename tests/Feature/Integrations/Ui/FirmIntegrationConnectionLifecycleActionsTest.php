@@ -11,8 +11,12 @@ use App\Filament\Firm\Resources\FirmIntegrationResource\Pages\ListFirmIntegratio
 use App\Filament\Firm\Resources\FirmIntegrationResource\Pages\ViewFirmIntegration;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Enums\ProviderKey;
+use App\Integrations\Enums\ResourceType;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationProvider;
+use App\Integrations\Providers\GoogleWorkspace\GoogleWorkspaceProvider;
+use App\Integrations\Providers\Microsoft365\Microsoft365Provider;
+use App\Integrations\Providers\Plaid\PlaidProvider;
 use App\Integrations\Providers\TestProvider\TestProvider;
 use App\Integrations\Services\IntegrationAccessPolicyService;
 use App\Integrations\Services\ProviderConnectionService;
@@ -25,7 +29,9 @@ use App\Services\TenantContextService;
 use Filament\Facades\Filament;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
+use ReflectionMethod;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -304,6 +310,98 @@ final class FirmIntegrationConnectionLifecycleActionsTest extends TestCase
         $this->expectException(RuntimeException::class);
 
         app(ProviderConnectionService::class)->startConnection($firm->id, 999999999, $firmUser->user_id);
+    }
+
+    // ------------------------------------------------------------
+    // 1b. COMM-008 fix: ConnectProviderAction must not offer the
+    // "Email" (ResourceType::Message) capability for a provider whose
+    // sync framework cannot materialize it. PullSyncJob::applyPage()
+    // only ever materializes an unmapped item when
+    // `$connection->providerKey() === ProviderKey::Plaid` — mirrored
+    // here via ConnectProviderAction::isDeadEndCapability(), keyed off
+    // the resolved provider's own key() since no FirmIntegration row
+    // exists yet at this point in the wizard.
+    // ------------------------------------------------------------
+
+    public function test_connect_provider_action_excludes_the_email_capability_for_microsoft365(): void
+    {
+        config(['integrations.providers' => [ProviderKey::Microsoft365->value => Microsoft365Provider::class]]);
+        $provider = $this->makeProviderRow(ProviderKey::Microsoft365);
+
+        $test = $this->mountConnectProviderActionAndSelectProvider($provider);
+
+        // Message ("Email") requests real Mail.Read/Mail.Send OAuth
+        // consent but PullSyncJob::applyPage() discards every Message
+        // item for a non-Plaid connection — must never be offered.
+        $test->assertDontSee('Email');
+
+        // The exclusion is scoped to Message only: Microsoft365's other
+        // real capabilities (Contact -> "Contacts", CalendarEvent ->
+        // "Calendar") must still be offered.
+        $test->assertSee('Contacts');
+        $test->assertSee('Calendar');
+    }
+
+    public function test_connect_provider_action_excludes_the_email_capability_for_google_workspace(): void
+    {
+        config(['integrations.providers' => [ProviderKey::GoogleWorkspace->value => GoogleWorkspaceProvider::class]]);
+        $provider = $this->makeProviderRow(ProviderKey::GoogleWorkspace);
+
+        $test = $this->mountConnectProviderActionAndSelectProvider($provider);
+
+        $test->assertDontSee('Email');
+
+        // Scoped exclusion: GoogleWorkspace's other real capabilities
+        // (CalendarEvent -> "Calendar", Document -> "Files") must still
+        // be offered.
+        $test->assertSee('Calendar');
+        $test->assertSee('Files');
+    }
+
+    public function test_connect_provider_action_does_not_exclude_non_message_capabilities_for_the_test_provider(): void
+    {
+        // The Test provider never offers Message at all (its
+        // pullableResourceTypes() is Contact/Task only) — proves the
+        // COMM-008 filter is inert for a provider it has nothing to do
+        // with, never a blanket capability removal.
+        config(['integrations.providers' => [ProviderKey::Test->value => TestProvider::class]]);
+        $provider = $this->makeTestProviderRow();
+
+        $test = $this->mountConnectProviderActionAndSelectProvider($provider);
+
+        $test->assertSee('Contacts');
+    }
+
+    /**
+     * Direct unit-level proof of ConnectProviderAction's private
+     * isDeadEndCapability() gate, mirroring PullSyncJob::applyPage()'s
+     * exact `$connection->providerKey() === ProviderKey::Plaid`
+     * condition: Message must be flagged as a dead end for every
+     * provider except Plaid (the one ProviderKey PullSyncJob's
+     * materializer branch actually reaches), and any non-Message
+     * resource type must never be flagged regardless of provider.
+     */
+    public function test_is_dead_end_capability_mirrors_the_pull_sync_job_materialization_gate(): void
+    {
+        $method = new ReflectionMethod(ConnectProviderAction::class, 'isDeadEndCapability');
+        $method->setAccessible(true);
+
+        $microsoft365 = app(Microsoft365Provider::class);
+        $googleWorkspace = app(GoogleWorkspaceProvider::class);
+        $plaid = app(PlaidProvider::class);
+
+        $this->assertTrue($method->invoke(null, ResourceType::Message->value, $microsoft365));
+        $this->assertTrue($method->invoke(null, ResourceType::Message->value, $googleWorkspace));
+
+        // Plaid is the one provider PullSyncJob::applyPage() gates its
+        // materializer branch on — Message must not be excluded for it
+        // even though Plaid itself never actually requests it, so the
+        // wizard filter stays a precise mirror of that gate rather than
+        // a hardcoded "never show Message" rule.
+        $this->assertFalse($method->invoke(null, ResourceType::Message->value, $plaid));
+
+        $this->assertFalse($method->invoke(null, ResourceType::Contact->value, $microsoft365));
+        $this->assertFalse($method->invoke(null, ResourceType::CalendarEvent->value, $googleWorkspace));
     }
 
     // ------------------------------------------------------------
@@ -595,6 +693,51 @@ final class FirmIntegrationConnectionLifecycleActionsTest extends TestCase
     {
         return IntegrationProvider::query()->where('code', ProviderKey::Test->value)->first()
             ?? IntegrationProvider::factory()->create(['code' => ProviderKey::Test->value]);
+    }
+
+    /**
+     * Microsoft365/GoogleWorkspace/Plaid all have a migration-seeded
+     * `integration_providers` catalog row already (unlike the synthetic
+     * Test provider fixture code), so this reuses that row rather than
+     * violating its unique `code` constraint — ensuring it is active
+     * along the way, mirroring makeTestProviderRow()'s own reuse
+     * pattern above.
+     */
+    private function makeProviderRow(ProviderKey $key): IntegrationProvider
+    {
+        $provider = IntegrationProvider::query()->where('code', $key->value)->first()
+            ?? IntegrationProvider::factory()->create(['code' => $key->value]);
+
+        if ($provider->status !== 'active') {
+            $provider->update(['status' => 'active']);
+        }
+
+        return $provider;
+    }
+
+    /**
+     * Mounts ConnectProviderAction for real (see
+     * FirmIntegrationConnectProviderDropdownVisibilityTest's class
+     * docblock for why forceRender() is needed after each mount/data
+     * update), then selects the given catalog row so the reactive
+     * `capabilities` CheckboxList's options() closure evaluates for
+     * real against that resolved provider. Returns the Livewire test
+     * instance so callers can assert against the genuinely rendered
+     * capability labels.
+     */
+    private function mountConnectProviderActionAndSelectProvider(IntegrationProvider $provider): Testable
+    {
+        $firm = $this->entitledFirm();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+
+        $test = $this->runWithFirmContext($firm, fn () => Livewire::test(ListFirmIntegrations::class));
+        $test->mountAction(ConnectProviderAction::getDefaultName());
+        $test->call('forceRender');
+
+        $test->setActionData(['integration_provider_id' => $provider->id]);
+        $test->call('forceRender');
+
+        return $test;
     }
 
     private function connectionFor(Firm $firm, array $overrides = []): FirmIntegration

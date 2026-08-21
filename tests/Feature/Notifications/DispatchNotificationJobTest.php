@@ -128,13 +128,13 @@ class DispatchNotificationJobTest extends TestCase
     }
 
     /**
-     * Non-email channels have no real transport wired (SMS/WhatsApp
-     * provider integration is explicitly out of scope for this
-     * mission). handle() must preserve its previous fakeable-boundary
-     * behavior for them rather than attempting a mail send with a
-     * non-email recipient.
+     * COMM-005 fix. Non-email channels have no real transport wired
+     * (SMS/WhatsApp provider integration is explicitly out of scope for
+     * this mission). handle() must now record this honestly as a
+     * Failed event — never a fabricated Sent event for a message that
+     * was never transmitted anywhere.
      */
-    public function test_handle_preserves_the_fakeable_boundary_for_a_non_email_channel(): void
+    public function test_handle_records_a_failed_event_for_a_non_email_channel_with_no_real_transport(): void
     {
         Notification::fake();
 
@@ -169,7 +169,17 @@ class DispatchNotificationJobTest extends TestCase
                 ->first(),
         );
 
-        $this->assertNotNull($sentEvent);
-        $this->assertNull($sentEvent->provider_message_id);
+        $this->assertNull($sentEvent, 'a non-email channel with no real transport must never record a Sent event');
+
+        $failedEvent = $this->runWithFirmContext(
+            $firm,
+            fn () => NotificationEvent::query()
+                ->where('firm_id', $firm->id)
+                ->where('status', NotificationEventStatus::Failed->value)
+                ->first(),
+        );
+
+        $this->assertNotNull($failedEvent);
+        $this->assertSame('no real transport exists for channel sms', $failedEvent->reason);
     }
 }

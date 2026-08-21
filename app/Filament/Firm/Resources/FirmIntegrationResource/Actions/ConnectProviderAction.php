@@ -68,6 +68,14 @@ use RuntimeException;
  * uses elsewhere (see e.g.
  * App\Filament\Actions\Platform\RequestSupportAccessAction's
  * `access_type` Select / `emergency_justification` Textarea pair).
+ *
+ * COMM-008 fix: the options list further filters out any resource type
+ * `isDeadEndCapability()` flags as unmaterializable by the pull-sync
+ * framework (currently just `ResourceType::Message` for any provider
+ * other than Plaid — see that method's docblock, which mirrors
+ * PullSyncJob::applyPage()'s exact gating condition) so this wizard
+ * never requests real OAuth consent (e.g. Mail.Read/Mail.Send) for a
+ * capability whose synced items are unconditionally discarded.
  * Step 2 discloses, for each selected capability, its human label and
  * the raw OAuth scopes it requires, read from
  * `SupportsOAuthContract::capabilityScopeMap()` — guarded by an
@@ -153,6 +161,7 @@ class ConnectProviderAction extends Action
                             }
 
                             return collect(ProviderMetadata::fromProvider($resolvedProvider)->resourceTypes)
+                                ->reject(fn (string $type): bool => self::isDeadEndCapability($type, $resolvedProvider))
                                 ->mapWithKeys(fn (string $type): array => [$type => self::capabilityLabel($type)])
                                 ->all();
                         })
@@ -302,5 +311,35 @@ class ConnectProviderAction extends Action
             ResourceType::Contact->value => 'Contacts',
             default => (string) str($resourceType)->replace('_', ' ')->headline(),
         };
+    }
+
+    /**
+     * COMM-008 fix. PullSyncJob::applyPage() only ever materializes a
+     * local record for an unmapped external item when
+     * `$connection->providerKey() === ProviderKey::Plaid`
+     * (app/Jobs/PullSyncJob.php, ~line 896) — every other provider falls
+     * straight through to SyncItemStatus::Skipped and nothing is ever
+     * kept locally, for ANY resource type. `ResourceType::Message`
+     * specifically is never handled even in the Plaid branch
+     * (FinancialEvidenceMaterializerService::materialize()'s match has
+     * no Message case at all), so offering it as a capability for a
+     * Microsoft365/GoogleWorkspace connection requests real mailbox
+     * OAuth consent (Mail.Read/Mail.Send or the Gmail equivalent) for a
+     * sync result that is discarded outright.
+     *
+     * This mirrors that exact gating condition here — using the
+     * resolved provider's own key() rather than a FirmIntegration model,
+     * since this wizard runs before any connection row exists — so the
+     * two stay consistent: Message is only ever offered for a provider
+     * whose sync framework can actually keep it (currently: none, since
+     * Plaid itself never selects Message as a resource type; this stays
+     * keyed off Plaid rather than hardcoded to "never" so a future
+     * provider that both is Plaid-keyed and gains real Message handling
+     * does not need this file touched again).
+     */
+    private static function isDeadEndCapability(string $resourceType, IntegrationProviderContract $resolvedProvider): bool
+    {
+        return $resourceType === ResourceType::Message->value
+            && $resolvedProvider->key() !== ProviderKey::Plaid;
     }
 }

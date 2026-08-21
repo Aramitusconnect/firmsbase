@@ -54,9 +54,11 @@ use Throwable;
  * Non-email channels (sms/whatsapp/portal): no real transport exists
  * for these (SMS/WhatsApp provider integration is explicitly out of
  * scope per this mission — "6.7, DO NOT IMPLEMENT"). For those
- * channels this job preserves its previous fakeable-boundary behavior
- * (recordSent() with providerMessageId=null) rather than attempting a
- * send that has nowhere real to go.
+ * channels this job now fails honestly: it calls recordFailed() with
+ * an explicit "no real transport exists" reason rather than fabricating
+ * a Sent event for a message that was never transmitted anywhere. This
+ * replaces the previous fakeable-boundary behavior, which called
+ * recordSent() for these channels even though nothing was ever sent.
  */
 class DispatchNotificationJob implements ShouldQueue
 {
@@ -105,17 +107,15 @@ class DispatchNotificationJob implements ShouldQueue
 
         if ($channel !== ConsentChannel::Email) {
             // No real transport exists yet for this channel — see class
-            // docblock. Preserve the previous fakeable-boundary
-            // behavior so the attempt is still faithfully recorded
-            // without claiming a real send that cannot happen.
-            $dispatcher->recordSent(
+            // docblock. Record this honestly as a failure rather than
+            // claiming a real send that never happened.
+            $dispatcher->recordFailed(
                 $firm,
                 $this->correlationId,
                 $channel,
                 $this->recipient,
                 $this->templateId,
-                $this->clientId,
-                $this->matterId,
+                "no real transport exists for channel {$channel->value}",
             );
 
             return;
