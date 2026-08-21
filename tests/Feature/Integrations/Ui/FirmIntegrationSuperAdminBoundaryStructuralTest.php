@@ -220,6 +220,14 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
         // Both confirmed gated behind Auth::guard('platform_admin') +
         // PlatformStaffAccessPolicyService, the same pattern every prior
         // cascade entry here already establishes.
+        // NON-PAYMENT-COMPLETION-PROGRAM UPDATE (reconciliation branch):
+        // ViewFirm.php's Firm-360 sections add a real, cross-firm-oversight
+        // "Integrations" section (firm_integrations, FORCE RLS, queried
+        // directly inside its own runWithFirmContext($record, ...) call
+        // — see that class's own docblock) — a legitimate, deliberate
+        // Integration-domain reference for exactly the same reason
+        // every other allowlisted file above is legitimate: real
+        // Platform Admin cross-firm oversight.
         $this->assertNoIntegrationDomainReferenceUnder($dir, allowedBasenames: [
             'ConnectionResource.php',
             'SyncFailureResource.php',
@@ -228,6 +236,7 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'ConflictResource.php',
             'ProviderKillSwitchResource.php',
             'PlaidItemOversightResource.php',
+            'ViewFirm.php',
         ]);
     }
 
@@ -987,7 +996,44 @@ final class FirmIntegrationSuperAdminBoundaryStructuralTest extends TestCase
             'Pages'.DIRECTORY_SEPARATOR.'PlatformOperationsOverviewPage.php',
         ];
 
-        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles, $mission1bExtremeSecurityHardeningAllowedRelativeFiles, $mission1cSecurityValidationActivationAllowedRelativeFiles, $mission2MarketplaceSuperAdminControlsAllowedRelativeFiles, $mission2MarketplaceAnalyticsAllowedRelativeFiles, $mission3AiOversightAllowedRelativeFiles, $myattorneySuperAdminConsoleUpgradeAllowedRelativeFiles, $promptTwoIntegrationOperationsAllowedRelativeFiles, $promptThreeGovernanceAllowedRelativeFiles, $promptFourBillingCommercialAllowedRelativeFiles, $promptFiveConfigurationAllowedRelativeFiles, $promptSixSupportAccessAllowedRelativeFiles, $promptSevenOperationsAllowedRelativeFiles);
+        // Non-Payment Completion Program (reconciliation branch) — two
+        // independent, non-Integration-domain additions (confirmed via
+        // grep for `App\Integrations\`/`FirmIntegrationResource` across
+        // every file listed below — zero matches), same cascade-safety
+        // reasoning as every block above:
+        //  - PlatformAutomationOversightPage.php: cross-tenant
+        //    AutomationRule/AutomationActionExecution/dead-lettered
+        //    domain-event oversight, read-only, no requeue/retry action.
+        //  - The entire app/Filament/ClientPortal tree: a third,
+        //    genuinely separate Filament panel (its own guard, its own
+        //    tenant-context bootstrap via
+        //    EstablishClientPortalTenantContext) — not a Firm-panel or
+        //    Admin-panel surface at all, so it necessarily lives outside
+        //    app/Filament/Firm exactly like Checkpoint 11's own
+        //    admin-panel tree does above. Mission 4 (Client Portal
+        //    Activation) plus its document-sharing/payment-plan-visibility
+        //    follow-ups.
+        $nonPaymentCompletionProgramAllowedRelativeFiles = [
+            'Pages'.DIRECTORY_SEPARATOR.'PlatformAutomationOversightPage.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'Dashboard.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'Profile.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Resources'.DIRECTORY_SEPARATOR.'MatterResource.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Resources'.DIRECTORY_SEPARATOR.'MatterResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListMatters.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Resources'.DIRECTORY_SEPARATOR.'MatterResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewMatter.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Resources'.DIRECTORY_SEPARATOR.'MatterResource'.DIRECTORY_SEPARATOR.'RelationManagers'.DIRECTORY_SEPARATOR.'DeadlinesRelationManager.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Resources'.DIRECTORY_SEPARATOR.'DocumentResource.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Resources'.DIRECTORY_SEPARATOR.'DocumentResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListDocuments.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Resources'.DIRECTORY_SEPARATOR.'DocumentResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewDocument.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Resources'.DIRECTORY_SEPARATOR.'InvoiceResource.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Resources'.DIRECTORY_SEPARATOR.'InvoiceResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListInvoices.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Resources'.DIRECTORY_SEPARATOR.'InvoiceResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewInvoice.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Resources'.DIRECTORY_SEPARATOR.'PaymentPlanResource.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Resources'.DIRECTORY_SEPARATOR.'PaymentPlanResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ListPaymentPlans.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Resources'.DIRECTORY_SEPARATOR.'PaymentPlanResource'.DIRECTORY_SEPARATOR.'Pages'.DIRECTORY_SEPARATOR.'ViewPaymentPlan.php',
+            'ClientPortal'.DIRECTORY_SEPARATOR.'Resources'.DIRECTORY_SEPARATOR.'PaymentPlanResource'.DIRECTORY_SEPARATOR.'RelationManagers'.DIRECTORY_SEPARATOR.'InstallmentsRelationManager.php',
+        ];
+
+        $allowedRelativeFiles = array_merge($checkpoint11AllowedRelativeFiles, $phase1AdminControlCenterAllowedRelativeFiles, $mfaAndPlatformAdministratorAllowedRelativeFiles, $executiveDashboardAllowedRelativeFiles, $phase2IntegrationOperationsCenterAllowedRelativeFiles, $phase3BillingAndCommercialAdministrationAllowedRelativeFiles, $phase4GovernanceAllowedRelativeFiles, $phase4SupportAndConfigurationAllowedRelativeFiles, $phase4OperationsAllowedRelativeFiles, $checkpoint4PlaidAllowedRelativeFiles, $checkpoint82ProviderOperationReconciliationAllowedRelativeFiles, $platformFirmProvisioningAllowedRelativeFiles, $practiceAreaCatalogAllowedRelativeFiles, $mission1bExtremeSecurityHardeningAllowedRelativeFiles, $mission1cSecurityValidationActivationAllowedRelativeFiles, $mission2MarketplaceSuperAdminControlsAllowedRelativeFiles, $mission2MarketplaceAnalyticsAllowedRelativeFiles, $mission3AiOversightAllowedRelativeFiles, $myattorneySuperAdminConsoleUpgradeAllowedRelativeFiles, $promptTwoIntegrationOperationsAllowedRelativeFiles, $promptThreeGovernanceAllowedRelativeFiles, $promptFourBillingCommercialAllowedRelativeFiles, $promptFiveConfigurationAllowedRelativeFiles, $promptSixSupportAccessAllowedRelativeFiles, $promptSevenOperationsAllowedRelativeFiles, $nonPaymentCompletionProgramAllowedRelativeFiles);
 
         $unauthorizedNonFirmFilamentFiles = [];
 
