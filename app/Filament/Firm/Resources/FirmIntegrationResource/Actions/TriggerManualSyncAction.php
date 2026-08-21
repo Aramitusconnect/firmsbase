@@ -11,6 +11,7 @@ use App\Integrations\Enums\SyncTriggerSource;
 use App\Integrations\Exceptions\SyncRunAlreadyInProgressException;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Services\IntegrationAccessPolicyService;
+use App\Integrations\Services\ResourceTypeMaterializationPolicyService;
 use App\Integrations\Services\SyncRunService;
 use App\Jobs\PullSyncJob;
 use App\Services\IntegrationEntitlementPolicyService;
@@ -77,11 +78,29 @@ class TriggerManualSyncAction extends Action
         $this->color('primary');
 
         $this->schema([
+            // Filtered through ResourceTypeMaterializationPolicyService
+            // — the same canonical capability-support predicate
+            // ConnectProviderAction's COMM-008 fix already enforces at
+            // connect time (Message unless Plaid, CalendarEvent
+            // unconditionally) — so this modal never offers a resource
+            // type PullSyncJob::applyPage() would silently discard
+            // every item for (or, for a future Plaid CalendarEvent
+            // selection, that FinancialEvidenceMaterializerService::materialize()'s
+            // match has no arm for at all).
             Select::make('resource_type')
                 ->label('Resource type')
-                ->options(collect(ResourceType::cases())->mapWithKeys(
-                    static fn (ResourceType $type) => [$type->value => str($type->value)->replace('_', ' ')->headline()]
-                )->all())
+                ->options(function (RelationManager $livewire): array {
+                    $connection = $livewire->getOwnerRecord();
+                    $providerKey = $connection instanceof FirmIntegration ? $connection->providerKey() : null;
+                    $policy = app(ResourceTypeMaterializationPolicyService::class);
+
+                    return collect(ResourceType::cases())
+                        ->reject(fn (ResourceType $type): bool => $policy->isDeadEndCapability($type->value, $providerKey))
+                        ->mapWithKeys(
+                            static fn (ResourceType $type) => [$type->value => str($type->value)->replace('_', ' ')->headline()]
+                        )
+                        ->all();
+                })
                 ->required()
                 ->native(false),
         ]);
