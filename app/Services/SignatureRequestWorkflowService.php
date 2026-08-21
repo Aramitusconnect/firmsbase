@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ConsentChannel;
 use App\Enums\SignatureEventActorType;
 use App\Enums\SignatureEventType;
+use App\Enums\SignatureRecipientType;
 use App\Enums\SignatureRequestStatus;
 use App\Enums\SignatureSourceDocumentType;
 use App\Models\Client;
@@ -106,6 +107,56 @@ class SignatureRequestWorkflowService
             );
 
             return $request->fresh();
+        });
+    }
+
+    /**
+     * The only place a signature_request_recipients row is created.
+     * Extracted from RecipientsRelationManager's original inline
+     * SignatureRequestRecipient::create() call (Governance Section 25+
+     * WorkflowTransitionEnforcementSearchTest requires every direct
+     * write of a catalog workflow status enum — SignatureRequestStatus
+     * included — to live in app/Services, never in a UI/Filament
+     * layer) — recipients are only ever created at Draft, mirroring
+     * create()'s own status write above for the parent request.
+     * $clientId is looked up (not trusted as already firm-scoped) the
+     * same way the original inline implementation did, inside this
+     * method's own tenant context wrap.
+     */
+    public function addRecipient(
+        SignatureRequest $request,
+        FirmUser $actor,
+        SignatureRecipientType $recipientType,
+        string $signerName,
+        string $signerEmail,
+        ?int $clientId = null,
+    ): SignatureRequestRecipient {
+        if (! $this->accessPolicy->canManageRequests($actor)) {
+            throw new \RuntimeException('Actor role is not permitted to manage recipients for this signature request.');
+        }
+
+        return (new TenantContextService)->runWithFirmContext($request->firm_id, function () use ($request, $actor, $recipientType, $signerName, $signerEmail, $clientId) {
+            $fresh = SignatureRequest::query()->where('id', $request->id)->firstOrFail();
+
+            if ((int) $actor->firm_id !== (int) $fresh->firm_id || $fresh->status !== SignatureRequestStatus::Draft) {
+                throw new \RuntimeException('This request can no longer accept new recipients.');
+            }
+
+            $resolvedClientId = null;
+
+            if ($recipientType === SignatureRecipientType::Client && $clientId !== null) {
+                $resolvedClientId = Client::query()->where('id', $clientId)->where('firm_id', $fresh->firm_id)->value('id');
+            }
+
+            return SignatureRequestRecipient::create([
+                'signature_request_id' => $fresh->id,
+                'firm_id' => $fresh->firm_id,
+                'recipient_type' => $recipientType,
+                'client_id' => $resolvedClientId,
+                'signer_name' => $signerName,
+                'signer_email' => $signerEmail,
+                'status' => SignatureRequestStatus::Draft,
+            ]);
         });
     }
 

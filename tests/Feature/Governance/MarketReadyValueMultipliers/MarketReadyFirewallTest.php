@@ -19,10 +19,23 @@ class MarketReadyFirewallTest extends TestCase
 
     private const NEW_SERVICE_FILES = [
         'MobilePortalCoverageMappingService.php',
-        'FirmCommandCenterAggregationService.php',
         'TemplatePackCoverageMappingService.php',
         'TrustDependentPackGatingMappingService.php',
     ];
+
+    // FirmCommandCenterAggregationService.php is deliberately NOT in
+    // NEW_SERVICE_FILES any more — Mission 5A ("Firm Daily-Workflow
+    // Completion," a later, distinct branch) found a genuine need to
+    // give its snapshot() method a real UI consumer: it had computed
+    // 15 real, firm-scoped operational metrics with zero UI consumers
+    // for its entire life until CommandCenterOverviewWidget.php
+    // (app/Filament/Firm/Widgets) was added. This is exactly the same
+    // "a later section found a genuine, reviewed need to cross this
+    // boundary" shape as the PROTECTED_FILES exclusions above
+    // (TrustEligibilityService.php, TemplatePackInstallationService.php,
+    // ReadinessScorecardRegistry.php, MatterReadinessService.php) — the
+    // UI surface itself is a deliberate feature decision, not scope
+    // creep back into Section 30's original boundary.
 
     private const FORBIDDEN_TOKENS = [
         'DB::statement', 'DB::unprepared', 'Schema::create', 'Schema::table', 'Schema::drop',

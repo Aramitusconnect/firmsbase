@@ -8,8 +8,8 @@ use App\Enums\SignatureRecipientType;
 use App\Enums\SignatureRequestStatus;
 use App\Models\Client;
 use App\Models\SignatureRequest;
-use App\Models\SignatureRequestRecipient;
 use App\Services\SignatureAndPdfAccessPolicyService;
+use App\Services\SignatureRequestWorkflowService;
 use App\Services\TenantContextService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
@@ -35,16 +35,20 @@ use Illuminate\Support\Facades\Auth;
  * request but never actually send one — a dead end, not a narrower
  * version of the feature. The "+ Add Recipient" action below is
  * therefore the one deliberately-added exception to "no bespoke extra
- * fields": a direct, tenant-context-wrapped
- * SignatureRequestRecipient::create() (status always Draft — a fresh
- * row, not a status transition, so this does not touch
- * SignatureWorkflowTransitionService/SignatureRecipientWorkflowService's
- * transition-graph enforcement at all) gated behind the exact same
- * canManageRequests() ceiling SignatureRequestWorkflowService::create()
- * itself uses, and only while the parent request is still Draft.
- * Otherwise strictly read-only — no edit/delete — every subsequent
- * status change is a signer's own action via SignatureRecipientController,
- * never something a firm user does through this table.
+ * fields": it calls SignatureRequestWorkflowService::addRecipient()
+ * (status always Draft — a fresh row, not a status transition, so this
+ * does not touch SignatureWorkflowTransitionService/
+ * SignatureRecipientWorkflowService's transition-graph enforcement at
+ * all), the same owning-service boundary create()/send()/void() already
+ * use for every other direct SignatureRequestStatus write — this
+ * Filament layer never writes the status enum itself (Governance
+ * Section 25+ WorkflowTransitionEnforcementSearchTest). Gated behind
+ * the exact same canManageRequests() ceiling
+ * SignatureRequestWorkflowService::create() itself uses, and only
+ * while the parent request is still Draft. Otherwise strictly
+ * read-only — no edit/delete — every subsequent status change is a
+ * signer's own action via SignatureRecipientController, never
+ * something a firm user does through this table.
  */
 class RecipientsRelationManager extends RelationManager
 {
@@ -150,37 +154,25 @@ class RecipientsRelationManager extends RelationManager
                     return;
                 }
 
-                app(TenantContextService::class)->runWithFirmContext(
-                    (int) $firmUser->firm_id,
-                    function () use ($data, $ownerRecord, $firmUser): void {
-                        $fresh = SignatureRequest::query()->where('id', $ownerRecord->id)->firstOrFail();
+                $recipientType = SignatureRecipientType::from((string) $data['recipient_type']);
+                $clientId = $recipientType === SignatureRecipientType::Client && filled($data['client_id'] ?? null)
+                    ? (int) $data['client_id']
+                    : null;
 
-                        if ((int) $firmUser->firm_id !== (int) $fresh->firm_id || $fresh->status !== SignatureRequestStatus::Draft) {
-                            Notification::make()->title('This request can no longer accept new recipients.')->danger()->send();
+                try {
+                    app(SignatureRequestWorkflowService::class)->addRecipient(
+                        $ownerRecord,
+                        $firmUser,
+                        $recipientType,
+                        (string) $data['signer_name'],
+                        (string) $data['signer_email'],
+                        $clientId,
+                    );
 
-                            return;
-                        }
-
-                        $clientId = null;
-
-                        if (($data['recipient_type'] ?? null) === SignatureRecipientType::Client->value && filled($data['client_id'] ?? null)) {
-                            $client = Client::query()->where('id', $data['client_id'])->where('firm_id', $fresh->firm_id)->first();
-                            $clientId = $client?->id;
-                        }
-
-                        SignatureRequestRecipient::create([
-                            'signature_request_id' => $fresh->id,
-                            'firm_id' => $fresh->firm_id,
-                            'recipient_type' => $data['recipient_type'],
-                            'client_id' => $clientId,
-                            'signer_name' => (string) $data['signer_name'],
-                            'signer_email' => (string) $data['signer_email'],
-                            'status' => SignatureRequestStatus::Draft->value,
-                        ]);
-
-                        Notification::make()->title('Recipient added')->success()->send();
-                    },
-                );
+                    Notification::make()->title('Recipient added')->success()->send();
+                } catch (\RuntimeException $e) {
+                    Notification::make()->title('Could not add recipient')->body($e->getMessage())->danger()->send();
+                }
             });
     }
 

@@ -97,8 +97,22 @@ class WorkflowTransitionEnforcementSearchTest extends TestCase
         // narrow exception: a pure infra health-check endpoint that never
         // touches a workflow-state-machine model or performs a status
         // write — orthogonal to this test's actual concern.
+        // SignatureRecipientController.php (non-payment completion
+        // program, e-signature signer-facing flow) is a second reviewed,
+        // narrow exception for the identical reason: a genuinely
+        // unauthenticated signer accessing /sign/{uuid} cannot go
+        // through any Filament panel (every panel requires an
+        // authenticated guard), so a real HTTP controller is the only
+        // possible surface — but every consent()/sign()/decline()
+        // method delegates the actual transition to
+        // SignatureRecipientWorkflowService (the owning service, which
+        // itself enforces SignatureWorkflowTransitionService's graph);
+        // the controller itself never writes signature_request_recipients.status
+        // or signature_requests.status directly (its only 'status' key
+        // usage is Laravel's unrelated session-flash `->with('status', ...)`
+        // UI message).
         $controllerFiles = glob(base_path('app/Http/Controllers/*.php')) ?: [];
-        $this->assertSame(['Controller.php', 'ReadinessController.php'], array_map('basename', $controllerFiles), 'No real controller should exist beyond the empty Laravel scaffold and the reviewed ECS readiness probe.');
+        $this->assertSame(['Controller.php', 'ReadinessController.php', 'SignatureRecipientController.php'], array_map('basename', $controllerFiles), 'No real controller should exist beyond the empty Laravel scaffold and the two reviewed exceptions.');
 
         // Narrowly updated by Checkpoint 4 (FirmsVault Live Integrations,
         // "Plaid financial evidence add-on") -- resources/views/filament-

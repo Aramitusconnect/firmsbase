@@ -60,8 +60,12 @@ class AdminControlUiBoundaryTest extends TestCase
         // model access, no admin UI, and no Filament/Livewire involvement
         // — orthogonal to this test's actual concern (no admin resource
         // was generated for Section 34).
+        // SignatureRecipientController.php (non-payment completion
+        // program) is a second reviewed, narrow exception for the same
+        // reason: it belongs to the Firm/public surface, not the Admin
+        // panel — no admin resource, page, or model access of any kind.
         $controllerFiles = glob(base_path('app/Http/Controllers/*.php')) ?: [];
-        $this->assertSame(['Controller.php', 'ReadinessController.php'], array_map('basename', $controllerFiles), 'No real controller should exist beyond the empty Laravel scaffold and the reviewed ECS readiness probe.');
+        $this->assertSame(['Controller.php', 'ReadinessController.php', 'SignatureRecipientController.php'], array_map('basename', $controllerFiles), 'No real controller should exist beyond the empty Laravel scaffold and the two reviewed exceptions.');
     }
 
     public function test_this_section_remains_catalog_mapping_only(): void
