@@ -6,11 +6,13 @@ namespace App\Filament\Firm\Pages;
 
 use App\Enums\ChartOfAccountPurpose;
 use App\Filament\Firm\Pages\AccountingOverviewPage\Actions\ClosePeriodAction;
+use App\Models\Invoice;
 use App\Services\AccountingEntitlementPolicyService;
 use App\Services\AccountingReportingService;
 use App\Services\ChartOfAccountsService;
 use BackedEnum;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\EmbeddedTable;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Text;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
@@ -19,6 +21,11 @@ use Filament\Schemas\Schema;
 use Filament\Support\Enums\FontWeight;
 use Filament\Support\Enums\TextSize;
 use Filament\Support\Icons\Heroicon;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Concerns\InteractsWithTable;
+use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Table;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 
 /**
@@ -34,9 +41,10 @@ use Illuminate\Support\Facades\Auth;
  * (ClosePeriodAction) invoking AccountingPeriodCloseService::close()
  * directly — never a generic form/CRUD control.
  */
-class AccountingOverviewPage extends Page implements HasSchemas
+class AccountingOverviewPage extends Page implements HasSchemas, HasTable
 {
     use InteractsWithSchemas;
+    use InteractsWithTable;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedChartBar;
 
@@ -110,6 +118,10 @@ class AccountingOverviewPage extends Page implements HasSchemas
                     Text::make(fn (): string => $this->arAgingSummary())
                         ->size(TextSize::Medium),
                 ]),
+            Section::make('Accounts Receivable Aging Detail')
+                ->description('Every unpaid invoice, bucketed by days overdue relative to its due date.')
+                ->collapsible()
+                ->schema([EmbeddedTable::make()]),
             Section::make('Earned vs. Unearned')
                 ->schema([
                     Text::make(fn (): string => $this->earnedVsUnearnedSummary())
@@ -122,6 +134,66 @@ class AccountingOverviewPage extends Page implements HasSchemas
                         ->weight(fn (): FontWeight => $this->hasReconciliationExceptions() ? FontWeight::Bold : FontWeight::Normal),
                 ]),
         ]);
+    }
+
+    /**
+     * The bucket-level detail behind arAgingSummary()'s collapsed
+     * sentence — same AccountingReportingService::accountsReceivableAging()
+     * call, rendered as a real per-invoice table instead of only a
+     * total. Array-row-backed ->records() table (mirrors
+     * PlatformAutomationOversightPage's established shape for a plain
+     * array/collection with no single backing Eloquent model) —
+     * ->recordAction(null)->recordUrl(null) disables Filament's default
+     * row-click resolution against these array rows for the same
+     * reason that page's own docblock documents.
+     */
+    public function table(Table $table): Table
+    {
+        return $table
+            ->records(fn (): Collection => $this->arAgingRows())
+            ->columns([
+                TextColumn::make('invoice.id')
+                    ->label('Invoice')
+                    ->formatStateUsing(fn ($state): string => "#{$state}"),
+                TextColumn::make('invoice.client.display_name')
+                    ->label('Client')
+                    ->placeholder('—'),
+                TextColumn::make('remaining_cents')
+                    ->label('Remaining')
+                    ->formatStateUsing(fn (int $state): string => '$'.number_format($state / 100, 2)),
+                TextColumn::make('days_overdue')
+                    ->label('Days Overdue')
+                    ->alignEnd(),
+                TextColumn::make('bucket')
+                    ->label('Bucket')
+                    ->badge()
+                    ->formatStateUsing(fn (string $state): string => (string) str($state)->headline())
+                    ->color(fn (string $state): string => match ($state) {
+                        'current' => 'success',
+                        '1_30' => 'info',
+                        '31_60' => 'warning',
+                        '61_90', '90_plus' => 'danger',
+                        default => 'gray',
+                    }),
+            ])
+            ->emptyStateHeading('No unpaid invoices')
+            ->recordAction(null)
+            ->recordUrl(null)
+            ->paginated(false);
+    }
+
+    /**
+     * @return Collection<int, array{invoice: Invoice, remaining_cents: int, days_overdue: int, bucket: string}>
+     */
+    private function arAgingRows(): Collection
+    {
+        $firmUser = Auth::user()?->activeFirmUser();
+
+        if ($firmUser === null) {
+            return collect();
+        }
+
+        return app(AccountingReportingService::class)->accountsReceivableAging($firmUser->firm)->data;
     }
 
     private function arAgingSummary(): string

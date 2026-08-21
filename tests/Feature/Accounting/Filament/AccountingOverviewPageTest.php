@@ -9,12 +9,14 @@ use App\Enums\ChartOfAccountPurpose;
 use App\Enums\ChartOfAccountType;
 use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
+use App\Enums\InvoiceStatus;
 use App\Filament\Firm\Pages\AccountingOverviewPage;
 use App\Filament\Firm\Pages\AccountingOverviewPage\Actions\ClosePeriodAction;
 use App\Models\AccountingPeriod;
 use App\Models\ChartOfAccount;
 use App\Models\Firm;
 use App\Models\FirmUser;
+use App\Models\Invoice;
 use App\Models\User;
 use App\Services\EntitlementService;
 use Filament\Facades\Filament;
@@ -41,9 +43,15 @@ final class AccountingOverviewPageTest extends TestCase
 
     private function actingAsRole(Firm $firm, FirmUserRole $role): FirmUser
     {
+        // Non-Payment Completion Program, Workstream 7: FirmOwner/Attorney
+        // now require confirmed 2FA regardless of the firm's own
+        // firm_user_2fa_mode (see FirmUser2faPolicyService's platform-
+        // minimum floor). This file's tests are about accounting page
+        // access, not MFA, so the fixture is pre-confirmed here to stay
+        // unaffected.
         $firmUser = $this->runWithFirmContext(
             $firm,
-            fn () => FirmUser::factory()->forFirm($firm)->forUser(User::factory()->create())->role($role)->create()
+            fn () => FirmUser::factory()->forFirm($firm)->forUser(User::factory()->create(['two_factor_confirmed_at' => now()]))->role($role)->create()
         );
 
         $this->actingAs($firmUser->user);
@@ -113,6 +121,53 @@ final class AccountingOverviewPageTest extends TestCase
             $test->assertSuccessful();
             $test->assertSeeText('Missing required accounts for');
             $test->assertSeeText('Operating Cash');
+        });
+    }
+
+    /**
+     * RPT-001: the bucketed AR aging data AccountingReportingService::
+     * accountsReceivableAging() already computes was previously only
+     * collapsed into a single summary sentence — this proves the new
+     * per-invoice table Section actually renders the real invoice,
+     * client, remaining amount, days-overdue, and bucket for each row.
+     */
+    public function test_the_page_renders_a_bucketed_ar_aging_table_with_real_rows(): void
+    {
+        $firm = Firm::factory()->create();
+        app(EntitlementService::class)->setForSource($firm, 'expenses', EntitlementSource::AdminOverride, true);
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+
+        $this->runWithFirmContext($firm, function () use ($firm): void {
+            $overdueInvoice = Invoice::factory()->forFirm($firm)->create([
+                'status' => InvoiceStatus::Sent,
+                'subtotal_cents' => 50000,
+                'total_cents' => 50000,
+                'amount_paid_cents' => 20000,
+                'due_at' => now()->subDays(45),
+            ]);
+
+            $currentInvoice = Invoice::factory()->forFirm($firm)->create([
+                'status' => InvoiceStatus::Sent,
+                'subtotal_cents' => 10000,
+                'total_cents' => 10000,
+                'amount_paid_cents' => 0,
+                'due_at' => now()->addDays(10),
+            ]);
+
+            $test = Livewire::test(AccountingOverviewPage::class);
+            $test->assertSuccessful();
+
+            // Remaining balances: overdue invoice $500.00 - $200.00 =
+            // $300.00; current invoice $100.00 - $0.00 = $100.00.
+            $test->assertSeeText('#'.$overdueInvoice->id);
+            $test->assertSeeText($overdueInvoice->client->display_name);
+            $test->assertSeeText('$300.00');
+            $test->assertSeeText('31 60');
+
+            $test->assertSeeText('#'.$currentInvoice->id);
+            $test->assertSeeText($currentInvoice->client->display_name);
+            $test->assertSeeText('$100.00');
+            $test->assertSeeText('Current');
         });
     }
 
