@@ -79,14 +79,12 @@ class TriggerManualSyncAction extends Action
 
         $this->schema([
             // Filtered through ResourceTypeMaterializationPolicyService
-            // — the same canonical capability-support predicate
-            // ConnectProviderAction's COMM-008 fix already enforces at
-            // connect time (Message unless Plaid, CalendarEvent
-            // unconditionally) — so this modal never offers a resource
-            // type PullSyncJob::applyPage() would silently discard
-            // every item for (or, for a future Plaid CalendarEvent
-            // selection, that FinancialEvidenceMaterializerService::materialize()'s
-            // match has no arm for at all).
+            // -- unlike ConnectProviderAction's own narrower, connect-
+            // time-only Message check, this modal dispatches a REAL
+            // PullSyncJob run, so it must exclude every resource type
+            // that run would silently discard every item for: Message
+            // unless Plaid, and CalendarEvent unconditionally (no
+            // provider's materializer has a CalendarEvent arm at all).
             Select::make('resource_type')
                 ->label('Resource type')
                 ->options(function (RelationManager $livewire): array {
@@ -95,7 +93,7 @@ class TriggerManualSyncAction extends Action
                     $policy = app(ResourceTypeMaterializationPolicyService::class);
 
                     return collect(ResourceType::cases())
-                        ->reject(fn (ResourceType $type): bool => $policy->isDeadEndCapability($type->value, $providerKey))
+                        ->reject(fn (ResourceType $type): bool => $policy->isUnmaterializedByPullSync($type->value, $providerKey))
                         ->mapWithKeys(
                             static fn (ResourceType $type) => [$type->value => str($type->value)->replace('_', ' ')->headline()]
                         )
