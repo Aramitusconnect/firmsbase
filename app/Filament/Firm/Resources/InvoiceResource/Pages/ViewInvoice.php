@@ -10,6 +10,8 @@ use App\Filament\Firm\Resources\InvoiceResource\Actions\ApproveInvoiceAction;
 use App\Filament\Firm\Resources\InvoiceResource\Actions\SendInvoiceAction;
 use App\Filament\Firm\Resources\InvoiceResource\Actions\SubmitInvoiceForReviewAction;
 use App\Filament\Firm\Resources\InvoiceResource\Actions\VoidInvoiceAction;
+use App\Filament\Firm\Resources\InvoiceResource\Actions\WriteOffInvoiceAction;
+use App\Models\Invoice;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Section;
@@ -37,6 +39,7 @@ class ViewInvoice extends ViewRecord
             ApproveInvoiceAction::make(),
             SendInvoiceAction::make(),
             VoidInvoiceAction::make(),
+            WriteOffInvoiceAction::make(),
         ];
     }
 
@@ -72,6 +75,10 @@ class ViewInvoice extends ViewRecord
                         ->formatStateUsing(fn (int $state): string => '$'.number_format($state / 100, 2)),
                     TextEntry::make('amount_paid_cents')
                         ->label('Amount Paid')
+                        ->formatStateUsing(fn (int $state): string => '$'.number_format($state / 100, 2)),
+                    TextEntry::make('outstanding_balance')
+                        ->label('Outstanding Balance')
+                        ->state(fn (Invoice $record): int => $record->total_cents - $record->amount_paid_cents)
                         ->formatStateUsing(fn (int $state): string => '$'.number_format($state / 100, 2)),
                     TextEntry::make('currency')->label('Currency'),
                     TextEntry::make('issued_at')->label('Issued At')->dateTime()->placeholder('—'),

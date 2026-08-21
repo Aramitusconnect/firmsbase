@@ -16,12 +16,17 @@ use App\Filament\Firm\Resources\InvoiceResource\Actions\DraftFromTimeEntriesActi
 use App\Filament\Firm\Resources\InvoiceResource\Actions\SendInvoiceAction;
 use App\Filament\Firm\Resources\InvoiceResource\Actions\SubmitInvoiceForReviewAction;
 use App\Filament\Firm\Resources\InvoiceResource\Actions\VoidInvoiceAction;
+use App\Filament\Firm\Resources\InvoiceResource\Actions\WriteOffInvoiceAction;
 use App\Filament\Firm\Resources\InvoiceResource\Pages\ListInvoices;
+use App\Filament\Firm\Resources\InvoiceResource\Pages\ViewInvoice;
+use App\Filament\Firm\Resources\InvoiceResource\RelationManagers\TimelineRelationManager;
 use App\Models\Client;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\Invoice;
+use App\Models\InvoiceWriteOff;
 use App\Models\TimeEntry;
+use App\Models\TimelineEvent;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -398,11 +403,269 @@ final class InvoiceResourceAccessTest extends TestCase
         $response->assertNotFound();
     }
 
+    // ------------------------------------------------------------
+    // 6. BILL-001 — Write Off action
+    // ------------------------------------------------------------
+
+    public function test_write_off_action_is_visible_for_firm_owner_when_a_balance_remains(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forFirm($firm)->status(InvoiceStatus::Sent)->create([
+            'total_cents' => 50000, 'amount_paid_cents' => 20000,
+        ]));
+
+        $this->runWithFirmContext($firm, function () use ($invoice): void {
+            $test = Livewire::test(ListInvoices::class);
+            $test->assertTableActionVisible(WriteOffInvoiceAction::getDefaultName(), $invoice);
+        });
+    }
+
+    public function test_write_off_action_is_hidden_for_billing_staff(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::BillingStaff);
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forFirm($firm)->status(InvoiceStatus::Sent)->create([
+            'total_cents' => 50000, 'amount_paid_cents' => 20000,
+        ]));
+
+        $this->runWithFirmContext($firm, function () use ($invoice): void {
+            $test = Livewire::test(ListInvoices::class);
+            $test->assertTableActionHidden(WriteOffInvoiceAction::getDefaultName(), $invoice);
+        });
+    }
+
+    public function test_write_off_action_is_hidden_for_a_paid_invoice(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forFirm($firm)->status(InvoiceStatus::Paid)->create([
+            'total_cents' => 50000, 'amount_paid_cents' => 50000,
+        ]));
+
+        $this->runWithFirmContext($firm, function () use ($invoice): void {
+            $test = Livewire::test(ListInvoices::class);
+            $test->assertTableActionHidden(WriteOffInvoiceAction::getDefaultName(), $invoice);
+        });
+    }
+
+    public function test_write_off_action_is_hidden_for_a_draft_invoice(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forFirm($firm)->status(InvoiceStatus::Draft)->create([
+            'total_cents' => 50000, 'amount_paid_cents' => 0,
+        ]));
+
+        $this->runWithFirmContext($firm, function () use ($invoice): void {
+            $test = Livewire::test(ListInvoices::class);
+            $test->assertTableActionHidden(WriteOffInvoiceAction::getDefaultName(), $invoice);
+        });
+    }
+
+    public function test_write_off_action_is_hidden_for_an_already_written_off_invoice(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forFirm($firm)->status(InvoiceStatus::WrittenOff)->create([
+            'total_cents' => 50000, 'amount_paid_cents' => 20000,
+        ]));
+
+        $this->runWithFirmContext($firm, function () use ($invoice): void {
+            $test = Livewire::test(ListInvoices::class);
+            $test->assertTableActionHidden(WriteOffInvoiceAction::getDefaultName(), $invoice);
+        });
+    }
+
+    public function test_write_off_action_is_hidden_when_no_remaining_balance_even_in_an_otherwise_eligible_status(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        // Sent is otherwise an eligible status, but nothing is left to
+        // collect — the action must not surface an operation the
+        // service itself would reject via its own $remainingCents <= 0
+        // guard.
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forFirm($firm)->status(InvoiceStatus::Sent)->create([
+            'total_cents' => 50000, 'amount_paid_cents' => 50000,
+        ]));
+
+        $this->runWithFirmContext($firm, function () use ($invoice): void {
+            $test = Livewire::test(ListInvoices::class);
+            $test->assertTableActionHidden(WriteOffInvoiceAction::getDefaultName(), $invoice);
+        });
+    }
+
+    public function test_write_off_performs_a_real_write_off_via_the_service(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::Attorney);
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forFirm($firm)->status(InvoiceStatus::Sent)->create([
+            'total_cents' => 50000, 'amount_paid_cents' => 20000,
+        ]));
+
+        $this->runWithFirmContext($firm, function () use ($invoice): void {
+            $test = Livewire::test(ListInvoices::class);
+            $test->mountTableAction(WriteOffInvoiceAction::getDefaultName(), $invoice);
+            $test->setActionData(['reason' => 'Client went out of business']);
+            $test->callMountedTableAction();
+            $test->assertNotified('Invoice written off');
+        });
+
+        $fresh = $this->runWithFirmContext($firm, fn () => Invoice::query()->find($invoice->id));
+        $this->assertSame(InvoiceStatus::WrittenOff, $fresh->status);
+        // amount_paid_cents (the already-collected portion) must be
+        // untouched by a write-off — proves this went through the real
+        // service's "write off only the remainder" semantics, not a
+        // bare status flip.
+        $this->assertSame(20000, $fresh->amount_paid_cents);
+
+        $writeOffRow = $this->runWithFirmContext($firm, fn () => InvoiceWriteOff::where('invoice_id', $invoice->id)->first());
+        $this->assertNotNull($writeOffRow);
+        $this->assertSame(30000, $writeOffRow->amount_cents);
+        $this->assertSame('Client went out of business', $writeOffRow->reason);
+    }
+
+    public function test_write_off_action_is_registered_as_a_view_page_header_action(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forFirm($firm)->status(InvoiceStatus::Sent)->create([
+            'total_cents' => 50000, 'amount_paid_cents' => 20000,
+        ]));
+
+        $this->runWithFirmContext($firm, function () use ($invoice): void {
+            $test = Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()]);
+            $test->assertActionVisible(WriteOffInvoiceAction::getDefaultName());
+        });
+    }
+
+    // ------------------------------------------------------------
+    // 7. BILL-004 — Timeline relation manager
+    // ------------------------------------------------------------
+
+    public function test_timeline_tab_shows_this_invoices_own_real_timeline_events(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forFirm($firm)->create());
+        $event = $this->runWithFirmContext($firm, fn () => TimelineEvent::factory()->forFirm($firm)->forSubject($invoice)->eventType('invoice_drafted')->create());
+
+        $this->runWithFirmContext($firm, function () use ($invoice, $event): void {
+            $test = Livewire::test(TimelineRelationManager::class, [
+                'ownerRecord' => $invoice,
+                'pageClass' => ViewInvoice::class,
+            ]);
+            $test->assertOk();
+            $test->assertCanSeeTableRecords([$event]);
+        });
+    }
+
+    public function test_timeline_tab_never_shows_a_different_invoices_event(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forFirm($firm)->create());
+        $otherInvoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forFirm($firm)->create());
+        $otherEvent = $this->runWithFirmContext($firm, fn () => TimelineEvent::factory()->forFirm($firm)->forSubject($otherInvoice)->eventType('invoice_drafted')->create());
+
+        $this->runWithFirmContext($firm, function () use ($invoice, $otherEvent): void {
+            $test = Livewire::test(TimelineRelationManager::class, [
+                'ownerRecord' => $invoice,
+                'pageClass' => ViewInvoice::class,
+            ]);
+            $test->assertOk();
+            $test->assertCanNotSeeTableRecords([$otherEvent], "Another invoice's timeline event must never appear on this invoice's Timeline tab.");
+        });
+    }
+
+    public function test_timeline_tab_never_shows_a_different_firms_event(): void
+    {
+        $firmA = Firm::factory()->create();
+        $firmB = Firm::factory()->create();
+        $this->actingAsRole($firmA, FirmUserRole::FirmOwner);
+        $invoiceA = $this->runWithFirmContext($firmA, fn () => Invoice::factory()->forFirm($firmA)->create());
+        $invoiceB = $this->runWithFirmContext($firmB, fn () => Invoice::factory()->forFirm($firmB)->create());
+        $eventB = $this->runWithFirmContext($firmB, fn () => TimelineEvent::factory()->forFirm($firmB)->forSubject($invoiceB)->eventType('invoice_drafted')->create());
+
+        $this->runWithFirmContext($firmA, function () use ($invoiceA, $eventB): void {
+            $test = Livewire::test(TimelineRelationManager::class, [
+                'ownerRecord' => $invoiceA,
+                'pageClass' => ViewInvoice::class,
+            ]);
+            $test->assertOk();
+            $test->assertCanNotSeeTableRecords([$eventB], "Firm B's timeline event must never appear under Firm A's session.");
+        });
+    }
+
+    public function test_invoice_resource_registers_the_timeline_relation_manager(): void
+    {
+        $this->assertContains(TimelineRelationManager::class, InvoiceResource::getRelations());
+    }
+
+    // ------------------------------------------------------------
+    // 8. BILL-005 — Outstanding balance display
+    // ------------------------------------------------------------
+
+    public function test_outstanding_balance_column_computes_total_minus_paid(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forFirm($firm)->status(InvoiceStatus::Sent)->create([
+            'total_cents' => 50000, 'amount_paid_cents' => 20000,
+        ]));
+
+        $this->runWithFirmContext($firm, function () use ($invoice): void {
+            $test = Livewire::test(ListInvoices::class);
+            $test->assertTableColumnStateSet('outstanding_balance', 30000, $invoice);
+        });
+    }
+
+    public function test_outstanding_balance_column_is_zero_for_a_fully_paid_invoice(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forFirm($firm)->status(InvoiceStatus::Paid)->create([
+            'total_cents' => 50000, 'amount_paid_cents' => 50000,
+        ]));
+
+        $this->runWithFirmContext($firm, function () use ($invoice): void {
+            $test = Livewire::test(ListInvoices::class);
+            $test->assertTableColumnStateSet('outstanding_balance', 0, $invoice);
+        });
+    }
+
+    public function test_view_page_shows_the_computed_outstanding_balance(): void
+    {
+        $firm = Firm::factory()->create();
+        $this->actingAsRole($firm, FirmUserRole::FirmOwner);
+        $invoice = $this->runWithFirmContext($firm, fn () => Invoice::factory()->forFirm($firm)->status(InvoiceStatus::Sent)->create([
+            'total_cents' => 50000, 'amount_paid_cents' => 20000,
+        ]));
+
+        // Mounts the page's Livewire component directly (mirrors this
+        // class's own test_write_off_action_is_registered_as_a_view_page_header_action
+        // and MatterResource's ActivityRelationManager test precedent)
+        // rather than a raw HTTP get(), so this stays a precise test of
+        // the infolist entry this batch adds, independent of unrelated
+        // full-request middleware behavior.
+        $this->runWithFirmContext($firm, function () use ($invoice): void {
+            $test = Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()]);
+            $test->assertOk();
+            $test->assertSee('Outstanding Balance');
+            $test->assertSee('$300.00');
+        });
+    }
+
     private function actingAsRole(Firm $firm, FirmUserRole $role): FirmUser
     {
+        // Non-Payment Completion Program, Workstream 7: FirmOwner/Attorney
+        // now require confirmed 2FA regardless of the firm's own
+        // firm_user_2fa_mode (see FirmUser2faPolicyService's platform-
+        // minimum floor). This file's tests are about invoice access, not
+        // MFA, so the fixture is pre-confirmed here to stay unaffected.
         $firmUser = $this->runWithFirmContext(
             $firm,
-            fn () => FirmUser::factory()->forFirm($firm)->forUser(User::factory()->create())->role($role)->create()
+            fn () => FirmUser::factory()->forFirm($firm)->forUser(User::factory()->create(['two_factor_confirmed_at' => now()]))->role($role)->create()
         );
 
         $this->actingAs($firmUser->user);

@@ -11,10 +11,12 @@ use App\Filament\Firm\Resources\InvoiceResource\Actions\ApproveInvoiceAction;
 use App\Filament\Firm\Resources\InvoiceResource\Actions\SendInvoiceAction;
 use App\Filament\Firm\Resources\InvoiceResource\Actions\SubmitInvoiceForReviewAction;
 use App\Filament\Firm\Resources\InvoiceResource\Actions\VoidInvoiceAction;
+use App\Filament\Firm\Resources\InvoiceResource\Actions\WriteOffInvoiceAction;
 use App\Filament\Firm\Resources\InvoiceResource\Pages\ListInvoices;
 use App\Filament\Firm\Resources\InvoiceResource\Pages\ViewInvoice;
 use App\Filament\Firm\Resources\InvoiceResource\RelationManagers\LinesRelationManager;
 use App\Filament\Firm\Resources\InvoiceResource\RelationManagers\PaymentsRelationManager;
+use App\Filament\Firm\Resources\InvoiceResource\RelationManagers\TimelineRelationManager;
 use App\Models\Client;
 use App\Models\Invoice;
 use App\Models\Matter;
@@ -116,6 +118,10 @@ class InvoiceResource extends Resource
                     ->label('Paid')
                     ->formatStateUsing(fn (int $state): string => '$'.number_format($state / 100, 2))
                     ->sortable(),
+                TextColumn::make('outstanding_balance')
+                    ->label('Outstanding')
+                    ->state(fn (Invoice $record): int => $record->total_cents - $record->amount_paid_cents)
+                    ->formatStateUsing(fn (int $state): string => '$'.number_format($state / 100, 2)),
                 TextColumn::make('issued_at')->label('Issued')->dateTime()->placeholder('—')->sortable(),
                 TextColumn::make('due_at')->label('Due')->dateTime()->placeholder('—')->sortable(),
                 TextColumn::make('created_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
@@ -167,6 +173,7 @@ class InvoiceResource extends Resource
                 ApproveInvoiceAction::make(),
                 SendInvoiceAction::make(),
                 VoidInvoiceAction::make(),
+                WriteOffInvoiceAction::make(),
             ]);
     }
 
@@ -175,6 +182,7 @@ class InvoiceResource extends Resource
         return [
             LinesRelationManager::class,
             PaymentsRelationManager::class,
+            TimelineRelationManager::class,
         ];
     }
 
