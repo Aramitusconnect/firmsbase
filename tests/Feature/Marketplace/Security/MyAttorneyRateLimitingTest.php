@@ -6,7 +6,9 @@ namespace Tests\Feature\Marketplace\Security;
 
 use App\Marketplace\Models\DirectoryFirm;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
@@ -56,22 +58,40 @@ final class MyAttorneyRateLimitingTest extends TestCase
         $this->assertSame(429, $lastStatus, 'The 61st home-page request within the same minute must be rate-limited.');
     }
 
+    /**
+     * These used to assert a literal 'throttle:60,1' string. The routes now use
+     * NAMED limiters, because an inline throttle keys on domain + IP with the
+     * URI excluded — every route on this host shared one counter, so reading a
+     * profile spent the Start Intake budget (see
+     * MyAttorneyRateLimitServiceProvider). Asserting the limiter's configured
+     * size keeps the same protection under test without pinning the mechanism.
+     */
+    private function assertRouteLimitedTo(string $limiterName, int $perMinute, $route, string $context = ''): void
+    {
+        $this->assertNotNull($route, "Route must exist. {$context}");
+        $this->assertContains(
+            'throttle:'.$limiterName,
+            $route->gatherMiddleware(),
+            "Route must carry the {$limiterName} limiter. {$context}"
+        );
+
+        $limiter = RateLimiter::limiter($limiterName);
+        $this->assertNotNull($limiter, "Limiter {$limiterName} must be registered.");
+
+        $limit = $limiter(Request::create('/', 'GET', server: ['REMOTE_ADDR' => '203.0.113.9']));
+        $this->assertSame($perMinute, $limit->maxAttempts, "Limiter {$limiterName} must allow {$perMinute} per minute.");
+    }
+
     // BB. Firm profile route carries the same throttle.
     public function test_firm_profile_route_carries_a_throttle_middleware(): void
     {
-        $route = Route::getRoutes()->getByName('myattorney.firms.show');
-
-        $this->assertNotNull($route);
-        $this->assertContains('throttle:60,1', $route->gatherMiddleware());
+        $this->assertRouteLimitedTo('myattorney-public', 60, Route::getRoutes()->getByName('myattorney.firms.show'));
     }
 
     // BC. Attorney profile route carries the same throttle.
     public function test_attorney_profile_route_carries_a_throttle_middleware(): void
     {
-        $route = Route::getRoutes()->getByName('myattorney.attorneys.show');
-
-        $this->assertNotNull($route);
-        $this->assertContains('throttle:60,1', $route->gatherMiddleware());
+        $this->assertRouteLimitedTo('myattorney-public', 60, Route::getRoutes()->getByName('myattorney.attorneys.show'));
     }
 
     // BD. Sitemap routes carry a throttle (bots/crawlers get a more
@@ -79,10 +99,7 @@ final class MyAttorneyRateLimitingTest extends TestCase
     public function test_sitemap_routes_carry_a_throttle_middleware(): void
     {
         foreach (['myattorney.sitemap.index', 'myattorney.sitemap.pages', 'myattorney.sitemap.firms', 'myattorney.sitemap.attorneys'] as $name) {
-            $route = Route::getRoutes()->getByName($name);
-
-            $this->assertNotNull($route, "Route {$name} must exist.");
-            $this->assertContains('throttle:120,1', $route->gatherMiddleware(), "Route {$name} must carry a throttle middleware.");
+            $this->assertRouteLimitedTo('myattorney-crawl', 120, Route::getRoutes()->getByName($name), $name);
         }
     }
 
@@ -97,8 +114,7 @@ final class MyAttorneyRateLimitingTest extends TestCase
         $myAttorneyRobots = collect(Route::getRoutes()->getRoutes())
             ->first(fn ($route) => $route->uri() === 'robots.txt' && $route->getDomain() !== null);
 
-        $this->assertNotNull($myAttorneyRobots);
-        $this->assertContains('throttle:120,1', $myAttorneyRobots->gatherMiddleware());
+        $this->assertRouteLimitedTo('myattorney-crawl', 120, $myAttorneyRobots);
     }
 
     // Proves the throttle does not fire early for genuine, varied

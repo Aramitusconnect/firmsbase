@@ -290,6 +290,15 @@ Route::domain($hosts->clientPortalHost())
 | PUBLICLY = NO boundary).
 */
 Route::domain($hosts->myAttorneyHost())->group(function () {
+    // Every throttle below is a NAMED limiter, not an inline throttle:max,min.
+    // That is not a style choice: ThrottleRequests keys an inline throttle on
+    // domain + client IP with the URI excluded, so all of these routes would
+    // share ONE counter and each would test it against its own maximum — a
+    // visitor who read a profile a few times was then refused at the first
+    // click of "Start Secure Intake". Named limiters key on the limiter name
+    // too, giving each concern its own budget. See
+    // MyAttorneyRateLimitServiceProvider for the limits and reasoning.
+
     // Mission 2 checkpoint 14 (security hardening): every route below
     // was completely unthrottled before this checkpoint — an
     // unauthenticated, DB-querying surface (search/candidates has no
@@ -304,7 +313,7 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
     // legitimate crawlers once indexing is enabled — see
     // AddSearchIndexingHeader — must not be rate-limited into a bad
     // experience) rather than tight abuse thresholds.
-    Route::middleware('throttle:60,1')->group(function () {
+    Route::middleware('throttle:myattorney-public')->group(function () {
         Route::get('/', [MyAttorneyHomeController::class, 'index'])->name('myattorney.home');
         Route::get('/attorneys/{slug}', [AttorneyProfileController::class, 'show'])->name('myattorney.attorneys.show');
     });
@@ -326,7 +335,7 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
     // visitor's token and replaying it to another is worse than not caching.
     // The controller now says so explicitly with a private/no-store header
     // rather than leaving it to a CDN's defaults.
-    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:60,1'])->group(function () {
+    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:myattorney-public'])->group(function () {
         Route::get('/firms/{slug}', [FirmProfileController::class, 'show'])->name('myattorney.firms.show');
     });
 
@@ -336,7 +345,7 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
     // route ahead of a domain-less one regardless of file order. An
     // explicit route here, same controller, wins the same way the
     // sitemap routes below already do.
-    Route::middleware('throttle:120,1')->group(function () {
+    Route::middleware('throttle:myattorney-crawl')->group(function () {
         Route::get('/robots.txt', RobotsTxtController::class);
 
         Route::get('/sitemap.xml', [SitemapController::class, 'index'])->name('myattorney.sitemap.index');
@@ -345,9 +354,9 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
         Route::get('/sitemap-attorneys-{page}.xml', [SitemapController::class, 'attorneys'])->where('page', '[0-9]+')->name('myattorney.sitemap.attorneys');
     });
 
-    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:20,1'])->group(function () {
+    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:myattorney-correction'])->group(function () {
         Route::get('/firms/{slug}/report-correction', [CorrectionRequestController::class, 'create'])->name('myattorney.firms.report-correction.create');
-        Route::post('/firms/{slug}/report-correction', [CorrectionRequestController::class, 'store'])->middleware('throttle:5,1')->name('myattorney.firms.report-correction.store');
+        Route::post('/firms/{slug}/report-correction', [CorrectionRequestController::class, 'store'])->middleware('throttle:myattorney-correction-submit')->name('myattorney.firms.report-correction.store');
     });
 
     // Mission 3A (MyAttorney Launch-Flow Closure) — the "Start Secure
@@ -357,7 +366,7 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
     // session-cookie + throttle shape exactly. Redirects to the
     // signed resumable-link page below on success; never itself
     // reachable via 'signed' since the visitor holds no link yet.
-    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:5,1'])->group(function () {
+    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:myattorney-intake-start'])->group(function () {
         Route::post('/firms/{slug}/start-intake', [MarketplaceIntakeStartController::class, 'store'])->name('myattorney.firms.start-intake');
     });
 
@@ -366,7 +375,7 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
     // exists until the visitor answers, so backing out leaves nothing behind.
     // Carries the myattorney session cookie for the same reason the profile
     // does — it renders a CSRF-protected form that posts to start-intake.
-    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:20,1'])->group(function () {
+    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:myattorney-intake-choose'])->group(function () {
         Route::get('/firms/{slug}/start-intake', [MarketplaceIntakeStartController::class, 'choose'])
             ->name('myattorney.firms.start-intake.choose');
     });
@@ -379,10 +388,10 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
     // establishes the isolated myattorney-panel session cookie the
     // same way the correction-request form above does, since later
     // checkpoints' multi-step answer-collection UI will need a real
-    // session. throttle:30,1 mirrors payment_requests' own public link
+    // session. the myattorney-intake-resume limiter mirrors payment_requests' own public link
     // page — generous enough for a legitimate prospect returning to
     // finish an intake, not a volumetric-abuse allowance.
-    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'signed', 'throttle:30,1'])->group(function () {
+    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'signed', 'throttle:myattorney-intake-resume'])->group(function () {
         Route::get('/intake/{uuid}', PublicIntakePage::class)
             ->where('uuid', '[0-9a-fA-F-]{36}')
             ->name('public.marketplace-intakes.show');
@@ -394,10 +403,10 @@ Route::domain($hosts->myAttorneyHost())->group(function () {
     // loading the GET route above (which establishes the myattorney
     // panel session cookie); this POST is a same-session follow-up
     // action, exactly like the correction-request store route below
-    // is a follow-up to its own GET. throttle:10,1 — tighter than the
+    // is a follow-up to its own GET. myattorney-intake-documents — tighter than the
     // read-only resume page, looser than a single-shot form
     // submission, since a legitimate visitor may attach several files.
-    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:10,1'])->group(function () {
+    Route::middleware([ConfigurePanelSessionCookie::class.':myattorney', 'throttle:myattorney-intake-documents'])->group(function () {
         Route::post('/intake/{uuid}/documents', [MarketplaceIntakeDocumentController::class, 'store'])
             ->where('uuid', '[0-9a-fA-F-]{36}')
             ->name('public.marketplace-intakes.documents.store');
