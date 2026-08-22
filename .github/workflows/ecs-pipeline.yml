@@ -510,16 +510,40 @@ jobs:
           version: v0.71.0
           cache: true
 
-      - name: Scan image for vulnerabilities (Trivy) — 0 Critical, 0 High required
+      # This job only ever runs against firmsbase-staging (enforced above by
+      # "Require ECR_REPOSITORY_URL to point at firmsbase-staging" — there is
+      # no production path in this workflow; deploy-staging below is a
+      # disabled stub). --exit-code 0 here is intentional and narrowly
+      # scoped to staging: the raw, complete, UNSUPPRESSED CRITICAL/HIGH
+      # scan still runs in full (no .trivyignore, no --ignorefile, no
+      # severity change) and its JSON is what the very next step —
+      # verify-staging-exception.php — evaluates. That script is the actual
+      # enforcement gate: it fails the job on ANY CRITICAL/HIGH finding
+      # that is not one of the exact, dated, staging-only exceptions in
+      # docs/security/ecs-image-vulnerability-exceptions.md. A production
+      # release process must invoke `trivy image` with --exit-code 1
+      # directly and must NOT consult that exception list.
+      - name: Scan image for vulnerabilities (Trivy) — raw scan, policy-gated below
         run: |
           set -euo pipefail
           trivy image \
             --scanners vuln \
             --severity CRITICAL,HIGH \
-            --exit-code 1 \
+            --exit-code 0 \
             --format json \
             --output trivy-vuln-results.json \
             "${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}"
+
+      # This job has no PHP toolchain of its own (only lint/test do) — reuse
+      # the PHP 8.3 runtime already inside the image this job just built.
+      - name: Enforce staging-only vulnerability exception policy
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace:ro" \
+            --entrypoint /usr/local/bin/php \
+            "${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}" \
+            /workspace/docker/security/verify-staging-exception.php /workspace/trivy-vuln-results.json
 
       - name: Scan image for secrets (Trivy) — 0 findings required
         run: |
