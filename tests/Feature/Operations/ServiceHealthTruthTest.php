@@ -51,10 +51,17 @@ class ServiceHealthTruthTest extends TestCase
     }
 
     /**
-     * The five surfaces with no probe behind them. Named explicitly
+     * The surfaces with no probe behind them at all. Named explicitly
      * rather than derived, so that making one of them genuinely
      * monitored has to be a deliberate edit to this list — it can
      * never happen by accident.
+     *
+     * Storage and DocumentScanning gained real LiveProbes, and
+     * EmailDelivery a real ConfigurationCheck, in commit a998600f — see
+     * tests/Feature/HealthCheck/HealthCheckRegistryTest.php for their
+     * dedicated truthfulness coverage. Only WebUptime (no external
+     * uptime provider) and PaymentWebhooks (explicitly out of scope)
+     * remain genuine stubs.
      *
      * @return array<int, array{0: HealthCheckType}>
      */
@@ -62,10 +69,7 @@ class ServiceHealthTruthTest extends TestCase
     {
         return [
             'web uptime' => [HealthCheckType::WebUptime],
-            'storage' => [HealthCheckType::Storage],
-            'email delivery' => [HealthCheckType::EmailDelivery],
             'payment webhooks' => [HealthCheckType::PaymentWebhooks],
-            'document scanning' => [HealthCheckType::DocumentScanning],
         ];
     }
 
@@ -109,19 +113,27 @@ class ServiceHealthTruthTest extends TestCase
         );
 
         // The real, current shape of the registry: four internally
-        // measured checks, five unmonitored, no live external probes.
+        // measured checks, two genuinely unmonitored (WebUptime,
+        // PaymentWebhooks), two live probes (Storage, DocumentScanning —
+        // see commit a998600f), one configuration check (EmailDelivery).
         $this->assertSame(4, $counts[HealthCheckMonitoringType::InternalMetric->value]);
-        $this->assertSame(5, $counts[HealthCheckMonitoringType::NotMonitored->value]);
-        $this->assertSame(0, $counts[HealthCheckMonitoringType::LiveProbe->value]);
+        $this->assertSame(2, $counts[HealthCheckMonitoringType::NotMonitored->value]);
+        $this->assertSame(2, $counts[HealthCheckMonitoringType::LiveProbe->value]);
+        $this->assertSame(1, $counts[HealthCheckMonitoringType::ConfigurationCheck->value]);
     }
 
     public function test_counts_follow_the_registry_when_a_check_is_made_real(): void
     {
+        // WebUptime, not Storage — Storage already carries a real
+        // LiveProbe (commit a998600f), so re-registering it as LiveProbe
+        // wouldn't move it out of NotMonitored and this delta assertion
+        // would no longer prove anything. WebUptime remains a genuine
+        // stub (see unmonitoredCheckTypes() above).
         $before = $this->registry->monitoringTypeCounts();
 
         $this->registry->register(
-            HealthCheckType::Storage,
-            fn () => new HealthCheckResult(HealthCheckType::Storage, HealthCheckStatus::Healthy, 'probed'),
+            HealthCheckType::WebUptime,
+            fn () => new HealthCheckResult(HealthCheckType::WebUptime, HealthCheckStatus::Healthy, 'probed'),
             HealthCheckMonitoringType::LiveProbe,
         );
 

@@ -118,7 +118,7 @@ class HealthCheckRegistryTest extends TestCase
 
     public function test_email_delivery_check_is_healthy_when_a_real_transport_mailer_resolves_cleanly(): void
     {
-        Config::set('mail.mailer', 'smtp');
+        Config::set('mail.default', 'smtp');
 
         $result = $this->registry->run(HealthCheckType::EmailDelivery);
 
@@ -130,7 +130,7 @@ class HealthCheckRegistryTest extends TestCase
 
     public function test_email_delivery_check_is_degraded_not_healthy_when_mailer_is_array(): void
     {
-        Config::set('mail.mailer', 'array');
+        Config::set('mail.default', 'array');
 
         $result = $this->registry->run(HealthCheckType::EmailDelivery);
 
@@ -139,7 +139,7 @@ class HealthCheckRegistryTest extends TestCase
 
     public function test_email_delivery_check_is_degraded_not_healthy_when_mailer_is_log(): void
     {
-        Config::set('mail.mailer', 'log');
+        Config::set('mail.default', 'log');
 
         $result = $this->registry->run(HealthCheckType::EmailDelivery);
 
@@ -148,7 +148,7 @@ class HealthCheckRegistryTest extends TestCase
 
     public function test_email_delivery_check_is_unknown_when_mail_mailer_is_not_configured_at_all(): void
     {
-        Config::set('mail.mailer', null);
+        Config::set('mail.default', null);
 
         $result = $this->registry->run(HealthCheckType::EmailDelivery);
 
@@ -162,7 +162,7 @@ class HealthCheckRegistryTest extends TestCase
         // SES client without one at all (verified: Mail::mailer('ses')
         // itself throws in that case), so this must never report
         // Degraded or Healthy.
-        Config::set('mail.mailer', 'ses');
+        Config::set('mail.default', 'ses');
         Config::set('services.ses.region', null);
 
         $result = $this->registry->run(HealthCheckType::EmailDelivery);
@@ -172,7 +172,7 @@ class HealthCheckRegistryTest extends TestCase
 
     public function test_email_delivery_check_is_healthy_when_ses_mailer_has_a_configured_region_even_without_static_keys(): void
     {
-        Config::set('mail.mailer', 'ses');
+        Config::set('mail.default', 'ses');
         Config::set('services.ses.region', 'us-east-1');
         // Deliberately null — this codebase's ECS-task-role deployments
         // legitimately omit static key/secret in favor of the AWS SDK's

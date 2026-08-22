@@ -356,7 +356,7 @@ class HealthCheckRegistry
     }
 
     /**
-     * probeEmailDelivery() — resolves `Mail::mailer(config('mail.mailer'))`
+     * probeEmailDelivery() — resolves `Mail::mailer(config('mail.default'))`
      * inside a try/catch to prove the mailer is at least instantiable/
      * configured correctly. This does NOT send any real email and does
      * NOT prove delivery actually works — only that config resolves
@@ -377,13 +377,18 @@ class HealthCheckRegistry
      */
     private function probeEmailDelivery(): HealthCheckResult
     {
-        $mailer = config('mail.mailer');
+        // config('mail.mailer') is not a real Laravel config key — the
+        // selected mailer lives at config('mail.default') (see
+        // config/mail.php's own 'default' key). Reading the wrong key here
+        // made this probe permanently report Unknown regardless of the
+        // actual configured mailer.
+        $mailer = config('mail.default');
 
         if (blank($mailer)) {
             return new HealthCheckResult(
                 HealthCheckType::EmailDelivery,
                 HealthCheckStatus::Unknown,
-                'mail.mailer is not configured',
+                'mail.default is not configured',
             );
         }
 

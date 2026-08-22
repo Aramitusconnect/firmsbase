@@ -2,16 +2,18 @@
 
 namespace Tests\Feature\HealthCheck;
 
-use App\Enums\HealthCheckStatus;
 use App\Enums\HealthCheckType;
 use App\Models\Firm;
+use App\Models\HealthCheck;
 use App\Services\HealthCheckRegistry;
 use App\Services\HealthCheckService;
 use App\Services\QueueHealthService;
 use App\Services\SchedulerHealthService;
 use App\Services\TenantContextService;
 use App\Services\TenantIsolationAnomalyService;
+use App\Services\VirusScan\ClamAvVirusScanner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Mockery;
 use Tests\TestCase;
 
 class HealthCheckServiceTest extends TestCase
@@ -24,9 +26,9 @@ class HealthCheckServiceTest extends TestCase
     {
         parent::setUp();
         $this->service = new HealthCheckService(new HealthCheckRegistry(
-            new QueueHealthService(),
-            new SchedulerHealthService(),
-            new TenantIsolationAnomalyService(),
+            new QueueHealthService,
+            new SchedulerHealthService,
+            new TenantIsolationAnomalyService,
         ));
     }
 
@@ -35,7 +37,7 @@ class HealthCheckServiceTest extends TestCase
         $checks = $this->service->runAllAndRecord();
 
         $this->assertCount(9, $checks);
-        $this->assertSame(9, \App\Models\HealthCheck::query()->count());
+        $this->assertSame(9, HealthCheck::query()->count());
     }
 
     public function test_tenant_isolation_anomalies_check_is_recorded_with_the_given_firm_id_others_are_platform_wide(): void
@@ -46,9 +48,9 @@ class HealthCheckServiceTest extends TestCase
 
         $tenantCheck = app(TenantContextService::class)->runWithFirmContext(
             $firm,
-            fn () => \App\Models\HealthCheck::query()->where('check_type', HealthCheckType::TenantIsolationAnomalies->value)->first()
+            fn () => HealthCheck::query()->where('check_type', HealthCheckType::TenantIsolationAnomalies->value)->first()
         );
-        $webUptimeCheck = \App\Models\HealthCheck::query()->where('check_type', HealthCheckType::WebUptime->value)->first();
+        $webUptimeCheck = HealthCheck::query()->where('check_type', HealthCheckType::WebUptime->value)->first();
 
         $this->assertSame($firm->id, $tenantCheck->firm_id);
         $this->assertNull($webUptimeCheck->firm_id);
@@ -61,7 +63,7 @@ class HealthCheckServiceTest extends TestCase
 
         $latest = $this->service->latestFor(HealthCheckType::WebUptime);
 
-        $this->assertSame(2, \App\Models\HealthCheck::query()->where('check_type', HealthCheckType::WebUptime->value)->count());
+        $this->assertSame(2, HealthCheck::query()->where('check_type', HealthCheckType::WebUptime->value)->count());
         $this->assertNotNull($latest);
     }
 
@@ -75,6 +77,19 @@ class HealthCheckServiceTest extends TestCase
     public function test_is_overall_healthy_true_once_every_check_reports_healthy_or_degraded(): void
     {
         app(SchedulerHealthService::class)->recordHeartbeat();
+
+        // DocumentScanning honestly reports Unknown whenever no clamd
+        // socket is configured (see ClamAvVirusScanner's own docblock:
+        // "every CI runner, every other engineer's local machine ... has
+        // no clamd sidecar deployed yet") — that's by design, not a bug.
+        // Proving "every check reports healthy or degraded" therefore
+        // requires simulating an environment where clamd IS available,
+        // via a container-level mock, rather than depending on a real
+        // daemon this test would otherwise never portably have.
+        config(['services.clamav.socket' => 'unix:///tmp/fake-clamd-for-test.sock']);
+        $scanner = Mockery::mock(ClamAvVirusScanner::class);
+        $scanner->shouldReceive('ping')->andReturn(true);
+        $this->app->instance(ClamAvVirusScanner::class, $scanner);
 
         $this->service->runAllAndRecord();
 
