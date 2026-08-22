@@ -23,21 +23,46 @@ declare(strict_types=1);
  *
  * Usage: php verify-staging-exception.php <path-to-trivy-vuln-results.json>
  */
+// Each approved ID carries its own expiry AND the exact scan target
+// substring it was assessed against — originally a single shared
+// 'frankenphp' constant (every approved ID lived in that one binary), but
+// the 2026-08-22 review added the first exception against a DIFFERENT
+// target (the Debian OS layer, for an OpenSSL package finding), so the
+// per-ID target check below is now a map rather than one global constant.
+// If a finding under one of the approved IDs is ever found against a
+// DIFFERENT target than what was actually reviewed (e.g. because the base
+// image pin moved without updating this list), that's exactly the kind of
+// silent drift this check exists to catch.
 const APPROVED_EXCEPTIONS = [
-    'GHSA-r277-6w6q-xmqw' => '2026-09-14',
-    'GHSA-hrxh-6v49-42gf' => '2026-09-14',
-    'CVE-2026-39821' => '2026-09-14',
-    'CVE-2026-46600' => '2026-09-14',
+    'GHSA-r277-6w6q-xmqw' => ['expires' => '2026-09-14', 'target' => 'frankenphp'],
+    'GHSA-hrxh-6v49-42gf' => ['expires' => '2026-09-14', 'target' => 'frankenphp'],
+    'CVE-2026-39821' => ['expires' => '2026-09-14', 'target' => 'frankenphp'],
+    'CVE-2026-46600' => ['expires' => '2026-09-14', 'target' => 'frankenphp'],
+    // Added 2026-08-22 — see docs/security/ecs-image-vulnerability-exceptions.md
+    // "Review: 2026-08-22". No official upstream fix exists yet for either
+    // kin-openapi CVE (frankenphp has not repinned; vulcain/caddy haven't
+    // cut releases with the fixed versions) — approved because
+    // openapi3filter (the vulnerable subpackage for both) is never imported
+    // by vulcain or anywhere else in this dependency graph, confirmed via
+    // source-level import analysis and a raw-byte scan of the shipped
+    // frankenphp binary, reinforced by docker/web/Caddyfile never
+    // configuring a `vulcain` directive (the only caller that could invoke
+    // kin-openapi at all).
+    'CVE-2026-76905' => ['expires' => '2026-09-14', 'target' => 'frankenphp'],
+    'CVE-2026-77354' => ['expires' => '2026-09-14', 'target' => 'frankenphp'],
+    // Added 2026-08-22 — same review. No Debian trixie fix exists yet
+    // (tracker.debian.org marks it "postponed"). Approved because the
+    // vulnerable code path is an OpenSSL-native QUIC *server listener*,
+    // and nothing in this image ever constructs one: Caddy/FrankenPHP's
+    // inbound TLS is Go's crypto/tls (not OpenSSL), docker/web/Caddyfile
+    // has no tls/http3/quic directive and no TLS listener at all
+    // (auto_https off, plain :8080 HTTP), no PHP extension here exposes
+    // OpenSSL's QUIC APIs, and the ECS security groups / ALB path is
+    // TCP-only end to end with the ALB terminating all external TLS
+    // before the container ever sees a byte of it. Target is the Debian
+    // OS layer (libssl3t64), not the frankenphp binary.
+    'CVE-2026-14456' => ['expires' => '2026-09-14', 'target' => 'debian'],
 ];
-
-// The FrankenPHP candidate this exception list was assessed against. If a
-// finding under one of the approved IDs above is ever found against a
-// DIFFERENT package/version than what was actually reviewed (e.g. because
-// the base image pin moved without updating this list), that's exactly
-// the kind of silent drift this check exists to catch — so each finding
-// is matched by ID AND cross-checked that it still belongs to the
-// frankenphp binary target, not merely present somewhere in the scan.
-const EXPECTED_SCAN_TARGET_SUBSTRING = 'frankenphp';
 
 function fail(string $message): never
 {
@@ -94,15 +119,18 @@ foreach (($decoded['Results'] ?? []) as $result) {
             continue;
         }
 
-        if (! str_contains($target, EXPECTED_SCAN_TARGET_SUBSTRING)) {
+        $expectedTarget = APPROVED_EXCEPTIONS[$id]['target'];
+
+        if (! str_contains($target, $expectedTarget)) {
             fail(sprintf(
-                "approved exception ID %s matched, but its finding is against target '%s', not the expected frankenphp binary — this looks like the same ID appearing on an unrelated/unexpected component, refusing to honor it",
+                "approved exception ID %s matched, but its finding is against target '%s', not the expected '%s' — this looks like the same ID appearing on an unrelated/unexpected component, refusing to honor it",
                 $id,
-                $target
+                $target,
+                $expectedTarget
             ));
         }
 
-        $expiresAt = APPROVED_EXCEPTIONS[$id];
+        $expiresAt = APPROVED_EXCEPTIONS[$id]['expires'];
 
         if ($today > $expiresAt) {
             fail("approved exception {$id} expired on {$expiresAt} (today is {$today}) — re-review required before this can be honored again");
