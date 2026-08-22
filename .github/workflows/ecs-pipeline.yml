@@ -308,6 +308,24 @@ jobs:
       # bug (RedisStore's unserialize() behavior) is invisible under any
       # non-Redis driver. Previously this job installed the redis PHP
       # extension but never provisioned a server for it to connect to.
+      # --memory/--oom-score-adj: this service reproducibly became
+      # unreachable (RedisException: Connection refused) roughly 24-30
+      # minutes into the ~49-55 minute "Run test suite" step, identically
+      # across 2 separate runs (same 7 failing tests, same exact warning/
+      # risky/passed counts both times) — deterministic, not a one-off
+      # flake, and confirmed NOT caused by this workflow's REDIS_HOST/
+      # PORT config, Laravel's config resolution, the failing test's own
+      # code, or any recent change to this service block (unchanged since
+      # it was added). Consistent with the shared 2-core/7GB runner
+      # coming under memory pressure from the long-running PHP test
+      # process over ~13,800 tests, with the kernel OOM-killer then
+      # picking the small, low-priority Redis container as its victim.
+      # --memory=512m gives Redis a dedicated, generous-for-test-data
+      # reservation (it only ever holds a handful of test keys) isolated
+      # from the rest of the runner; --oom-score-adj=-500 biases the
+      # kernel's OOM victim selection away from this container rather
+      # than disabling OOM protection outright (never --oom-kill-disable
+      # — that can hang the whole runner instead).
       redis:
         image: redis:7
         ports:
@@ -317,6 +335,8 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+          --memory=512m
+          --oom-score-adj=-500
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
         with:
