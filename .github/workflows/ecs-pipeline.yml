@@ -576,9 +576,18 @@ jobs:
           set -euo pipefail
           IMG="${{ vars.ECR_REPOSITORY_URL }}:${{ needs.validate-commit.outputs.short_sha }}"
           APP_KEY="base64:$(openssl rand -base64 32)"
+          # Disposable, CI-only value — protects nothing real, exists only
+          # so docker/entrypoint.sh's required-var check for the web role
+          # (PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY, needed
+          # by CorrelatedPasswordResetSenderService's platform-scope path)
+          # doesn't fail this ephemeral smoke container before FrankenPHP
+          # ever binds :8080. Never a staging/production secret, never a
+          # repository secret, never printed.
+          PLATFORM_NOTIFICATIONS_HMAC_KEY="$(openssl rand -hex 32)"
           COMMON_ENV=(-e APP_KEY="$APP_KEY" -e APP_ENV=production -e DB_CONNECTION=pgsql \
             -e DB_HOST=127.0.0.1 -e DB_PORT=5432 -e DB_DATABASE=firmsbase_smoke \
-            -e DB_USERNAME=firmsbase -e DB_PASSWORD=smokepass -e REDIS_HOST=127.0.0.1)
+            -e DB_USERNAME=firmsbase -e DB_PASSWORD=smokepass -e REDIS_HOST=127.0.0.1 \
+            -e PLATFORM_NOTIFICATIONS_RECIPIENT_FINGERPRINT_HMAC_KEY="$PLATFORM_NOTIFICATIONS_HMAC_KEY")
 
           # Prints container state + logs before a long-running-role
           # assertion fails, so a future failure shows the real exception
@@ -606,11 +615,33 @@ jobs:
 
           echo "=== web ==="
           docker run -d --name smoke-web --network host "${COMMON_ENV[@]}" "$IMG" web
-          sleep 5
-          UP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/up)
+
+          # Bounded readiness loop (30s, 1s poll interval — never
+          # indefinite) instead of a fixed sleep+single-curl: distinguishes
+          # "container exited during startup" (e.g. a failed entrypoint
+          # required-var check) from "still starting" from "genuinely
+          # timed out", and dumps state+logs on every failure path so a
+          # future regression shows the real exception instead of only a
+          # generic curl connection error.
+          UP_CODE=""
+          for _ in $(seq 1 30); do
+            if ! docker ps --filter name=smoke-web --format '{{.Names}}' | grep -q smoke-web; then
+              echo "::error::smoke-web exited before becoming ready"
+              dump_role_diagnostics smoke-web
+              exit 1
+            fi
+            UP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/up || true)"
+            [ "$UP_CODE" = "200" ] && break
+            sleep 1
+          done
+          if [ "$UP_CODE" != "200" ]; then
+            echo "::error::/up did not return 200 within 30s (last code: $UP_CODE)"
+            dump_role_diagnostics smoke-web
+            exit 1
+          fi
+
           READY_CODE=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/readyz)
-          [ "$UP_CODE" = "200" ] || { echo "::error::/up returned $UP_CODE, expected 200"; exit 1; }
-          [ "$READY_CODE" = "200" ] || { echo "::error::/readyz returned $READY_CODE, expected 200"; exit 1; }
+          [ "$READY_CODE" = "200" ] || { echo "::error::/readyz returned $READY_CODE, expected 200"; dump_role_diagnostics smoke-web; exit 1; }
           echo "/up=$UP_CODE /readyz=$READY_CODE"
 
           UID_GID=$(docker exec smoke-web /usr/local/bin/php -r "echo posix_getuid(),' ',posix_getgid();")
