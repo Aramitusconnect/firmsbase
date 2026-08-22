@@ -30,6 +30,12 @@ variable "sns_topic_arn_pattern" {
   default     = null
 }
 
+variable "ses_sns_topic_arn_pattern" {
+  description = "Same topic ARN pattern as sns_topic_arn_pattern, but trusting the ses.amazonaws.com service principal instead of sns.amazonaws.com. Real, apply-time-confirmed requirement (not anticipated speculatively): SES's own sns:Publish call into a KMS-encrypted topic hits the SAME kms:EncryptionContext:aws:sns:topicArn-scoped grant a native SNS-to-SNS operation would, but AWS evaluates it against SES's own service principal, not SNS's -- confirmed via a real CreateConfigurationSetEventDestination failure: 'BadRequestException: Access denied to KMS key for SNS topic ... Verify the KMS key policy grants Amazon SES the kms:GenerateDataKey and kms:Decrypt permissions.' Null (default) omits this statement entirely."
+  type        = string
+  default     = null
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

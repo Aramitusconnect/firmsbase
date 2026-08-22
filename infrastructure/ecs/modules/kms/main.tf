@@ -134,6 +134,41 @@ data "aws_iam_policy_document" "this" {
       }
     }
   }
+
+  # SES itself, not just SNS, needs a grant on this key: its own
+  # sns:Publish call into the KMS-encrypted topic (made when a
+  # configuration-set event fires) is evaluated against the
+  # ses.amazonaws.com service principal, not sns.amazonaws.com. Real,
+  # apply-time-confirmed requirement — see var.ses_sns_topic_arn_pattern's
+  # own docblock for the exact error this fixes. Omitted entirely when
+  # var.ses_sns_topic_arn_pattern is null.
+  dynamic "statement" {
+    for_each = var.ses_sns_topic_arn_pattern == null ? [] : [var.ses_sns_topic_arn_pattern]
+    content {
+      sid    = "AllowSesPublishEncryption"
+      effect = "Allow"
+
+      principals {
+        type        = "Service"
+        identifiers = ["ses.amazonaws.com"]
+      }
+
+      actions = [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:Describe*",
+      ]
+      resources = ["*"]
+
+      condition {
+        test     = "ArnLike"
+        variable = "kms:EncryptionContext:aws:sns:topicArn"
+        values   = [statement.value]
+      }
+    }
+  }
 }
 
 resource "aws_kms_key" "this" {

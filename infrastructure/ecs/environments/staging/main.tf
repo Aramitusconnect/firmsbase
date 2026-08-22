@@ -47,8 +47,9 @@ module "kms" {
   # module.ses_events_pipeline's queue+DLQ (both "${var.name_prefix}-ses-events*")
   # and topic — see that module for why SQS/SNS need the identical
   # service-linked-trust statement CloudWatch Logs already needed above.
-  sqs_queue_arn_pattern = "arn:aws:sqs:${var.aws_region}:${var.aws_account_id}:${var.name_prefix}-ses-events*"
-  sns_topic_arn_pattern = "arn:aws:sns:${var.aws_region}:${var.aws_account_id}:${var.name_prefix}-ses-events"
+  sqs_queue_arn_pattern     = "arn:aws:sqs:${var.aws_region}:${var.aws_account_id}:${var.name_prefix}-ses-events*"
+  sns_topic_arn_pattern     = "arn:aws:sns:${var.aws_region}:${var.aws_account_id}:${var.name_prefix}-ses-events"
+  ses_sns_topic_arn_pattern = "arn:aws:sns:${var.aws_region}:${var.aws_account_id}:${var.name_prefix}-ses-events"
 }
 
 module "ses_events_pipeline" {
