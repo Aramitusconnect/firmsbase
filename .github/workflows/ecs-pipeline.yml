@@ -220,6 +220,12 @@ jobs:
       # — Laravel throws MissingAppKeyException the first time any test
       # touches per-firm key provisioning if APP_KEY is unset.
       APP_KEY: "base64:ELVhdkVn+QSCzkyvW6Io8hKv/lmwnzz6LLmlYIhiL6o="
+      # config/database.php's own redis connections default to these
+      # exact values (env('REDIS_HOST', '127.0.0.1') / env('REDIS_PORT',
+      # '6379')) — set explicitly here anyway so the job's requirement is
+      # visible without having to cross-reference application config.
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: "6379"
     services:
       postgres:
         image: postgres:16
@@ -231,6 +237,24 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      # Redis 7, matching staging's real ElastiCache engine_version (see
+      # infrastructure/ecs/environments/staging/terraform.tfvars.example,
+      # elasticache_engine_version = "7.2"). A handful of tests
+      # (e.g. DashboardRedisCacheSerializationTest) deliberately force
+      # cache.default/session.driver to 'redis' — phpunit.xml otherwise
+      # defaults both to the 'array' driver — because that exact class of
+      # bug (RedisStore's unserialize() behavior) is invisible under any
+      # non-Redis driver. This job installed the redis PHP extension but
+      # never provisioned a server for it to connect to.
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
