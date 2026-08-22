@@ -19,7 +19,7 @@ use Tests\TestCase;
  * Template Provisioning"). Proves `firmsvault:ensure-notification-templates`
  * (unlike NotificationTemplateSeeder, which DatabaseSeeder::run() only
  * calls in local/testing) is a safe, idempotent, environment-agnostic
- * way to provision the four global-default notification templates
+ * way to provision the global-default notification templates
  * NotificationDispatchService::dispatch() requires to resolve.
  */
 final class EnsureNotificationTemplatesCommandTest extends TestCase
@@ -33,14 +33,23 @@ final class EnsureNotificationTemplatesCommandTest extends TestCase
         );
     }
 
-    public function test_first_run_creates_all_four_default_templates(): void
+    // Derived from the seeder's own canonical list rather than a second,
+    // independently-hardcoded number — keeps this test self-updating as
+    // NotificationTemplateSeeder::defaults() grows (e.g. signature_request_sent
+    // was added for the e-signature signer flow).
+    private function expectedDefaultCount(): int
+    {
+        return count(NotificationTemplateSeeder::defaults());
+    }
+
+    public function test_first_run_creates_all_default_templates(): void
     {
         $exitCode = Artisan::call('firmsvault:ensure-notification-templates');
 
         $this->assertSame(0, $exitCode);
 
         $templates = $this->globalDefaults();
-        $this->assertCount(4, $templates);
+        $this->assertCount($this->expectedDefaultCount(), $templates);
 
         $expectedKeys = collect(NotificationTemplateSeeder::defaults())->pluck('key')->sort()->values();
         $this->assertSame($expectedKeys->all(), $templates->pluck('key')->sort()->values()->all());
@@ -61,8 +70,8 @@ final class EnsureNotificationTemplatesCommandTest extends TestCase
         $exitCode = Artisan::call('firmsvault:ensure-notification-templates');
 
         $this->assertSame(0, $exitCode);
-        $this->assertSame(4, $firstRunCount);
-        $this->assertSame(4, $this->globalDefaults()->count(), 'Re-running the command must never create duplicate rows.');
+        $this->assertSame($this->expectedDefaultCount(), $firstRunCount);
+        $this->assertSame($this->expectedDefaultCount(), $this->globalDefaults()->count(), 'Re-running the command must never create duplicate rows.');
     }
 
     public function test_third_run_is_still_idempotent(): void
@@ -71,7 +80,7 @@ final class EnsureNotificationTemplatesCommandTest extends TestCase
         Artisan::call('firmsvault:ensure-notification-templates');
         Artisan::call('firmsvault:ensure-notification-templates');
 
-        $this->assertSame(4, $this->globalDefaults()->count());
+        $this->assertSame($this->expectedDefaultCount(), $this->globalDefaults()->count());
     }
 
     public function test_an_existing_customized_template_with_the_same_key_is_never_overwritten(): void
@@ -100,8 +109,8 @@ final class EnsureNotificationTemplatesCommandTest extends TestCase
         $this->assertSame('Custom subject an operator wrote', $fresh->subject);
         $this->assertSame('Custom body content an operator wrote, deliberately different from the seeder default.', $fresh->body);
 
-        // The other three keys the customized row does not cover must still be provisioned.
-        $this->assertCount(4, $this->globalDefaults());
+        // The other keys the customized row does not cover must still be provisioned.
+        $this->assertCount($this->expectedDefaultCount(), $this->globalDefaults());
     }
 
     public function test_the_command_runs_without_error_regardless_of_app_environment(): void
@@ -112,7 +121,7 @@ final class EnsureNotificationTemplatesCommandTest extends TestCase
             config(['app.env' => 'production']);
             $exitCode = Artisan::call('firmsvault:ensure-notification-templates');
             $this->assertSame(0, $exitCode, 'Unlike the seeder (guarded to local/testing by DatabaseSeeder), this command must run cleanly in production.');
-            $this->assertCount(4, $this->globalDefaults());
+            $this->assertCount($this->expectedDefaultCount(), $this->globalDefaults());
         } finally {
             config(['app.env' => $original]);
         }
