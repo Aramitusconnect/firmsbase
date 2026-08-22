@@ -41,6 +41,5 @@ final class OAuthCallbackResult
         public readonly bool $successful,
         public readonly ?string $errorMessage = null,
         public readonly bool $transitionedThisCall = false,
-    ) {
-    }
+    ) {}
 }

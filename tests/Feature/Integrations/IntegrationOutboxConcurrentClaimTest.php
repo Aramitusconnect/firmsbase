@@ -65,7 +65,7 @@ class IntegrationOutboxConcurrentClaimTest extends TestCase
     {
         parent::setUp();
 
-        $this->service = new IntegrationOutboxEventService(new WebhookRetryPolicyService(), new TimelineEventRecorder(), new IntegrationRequeueAuditLogger());
+        $this->service = new IntegrationOutboxEventService(new WebhookRetryPolicyService, new TimelineEventRecorder, new IntegrationRequeueAuditLogger);
 
         // firms carries no RLS policy, so it can be created directly with
         // no tenant context active.

@@ -7,6 +7,8 @@ use App\Enums\SupportAccessType;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\PlatformAdmin;
+use App\Models\SupportAccessRequest;
+use App\Models\SupportAccessSession;
 use App\Services\SupportAccessRequestService;
 use App\Services\SupportAccessSessionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -17,13 +19,14 @@ class SupportAccessSessionServiceTest extends TestCase
     use RefreshDatabase;
 
     private SupportAccessRequestService $requestService;
+
     private SupportAccessSessionService $sessionService;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->requestService = new SupportAccessRequestService();
-        $this->sessionService = new SupportAccessSessionService();
+        $this->requestService = new SupportAccessRequestService;
+        $this->sessionService = new SupportAccessSessionService;
     }
 
     public function test_starting_a_session_sets_an_expiry_based_on_requested_duration(): void
@@ -52,8 +55,8 @@ class SupportAccessSessionServiceTest extends TestCase
         // support_access_request tied to a DIFFERENT firm now correctly
         // fails at the database layer. An explicit, matching parent
         // request for THIS firm must be created first.
-        $request = \App\Models\SupportAccessRequest::factory()->forFirm($firm)->create();
-        $session = \App\Models\SupportAccessSession::factory()->expired()->create([
+        $request = SupportAccessRequest::factory()->forFirm($firm)->create();
+        $session = SupportAccessSession::factory()->expired()->create([
             'firm_id' => $firm->id,
             'support_access_request_id' => $request->id,
         ]);

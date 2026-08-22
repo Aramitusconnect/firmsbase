@@ -7,7 +7,6 @@ use App\Enums\HealthCheckStatus;
 use App\Models\DeploymentHealthCheck;
 use App\Models\Firm;
 use App\Models\PrivateEnterpriseSettings;
-use App\Services\TenantContextService;
 use App\ValueObjects\DeploymentHealthEnvelope;
 
 /**
@@ -23,9 +22,7 @@ use App\ValueObjects\DeploymentHealthEnvelope;
  */
 class DeploymentHealthEnvelopeService
 {
-    public function __construct(private readonly VersionSkewPolicyService $versionSkewPolicy)
-    {
-    }
+    public function __construct(private readonly VersionSkewPolicyService $versionSkewPolicy) {}
 
     public function buildEnvelope(Firm $firm, string $version, string $saasVersion, ?string $migrationStatus = null): DeploymentHealthEnvelope
     {
@@ -37,7 +34,7 @@ class DeploymentHealthEnvelopeService
         // firm_id instead of trusting the cached
         // $firm->privateEnterpriseSettings relation, to avoid a
         // stale-cache hazard.
-        $telemetryProhibited = (new TenantContextService())->runWithFirmContext(
+        $telemetryProhibited = (new TenantContextService)->runWithFirmContext(
             $firm,
             fn () => (bool) (PrivateEnterpriseSettings::query()->where('firm_id', $firm->id)->first()?->telemetry_prohibited ?? false),
         );
@@ -54,7 +51,7 @@ class DeploymentHealthEnvelopeService
         // which has already closed by this point). Keyed on the same
         // $firm param since both wrapped operations concern the same
         // firm's data.
-        (new TenantContextService())->runWithFirmContext($firm, fn () => DeploymentHealthCheck::create([
+        (new TenantContextService)->runWithFirmContext($firm, fn () => DeploymentHealthCheck::create([
             'firm_id' => $firm->id,
             'heartbeat_at' => $heartbeatAt,
             'version' => $version,
@@ -83,7 +80,7 @@ class DeploymentHealthEnvelopeService
         // deployment_health_checks now carries permanent FORCE ROW
         // LEVEL SECURITY — this method had no wrap of any kind before
         // this batch.
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => DeploymentHealthCheck::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => DeploymentHealthCheck::create([
             'firm_id' => $firm->id,
             'heartbeat_at' => now(),
             'version' => $version,

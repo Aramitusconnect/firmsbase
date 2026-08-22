@@ -13,6 +13,7 @@ use App\Integrations\Services\IntegrationUsageRecorderService;
 use App\Models\Firm;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 use Tests\TestCase;
 
@@ -37,7 +38,7 @@ class IntegrationUsageRecorderServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new IntegrationUsageRecorderService();
+        $this->service = new IntegrationUsageRecorderService;
     }
 
     private function connection(Firm $firm): FirmIntegration
@@ -166,7 +167,7 @@ class IntegrationUsageRecorderServiceTest extends TestCase
 
     public function test_no_billing_or_cost_column_exists_on_the_table(): void
     {
-        $columns = \Illuminate\Support\Facades\Schema::getColumnListing('integration_usage_records');
+        $columns = Schema::getColumnListing('integration_usage_records');
 
         foreach (['cost', 'cost_cents', 'billing', 'price', 'amount', 'charge'] as $forbidden) {
             $this->assertNotContains($forbidden, $columns, "integration_usage_records must not carry a billing/cost column: {$forbidden}");
@@ -224,14 +225,14 @@ class IntegrationUsageRecorderServiceTest extends TestCase
     {
         $this->expectException(InvalidArgumentException::class);
 
-        new SanitizedUsageMetadataReference(['bad_field' => new \stdClass()]);
+        new SanitizedUsageMetadataReference(['bad_field' => new \stdClass]);
     }
 
     public function test_a_disallowed_nested_object_inside_an_array_field_is_also_rejected(): void
     {
         $this->expectException(InvalidArgumentException::class);
 
-        new SanitizedUsageMetadataReference(['nested' => ['ok' => 1, 'bad' => new \stdClass()]]);
+        new SanitizedUsageMetadataReference(['nested' => ['ok' => 1, 'bad' => new \stdClass]]);
     }
 
     public function test_metadata_defaults_to_an_empty_array_when_omitted(): void

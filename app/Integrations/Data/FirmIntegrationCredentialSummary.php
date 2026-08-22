@@ -35,13 +35,12 @@ final readonly class FirmIntegrationCredentialSummary
         public ?Carbon $createdAt,
         public ?Carbon $rotatedAt,
         public ?Carbon $revokedAt,
-    ) {
-    }
+    ) {}
 
     /**
      * @param  array<string, mixed>  $maskedMetadata  the exact return
-     *   shape of IntegrationCredentialService::getMaskedMetadata() —
-     *   never any other array shape.
+     *                                                shape of IntegrationCredentialService::getMaskedMetadata() —
+     *                                                never any other array shape.
      */
     public static function fromMaskedMetadata(array $maskedMetadata): self
     {

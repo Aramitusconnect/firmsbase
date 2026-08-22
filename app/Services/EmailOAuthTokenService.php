@@ -44,8 +44,7 @@ class EmailOAuthTokenService
     public function __construct(
         private readonly EmailBodyEncryptionService $bodyEncryption,
         private readonly EmailSyncAuditService $auditService,
-    ) {
-    }
+    ) {}
 
     public function store(EmailAccount $account, EmailOAuthTokenType $type, string $rawToken, ?\DateTimeInterface $expiresAt = null): EmailOAuthToken
     {
@@ -73,7 +72,7 @@ class EmailOAuthTokenService
 
         $newToken = $this->store($account, $token->token_type, $newRawToken, $expiresAt);
 
-        (new TenantContextService())->runWithFirmContext($account->firm_id, fn () => $this->auditService->record(
+        (new TenantContextService)->runWithFirmContext($account->firm_id, fn () => $this->auditService->record(
             $account->firm,
             $account,
             EmailSyncEventType::TokenRotated,
@@ -89,7 +88,7 @@ class EmailOAuthTokenService
 
         $token->update(['status' => EmailOAuthTokenStatus::Revoked]);
 
-        (new TenantContextService())->runWithFirmContext($account->firm_id, fn () => $this->auditService->record(
+        (new TenantContextService)->runWithFirmContext($account->firm_id, fn () => $this->auditService->record(
             $account->firm,
             $account,
             EmailSyncEventType::TokenRevoked,

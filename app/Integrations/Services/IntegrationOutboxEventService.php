@@ -56,8 +56,7 @@ final class IntegrationOutboxEventService
         private readonly WebhookRetryPolicyService $retryPolicy,
         private readonly TimelineEventRecorder $events,
         private readonly IntegrationRequeueAuditLogger $requeueAudit,
-    ) {
-    }
+    ) {}
 
     /**
      * Idempotent, atomic write via insertOrIgnoreReturning() + a

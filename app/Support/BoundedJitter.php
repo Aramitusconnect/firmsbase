@@ -33,9 +33,7 @@ final class BoundedJitter
     /**
      * @param  \Closure(): float  $unitIntervalSource  returns a value in [0.0, 1.0)
      */
-    public function __construct(private readonly \Closure $unitIntervalSource)
-    {
-    }
+    public function __construct(private readonly \Closure $unitIntervalSource) {}
 
     /**
      * Production wiring: PHP 8.3's Random\Randomizer (itself built for

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Integrations\Admin;
 
+use App\Enums\EntitlementSource;
 use App\Enums\FirmActivationStatus;
 use App\Enums\PlatformRoleCode;
 use App\Filament\Pages\PlatformIntegrationOverviewPage;
@@ -18,10 +19,13 @@ use App\Integrations\Services\HealthStateService;
 use App\Jobs\RefreshIntegrationPlatformOverviewSummaryJob;
 use App\Models\Firm;
 use App\Models\PlatformAdmin;
-use App\Services\IntegrationPlatformOverviewSummaryService;
+use App\Services\EntitlementService;
 use App\Services\IntegrationPlatformOversightReadService;
+use App\Services\IntegrationPlatformOverviewSummaryService;
 use App\Services\PlatformRoleService;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
@@ -63,7 +67,7 @@ final class PlatformIntegrationOverviewCrossFirmCorrectnessTest extends TestCase
 
         $this->runWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->count(2)->create());
 
-        \Illuminate\Support\Carbon::setTestNow(now());
+        Carbon::setTestNow(now());
 
         app(IntegrationPlatformOverviewSummaryService::class)->refreshForFirm($firm);
 
@@ -82,7 +86,7 @@ final class PlatformIntegrationOverviewCrossFirmCorrectnessTest extends TestCase
         // just a no-op re-write of identical values.
         $this->runWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
 
-        \Illuminate\Support\Carbon::setTestNow(now()->addMinute());
+        Carbon::setTestNow(now()->addMinute());
 
         // The second call for the SAME firm must succeed too — no
         // duplicate-key exception — and must UPDATE the existing row
@@ -105,11 +109,11 @@ final class PlatformIntegrationOverviewCrossFirmCorrectnessTest extends TestCase
         );
         $this->assertSame(3, $secondRow->connection_count_active, 'The second refresh must reflect the newly-added connection.');
         $this->assertTrue(
-            \Illuminate\Support\Carbon::parse($secondRow->computed_at)->gt(\Illuminate\Support\Carbon::parse($firstRow->computed_at)),
+            Carbon::parse($secondRow->computed_at)->gt(Carbon::parse($firstRow->computed_at)),
             'computed_at must advance on the second refresh, proving it is a real update, not a stale/duplicate row.'
         );
 
-        \Illuminate\Support\Carbon::setTestNow();
+        Carbon::setTestNow();
     }
 
     public function test_the_underlying_per_firm_computation_correctly_derives_that_firms_own_data_only(): void
@@ -156,7 +160,7 @@ final class PlatformIntegrationOverviewCrossFirmCorrectnessTest extends TestCase
         $before = $this->computeForFirm($firm);
         $this->assertFalse($before['entitlement_enabled']);
 
-        app(\App\Services\EntitlementService::class)->setForSource($firm, 'integration', \App\Enums\EntitlementSource::AdminOverride, true);
+        app(EntitlementService::class)->setForSource($firm, 'integration', EntitlementSource::AdminOverride, true);
 
         $after = $this->computeForFirm($firm->fresh());
         $this->assertTrue($after['entitlement_enabled']);
@@ -242,7 +246,7 @@ final class PlatformIntegrationOverviewCrossFirmCorrectnessTest extends TestCase
         $this->assertSame(2, $rowA['connection_count_active']);
         $this->assertSame(1, $rowB['connection_count_active']);
 
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $test = Livewire::test(PlatformIntegrationOverviewPage::class);

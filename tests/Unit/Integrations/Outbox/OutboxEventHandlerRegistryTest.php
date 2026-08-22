@@ -30,7 +30,7 @@ class OutboxEventHandlerRegistryTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->registry = new OutboxEventHandlerRegistry();
+        $this->registry = new OutboxEventHandlerRegistry;
     }
 
     // ------------------------------------------------------------

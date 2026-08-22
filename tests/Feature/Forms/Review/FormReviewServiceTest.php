@@ -9,6 +9,7 @@ use App\Models\FirmUser;
 use App\Models\FormDraft;
 use App\Models\FormDraftValue;
 use App\Models\FormField;
+use App\Services\EntitlementService;
 use App\Services\FormAndDocumentAccessPolicyService;
 use App\Services\FormMissingDataDetectionService;
 use App\Services\FormReviewChecklistService;
@@ -23,17 +24,18 @@ class FormReviewServiceTest extends TestCase
     use RefreshDatabase;
 
     private FormReviewService $service;
+
     private FormReviewChecklistService $checklistService;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->checklistService = new FormReviewChecklistService();
+        $this->checklistService = new FormReviewChecklistService;
         $this->service = new FormReviewService(
-            new ReviewWorkflowTransitionService(),
-            new FormMissingDataDetectionService(),
+            new ReviewWorkflowTransitionService,
+            new FormMissingDataDetectionService,
             $this->checklistService,
-            new FormAndDocumentAccessPolicyService(app(\App\Services\EntitlementService::class)),
+            new FormAndDocumentAccessPolicyService(app(EntitlementService::class)),
         );
     }
 
@@ -172,7 +174,7 @@ class FormReviewServiceTest extends TestCase
         // service call actually does to context, matching every other
         // FORCE-RLS-era test's own "clear before the operation under
         // test" convention.
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         try {
             $this->service->resubmitAfterRevision($draft, $actor);

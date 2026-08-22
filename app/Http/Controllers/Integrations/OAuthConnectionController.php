@@ -62,9 +62,7 @@ use RuntimeException;
  */
 class OAuthConnectionController extends Controller
 {
-    public function __construct(private readonly ProviderConnectionService $connectionService)
-    {
-    }
+    public function __construct(private readonly ProviderConnectionService $connectionService) {}
 
     public function initiate(Request $request, string $firmIntegration): RedirectResponse
     {
@@ -76,7 +74,7 @@ class OAuthConnectionController extends Controller
             abort(403, 'No active firm membership.');
         }
 
-        $connection = (new TenantContextService())->runWithFirmContext(
+        $connection = (new TenantContextService)->runWithFirmContext(
             $firmUser->firm_id,
             fn () => FirmIntegration::query()->where('uuid', $firmIntegration)->first()
         );

@@ -149,7 +149,7 @@ class RetryAfterParserTest extends TestCase
             'garbage text' => ['not-a-retry-after-value'],
             'malformed date' => ['32 Foo 2026 25:99:99 XYZ'],
             'partial http date' => ['Thu, 01 Jan 2026'],
-            'sql-injection-shaped string' => ["120; DROP TABLE integration_outbox_events; --"],
+            'sql-injection-shaped string' => ['120; DROP TABLE integration_outbox_events; --'],
             'numeric-looking but with internal whitespace' => ['1 2 0'],
             'hex-looking digits' => ['0x78'],
             'unicode digits' => ['１２０'],

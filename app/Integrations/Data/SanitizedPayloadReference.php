@@ -38,8 +38,7 @@ final class SanitizedPayloadReference
         public readonly ResourceType $resourceType,
         public readonly string $resourceId,
         public readonly array $fields = [],
-    ) {
-    }
+    ) {}
 
     /**
      * @return array{resource_type: string, resource_id: string, fields: array<string, mixed>}

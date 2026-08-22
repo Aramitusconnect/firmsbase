@@ -21,8 +21,7 @@ class KeyDestructionApprovalService
 {
     public function __construct(
         private readonly HighRiskPlatformChangePolicyService $highRiskPolicy,
-    ) {
-    }
+    ) {}
 
     public function requestApproval(KeyDestructionRequest $request, PlatformAdmin $requestedBy, string $reason): KeyDestructionApproval
     {
@@ -39,7 +38,7 @@ class KeyDestructionApprovalService
             'status' => HighRiskChangeRequestStatus::Pending,
         ]);
 
-        (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => KeyDestructionRequestStatus::PendingApproval]));
+        (new TenantContextService)->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => KeyDestructionRequestStatus::PendingApproval]));
 
         return $approval;
     }
@@ -86,7 +85,7 @@ class KeyDestructionApprovalService
         ]);
 
         if ($decision->status === HighRiskChangeRequestStatus::Approved) {
-            (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => KeyDestructionRequestStatus::Approved]));
+            (new TenantContextService)->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => KeyDestructionRequestStatus::Approved]));
         }
 
         return $approval->fresh();
@@ -112,7 +111,7 @@ class KeyDestructionApprovalService
             'denial_reason' => $reason,
         ]);
 
-        (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => KeyDestructionRequestStatus::Denied]));
+        (new TenantContextService)->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => KeyDestructionRequestStatus::Denied]));
 
         return $approval->fresh();
     }

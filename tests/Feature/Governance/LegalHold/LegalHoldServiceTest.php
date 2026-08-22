@@ -3,7 +3,7 @@
 namespace Tests\Feature\Governance\LegalHold;
 
 use App\Enums\LegalHoldScope;
-use App\Models\LegalHold;
+use App\Models\Matter;
 use App\Services\LegalHoldService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\Governance\Concerns\SetsUpGovernanceFirm;
@@ -71,8 +71,8 @@ class LegalHoldServiceTest extends TestCase
     {
         $firm = $this->makeGovernanceFirm();
         $admin = $this->makePlatformAdmin();
-        $matter = \App\Models\Matter::factory()->create(['firm_id' => $firm->id]);
-        $otherMatter = \App\Models\Matter::factory()->create(['firm_id' => $firm->id]);
+        $matter = Matter::factory()->create(['firm_id' => $firm->id]);
+        $otherMatter = Matter::factory()->create(['firm_id' => $firm->id]);
 
         $this->service->place($firm, LegalHoldScope::Matter, 'Matter under hold.', $admin, matter: $matter);
 

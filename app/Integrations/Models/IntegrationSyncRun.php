@@ -34,7 +34,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class IntegrationSyncRun extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     protected $table = 'integration_sync_runs';
 

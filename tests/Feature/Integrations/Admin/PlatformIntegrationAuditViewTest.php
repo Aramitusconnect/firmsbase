@@ -9,11 +9,12 @@ use App\Filament\Pages\PlatformFirmIntegrationDetailPage;
 use App\Integrations\Models\FirmIntegration;
 use App\Models\Firm;
 use App\Models\PlatformAdmin;
-use App\Models\SecurityEvent;
 use App\Models\TimelineEvent;
 use App\Services\IntegrationPlatformOversightReadService;
 use App\Services\PlatformRoleService;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -49,9 +50,9 @@ final class PlatformIntegrationAuditViewTest extends TestCase
                 'metadata_json' => [],
             ]);
 
-            \Illuminate\Support\Facades\DB::table('security_events')->insert([
+            DB::table('security_events')->insert([
                 'firm_id' => $firm->id,
-                'actor_type' => \App\Models\PlatformAdmin::class,
+                'actor_type' => PlatformAdmin::class,
                 'actor_id' => 1,
                 'event_type' => 'platform_integration_oversight.queue_nudged',
                 'category' => 'platform_integration_oversight',
@@ -108,9 +109,9 @@ final class PlatformIntegrationAuditViewTest extends TestCase
         $firm = Firm::factory()->activated()->create();
 
         $this->runWithFirmContext($firm, function () use ($firm) {
-            \Illuminate\Support\Facades\DB::table('security_events')->insert([
+            DB::table('security_events')->insert([
                 'firm_id' => $firm->id,
-                'actor_type' => \App\Models\PlatformAdmin::class,
+                'actor_type' => PlatformAdmin::class,
                 'actor_id' => 1,
                 'event_type' => 'login_succeeded',
                 'category' => 'authentication', // NOT support_access/platform_integration_oversight
@@ -164,9 +165,9 @@ final class PlatformIntegrationAuditViewTest extends TestCase
         $firm = Firm::factory()->activated()->create();
 
         $this->runWithFirmContext($firm, function () use ($firm) {
-            \Illuminate\Support\Facades\DB::table('security_events')->insert([
+            DB::table('security_events')->insert([
                 'firm_id' => $firm->id,
-                'actor_type' => \App\Models\PlatformAdmin::class,
+                'actor_type' => PlatformAdmin::class,
                 'actor_id' => 1,
                 'event_type' => 'support_access.requested',
                 'category' => 'support_access',
@@ -192,9 +193,9 @@ final class PlatformIntegrationAuditViewTest extends TestCase
         $connection = $this->runWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
 
         $this->runWithFirmContext($firm, function () use ($firm) {
-            \Illuminate\Support\Facades\DB::table('security_events')->insert([
+            DB::table('security_events')->insert([
                 'firm_id' => $firm->id,
-                'actor_type' => \App\Models\PlatformAdmin::class,
+                'actor_type' => PlatformAdmin::class,
                 'actor_id' => 1,
                 'event_type' => 'support_access.requested',
                 'category' => 'support_access',
@@ -204,7 +205,7 @@ final class PlatformIntegrationAuditViewTest extends TestCase
         });
 
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $test = Livewire::test(PlatformFirmIntegrationDetailPage::class, [

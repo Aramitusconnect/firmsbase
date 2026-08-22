@@ -13,15 +13,13 @@ use App\Models\TrustAccount;
  */
 class TrustAccountService
 {
-    public function __construct(private readonly TrustEligibilityService $eligibility)
-    {
-    }
+    public function __construct(private readonly TrustEligibilityService $eligibility) {}
 
     public function open(Firm $firm, string $accountName, ?string $bankNameReference = null): TrustAccount
     {
         $this->eligibility->assertEligible($firm);
 
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => TrustAccount::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => TrustAccount::create([
             'firm_id' => $firm->id,
             'account_name' => $accountName,
             'bank_name_reference' => $bankNameReference,
@@ -34,7 +32,7 @@ class TrustAccountService
     {
         $this->eligibility->assertEligible($firm);
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($account) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($account) {
             $account->update(['status' => TrustAccountStatus::Suspended]);
 
             return $account->fresh();
@@ -45,7 +43,7 @@ class TrustAccountService
     {
         $this->eligibility->assertEligible($firm);
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($account) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($account) {
             $account->update(['status' => TrustAccountStatus::Closed]);
 
             return $account->fresh();

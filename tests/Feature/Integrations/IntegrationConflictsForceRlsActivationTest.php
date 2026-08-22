@@ -6,7 +6,6 @@ namespace Tests\Feature\Integrations;
 
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Models\IntegrationConflict;
-use App\Integrations\Models\IntegrationExternalMapping;
 use App\Integrations\Models\IntegrationSyncItem;
 use App\Integrations\Models\IntegrationSyncRun;
 use App\Models\Concerns\BelongsToTenant;
@@ -118,7 +117,7 @@ class IntegrationConflictsForceRlsActivationTest extends TestCase
         $run = IntegrationSyncRun::factory()->forFirmIntegration($connection)->create();
         $item = IntegrationSyncItem::factory()->forSyncRun($run)->create();
 
-        $conflict = $this->runWithFirmContext($firm, function () use ($firm, $connection, $item) {
+        $conflict = $this->runWithFirmContext($firm, function () use ($connection, $item) {
             return IntegrationConflict::factory()
                 ->forFirmIntegration($connection)
                 ->create(['sync_item_id' => $item->id]);
@@ -197,7 +196,7 @@ class IntegrationConflictsForceRlsActivationTest extends TestCase
     {
         IntegrationConflict::factory()->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(0, DB::table('integration_conflicts')->count());
     }
@@ -207,7 +206,7 @@ class IntegrationConflictsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $connection = FirmIntegration::factory()->forFirm($firm)->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
 
@@ -297,7 +296,7 @@ class IntegrationConflictsForceRlsActivationTest extends TestCase
     public function test_tenant_context_clears_after_success(): void
     {
         $firm = Firm::factory()->create();
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->runWithFirmContext($firm, fn () => IntegrationConflict::factory()->forFirmIntegration(FirmIntegration::factory()->forFirm($firm)->create())->create());
 
@@ -456,7 +455,7 @@ class IntegrationConflictsForceRlsActivationTest extends TestCase
 
     public function test_model_table_resolves_correctly(): void
     {
-        $this->assertSame('integration_conflicts', (new IntegrationConflict())->getTable());
+        $this->assertSame('integration_conflicts', (new IntegrationConflict)->getTable());
     }
 
     public function test_model_uses_belongs_to_tenant_trait(): void

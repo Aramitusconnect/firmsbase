@@ -30,7 +30,7 @@ class MigrationProjectService
         ?FirmUser $createdByFirmUser = null,
         ?PlatformAdmin $createdByPlatformAdmin = null,
     ): MigrationProject {
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => MigrationProject::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => MigrationProject::create([
             'firm_id' => $firm->id,
             'source_type' => $sourceType,
             'status' => MigrationProjectStatus::Draft,
@@ -42,7 +42,7 @@ class MigrationProjectService
 
     public function start(MigrationProject $project): MigrationProject
     {
-        return (new TenantContextService())->runWithFirmContext($project->firm_id, function () use ($project) {
+        return (new TenantContextService)->runWithFirmContext($project->firm_id, function () use ($project) {
             $project->update(['status' => MigrationProjectStatus::InProgress, 'started_at' => now()]);
 
             return $project->fresh();
@@ -51,7 +51,7 @@ class MigrationProjectService
 
     public function complete(MigrationProject $project): MigrationProject
     {
-        return (new TenantContextService())->runWithFirmContext($project->firm_id, function () use ($project) {
+        return (new TenantContextService)->runWithFirmContext($project->firm_id, function () use ($project) {
             $project->update(['status' => MigrationProjectStatus::Completed, 'completed_at' => now()]);
 
             return $project->fresh();
@@ -60,7 +60,7 @@ class MigrationProjectService
 
     public function cancel(MigrationProject $project): MigrationProject
     {
-        return (new TenantContextService())->runWithFirmContext($project->firm_id, function () use ($project) {
+        return (new TenantContextService)->runWithFirmContext($project->firm_id, function () use ($project) {
             $project->update(['status' => MigrationProjectStatus::Cancelled]);
 
             return $project->fresh();
@@ -69,7 +69,7 @@ class MigrationProjectService
 
     public function fail(MigrationProject $project): MigrationProject
     {
-        return (new TenantContextService())->runWithFirmContext($project->firm_id, function () use ($project) {
+        return (new TenantContextService)->runWithFirmContext($project->firm_id, function () use ($project) {
             $project->update(['status' => MigrationProjectStatus::Failed]);
 
             return $project->fresh();

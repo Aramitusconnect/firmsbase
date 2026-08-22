@@ -37,7 +37,7 @@ class IntegrationOutboxPayloadBuilderServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new IntegrationOutboxPayloadBuilderService();
+        $this->service = new IntegrationOutboxPayloadBuilderService;
     }
 
     // ------------------------------------------------------------

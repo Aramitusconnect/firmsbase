@@ -3,8 +3,8 @@
 namespace App\Services;
 
 use App\Enums\PdfAnnotationType;
-use App\Enums\PdfViewEventAction;
 use App\Enums\PdfViewerViewerType;
+use App\Enums\PdfViewEventAction;
 use App\Enums\SignatureSourceDocumentType;
 use App\Models\Document;
 use App\Models\Firm;
@@ -118,7 +118,7 @@ class PdfViewEventService
         string $ipAddress,
         string $userAgent,
     ): PdfViewEvent {
-        return (new TenantContextService())->runWithFirmContext($firm->id, fn () => PdfViewEvent::create([
+        return (new TenantContextService)->runWithFirmContext($firm->id, fn () => PdfViewEvent::create([
             'firm_id' => $firm->id,
             'viewer_type' => $viewerType,
             'viewer_firm_user_id' => $viewerFirmUser?->id,
@@ -148,7 +148,7 @@ class PdfViewEventService
         string $ipAddress,
         string $userAgent,
     ): PdfViewEvent {
-        return (new TenantContextService())->runWithFirmContext($firm->id, fn () => PdfViewEvent::create([
+        return (new TenantContextService)->runWithFirmContext($firm->id, fn () => PdfViewEvent::create([
             'firm_id' => $firm->id,
             'viewer_type' => $viewerType,
             'viewer_firm_user_id' => $viewerFirmUser?->id,

@@ -37,9 +37,9 @@ class EmergencySupportHighRiskApprovalTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->requestService = new SupportAccessRequestService();
-        $this->policyService = new SupportAccessPolicyService();
-        $this->highRiskPolicy = new HighRiskPlatformChangePolicyService();
+        $this->requestService = new SupportAccessRequestService;
+        $this->policyService = new SupportAccessPolicyService;
+        $this->highRiskPolicy = new HighRiskPlatformChangePolicyService;
     }
 
     public function test_emergency_request_raises_a_high_risk_change_request_of_the_correct_type(): void

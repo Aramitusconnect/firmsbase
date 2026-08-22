@@ -9,6 +9,7 @@ use App\Models\Firm;
 use App\Services\TenantContextResolver;
 use App\Services\TenantSafeEmailPolicyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 /**
@@ -86,7 +87,7 @@ class EmailTenantIsolationTest extends TestCase
 
         $this->expectException(TenantIsolationException::class);
 
-        (new TenantSafeEmailPolicyService())->assertEmailAccountBelongsToFirm($account, $firmB);
+        (new TenantSafeEmailPolicyService)->assertEmailAccountBelongsToFirm($account, $firmB);
     }
 
     public function test_tenant_safe_policy_service_rejects_cross_firm_email_message_access(): void
@@ -98,12 +99,12 @@ class EmailTenantIsolationTest extends TestCase
 
         $this->expectException(TenantIsolationException::class);
 
-        (new TenantSafeEmailPolicyService())->assertEmailMessageBelongsToFirm($message, $firmB);
+        (new TenantSafeEmailPolicyService)->assertEmailMessageBelongsToFirm($message, $firmB);
     }
 
     public function test_email_oauth_token_has_no_firm_id_column_and_is_scoped_transitively(): void
     {
-        $columns = \Illuminate\Support\Facades\Schema::getColumnListing('email_oauth_tokens');
+        $columns = Schema::getColumnListing('email_oauth_tokens');
 
         $this->assertNotContains('firm_id', $columns);
         $this->assertContains('email_account_id', $columns);

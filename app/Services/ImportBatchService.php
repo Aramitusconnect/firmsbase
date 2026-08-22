@@ -28,8 +28,7 @@ class ImportBatchService
 {
     public function __construct(
         private readonly ImportAuditService $auditService,
-    ) {
-    }
+    ) {}
 
     public function create(
         Firm $firm,
@@ -39,7 +38,7 @@ class ImportBatchService
         ?FirmUser $createdByFirmUser = null,
         ?PlatformAdmin $createdByPlatformAdmin = null,
     ): ImportBatch {
-        $batch = (new TenantContextService())->runWithFirmContext($firm, fn () => ImportBatch::create([
+        $batch = (new TenantContextService)->runWithFirmContext($firm, fn () => ImportBatch::create([
             'firm_id' => $firm->id,
             'entity_type' => $entityType,
             'source_type' => $sourceType,
@@ -55,7 +54,7 @@ class ImportBatchService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $rows
+     * @param  array<int, array<string, mixed>>  $rows
      */
     public function stageRows(ImportBatch $batch, array $rows): ImportBatch
     {
@@ -67,7 +66,7 @@ class ImportBatchService
             ]);
         }
 
-        return (new TenantContextService())->runWithFirmContext($batch->firm_id, function () use ($batch) {
+        return (new TenantContextService)->runWithFirmContext($batch->firm_id, function () use ($batch) {
             $batch->update(['status' => ImportBatchStatus::Staged, 'staged_at' => now()]);
 
             return $batch->fresh();
@@ -76,10 +75,10 @@ class ImportBatchService
 
     public function cancel(ImportBatch $batch): ImportBatch
     {
-        return (new TenantContextService())->runWithFirmContext($batch->firm_id, function () use ($batch) {
+        return (new TenantContextService)->runWithFirmContext($batch->firm_id, function () use ($batch) {
             $batch->update(['status' => ImportBatchStatus::Cancelled, 'cancelled_at' => now()]);
 
-            $this->auditService->record($batch, \App\Enums\ImportAuditEventType::BatchCancelled);
+            $this->auditService->record($batch, ImportAuditEventType::BatchCancelled);
 
             return $batch->fresh();
         });

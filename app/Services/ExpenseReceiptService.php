@@ -34,8 +34,7 @@ class ExpenseReceiptService
     public function __construct(
         private readonly AccountingEntitlementPolicyService $entitlementPolicy,
         private readonly TenantSafeAccountingPolicyService $tenantSafePolicy,
-    ) {
-    }
+    ) {}
 
     public function upload(
         Firm $firm,
@@ -52,7 +51,7 @@ class ExpenseReceiptService
         $this->entitlementPolicy->assertExpensesEnabled($firm);
         $this->tenantSafePolicy->assertExpenseBelongsToFirm($expense, $firm);
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use (
+        return (new TenantContextService)->runWithFirmContext($firm, function () use (
             $firm, $expense, $originalFilename, $mimeType, $sizeBytes, $storageDisk, $storagePath, $fileHash, $uploadedBy, $encryptionKey,
         ) {
             if ($expense->receipt()->exists()) {

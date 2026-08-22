@@ -20,7 +20,7 @@ class ImportBatchServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new ImportBatchService(new ImportAuditService());
+        $this->service = new ImportBatchService(new ImportAuditService);
     }
 
     public function test_create_writes_a_draft_batch_and_an_audit_event(): void

@@ -34,9 +34,7 @@ class TrustEligibilityService
 {
     private const MODULE_CODE = 'trust_iolta';
 
-    public function __construct(private readonly EntitlementService $entitlementService)
-    {
-    }
+    public function __construct(private readonly EntitlementService $entitlementService) {}
 
     public function evaluate(Firm $firm): TrustEligibilityDecision
     {
@@ -56,7 +54,7 @@ class TrustEligibilityService
         // method, since the other checks (customer_type, entitlement,
         // hasApprovedTrustSetup) don't touch firm_settings and shouldn't be
         // pulled inside the wrap.
-        $settings = (new TenantContextService())->runWithFirmContext($firm, fn () => $firm->firmSettings);
+        $settings = (new TenantContextService)->runWithFirmContext($firm, fn () => $firm->firmSettings);
 
         if ($settings?->payment_mode !== PaymentMode::OperatingAndTrust) {
             return TrustEligibilityDecision::deny('Firm payment_mode is not operating_and_trust.');
@@ -75,7 +73,7 @@ class TrustEligibilityService
         // wraps protect two independent tables and should remain
         // independently auditable, consistent with this method's own
         // established convention.
-        $hasApprovedSetup = (new TenantContextService())->runWithFirmContext($firm, fn () => $this->hasApprovedTrustSetup($firm));
+        $hasApprovedSetup = (new TenantContextService)->runWithFirmContext($firm, fn () => $this->hasApprovedTrustSetup($firm));
 
         if (! $hasApprovedSetup) {
             return TrustEligibilityDecision::deny('No approved trust-mode activation exists for this firm (Phase 7 two-person approval not completed).');

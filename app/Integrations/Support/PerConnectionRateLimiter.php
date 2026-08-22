@@ -30,9 +30,7 @@ use Illuminate\Cache\RateLimiter;
  */
 final class PerConnectionRateLimiter
 {
-    public function __construct(private readonly RateLimiter $limiter)
-    {
-    }
+    public function __construct(private readonly RateLimiter $limiter) {}
 
     /**
      * True if this connection is currently within its configured

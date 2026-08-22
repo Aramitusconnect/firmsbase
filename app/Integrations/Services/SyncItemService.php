@@ -32,8 +32,7 @@ final class SyncItemService
     public function __construct(
         private readonly TimelineEventRecorder $events,
         private readonly IntegrationRequeueAuditLogger $requeueAudit,
-    ) {
-    }
+    ) {}
 
     /**
      * The owning run's own batch-loop write path — first-attempt

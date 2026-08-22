@@ -15,6 +15,7 @@ use App\Models\ChartOfAccount;
 use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\Payment;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
 /**
@@ -48,9 +49,7 @@ use Illuminate\Support\Collection;
  */
 class AccountingExportLineBuilderService
 {
-    public function __construct(private readonly AccountingEntitlementPolicyService $entitlementPolicy)
-    {
-    }
+    public function __construct(private readonly AccountingEntitlementPolicyService $entitlementPolicy) {}
 
     /**
      * @return Collection<int, AccountingExportLine>
@@ -59,7 +58,7 @@ class AccountingExportLineBuilderService
     {
         $this->entitlementPolicy->assertExpensesEnabled($batch->firm);
 
-        $lines = new Collection();
+        $lines = new Collection;
 
         foreach ($this->eligibleExpenses($batch) as $expense) {
             $lines->push($this->buildLine(
@@ -96,7 +95,7 @@ class AccountingExportLineBuilderService
 
     private function eligibleExpenses(AccountingExportBatch $batch): Collection
     {
-        return (new TenantContextService())->runWithFirmContext($batch->firm_id, fn () => Expense::query()
+        return (new TenantContextService)->runWithFirmContext($batch->firm_id, fn () => Expense::query()
             ->where('firm_id', $batch->firm_id)
             ->where('status', ExpenseStatus::Approved->value)
             ->whereBetween('expense_date', [$batch->date_range_start, $batch->date_range_end])
@@ -106,7 +105,7 @@ class AccountingExportLineBuilderService
 
     private function eligibleInvoices(AccountingExportBatch $batch): Collection
     {
-        return (new TenantContextService())->runWithFirmContext($batch->firm_id, fn () => Invoice::query()
+        return (new TenantContextService)->runWithFirmContext($batch->firm_id, fn () => Invoice::query()
             ->where('firm_id', $batch->firm_id)
             ->whereNotIn('status', [InvoiceStatus::Draft->value, InvoiceStatus::Void->value])
             ->whereBetween('issued_at', [$this->windowStart($batch), $this->windowEnd($batch)])
@@ -119,7 +118,7 @@ class AccountingExportLineBuilderService
      */
     private function eligibleOperatingPayments(AccountingExportBatch $batch): Collection
     {
-        return (new TenantContextService())->runWithFirmContext($batch->firm_id, fn () => Payment::query()
+        return (new TenantContextService)->runWithFirmContext($batch->firm_id, fn () => Payment::query()
             ->where('firm_id', $batch->firm_id)
             ->where('payment_classification', PaymentClassification::OperatingPayment->value)
             ->where('status', PaymentStatus::Succeeded->value)
@@ -127,14 +126,14 @@ class AccountingExportLineBuilderService
             ->get());
     }
 
-    private function windowStart(AccountingExportBatch $batch): \Carbon\CarbonImmutable
+    private function windowStart(AccountingExportBatch $batch): CarbonImmutable
     {
-        return \Carbon\CarbonImmutable::parse($batch->date_range_start)->startOfDay();
+        return CarbonImmutable::parse($batch->date_range_start)->startOfDay();
     }
 
-    private function windowEnd(AccountingExportBatch $batch): \Carbon\CarbonImmutable
+    private function windowEnd(AccountingExportBatch $batch): CarbonImmutable
     {
-        return \Carbon\CarbonImmutable::parse($batch->date_range_end)->endOfDay();
+        return CarbonImmutable::parse($batch->date_range_end)->endOfDay();
     }
 
     private function buildLine(
@@ -144,7 +143,7 @@ class AccountingExportLineBuilderService
         int $amountCents,
         ?ChartOfAccount $chartOfAccount,
     ): AccountingExportLine {
-        return (new TenantContextService())->runWithFirmContext($batch->firm_id, fn () => AccountingExportLine::create([
+        return (new TenantContextService)->runWithFirmContext($batch->firm_id, fn () => AccountingExportLine::create([
             'accounting_export_batch_id' => $batch->id,
             'firm_id' => $batch->firm_id,
             'source_record_type' => $type,
@@ -159,7 +158,7 @@ class AccountingExportLineBuilderService
 
     private function resolveActiveAccountByType(AccountingExportBatch $batch, ChartOfAccountType $type): ?ChartOfAccount
     {
-        return (new TenantContextService())->runWithFirmContext($batch->firm_id, fn () => ChartOfAccount::query()
+        return (new TenantContextService)->runWithFirmContext($batch->firm_id, fn () => ChartOfAccount::query()
             ->where('firm_id', $batch->firm_id)
             ->where('account_type', $type->value)
             ->where('is_active', true)

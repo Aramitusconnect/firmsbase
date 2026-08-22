@@ -38,8 +38,7 @@ class FormDraftGenerationService
     public function __construct(
         private readonly DeterministicFieldResolutionService $resolver,
         private readonly FormMissingDataDetectionService $missingDataDetectionService,
-    ) {
-    }
+    ) {}
 
     public function generate(Matter $matter, FormTemplateVersion $version, FirmUser $actor, ?Client $client = null): FormDraftGenerationResult
     {
@@ -49,7 +48,7 @@ class FormDraftGenerationService
             );
         }
 
-        return (new TenantContextService())->runWithFirmContext($matter->firm_id, function () use ($matter, $version, $actor, $client) {
+        return (new TenantContextService)->runWithFirmContext($matter->firm_id, function () use ($matter, $version, $actor, $client) {
             $draft = FormDraft::create([
                 'firm_id' => $matter->firm_id,
                 'matter_id' => $matter->id,

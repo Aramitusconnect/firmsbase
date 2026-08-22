@@ -7,6 +7,7 @@ use App\Enums\SignatureSourceDocumentType;
 use App\Models\Document;
 use App\Models\DocumentHash;
 use App\Models\Firm;
+use App\Models\GeneratedDocument;
 use App\Services\TenantContextService;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Model;
@@ -39,7 +40,7 @@ class DocumentHashFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -73,7 +74,7 @@ class DocumentHashFactory extends Factory
         ]);
     }
 
-    public function forGeneratedDocument(\App\Models\GeneratedDocument $generatedDocument): static
+    public function forGeneratedDocument(GeneratedDocument $generatedDocument): static
     {
         return $this->state(fn () => [
             'firm_id' => $generatedDocument->firm_id,

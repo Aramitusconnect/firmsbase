@@ -39,6 +39,5 @@ final readonly class IntegrationUsageSummary
         public string $unit,
         public ?Carbon $firstOccurredAt,
         public ?Carbon $lastOccurredAt,
-    ) {
-    }
+    ) {}
 }

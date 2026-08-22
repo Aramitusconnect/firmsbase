@@ -92,7 +92,7 @@ class ImplementationTaskService
             default => ImplementationProjectStatus::NotStarted,
         };
 
-        return (new TenantContextService())->runWithFirmContext($project->firm_id, function () use ($project, $status) {
+        return (new TenantContextService)->runWithFirmContext($project->firm_id, function () use ($project, $status) {
             $project->update([
                 'status' => $status,
                 'completed_at' => $status === ImplementationProjectStatus::Completed ? ($project->completed_at ?? now()) : $project->completed_at,

@@ -8,12 +8,16 @@ use App\Enums\EntitlementSource;
 use App\Enums\FirmUserRole;
 use App\Filament\Firm\Pages\IntegrationUsagePage;
 use App\Filament\Firm\Resources\FirmIntegrationResource;
+use App\Filament\Firm\Resources\FirmIntegrationResource\Pages\ViewFirmIntegration;
 use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Policies\FirmIntegrationPolicy;
+use App\Integrations\Services\IntegrationAccessPolicyService;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\TenantEncryptionKey;
 use App\Models\User;
 use App\Services\EntitlementService;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -53,7 +57,7 @@ final class FirmIntegrationsNavigationAuthorizationTest extends TestCase
         // belong to. Explicitly activating the 'firm' panel here mirrors
         // what EstablishFirmTenantContext's real request-time middleware
         // stack does implicitly for every genuine firm-panel request.
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('firm'));
+        Filament::setCurrentPanel(Filament::getPanel('firm'));
     }
 
     private const VIEW_ROLES = [
@@ -165,7 +169,7 @@ final class FirmIntegrationsNavigationAuthorizationTest extends TestCase
         $connection = $this->connectionFor($firm);
         $firmUser = $this->actingAsRole($firm, FirmUserRole::Paralegal);
 
-        $policy = app(\App\Integrations\Policies\FirmIntegrationPolicy::class);
+        $policy = app(FirmIntegrationPolicy::class);
 
         $this->assertTrue($policy->view($firmUser->user, $connection));
     }
@@ -183,7 +187,7 @@ final class FirmIntegrationsNavigationAuthorizationTest extends TestCase
         $test = $this->runWithFirmContext(
             $firm,
             fn () => Livewire::test(
-                \App\Filament\Firm\Resources\FirmIntegrationResource\Pages\ViewFirmIntegration::class,
+                ViewFirmIntegration::class,
                 ['record' => $connection->uuid]
             )
         );
@@ -197,7 +201,7 @@ final class FirmIntegrationsNavigationAuthorizationTest extends TestCase
         $connection = $this->connectionFor($firm);
         $firmUser = $this->actingAsRole($firm, FirmUserRole::Receptionist);
 
-        $policy = app(\App\Integrations\Policies\FirmIntegrationPolicy::class);
+        $policy = app(FirmIntegrationPolicy::class);
 
         $this->assertFalse($policy->view($firmUser->user, $connection));
     }
@@ -210,7 +214,7 @@ final class FirmIntegrationsNavigationAuthorizationTest extends TestCase
 
     public function test_only_firm_owner_and_attorney_pass_the_connect_configure_disconnect_sync_ceiling(): void
     {
-        $policy = app(\App\Integrations\Services\IntegrationAccessPolicyService::class);
+        $policy = app(IntegrationAccessPolicyService::class);
 
         foreach (FirmUserRole::cases() as $role) {
             $expected = in_array($role, self::CONNECT_CONFIGURE_DISCONNECT_SYNC_ROLES, true);
@@ -224,7 +228,7 @@ final class FirmIntegrationsNavigationAuthorizationTest extends TestCase
 
     public function test_receptionist_never_passes_any_of_the_four_connect_configure_disconnect_sync_gates(): void
     {
-        $policy = app(\App\Integrations\Services\IntegrationAccessPolicyService::class);
+        $policy = app(IntegrationAccessPolicyService::class);
 
         $this->assertFalse($policy->canConnect(FirmUserRole::Receptionist));
         $this->assertFalse($policy->canConfigure(FirmUserRole::Receptionist));

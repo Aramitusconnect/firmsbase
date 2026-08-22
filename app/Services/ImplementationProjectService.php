@@ -25,7 +25,7 @@ class ImplementationProjectService
 {
     public function createForFirm(Firm $firm, ?PlatformAdmin $assignedTo = null): ImplementationProject
     {
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $assignedTo) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $assignedTo) {
             $project = ImplementationProject::create([
                 'firm_id' => $firm->id,
                 'assigned_to' => $assignedTo?->id,
@@ -47,7 +47,7 @@ class ImplementationProjectService
 
     public function start(ImplementationProject $project): ImplementationProject
     {
-        return (new TenantContextService())->runWithFirmContext($project->firm_id, function () use ($project) {
+        return (new TenantContextService)->runWithFirmContext($project->firm_id, function () use ($project) {
             $project->update([
                 'status' => ImplementationProjectStatus::InProgress,
                 'started_at' => $project->started_at ?? now(),
@@ -59,7 +59,7 @@ class ImplementationProjectService
 
     public function markGoLive(ImplementationProject $project): ImplementationProject
     {
-        return (new TenantContextService())->runWithFirmContext($project->firm_id, function () use ($project) {
+        return (new TenantContextService)->runWithFirmContext($project->firm_id, function () use ($project) {
             $project->update([
                 'go_live_at' => now(),
                 'success_review_due_at' => now()->addDays(30),
@@ -71,7 +71,7 @@ class ImplementationProjectService
 
     public function completeSuccessReview(ImplementationProject $project): ImplementationProject
     {
-        return (new TenantContextService())->runWithFirmContext($project->firm_id, function () use ($project) {
+        return (new TenantContextService)->runWithFirmContext($project->firm_id, function () use ($project) {
             $project->update([
                 'success_review_completed_at' => now(),
                 'status' => ImplementationProjectStatus::Completed,

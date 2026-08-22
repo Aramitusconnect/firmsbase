@@ -29,9 +29,7 @@ use App\Models\FirmUser;
  */
 class AccountingExportBatchService
 {
-    public function __construct(private readonly AccountingEntitlementPolicyService $entitlementPolicy)
-    {
-    }
+    public function __construct(private readonly AccountingEntitlementPolicyService $entitlementPolicy) {}
 
     public function request(
         Firm $firm,
@@ -41,7 +39,7 @@ class AccountingExportBatchService
         AccountingExportTarget $target = AccountingExportTarget::QuickbooksOnline,
     ): AccountingExportBatch {
         if (! $this->entitlementPolicy->isExpensesEnabledForFirm($firm)) {
-            return (new TenantContextService())->runWithFirmContext($firm, fn () => AccountingExportBatch::create([
+            return (new TenantContextService)->runWithFirmContext($firm, fn () => AccountingExportBatch::create([
                 'firm_id' => $firm->id,
                 'export_target' => $target,
                 'status' => AccountingExportBatchStatus::Blocked,
@@ -52,7 +50,7 @@ class AccountingExportBatchService
             ]));
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => AccountingExportBatch::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => AccountingExportBatch::create([
             'firm_id' => $firm->id,
             'export_target' => $target,
             'status' => AccountingExportBatchStatus::Requested,
@@ -66,7 +64,7 @@ class AccountingExportBatchService
     {
         $this->assertNotTerminal($batch);
 
-        return (new TenantContextService())->runWithFirmContext($batch->firm_id, function () use ($batch) {
+        return (new TenantContextService)->runWithFirmContext($batch->firm_id, function () use ($batch) {
             $batch->update(['status' => AccountingExportBatchStatus::InProgress, 'started_at' => now()]);
 
             return $batch->fresh();
@@ -77,7 +75,7 @@ class AccountingExportBatchService
     {
         $this->assertNotTerminal($batch);
 
-        return (new TenantContextService())->runWithFirmContext($batch->firm_id, function () use ($batch) {
+        return (new TenantContextService)->runWithFirmContext($batch->firm_id, function () use ($batch) {
             $batch->update(['status' => AccountingExportBatchStatus::Completed, 'completed_at' => now()]);
 
             return $batch->fresh();
@@ -88,7 +86,7 @@ class AccountingExportBatchService
     {
         $this->assertNotTerminal($batch);
 
-        return (new TenantContextService())->runWithFirmContext($batch->firm_id, function () use ($batch) {
+        return (new TenantContextService)->runWithFirmContext($batch->firm_id, function () use ($batch) {
             $batch->update(['status' => AccountingExportBatchStatus::CompletedWithErrors, 'completed_at' => now()]);
 
             return $batch->fresh();
@@ -99,7 +97,7 @@ class AccountingExportBatchService
     {
         $this->assertNotTerminal($batch);
 
-        return (new TenantContextService())->runWithFirmContext($batch->firm_id, function () use ($batch, $reason) {
+        return (new TenantContextService)->runWithFirmContext($batch->firm_id, function () use ($batch, $reason) {
             $batch->update(['status' => AccountingExportBatchStatus::Failed, 'failed_reason' => $reason]);
 
             return $batch->fresh();

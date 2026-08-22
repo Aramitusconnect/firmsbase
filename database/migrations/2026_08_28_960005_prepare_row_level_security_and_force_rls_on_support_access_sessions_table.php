@@ -82,7 +82,7 @@ return new class extends Migration
 
         DB::statement(
             "ALTER TABLE {$table} ADD CONSTRAINT {$compositeFk} "
-            ."FOREIGN KEY (firm_id, support_access_request_id) "
+            .'FOREIGN KEY (firm_id, support_access_request_id) '
             ."REFERENCES {$parentTable} (firm_id, id) ON DELETE CASCADE"
         );
 

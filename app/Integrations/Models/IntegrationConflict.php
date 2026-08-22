@@ -44,7 +44,7 @@ use RuntimeException;
  */
 class IntegrationConflict extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     protected $table = 'integration_conflicts';
 

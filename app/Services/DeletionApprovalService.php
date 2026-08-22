@@ -21,8 +21,7 @@ class DeletionApprovalService
 {
     public function __construct(
         private readonly HighRiskPlatformChangePolicyService $highRiskPolicy,
-    ) {
-    }
+    ) {}
 
     public function requestApproval(DeletionRequest $request, PlatformAdmin $requestedBy, string $reason): DeletionApproval
     {
@@ -39,7 +38,7 @@ class DeletionApprovalService
             'status' => HighRiskChangeRequestStatus::Pending,
         ]);
 
-        (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => \App\Enums\DeletionRequestStatus::PendingApproval]));
+        (new TenantContextService)->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => DeletionRequestStatus::PendingApproval]));
 
         return $approval;
     }
@@ -86,7 +85,7 @@ class DeletionApprovalService
         ]);
 
         if ($decision->status === HighRiskChangeRequestStatus::Approved) {
-            (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => DeletionRequestStatus::ReadyForExecution]));
+            (new TenantContextService)->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => DeletionRequestStatus::ReadyForExecution]));
         }
 
         return $approval->fresh();
@@ -112,7 +111,7 @@ class DeletionApprovalService
             'denial_reason' => $reason,
         ]);
 
-        (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => DeletionRequestStatus::Denied]));
+        (new TenantContextService)->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => DeletionRequestStatus::Denied]));
 
         return $approval->fresh();
     }

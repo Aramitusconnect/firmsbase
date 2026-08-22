@@ -69,7 +69,7 @@ class AccessReviewService
             // never matches), so preserving that exact no-op behavior
             // is correct rather than guessing a firm.
             AccessReviewScope::FirmAdmins, AccessReviewScope::EmployeeRoles => $review->firm_id !== null
-                ? (new TenantContextService())->runWithFirmContext(
+                ? (new TenantContextService)->runWithFirmContext(
                     $review->firm_id,
                     fn () => FirmUser::query()->where('firm_id', $review->firm_id)->get(),
                 )
@@ -111,7 +111,7 @@ class AccessReviewService
      */
     private function supportAccessRequesterIdsAcrossAllFirms(): array
     {
-        $tenantContext = new TenantContextService();
+        $tenantContext = new TenantContextService;
         $requesterIds = collect();
 
         foreach (Firm::query()->get() as $firm) {

@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace Tests\Feature\Integrations\Admin;
 
 use App\Enums\PlatformRoleCode;
+use App\Enums\SupportAccessSessionStatus;
 use App\Filament\Pages\PlatformFirmIntegrationsPage;
 use App\Integrations\Models\FirmIntegration;
 use App\Models\Firm;
 use App\Models\PlatformAdmin;
+use App\Models\SupportAccessRequest;
+use App\Models\SupportAccessSession;
 use App\Services\PlatformRoleService;
 use App\Services\TenantContextService;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -37,7 +41,7 @@ final class CrossRequestTenantContextIsolationTest extends TestCase
         $connectionB = $this->runWithFirmContext($firmB, fn () => FirmIntegration::factory()->forFirm($firmB)->create(['display_label' => 'Connection Bravo Only']));
 
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         // Sanity: no context active before we start.
@@ -102,7 +106,7 @@ final class CrossRequestTenantContextIsolationTest extends TestCase
         $this->activeSessionFor($admin, $firmA);
         // Deliberately NO active session for firmB.
 
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $testA = Livewire::test(PlatformFirmIntegrationsPage::class, ['firmUuid' => $firmA->uuid]);
@@ -127,14 +131,14 @@ final class CrossRequestTenantContextIsolationTest extends TestCase
     {
         $request = $this->runWithFirmContext(
             $firm,
-            fn () => \App\Models\SupportAccessRequest::factory()->forFirm($firm)->create(['requested_by' => $admin->id])
+            fn () => SupportAccessRequest::factory()->forFirm($firm)->create(['requested_by' => $admin->id])
         );
 
-        $this->runWithFirmContext($firm, fn () => \App\Models\SupportAccessSession::factory()->create([
+        $this->runWithFirmContext($firm, fn () => SupportAccessSession::factory()->create([
             'firm_id' => $firm->id,
             'support_access_request_id' => $request->id,
             'platform_admin_id' => $admin->id,
-            'status' => \App\Enums\SupportAccessSessionStatus::Active->value,
+            'status' => SupportAccessSessionStatus::Active->value,
             'started_at' => now(),
             'expires_at' => now()->addHour(),
         ]));

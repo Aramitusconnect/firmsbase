@@ -12,7 +12,7 @@ class AcceptanceUiDependencyTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new AcceptanceTestMatrixMappingService();
+        $this->service = new AcceptanceTestMatrixMappingService;
     }
 
     public function test_accessibility_mobile_group_is_not_applicable_yet_because_no_real_ui_surface_exists(): void

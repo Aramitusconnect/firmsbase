@@ -8,11 +8,14 @@ use App\Enums\PlatformRoleCode;
 use App\Filament\Pages\PlatformFirmIntegrationDetailPage;
 use App\Integrations\Enums\ConnectionStatus;
 use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Providers\TestProvider\TestProvider;
 use App\Models\Firm;
 use App\Models\PlatformAdmin;
 use App\Services\IntegrationPlatformOversightReadService;
 use App\Services\PlatformRoleService;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -70,7 +73,7 @@ final class PlatformIntegrationConnectionDetailRenderingTest extends TestCase
         ]));
 
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $test = Livewire::test(PlatformFirmIntegrationDetailPage::class, [
@@ -103,16 +106,16 @@ final class PlatformIntegrationConnectionDetailRenderingTest extends TestCase
         ]));
 
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
-        $test = Livewire::test(\App\Filament\Pages\PlatformFirmIntegrationDetailPage::class, [
+        $test = Livewire::test(PlatformFirmIntegrationDetailPage::class, [
             'firmUuid' => $firm->uuid,
             'connectionUuid' => $connection->uuid,
         ]);
 
         $test->assertOk();
-        $test->assertSee((new \App\Integrations\Providers\TestProvider\TestProvider())->displayName());
+        $test->assertSee((new TestProvider)->displayName());
     }
 
     public function test_the_detail_page_404s_for_a_connection_uuid_belonging_to_a_different_firm(): void
@@ -122,7 +125,7 @@ final class PlatformIntegrationConnectionDetailRenderingTest extends TestCase
         $otherConnection = $this->runWithFirmContext($otherFirm, fn () => FirmIntegration::factory()->forFirm($otherFirm)->create());
 
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $test = Livewire::test(PlatformFirmIntegrationDetailPage::class, [
@@ -137,12 +140,12 @@ final class PlatformIntegrationConnectionDetailRenderingTest extends TestCase
     {
         $firm = Firm::factory()->activated()->create();
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $test = Livewire::test(PlatformFirmIntegrationDetailPage::class, [
             'firmUuid' => $firm->uuid,
-            'connectionUuid' => (string) \Illuminate\Support\Str::uuid(),
+            'connectionUuid' => (string) Str::uuid(),
         ]);
 
         $test->assertNotFound();

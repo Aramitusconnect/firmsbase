@@ -19,7 +19,7 @@ class CustomerSuccessHealthScoreServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new CustomerSuccessHealthScoreService(new QueueHealthService());
+        $this->service = new CustomerSuccessHealthScoreService(new QueueHealthService);
     }
 
     public function test_compute_creates_a_new_snapshot_row(): void

@@ -9,6 +9,7 @@ use App\Enums\EntitlementSource;
 use App\Enums\ExpenseStatus;
 use App\Models\ChartOfAccount;
 use App\Models\Expense;
+use App\Models\ExpenseCategory;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Services\AccountingEntitlementPolicyService;
@@ -25,8 +26,11 @@ class AccountingExportSimulationServiceTest extends TestCase
     use RefreshDatabase;
 
     private AccountingExportSimulationService $simulation;
+
     private AccountingExportLineBuilderService $lineBuilder;
+
     private AccountingExportBatchService $batchService;
+
     private EntitlementService $entitlements;
 
     protected function setUp(): void
@@ -36,7 +40,7 @@ class AccountingExportSimulationServiceTest extends TestCase
         $policy = new AccountingEntitlementPolicyService($this->entitlements);
         $this->batchService = new AccountingExportBatchService($policy);
         $this->lineBuilder = new AccountingExportLineBuilderService($policy);
-        $this->simulation = new AccountingExportSimulationService($this->batchService, new AccountingExportErrorLogger());
+        $this->simulation = new AccountingExportSimulationService($this->batchService, new AccountingExportErrorLogger);
     }
 
     private function firmWithExpenses(): Firm
@@ -53,7 +57,7 @@ class AccountingExportSimulationServiceTest extends TestCase
         $firm = $this->firmWithExpenses();
         $requester = FirmUser::factory()->create(['firm_id' => $firm->id]);
         $expenseAccount = ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Expense)->create();
-        $category = \App\Models\ExpenseCategory::factory()->forFirm($firm)->create(['chart_of_accounts_id' => $expenseAccount->id]);
+        $category = ExpenseCategory::factory()->forFirm($firm)->create(['chart_of_accounts_id' => $expenseAccount->id]);
         Expense::factory()->forFirm($firm)->status(ExpenseStatus::Approved)
             ->create(['expense_category_id' => $category->id, 'expense_date' => now()->subDays(1)]);
 
@@ -113,7 +117,7 @@ class AccountingExportSimulationServiceTest extends TestCase
         $firm = $this->firmWithExpenses();
         $requester = FirmUser::factory()->create(['firm_id' => $firm->id]);
         $expenseAccount = ChartOfAccount::factory()->forFirm($firm)->type(ChartOfAccountType::Expense)->create();
-        $category = \App\Models\ExpenseCategory::factory()->forFirm($firm)->create(['chart_of_accounts_id' => $expenseAccount->id]);
+        $category = ExpenseCategory::factory()->forFirm($firm)->create(['chart_of_accounts_id' => $expenseAccount->id]);
         Expense::factory()->forFirm($firm)->status(ExpenseStatus::Approved)
             ->create(['expense_category_id' => $category->id, 'expense_date' => now()->subDays(1)]);
 

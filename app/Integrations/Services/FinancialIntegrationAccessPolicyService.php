@@ -129,9 +129,7 @@ class FinancialIntegrationAccessPolicyService
         FirmUserRole::BillingStaff,
     ];
 
-    public function __construct(private readonly TimelineEventRecorder $events)
-    {
-    }
+    public function __construct(private readonly TimelineEventRecorder $events) {}
 
     public function canRequest(FirmUserRole $role): bool
     {

@@ -15,6 +15,7 @@ class OffboardingExportServiceTest extends TestCase
     use RefreshDatabase, SetsUpGovernanceFirm;
 
     private OffboardingRequestService $requestService;
+
     private OffboardingExportService $exportService;
 
     protected function setUp(): void
@@ -37,7 +38,7 @@ class OffboardingExportServiceTest extends TestCase
         // export_jobs now has permanent FORCE ROW LEVEL SECURITY
         // (Section 39A-5 Wave 9) — a raw assertDatabaseHas() query runs
         // with no ambient context, so it must be wrapped to see the row.
-        (new TenantContextService())->runWithFirmContext(
+        (new TenantContextService)->runWithFirmContext(
             $firm,
             fn () => $this->assertDatabaseHas('export_jobs', ['id' => $export->export_job_id]),
         );

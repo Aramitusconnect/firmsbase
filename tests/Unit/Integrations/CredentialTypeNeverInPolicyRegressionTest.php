@@ -62,11 +62,11 @@ final class CredentialTypeNeverInPolicyRegressionTest extends TestCase
     public function test_no_row_level_security_policy_anywhere_in_the_database_references_credential_type(): void
     {
         $rows = DB::select(
-            "select polrelid::regclass::text as table_name,
+            'select polrelid::regclass::text as table_name,
                     polname,
                     pg_get_expr(polqual, polrelid) as using_expr,
                     pg_get_expr(polwithcheck, polrelid) as with_check_expr
-             from pg_policy"
+             from pg_policy'
         );
 
         $this->assertNotEmpty($rows, 'The database must have at least some RLS policies at this point in the test suite.');

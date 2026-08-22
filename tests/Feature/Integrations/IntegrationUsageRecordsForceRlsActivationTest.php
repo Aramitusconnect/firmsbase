@@ -14,6 +14,7 @@ use App\Services\TenantContextService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use LogicException;
 use RuntimeException;
@@ -51,12 +52,12 @@ class IntegrationUsageRecordsForceRlsActivationTest extends TestCase
 
     public function test_integration_usage_records_table_exists(): void
     {
-        $this->assertTrue(\Illuminate\Support\Facades\Schema::hasTable('integration_usage_records'));
+        $this->assertTrue(Schema::hasTable('integration_usage_records'));
     }
 
     public function test_integration_usage_records_has_exactly_the_expected_columns(): void
     {
-        $columns = \Illuminate\Support\Facades\Schema::getColumnListing('integration_usage_records');
+        $columns = Schema::getColumnListing('integration_usage_records');
         sort($columns);
         $expected = self::EXPECTED_COLUMNS;
         sort($expected);
@@ -66,7 +67,7 @@ class IntegrationUsageRecordsForceRlsActivationTest extends TestCase
 
     public function test_no_updated_at_column_exists(): void
     {
-        $this->assertNotContains('updated_at', \Illuminate\Support\Facades\Schema::getColumnListing('integration_usage_records'));
+        $this->assertNotContains('updated_at', Schema::getColumnListing('integration_usage_records'));
         $this->assertNull(IntegrationUsageRecord::UPDATED_AT);
     }
 
@@ -319,7 +320,7 @@ class IntegrationUsageRecordsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $this->createWithFirmContext($firm, fn () => IntegrationUsageRecord::factory()->forFirmIntegration(FirmIntegration::factory()->forFirm($firm)->create())->create());
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(0, DB::table('integration_usage_records')->count());
     }
@@ -329,7 +330,7 @@ class IntegrationUsageRecordsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $connection = $this->createWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
 
@@ -341,7 +342,7 @@ class IntegrationUsageRecordsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $record = $this->createWithFirmContext($firm, fn () => IntegrationUsageRecord::factory()->forFirmIntegration(FirmIntegration::factory()->forFirm($firm)->create())->create());
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $affected = DB::table('integration_usage_records')->where('id', $record->id)->update(['outcome' => 'no-context']);
         $this->assertSame(0, $affected);
@@ -352,7 +353,7 @@ class IntegrationUsageRecordsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $record = $this->createWithFirmContext($firm, fn () => IntegrationUsageRecord::factory()->forFirmIntegration(FirmIntegration::factory()->forFirm($firm)->create())->create());
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $affected = DB::table('integration_usage_records')->where('id', $record->id)->delete();
         $this->assertSame(0, $affected);
@@ -362,7 +363,7 @@ class IntegrationUsageRecordsForceRlsActivationTest extends TestCase
     {
         $firm = Firm::factory()->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->createWithFirmContext($firm, fn () => IntegrationUsageRecord::factory()->forFirmIntegration(FirmIntegration::factory()->forFirm($firm)->create())->create());
 
@@ -390,7 +391,7 @@ class IntegrationUsageRecordsForceRlsActivationTest extends TestCase
 
     public function test_model_table_resolves_to_integration_usage_records(): void
     {
-        $model = new IntegrationUsageRecord();
+        $model = new IntegrationUsageRecord;
 
         $this->assertSame('integration_usage_records', $model->getTable());
     }
@@ -404,7 +405,7 @@ class IntegrationUsageRecordsForceRlsActivationTest extends TestCase
 
     public function test_model_has_the_tenant_global_scope_applied(): void
     {
-        $model = new IntegrationUsageRecord();
+        $model = new IntegrationUsageRecord;
 
         $this->assertArrayHasKey('tenant', $model->getGlobalScopes());
     }
@@ -436,7 +437,7 @@ class IntegrationUsageRecordsForceRlsActivationTest extends TestCase
         $firm = Firm::factory()->create();
         $connection = $this->createWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
 
-        $record = $this->runWithFirmContext($firm, fn () => (new IntegrationUsageRecorderService())->recordOnce(
+        $record = $this->runWithFirmContext($firm, fn () => (new IntegrationUsageRecorderService)->recordOnce(
             firmId: $firm->id,
             firmIntegrationId: $connection->id,
             providerKey: 'test',

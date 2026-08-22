@@ -50,8 +50,7 @@ final class TestResourcePushHandler implements OutboxEventHandlerContract
         private readonly ProviderRegistry $providerRegistry,
         private readonly OutboundProviderHttpClient $httpClient,
         private readonly IntegrationExternalMappingService $mappings,
-    ) {
-    }
+    ) {}
 
     public function handle(int $firmId, ?int $firmIntegrationId, string $domainEventId, array $payload): void
     {

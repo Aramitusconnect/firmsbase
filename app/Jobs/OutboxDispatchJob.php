@@ -57,8 +57,7 @@ final class OutboxDispatchJob implements ShouldQueue
     public function __construct(
         public readonly int $firmId,
         public readonly int $batchSize = 25,
-    ) {
-    }
+    ) {}
 
     /**
      * Per-firm, not per-connection or global (agent-8b "Job class

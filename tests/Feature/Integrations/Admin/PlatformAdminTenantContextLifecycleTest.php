@@ -12,6 +12,7 @@ use App\Services\PlatformFirmIntegrationBoundedAccessService;
 use App\Services\PlatformRoleService;
 use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use RuntimeException;
 use Tests\TestCase;
@@ -141,8 +142,8 @@ final class PlatformAdminTenantContextLifecycleTest extends TestCase
 
         $observedFirmId = null;
 
-        $bounded->readWithinFirmAccess($admin, $firm, function () use (&$observedFirmId, $firm) {
-            $observedFirmId = \Illuminate\Support\Facades\DB::selectOne(
+        $bounded->readWithinFirmAccess($admin, $firm, function () use (&$observedFirmId) {
+            $observedFirmId = DB::selectOne(
                 "select current_setting('app.current_firm_id', true) as value"
             )->value;
         });

@@ -141,8 +141,8 @@ final class NoSuperAdminRlsCarveOutTest extends TestCase
     public function test_no_security_definer_function_was_introduced_for_the_platform_overview_surface(): void
     {
         $rows = DB::select(
-            "select proname from pg_proc p ".
-            "join pg_namespace n on n.oid = p.pronamespace ".
+            'select proname from pg_proc p '.
+            'join pg_namespace n on n.oid = p.pronamespace '.
             "where n.nspname = 'public' and p.prosecdef = true"
         );
 

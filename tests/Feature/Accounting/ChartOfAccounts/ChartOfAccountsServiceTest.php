@@ -17,6 +17,7 @@ class ChartOfAccountsServiceTest extends TestCase
     use RefreshDatabase;
 
     private ChartOfAccountsService $service;
+
     private EntitlementService $entitlements;
 
     protected function setUp(): void

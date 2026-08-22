@@ -98,7 +98,7 @@ return new class extends Migration
     private function quoteIdentifier(string $identifier): string
     {
         if (! preg_match('/^[a-z_][a-z0-9_]*$/', $identifier)) {
-            throw new \RuntimeException("Refusing to operate on an unsafe/unexpected identifier: {$identifier}");
+            throw new RuntimeException("Refusing to operate on an unsafe/unexpected identifier: {$identifier}");
         }
 
         return '"'.$identifier.'"';

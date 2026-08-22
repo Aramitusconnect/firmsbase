@@ -175,7 +175,7 @@ final class TestProviderProductionIsolationTest extends TestCase
             app()->detectEnvironment(fn () => 'production');
             $this->assertTrue(app()->environment('production'), 'Sanity check: environment simulation must genuinely report production before proceeding.');
 
-            $provider = new TestProvider();
+            $provider = new TestProvider;
 
             $this->assertFalse(
                 $this->isEnabledByEnvironment($provider),
@@ -294,7 +294,7 @@ final class TestProviderProductionIsolationTest extends TestCase
         $this->assertTrue(app()->environment('testing'));
         $this->assertFalse(app()->environment('production'));
 
-        $provider = new TestProvider();
+        $provider = new TestProvider;
 
         $this->assertTrue(
             $this->isEnabledByEnvironment($provider),
@@ -355,7 +355,7 @@ final class TestProviderProductionIsolationTest extends TestCase
 
         $this->assertFalse(app()->environment('production'));
 
-        $provider = new TestProvider();
+        $provider = new TestProvider;
 
         $this->assertFalse($this->isEnabledByEnvironment($provider));
         $this->assertFalse($provider->isConfigured());
@@ -372,7 +372,7 @@ final class TestProviderProductionIsolationTest extends TestCase
             app()->detectEnvironment(fn () => 'production');
             $this->assertTrue(app()->environment('production'));
 
-            $provider = new TestProvider();
+            $provider = new TestProvider;
 
             $this->assertFalse(
                 $this->isEnabledByEnvironment($provider),
@@ -396,7 +396,7 @@ final class TestProviderProductionIsolationTest extends TestCase
 
         $this->assertFalse(app()->environment('production'));
 
-        $provider = new TestProvider();
+        $provider = new TestProvider;
 
         $this->assertFalse($this->isEnabledByEnvironment($provider));
         $this->assertFalse($provider->isConfigured());
@@ -427,7 +427,7 @@ final class TestProviderProductionIsolationTest extends TestCase
             try {
                 app()->detectEnvironment(fn () => $environment);
 
-                $provider = new TestProvider();
+                $provider = new TestProvider;
                 $actual = $this->isEnabledByEnvironment($provider);
 
                 $this->assertSame(

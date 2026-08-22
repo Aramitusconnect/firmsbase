@@ -41,8 +41,7 @@ class EmailAccountService
     public function __construct(
         private readonly EmailAccessPolicyService $accessPolicy,
         private readonly EmailSyncAuditService $auditService,
-    ) {
-    }
+    ) {}
 
     public function connect(
         Firm $firm,
@@ -59,7 +58,7 @@ class EmailAccountService
             throw new \RuntimeException('Actor does not belong to the connecting firm.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm->id, function () use ($firm, $provider, $mailboxAddress, $storageMode, $actor) {
+        return (new TenantContextService)->runWithFirmContext($firm->id, function () use ($firm, $provider, $mailboxAddress, $storageMode, $actor) {
             $account = EmailAccount::create([
                 'firm_id' => $firm->id,
                 'provider' => $provider,
@@ -87,7 +86,7 @@ class EmailAccountService
             throw new \RuntimeException('Actor role is not permitted to disconnect a firm mailbox.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($account->firm_id, function () use ($account) {
+        return (new TenantContextService)->runWithFirmContext($account->firm_id, function () use ($account) {
             $account->update(['connection_status' => EmailAccountConnectionStatus::Disconnected]);
 
             $this->auditService->record(
@@ -107,7 +106,7 @@ class EmailAccountService
             throw new \RuntimeException('Actor role is not permitted to revoke a firm mailbox.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($account->firm_id, function () use ($account, $reason) {
+        return (new TenantContextService)->runWithFirmContext($account->firm_id, function () use ($account, $reason) {
             $account->update([
                 'connection_status' => EmailAccountConnectionStatus::Revoked,
                 'error_reason' => $reason,
@@ -127,7 +126,7 @@ class EmailAccountService
 
     public function markError(EmailAccount $account, string $reason): EmailAccount
     {
-        return (new TenantContextService())->runWithFirmContext($account->firm_id, function () use ($account, $reason) {
+        return (new TenantContextService)->runWithFirmContext($account->firm_id, function () use ($account, $reason) {
             $account->update([
                 'connection_status' => EmailAccountConnectionStatus::Error,
                 'error_reason' => $reason,
@@ -143,7 +142,7 @@ class EmailAccountService
             throw new \RuntimeException('Actor role is not permitted to change mailbox storage mode.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($account->firm_id, function () use ($account, $storageMode) {
+        return (new TenantContextService)->runWithFirmContext($account->firm_id, function () use ($account, $storageMode) {
             $account->update(['storage_mode' => $storageMode]);
 
             return $account->fresh();

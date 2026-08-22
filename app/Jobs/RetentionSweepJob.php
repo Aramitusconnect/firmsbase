@@ -53,8 +53,7 @@ final class RetentionSweepJob implements ShouldQueue
         public readonly int $firmId,
         public readonly bool $dryRun = false,
         public readonly int $batchSize = 500,
-    ) {
-    }
+    ) {}
 
     public function middleware(): array
     {

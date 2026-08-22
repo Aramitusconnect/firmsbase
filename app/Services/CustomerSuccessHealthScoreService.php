@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Enums\CustomerHealthRiskLevel;
+use App\Enums\ImplementationTaskStatus;
+use App\Enums\ProductAnalyticsEventType;
 use App\Models\CustomerSuccessHealthScore;
 use App\Models\Firm;
 use App\Models\ProductAnalyticsEvent;
@@ -47,8 +49,7 @@ class CustomerSuccessHealthScoreService
 {
     public function __construct(
         private readonly QueueHealthService $queueHealthService,
-    ) {
-    }
+    ) {}
 
     public function compute(Firm $firm): CustomerSuccessHealthScore
     {
@@ -57,17 +58,17 @@ class CustomerSuccessHealthScoreService
         $clientsCount = $firm->clients()->count();
         $documentsCount = $firm->documents()->count();
         $invoicesCount = $firm->invoices()->count();
-        $paymentPlansCount = (new TenantContextService())->runWithFirmContext($firm, fn () => $firm->paymentPlans()->count());
+        $paymentPlansCount = (new TenantContextService)->runWithFirmContext($firm, fn () => $firm->paymentPlans()->count());
         $paymentsCount = $firm->payments()->count();
 
         $aiUsageCount = ProductAnalyticsEvent::query()
             ->where('firm_id', $firm->id)
-            ->where('event_type', \App\Enums\ProductAnalyticsEventType::AiUsed->value)
+            ->where('event_type', ProductAnalyticsEventType::AiUsed->value)
             ->count();
 
         $lastLoginAt = ProductAnalyticsEvent::query()
             ->where('firm_id', $firm->id)
-            ->where('event_type', \App\Enums\ProductAnalyticsEventType::ClientPortalLogin->value)
+            ->where('event_type', ProductAnalyticsEventType::ClientPortalLogin->value)
             ->max('occurred_at');
 
         $failedJobsCount = $this->queueHealthService->failedJobsCount();
@@ -120,8 +121,8 @@ class CustomerSuccessHealthScoreService
         }
 
         $completed = $tasks->whereIn('status', [
-            \App\Enums\ImplementationTaskStatus::Completed,
-            \App\Enums\ImplementationTaskStatus::Skipped,
+            ImplementationTaskStatus::Completed,
+            ImplementationTaskStatus::Skipped,
         ])->count();
 
         return (int) round(($completed / $tasks->count()) * 100);

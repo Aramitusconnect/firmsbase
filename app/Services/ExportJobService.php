@@ -8,7 +8,6 @@ use App\Models\ExportJob;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\PlatformAdmin;
-use App\ValueObjects\ExportGovernanceDecision;
 
 /**
  * ExportJobService — the only writer of export_jobs. Every job is
@@ -26,8 +25,7 @@ class ExportJobService
 {
     public function __construct(
         private readonly ExportGovernancePolicyService $governancePolicyService,
-    ) {
-    }
+    ) {}
 
     public function request(
         Firm $firm,
@@ -41,7 +39,7 @@ class ExportJobService
     ): ExportJob {
         $decision = $this->governancePolicyService->evaluate($firm, $hasActiveLegalHold, $retentionPeriodExpired, $firmIsOffboarding);
 
-        $job = (new TenantContextService())->runWithFirmContext($firm, fn () => ExportJob::create([
+        $job = (new TenantContextService)->runWithFirmContext($firm, fn () => ExportJob::create([
             'firm_id' => $firm->id,
             'export_type' => $exportType,
             'status' => $decision->allowed ? ExportJobStatus::Requested : ExportJobStatus::Blocked,
@@ -59,7 +57,7 @@ class ExportJobService
 
     public function markInProgress(ExportJob $job): ExportJob
     {
-        return (new TenantContextService())->runWithFirmContext($job->firm_id, function () use ($job) {
+        return (new TenantContextService)->runWithFirmContext($job->firm_id, function () use ($job) {
             $job->update(['status' => ExportJobStatus::InProgress, 'started_at' => now()]);
 
             return $job->fresh();
@@ -68,7 +66,7 @@ class ExportJobService
 
     public function markCompleted(ExportJob $job): ExportJob
     {
-        return (new TenantContextService())->runWithFirmContext($job->firm_id, function () use ($job) {
+        return (new TenantContextService)->runWithFirmContext($job->firm_id, function () use ($job) {
             $job->update(['status' => ExportJobStatus::Completed, 'completed_at' => now()]);
 
             return $job->fresh();
@@ -77,7 +75,7 @@ class ExportJobService
 
     public function markFailed(ExportJob $job, string $reason): ExportJob
     {
-        return (new TenantContextService())->runWithFirmContext($job->firm_id, function () use ($job, $reason) {
+        return (new TenantContextService)->runWithFirmContext($job->firm_id, function () use ($job, $reason) {
             $job->update(['status' => ExportJobStatus::Failed, 'failed_reason' => $reason]);
 
             return $job->fresh();

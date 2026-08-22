@@ -168,7 +168,7 @@ class BoundedJitterTest extends TestCase
 
     public function test_bounded_jitter_composes_on_top_of_but_is_never_implicitly_applied_by_webhook_retry_policy_service(): void
     {
-        $policy = new WebhookRetryPolicyService();
+        $policy = new WebhookRetryPolicyService;
 
         // Deterministic, no-jitter delay for attempt 1 of the default
         // policy (base_delay_seconds=30, multiplier=2) -> 30.

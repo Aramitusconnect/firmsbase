@@ -21,7 +21,7 @@ class SignatureAndPdfTenantIsolationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->policy = new TenantSafeSignatureAndPdfPolicyService();
+        $this->policy = new TenantSafeSignatureAndPdfPolicyService;
     }
 
     public function test_signature_request_belonging_to_a_different_firm_is_rejected(): void

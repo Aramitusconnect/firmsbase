@@ -23,6 +23,5 @@ final class ResolvedWebhookConnection
         public readonly int $firmIntegrationId,
         public readonly int $integrationProviderId,
         public readonly string $providerKey,
-    ) {
-    }
+    ) {}
 }

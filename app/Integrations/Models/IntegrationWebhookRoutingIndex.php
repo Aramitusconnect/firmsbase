@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Integrations\Models;
 
+use App\Models\Firm;
 use Database\Factories\IntegrationWebhookRoutingIndexFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -59,7 +60,7 @@ class IntegrationWebhookRoutingIndex extends Model
 
     public function firm(): BelongsTo
     {
-        return $this->belongsTo(\App\Models\Firm::class);
+        return $this->belongsTo(Firm::class);
     }
 
     public function firmIntegration(): BelongsTo

@@ -34,9 +34,7 @@ class IntegrationEntitlementPolicyService
 {
     private const MODULE_CODE = 'integration';
 
-    public function __construct(private readonly EntitlementService $entitlementService)
-    {
-    }
+    public function __construct(private readonly EntitlementService $entitlementService) {}
 
     public function isEnabled(Firm $firm): bool
     {

@@ -101,10 +101,9 @@ final class SyncRetryPollJobExhaustionTest extends TestCase
 
     private function registerAlwaysFailingPushProvider(string $failCategory = 'rate_limited'): void
     {
-        $provider = new class($failCategory) implements IntegrationProviderContract, SupportsPushSyncContract {
-            public function __construct(private readonly string $failCategory)
-            {
-            }
+        $provider = new class($failCategory) implements IntegrationProviderContract, SupportsPushSyncContract
+        {
+            public function __construct(private readonly string $failCategory) {}
 
             public function key(): ProviderKey
             {

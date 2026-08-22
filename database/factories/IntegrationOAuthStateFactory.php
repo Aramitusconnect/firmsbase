@@ -79,7 +79,7 @@ class IntegrationOAuthStateFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);
@@ -242,7 +242,7 @@ class IntegrationOAuthStateFactory extends Factory
             TenantEncryptionKey::factory()->forFirm($firm)->create();
         }
 
-        $result = (new EmailBodyEncryptionService(new EncryptionKeyService()))
+        $result = (new EmailBodyEncryptionService(new EncryptionKeyService))
             ->encrypt($firm, 'fixture-pkce-verifier-'.Str::random(43));
 
         if (! $result->succeeded) {

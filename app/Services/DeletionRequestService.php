@@ -25,7 +25,7 @@ class DeletionRequestService
         array $subjectSnapshot = [],
         ?OffboardingExport $offboardingExport = null,
     ): DeletionRequest {
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => DeletionRequest::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => DeletionRequest::create([
             'firm_id' => $firm->id,
             'subject_type' => $subjectType,
             'subject_id' => $subjectId,
@@ -41,7 +41,7 @@ class DeletionRequestService
 
     public function cancel(DeletionRequest $request, string $reason): DeletionRequest
     {
-        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $reason) {
+        return (new TenantContextService)->runWithFirmContext($request->firm_id, function () use ($request) {
             $request->update([
                 'status' => DeletionRequestStatus::Cancelled,
                 'cancelled_at' => now(),

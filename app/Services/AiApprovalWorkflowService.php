@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\AiApprovalCategory;
 use App\Enums\AiApprovalEventType;
 use App\Enums\AiApprovalRequestStatus;
+use App\Enums\FirmUserRole;
 use App\Models\AiApprovalEvent;
 use App\Models\AiApprovalRequest;
 use App\Models\AiUsageEvent;
@@ -12,7 +13,6 @@ use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\Matter;
 use App\Models\User;
-use App\Enums\FirmUserRole;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -87,9 +87,7 @@ class AiApprovalWorkflowService
         FirmUserRole::Attorney,
     ];
 
-    public function __construct(private readonly EmailBodyEncryptionService $encryption)
-    {
-    }
+    public function __construct(private readonly EmailBodyEncryptionService $encryption) {}
 
     public function submit(
         Firm $firm,
@@ -139,7 +137,7 @@ class AiApprovalWorkflowService
 
         $this->assertPending($request);
 
-        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $actor, $reason) {
+        return (new TenantContextService)->runWithFirmContext($request->firm_id, function () use ($request, $actor, $reason) {
             $request->update([
                 'status' => AiApprovalRequestStatus::Approved,
                 'resolved_at' => now(),
@@ -167,7 +165,7 @@ class AiApprovalWorkflowService
 
         $this->assertPending($request);
 
-        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $actor, $reason) {
+        return (new TenantContextService)->runWithFirmContext($request->firm_id, function () use ($request, $actor, $reason) {
             $request->update([
                 'status' => AiApprovalRequestStatus::Rejected,
                 'resolved_at' => now(),

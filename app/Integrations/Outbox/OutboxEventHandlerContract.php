@@ -39,7 +39,7 @@ interface OutboxEventHandlerContract
      *
      * @throws OutboxHandlerTransientException retry (fail()'s retry branch)
      * @throws OutboxHandlerPermanentException dead-letter immediately, regardless of remaining attempts
-     * @throws OutboxHandlerReleaseException   re-enter the pool immediately, no error recorded
+     * @throws OutboxHandlerReleaseException re-enter the pool immediately, no error recorded
      */
     public function handle(int $firmId, ?int $firmIntegrationId, string $domainEventId, array $payload): void;
 }

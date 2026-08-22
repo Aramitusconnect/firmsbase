@@ -15,6 +15,7 @@ use App\Models\FirmUser;
 use App\Models\User;
 use App\Services\EntitlementService;
 use App\Services\IntegrationEntitlementPolicyService;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use RuntimeException;
@@ -36,7 +37,7 @@ final class FirmIntegrationEntitlementVisibilityTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('firm'));
+        Filament::setCurrentPanel(Filament::getPanel('firm'));
     }
 
     // ------------------------------------------------------------

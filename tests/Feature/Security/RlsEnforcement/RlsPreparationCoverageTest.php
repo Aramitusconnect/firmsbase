@@ -30,7 +30,7 @@ class RlsPreparationCoverageTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->coverage = new RowLevelSecurityCoverageMappingService();
+        $this->coverage = new RowLevelSecurityCoverageMappingService;
     }
 
     public function test_every_prepared_table_has_row_level_security_enabled(): void

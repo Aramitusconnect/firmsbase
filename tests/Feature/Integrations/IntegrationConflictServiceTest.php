@@ -10,6 +10,7 @@ use App\Integrations\Models\IntegrationConflict;
 use App\Integrations\Services\IntegrationConflictService;
 use App\Models\Firm;
 use App\Models\FirmUser;
+use App\Models\TimelineEvent;
 use App\Services\TimelineEventRecorder;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -44,7 +45,7 @@ class IntegrationConflictServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new IntegrationConflictService(new TimelineEventRecorder());
+        $this->service = new IntegrationConflictService(new TimelineEventRecorder);
     }
 
     // ------------------------------------------------------------
@@ -527,7 +528,7 @@ class IntegrationConflictServiceTest extends TestCase
             fn () => $this->service->proposeResolution($conflict, ConflictStatus::ResolvedMerged, $proposer->id),
         );
 
-        $event = $this->runWithFirmContext($firm, fn () => \App\Models\TimelineEvent::query()
+        $event = $this->runWithFirmContext($firm, fn () => TimelineEvent::query()
             ->where('event_type', 'integration_conflict.resolution_proposed')
             ->latest('id')
             ->first());

@@ -4,12 +4,13 @@ namespace Tests\Feature\Governance\Firewall;
 
 use App\Enums\GovernanceRecordScope;
 use App\Models\AiUsageEvent;
+use App\Models\Firm;
 use App\Models\PdfViewEvent;
-use App\Models\PlatformBillingEvent;
 use App\Models\TrustLedgerEntry;
 use App\Models\WebhookEvent;
 use App\Services\AuditPreservationPolicyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 /**
@@ -47,7 +48,7 @@ class AuditPreservationPolicyServiceTest extends TestCase
 
     public function test_no_fourteenth_phase_17_table_was_invented_for_client_portal_logs(): void
     {
-        $this->assertFalse(\Illuminate\Support\Facades\Schema::hasTable('client_portal_logs'));
+        $this->assertFalse(Schema::hasTable('client_portal_logs'));
     }
 
     public function test_existing_trust_ledger_append_only_protection_still_throws(): void
@@ -60,7 +61,7 @@ class AuditPreservationPolicyServiceTest extends TestCase
 
     public function test_existing_ai_usage_event_append_only_protection_still_throws(): void
     {
-        $firm = \App\Models\Firm::factory()->create();
+        $firm = Firm::factory()->create();
         $event = $this->runWithFirmContext($firm, fn () => AiUsageEvent::factory()->forFirm($firm)->create());
 
         $this->expectException(\LogicException::class);
@@ -73,7 +74,7 @@ class AuditPreservationPolicyServiceTest extends TestCase
         // (Wave 11) and — unlike TrustLedgerEntry/AiUsageEvent's own
         // factories — WebhookEventFactory has no context-hold create()
         // override, so this bare create() needs an explicit wrap.
-        $firm = \App\Models\Firm::factory()->create();
+        $firm = Firm::factory()->create();
         $event = $this->runWithFirmContext($firm, fn () => WebhookEvent::factory()->forFirm($firm)->create());
 
         $this->expectException(\LogicException::class);

@@ -25,7 +25,7 @@ interface SupportsIncrementalSyncContract
      * resource type, or null if none is available yet (e.g. no prior
      * sync has completed).
      *
-     * @param array<string, mixed> $context
+     * @param  array<string, mixed>  $context
      */
     public function incrementalCursorFor(array $context, string $resourceType): ?string;
 }

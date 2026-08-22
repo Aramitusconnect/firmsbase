@@ -7,12 +7,14 @@ namespace Tests\Feature\Integrations\Admin;
 use App\Enums\PlatformRoleCode;
 use App\Filament\Pages\PlatformFirmIntegrationDetailPage;
 use App\Integrations\Data\SanitizedHealthDiagnostic;
+use App\Integrations\Enums\HealthSummaryState;
 use App\Integrations\Models\FirmIntegration;
 use App\Integrations\Services\HealthStateService;
 use App\Models\Firm;
 use App\Models\PlatformAdmin;
 use App\Services\IntegrationPlatformOversightReadService;
 use App\Services\PlatformRoleService;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -42,7 +44,7 @@ final class PlatformIntegrationHealthViewTest extends TestCase
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
         $detail = app(IntegrationPlatformOversightReadService::class)->connectionDetail($admin, $firm, $connection->uuid);
 
-        $this->assertSame(\App\Integrations\Enums\HealthSummaryState::Healthy, $detail->healthSummaryState);
+        $this->assertSame(HealthSummaryState::Healthy, $detail->healthSummaryState);
         $this->assertSame(0, $detail->consecutiveFailures);
     }
 
@@ -67,7 +69,7 @@ final class PlatformIntegrationHealthViewTest extends TestCase
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
         $detail = app(IntegrationPlatformOversightReadService::class)->connectionDetail($admin, $firm, $connection->uuid);
 
-        $this->assertSame(\App\Integrations\Enums\HealthSummaryState::ActionRequired, $detail->healthSummaryState);
+        $this->assertSame(HealthSummaryState::ActionRequired, $detail->healthSummaryState);
         $this->assertSame('credential_error', $detail->lastFailureCategory);
         $this->assertNotNull($detail->sanitizedDiagnosticSummary);
         $this->assertSame(1, $detail->consecutiveFailures);
@@ -92,7 +94,7 @@ final class PlatformIntegrationHealthViewTest extends TestCase
         });
 
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $test = Livewire::test(PlatformFirmIntegrationDetailPage::class, [
@@ -112,7 +114,7 @@ final class PlatformIntegrationHealthViewTest extends TestCase
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
         $detail = app(IntegrationPlatformOversightReadService::class)->connectionDetail($admin, $firm, $connection->uuid);
 
-        $this->assertSame(\App\Integrations\Enums\HealthSummaryState::Healthy, $detail->healthSummaryState);
+        $this->assertSame(HealthSummaryState::Healthy, $detail->healthSummaryState);
         $this->assertNull($detail->sanitizedDiagnosticSummary);
         $this->assertNull($detail->lastFailureCategory);
     }

@@ -37,7 +37,7 @@ class DocumentHashService
         ?FirmUser $recordedBy = null,
         HashAlgorithm $algorithm = HashAlgorithm::Sha256,
     ): DocumentHashRecordResult {
-        $hash = (new TenantContextService())->runWithFirmContext($document->firm_id, fn () => DocumentHash::create([
+        $hash = (new TenantContextService)->runWithFirmContext($document->firm_id, fn () => DocumentHash::create([
             'firm_id' => $document->firm_id,
             'source_document_type' => SignatureSourceDocumentType::Document,
             'document_id' => $document->id,
@@ -56,7 +56,7 @@ class DocumentHashService
         ?FirmUser $recordedBy = null,
         HashAlgorithm $algorithm = HashAlgorithm::Sha256,
     ): DocumentHashRecordResult {
-        $hash = (new TenantContextService())->runWithFirmContext($generatedDocument->firm_id, fn () => DocumentHash::create([
+        $hash = (new TenantContextService)->runWithFirmContext($generatedDocument->firm_id, fn () => DocumentHash::create([
             'firm_id' => $generatedDocument->firm_id,
             'source_document_type' => SignatureSourceDocumentType::GeneratedDocument,
             'generated_document_id' => $generatedDocument->id,

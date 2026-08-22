@@ -6,10 +6,16 @@ namespace Tests\Feature\Integrations\Admin;
 
 use App\Enums\PlatformRoleCode;
 use App\Filament\Pages\PlatformFirmIntegrationDetailPage;
+use App\Integrations\Enums\SyncDirection;
+use App\Integrations\Enums\UsageOperationType;
+use App\Integrations\Models\FirmIntegration;
+use App\Integrations\Models\IntegrationUsageRecord;
 use App\Models\Firm;
 use App\Models\PlatformAdmin;
+use App\Models\TimelineEvent;
 use App\Services\IntegrationPlatformOversightReadService;
 use App\Services\PlatformRoleService;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -94,16 +100,16 @@ final class PlatformIntegrationUsageViewTest extends TestCase
         );
 
         $firm = Firm::factory()->activated()->create();
-        $connection = $this->runWithFirmContext($firm, fn () => \App\Integrations\Models\FirmIntegration::factory()->forFirm($firm)->create());
+        $connection = $this->runWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
 
         // Reuses Checkpoint 10's own IntegrationUsageRecord factory
         // convention. Default direction (from the factory) is
         // SyncDirection::Inbound.
         $this->runWithFirmContext($firm, function () use ($connection) {
-            \App\Integrations\Models\IntegrationUsageRecord::factory()->forFirmIntegration($connection)->create([
+            IntegrationUsageRecord::factory()->forFirmIntegration($connection)->create([
                 'provider_key' => 'quickbooks',
                 'capability' => 'contacts',
-                'operation_type' => \App\Integrations\Enums\UsageOperationType::PullSync->value,
+                'operation_type' => UsageOperationType::PullSync->value,
                 'quantity' => 3,
                 'unit' => 'item',
             ]);
@@ -118,8 +124,8 @@ final class PlatformIntegrationUsageViewTest extends TestCase
         $summary = $summaries->first();
         $this->assertSame('quickbooks', $summary['provider_key']);
         $this->assertSame('contacts', $summary['capability']);
-        $this->assertSame(\App\Integrations\Enums\UsageOperationType::PullSync->value, $summary['operation_type']);
-        $this->assertSame(\App\Integrations\Enums\SyncDirection::Inbound->value, $summary['direction']);
+        $this->assertSame(UsageOperationType::PullSync->value, $summary['operation_type']);
+        $this->assertSame(SyncDirection::Inbound->value, $summary['direction']);
         $this->assertSame(3, $summary['total_quantity']);
         $this->assertSame('item', $summary['unit']);
     }
@@ -143,12 +149,12 @@ final class PlatformIntegrationUsageViewTest extends TestCase
     public function test_usage_retention_and_audit_sections_are_gated_by_can_access_platform_billing_and_can_access_security_logs_rechecked_fresh_at_render(): void
     {
         $firm = Firm::factory()->activated()->create();
-        $connection = $this->runWithFirmContext($firm, fn () => \App\Integrations\Models\FirmIntegration::factory()->forFirm($firm)->create());
+        $connection = $this->runWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
 
         $auditMarker = 'integration.gating_marker_5d2b8f61';
 
         $this->runWithFirmContext($firm, function () use ($firm, $auditMarker) {
-            \App\Models\TimelineEvent::create([
+            TimelineEvent::create([
                 'firm_id' => $firm->id,
                 'subject_type' => 'App\\Integrations\\Models\\FirmIntegration',
                 'subject_id' => 1,
@@ -174,7 +180,7 @@ final class PlatformIntegrationUsageViewTest extends TestCase
         // ::SECURITY_LOG_ROLES, so usage/retention/audit must all be
         // denied for it.
         $deniedAdmin = $this->adminWithRole(PlatformRoleCode::ImplementationSpecialist);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($deniedAdmin, 'platform_admin');
 
         $deniedTest = Livewire::test(PlatformFirmIntegrationDetailPage::class, [
@@ -244,12 +250,12 @@ final class PlatformIntegrationUsageViewTest extends TestCase
     public function test_the_detail_page_renders_the_usage_records_retention_days_line_item_within_the_retention_section(): void
     {
         $firm = Firm::factory()->activated()->create();
-        $connection = $this->runWithFirmContext($firm, fn () => \App\Integrations\Models\FirmIntegration::factory()->forFirm($firm)->create());
+        $connection = $this->runWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
 
         config(['integrations.usage_records.retention_days' => 999]);
 
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $test = Livewire::test(PlatformFirmIntegrationDetailPage::class, [

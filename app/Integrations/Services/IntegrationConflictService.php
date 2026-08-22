@@ -38,9 +38,7 @@ final class IntegrationConflictService
 {
     private const PRIVILEGED_RESOURCE_TYPES = ['invoice', 'payment', 'document', 'message'];
 
-    public function __construct(private readonly TimelineEventRecorder $events)
-    {
-    }
+    public function __construct(private readonly TimelineEventRecorder $events) {}
 
     /**
      * Atomic, idempotent detection write (frozen-design-post-review.md

@@ -16,13 +16,14 @@ class ImplementationTaskServiceTest extends TestCase
     use RefreshDatabase;
 
     private ImplementationProjectService $projectService;
+
     private ImplementationTaskService $taskService;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->projectService = new ImplementationProjectService();
-        $this->taskService = new ImplementationTaskService();
+        $this->projectService = new ImplementationProjectService;
+        $this->taskService = new ImplementationTaskService;
     }
 
     public function test_completing_a_task_moves_project_into_in_progress(): void
@@ -47,7 +48,7 @@ class ImplementationTaskServiceTest extends TestCase
         // on the firm this project belongs to.
         $this->assertSame(
             ImplementationProjectStatus::InProgress,
-            (new TenantContextService())->runWithFirmContext($firm, fn () => $project->fresh()->status)
+            (new TenantContextService)->runWithFirmContext($firm, fn () => $project->fresh()->status)
         );
     }
 
@@ -63,7 +64,7 @@ class ImplementationTaskServiceTest extends TestCase
 
         // Same FORCE-RLS-driven fix as above: bare ->fresh() with no
         // ambient context active would return null.
-        $refreshed = (new TenantContextService())->runWithFirmContext($firm, fn () => $project->fresh());
+        $refreshed = (new TenantContextService)->runWithFirmContext($firm, fn () => $project->fresh());
         $this->assertSame(ImplementationProjectStatus::Completed, $refreshed->status);
         $this->assertNotNull($refreshed->completed_at);
     }
@@ -78,7 +79,7 @@ class ImplementationTaskServiceTest extends TestCase
         // Same FORCE-RLS-driven fix as above.
         $this->assertSame(
             ImplementationProjectStatus::Blocked,
-            (new TenantContextService())->runWithFirmContext($firm, fn () => $project->fresh()->status)
+            (new TenantContextService)->runWithFirmContext($firm, fn () => $project->fresh()->status)
         );
     }
 }

@@ -18,7 +18,6 @@ use App\Models\FirmUser;
 use App\Services\EmailBodyEncryptionService;
 use App\Services\TenantContextService;
 use Closure;
-use DateTimeInterface;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -79,8 +78,7 @@ class IntegrationOAuthStateService
         private readonly EmailBodyEncryptionService $encryption,
         private readonly PkceService $pkce,
         private readonly ProviderRedirectUrlValidator $redirectValidator,
-    ) {
-    }
+    ) {}
 
     /**
      * Generates a fresh raw state token and PKCE verifier/challenge
@@ -96,7 +94,7 @@ class IntegrationOAuthStateService
      * write the row under that same context/transaction the caller
      * already owns.
      *
-     * @param  Closure(string $rawState, string $codeChallenge): string $buildAuthorizationUrl
+     * @param  Closure(string $rawState, string $codeChallenge): string  $buildAuthorizationUrl
      */
     public function initiate(
         FirmIntegration $connection,
@@ -154,7 +152,7 @@ class IntegrationOAuthStateService
     public function resolveAndConsume(string $rawState, int $currentUserId): ConsumedOAuthState
     {
         $hash = hash('sha256', $rawState);
-        $tenantContext = new TenantContextService();
+        $tenantContext = new TenantContextService;
 
         $row = $tenantContext->withUserContext(
             $currentUserId,
@@ -164,7 +162,7 @@ class IntegrationOAuthStateService
         );
 
         if ($row === null) {
-            throw new OAuthStateNotFoundException();
+            throw new OAuthStateNotFoundException;
         }
 
         return $tenantContext->runWithFirmContext(
@@ -232,14 +230,14 @@ class IntegrationOAuthStateService
         $existing = IntegrationOAuthState::query()->find($stateId);
 
         if ($existing === null) {
-            throw new OAuthStateNotFoundException();
+            throw new OAuthStateNotFoundException;
         }
 
         if ($existing->consumed_at !== null) {
-            throw new OAuthStateAlreadyConsumedException();
+            throw new OAuthStateAlreadyConsumedException;
         }
 
-        throw new OAuthStateExpiredException();
+        throw new OAuthStateExpiredException;
     }
 
     /**

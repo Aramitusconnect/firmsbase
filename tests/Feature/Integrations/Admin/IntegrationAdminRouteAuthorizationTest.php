@@ -17,6 +17,7 @@ use App\Models\SupportAccessSession;
 use App\Services\PlatformFirmIntegrationBoundedAccessService;
 use App\Services\PlatformRoleService;
 use App\Services\PlatformStaffAccessPolicyService;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use RuntimeException;
@@ -62,7 +63,7 @@ final class IntegrationAdminRouteAuthorizationTest extends TestCase
     {
         parent::setUp();
 
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
     }
 
     // ------------------------------------------------------------

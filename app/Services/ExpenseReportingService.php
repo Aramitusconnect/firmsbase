@@ -46,9 +46,7 @@ use Illuminate\Support\Collection;
  */
 class ExpenseReportingService
 {
-    public function __construct(private readonly AccountingEntitlementPolicyService $entitlementPolicy)
-    {
-    }
+    public function __construct(private readonly AccountingEntitlementPolicyService $entitlementPolicy) {}
 
     public function query(
         Firm $firm,
@@ -99,7 +97,7 @@ class ExpenseReportingService
         ?bool $reimbursable = null,
         ?ExpenseStatus $status = null,
     ): int {
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $matterId, $categoryId, $from, $to, $reimbursable, $status) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $matterId, $categoryId, $from, $to, $reimbursable, $status) {
             return (int) $this->query($firm, $matterId, $categoryId, $from, $to, $reimbursable, $status)->sum('amount_cents');
         });
     }
@@ -113,7 +111,7 @@ class ExpenseReportingService
         ?bool $reimbursable = null,
         ?ExpenseStatus $status = null,
     ): Collection {
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $matterId, $categoryId, $from, $to, $reimbursable, $status) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $matterId, $categoryId, $from, $to, $reimbursable, $status) {
             return $this->query($firm, $matterId, $categoryId, $from, $to, $reimbursable, $status)->get();
         });
     }

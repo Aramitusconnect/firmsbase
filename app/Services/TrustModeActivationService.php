@@ -35,9 +35,7 @@ use App\ValueObjects\HighRiskChangeDecision;
  */
 class TrustModeActivationService
 {
-    public function __construct(private readonly HighRiskPlatformChangePolicyService $highRiskPolicy)
-    {
-    }
+    public function __construct(private readonly HighRiskPlatformChangePolicyService $highRiskPolicy) {}
 
     public function requestActivation(Firm $firm, PlatformAdmin $requestedBy, string $reason): HighRiskChangeRequest
     {
@@ -83,7 +81,7 @@ class TrustModeActivationService
             throw new \RuntimeException('This high-risk change request was not raised for this firm.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => TrustApprovalEvent::create([
             'firm_id' => $firm->id,
             'event_type' => TrustApprovalEventType::TrustModeActivationLinked,
             'actor_firm_user_id' => $recordedBy->id,

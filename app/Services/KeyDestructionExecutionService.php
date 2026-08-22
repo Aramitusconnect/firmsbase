@@ -18,8 +18,7 @@ class KeyDestructionExecutionService
     public function __construct(
         private readonly EncryptionKeyService $encryptionKeyService,
         private readonly TimelineEventRecorder $timelineEventRecorder,
-    ) {
-    }
+    ) {}
 
     public function execute(KeyDestructionRequest $request): KeyDestructionRequest
     {
@@ -31,7 +30,7 @@ class KeyDestructionExecutionService
         // wrap's own finally-block closes before that one opens, so
         // neither one's context leaks into or is clobbered by the
         // other.
-        $fresh = (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->fresh());
+        $fresh = (new TenantContextService)->runWithFirmContext($request->firm_id, fn () => $request->fresh());
 
         if ($fresh->status !== KeyDestructionRequestStatus::Approved) {
             throw new \RuntimeException('Key destruction can only execute for an Approved request.');
@@ -39,7 +38,7 @@ class KeyDestructionExecutionService
 
         $destroyedCount = $this->encryptionKeyService->destroy($fresh->firm, $fresh->id);
 
-        return (new TenantContextService())->runWithFirmContext($fresh->firm, function () use ($fresh, $destroyedCount) {
+        return (new TenantContextService)->runWithFirmContext($fresh->firm, function () use ($fresh, $destroyedCount) {
             $fresh->update([
                 'status' => KeyDestructionRequestStatus::Executed,
                 'executed_at' => now(),

@@ -35,8 +35,7 @@ final class RefreshIntegrationPlatformOverviewSummaryJob implements ShouldQueue
 
     public function __construct(
         public readonly int $firmId,
-    ) {
-    }
+    ) {}
 
     public function middleware(): array
     {

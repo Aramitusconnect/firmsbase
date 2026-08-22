@@ -9,6 +9,7 @@ use App\Models\WebhookDeliveryAttempt;
 use App\Models\WebhookEvent;
 use App\Models\WebhookSecret;
 use App\Models\WebhookSubscription;
+use App\Services\TenantContextResolver;
 use App\Services\TenantSafeWebhookPolicyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -57,7 +58,7 @@ class WebhookTenantIsolationTest extends TestCase
 
     protected function tearDown(): void
     {
-        \App\Services\TenantContextResolver::clear();
+        TenantContextResolver::clear();
 
         parent::tearDown();
     }

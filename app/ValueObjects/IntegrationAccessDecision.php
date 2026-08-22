@@ -14,8 +14,7 @@ final readonly class IntegrationAccessDecision
     public function __construct(
         public bool $allowed,
         public ?string $reason = null,
-    ) {
-    }
+    ) {}
 
     public static function allow(): self
     {

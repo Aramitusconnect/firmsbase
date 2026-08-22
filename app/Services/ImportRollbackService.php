@@ -32,12 +32,11 @@ class ImportRollbackService
 {
     public function __construct(
         private readonly ImportAuditService $auditService,
-    ) {
-    }
+    ) {}
 
     public function rollbackBatch(ImportBatch $batch): ImportBatch
     {
-        return (new TenantContextService())->runWithFirmContext($batch->firm_id, function () use ($batch) {
+        return (new TenantContextService)->runWithFirmContext($batch->firm_id, function () use ($batch) {
             $records = $batch->rollbackRecords()->where('status', RollbackRecordStatus::Pending->value)->get();
 
             foreach ($records as $record) {

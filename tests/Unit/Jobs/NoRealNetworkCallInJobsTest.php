@@ -43,8 +43,8 @@ final class NoRealNetworkCallInJobsTest extends TestCase
 
     /**
      * @return string[] absolute paths to every .php file under either
-     *                   job directory, found by walking the filesystem
-     *                   directly — no filename filter of any kind.
+     *                  job directory, found by walking the filesystem
+     *                  directly — no filename filter of any kind.
      */
     private static function allJobSourceFiles(): array
     {

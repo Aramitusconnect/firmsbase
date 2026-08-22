@@ -10,8 +10,6 @@ use App\Models\Concerns\BelongsToTenant;
 use App\Models\Firm;
 use App\Models\FirmUser;
 use App\Models\TenantEncryptionKey;
-use App\Services\EmailBodyEncryptionService;
-use App\Services\EncryptionKeyService;
 use App\Services\TenantContextService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -342,7 +340,7 @@ class IntegrationOauthStatesForceRlsActivationTest extends TestCase
     {
         IntegrationOAuthState::factory()->create();
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->assertSame(0, DB::table('integration_oauth_states')->count());
     }
@@ -353,7 +351,7 @@ class IntegrationOauthStatesForceRlsActivationTest extends TestCase
         $connection = $this->connectionForFirm($firm);
         $firmUser = $this->firmUserFor($firm);
 
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->expectExceptionMessageMatches('/row-level security policy/');
 
@@ -448,7 +446,7 @@ class IntegrationOauthStatesForceRlsActivationTest extends TestCase
     public function test_tenant_context_clears_after_success(): void
     {
         $firm = $this->firmWithActiveKey();
-        (new TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->runWithFirmContext($firm, fn () => IntegrationOAuthState::factory()->forFirmIntegration($this->connectionForFirm($firm))->create());
 
@@ -504,7 +502,7 @@ class IntegrationOauthStatesForceRlsActivationTest extends TestCase
         $firmUser = $this->firmUserFor($firm);
         $state = $this->stateForFirm($firm, $firmUser);
 
-        $tenantContext = new TenantContextService();
+        $tenantContext = new TenantContextService;
         $tenantContext->clearDatabaseTenantContext();
         $visibleIds = $tenantContext->withUserContext($firmUser->user_id, fn () => DB::table('integration_oauth_states')->pluck('id')->all());
 
@@ -518,7 +516,7 @@ class IntegrationOauthStatesForceRlsActivationTest extends TestCase
         $otherFirmUser = $this->firmUserFor($firm);
         $ownerState = $this->stateForFirm($firm, $ownerFirmUser);
 
-        $tenantContext = new TenantContextService();
+        $tenantContext = new TenantContextService;
         $tenantContext->clearDatabaseTenantContext();
         $visibleIds = $tenantContext->withUserContext($otherFirmUser->user_id, fn () => DB::table('integration_oauth_states')->pluck('id')->all());
 
@@ -531,7 +529,7 @@ class IntegrationOauthStatesForceRlsActivationTest extends TestCase
         $connection = $this->connectionForFirm($firm);
         $firmUser = $this->firmUserFor($firm);
 
-        $tenantContext = new TenantContextService();
+        $tenantContext = new TenantContextService;
         $tenantContext->clearDatabaseTenantContext();
 
         $this->expectException(QueryException::class);
@@ -550,7 +548,7 @@ class IntegrationOauthStatesForceRlsActivationTest extends TestCase
         $firmUser = $this->firmUserFor($firm);
         $state = $this->stateForFirm($firm, $firmUser);
 
-        $tenantContext = new TenantContextService();
+        $tenantContext = new TenantContextService;
         $tenantContext->clearDatabaseTenantContext();
         $affected = $tenantContext->withUserContext(
             $firmUser->user_id,
@@ -571,7 +569,7 @@ class IntegrationOauthStatesForceRlsActivationTest extends TestCase
         $otherFirmUser = $this->firmUserFor($firmA);
         $state = $this->stateForFirm($firmA, $firmUser);
 
-        $tenantContext = new TenantContextService();
+        $tenantContext = new TenantContextService;
         $tenantContext->clearDatabaseTenantContext();
 
         $affectedFirmIdChange = $tenantContext->withUserContext(
@@ -611,7 +609,7 @@ class IntegrationOauthStatesForceRlsActivationTest extends TestCase
             $otherStateIds[] = $this->stateForFirm($otherFirm, $otherFirmUser)->id;
         }
 
-        $tenantContext = new TenantContextService();
+        $tenantContext = new TenantContextService;
         $tenantContext->clearDatabaseTenantContext();
         $visibleIds = $tenantContext->withUserContext($caller->user_id, fn () => DB::table('integration_oauth_states')->pluck('id')->all());
 
@@ -634,7 +632,7 @@ class IntegrationOauthStatesForceRlsActivationTest extends TestCase
         $firmUser = $this->firmUserFor($firm);
         $this->stateForFirm($firm, $firmUser);
 
-        $tenantContext = new TenantContextService();
+        $tenantContext = new TenantContextService;
         $tenantContext->clearDatabaseTenantContext();
 
         // The caller is authenticated as the correct user (self-lookup
@@ -776,14 +774,14 @@ class IntegrationOauthStatesForceRlsActivationTest extends TestCase
 
     public function test_model_table_resolves_to_integration_oauth_states(): void
     {
-        $model = new IntegrationOAuthState();
+        $model = new IntegrationOAuthState;
 
         $this->assertSame('integration_oauth_states', $model->getTable());
     }
 
     public function test_model_fillable_contains_exactly_the_expected_fields(): void
     {
-        $model = new IntegrationOAuthState();
+        $model = new IntegrationOAuthState;
 
         $expected = [
             'firm_id',
@@ -818,7 +816,7 @@ class IntegrationOauthStatesForceRlsActivationTest extends TestCase
 
     public function test_model_has_the_tenant_global_scope_applied(): void
     {
-        $model = new IntegrationOAuthState();
+        $model = new IntegrationOAuthState;
 
         $this->assertArrayHasKey('tenant', $model->getGlobalScopes());
     }
@@ -974,7 +972,7 @@ class IntegrationOauthStatesForceRlsActivationTest extends TestCase
 
     public function test_model_hidden_attributes_contains_opaque_token_hash_and_verifier_ciphertext(): void
     {
-        $model = new IntegrationOAuthState();
+        $model = new IntegrationOAuthState;
 
         $this->assertContains('opaque_token_hash', $model->getHidden());
         $this->assertContains('verifier_ciphertext', $model->getHidden());

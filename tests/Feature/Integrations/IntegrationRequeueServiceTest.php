@@ -19,6 +19,7 @@ use App\Integrations\Services\SyncItemService;
 use App\Models\Firm;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 /**
@@ -368,7 +369,7 @@ class IntegrationRequeueServiceTest extends TestCase
 
         $this->assertNotNull($requeued);
         $this->assertSame(5, $requeued->attempt_count, 'attempt_count must NEVER be reset by requeueFromFailedPermanent().');
-        $this->assertNotContains('max_requeues', \Illuminate\Support\Facades\Schema::getColumnListing('integration_sync_items'), 'integration_sync_items has no max_requeues-equivalent column — eligibility is status-gated only.');
+        $this->assertNotContains('max_requeues', Schema::getColumnListing('integration_sync_items'), 'integration_sync_items has no max_requeues-equivalent column — eligibility is status-gated only.');
     }
 
     public function test_sync_item_requeue_can_be_repeated_many_times_since_there_is_no_ceiling_column(): void

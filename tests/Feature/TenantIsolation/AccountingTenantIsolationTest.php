@@ -28,7 +28,7 @@ class AccountingTenantIsolationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->policy = new TenantSafeAccountingPolicyService();
+        $this->policy = new TenantSafeAccountingPolicyService;
     }
 
     protected function tearDown(): void

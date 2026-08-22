@@ -8,6 +8,7 @@ use App\Enums\LegalHoldScope;
 use App\Enums\RetentionPolicyStatus;
 use App\Enums\RetentionRecordType;
 use App\Models\Matter;
+use App\Models\OffboardingExport;
 use App\Models\RetentionPolicy;
 use App\Services\DeletionApprovalService;
 use App\Services\DeletionGovernanceService;
@@ -27,7 +28,7 @@ class DeletionGovernanceLifecycleTest extends TestCase
 {
     use RefreshDatabase, SetsUpGovernanceFirm;
 
-    private function verifiedExportFor($firm, $admin): \App\Models\OffboardingExport
+    private function verifiedExportFor($firm, $admin): OffboardingExport
     {
         $offboardingRequest = app(OffboardingRequestService::class)->request($firm, $admin, 'Offboarding for deletion.');
         $export = app(OffboardingExportService::class)->generate($offboardingRequest, requestedByPlatformAdmin: $admin);

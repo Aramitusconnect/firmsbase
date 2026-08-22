@@ -6,9 +6,11 @@ use App\Enums\EntitlementSource;
 use App\Models\Expense;
 use App\Models\Firm;
 use App\Models\Matter;
+use App\Models\MatterExpense;
 use App\Services\AccountingEntitlementPolicyService;
 use App\Services\EntitlementService;
 use App\Services\MatterExpenseService;
+use App\Services\TenantContextService;
 use App\Services\TenantSafeAccountingPolicyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -18,6 +20,7 @@ class MatterExpenseServiceTest extends TestCase
     use RefreshDatabase;
 
     private MatterExpenseService $service;
+
     private EntitlementService $entitlements;
 
     protected function setUp(): void
@@ -26,7 +29,7 @@ class MatterExpenseServiceTest extends TestCase
         $this->entitlements = app(EntitlementService::class);
         $this->service = new MatterExpenseService(
             new AccountingEntitlementPolicyService($this->entitlements),
-            new TenantSafeAccountingPolicyService(),
+            new TenantSafeAccountingPolicyService,
         );
     }
 
@@ -55,7 +58,7 @@ class MatterExpenseServiceTest extends TestCase
         // e.g. FirmActivationEventsForceRlsActivationTest).
         $reRead = $this->runWithFirmContext(
             $firm,
-            fn () => \App\Models\MatterExpense::withoutGlobalScopes()->find($link->id),
+            fn () => MatterExpense::withoutGlobalScopes()->find($link->id),
         );
 
         $this->assertNotNull($reRead, 'link() must genuinely persist a matter_expenses row, readable under its own firm context.');
@@ -101,7 +104,7 @@ class MatterExpenseServiceTest extends TestCase
         // explicitly so the assertions below prove link() itself leaves
         // no context behind, rather than merely restoring that
         // pre-existing fixture leftover.
-        (new \App\Services\TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $this->service->link($firm, $matter, $expense);
         $this->assertNoDatabaseTenantContext('link() must clear its own internal context wrap after a successful link.');
@@ -158,7 +161,7 @@ class MatterExpenseServiceTest extends TestCase
         // under the owning firm's context instead.
         $reRead = $this->runWithFirmContext(
             $firm,
-            fn () => \App\Models\MatterExpense::withoutGlobalScopes()->find($link->id),
+            fn () => MatterExpense::withoutGlobalScopes()->find($link->id),
         );
 
         $this->assertNotNull($reRead);

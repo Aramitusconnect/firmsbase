@@ -199,7 +199,7 @@ class IntegrationSyncRunConcurrentStartTest extends TestCase
         // The REAL, unmodified startRun() on the default connection must now
         // hit the committed conflicting row -> UniqueConstraintViolationException
         // -> typed SyncRunAlreadyInProgressException.
-        $service = new SyncRunService(new TimelineEventRecorder());
+        $service = new SyncRunService(new TimelineEventRecorder);
 
         $thrown = null;
         try {

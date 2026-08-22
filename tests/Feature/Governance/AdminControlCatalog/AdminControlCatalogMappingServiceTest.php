@@ -2,10 +2,9 @@
 
 namespace Tests\Feature\Governance\AdminControlCatalog;
 
-use App\Enums\GovernanceMappingStatus;
 use App\Services\AdminControlCatalogMappingService;
-use App\ValueObjects\GovernanceMappingResult;
 use App\Services\ComplianceGapRegistryService;
+use App\ValueObjects\GovernanceMappingResult;
 use Tests\TestCase;
 
 class AdminControlCatalogMappingServiceTest extends TestCase
@@ -76,7 +75,7 @@ class AdminControlCatalogMappingServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new AdminControlCatalogMappingService();
+        $this->service = new AdminControlCatalogMappingService;
     }
 
     public function test_all_eighty_nine_admin_control_keys_are_explicitly_declared(): void
@@ -130,7 +129,7 @@ class AdminControlCatalogMappingServiceTest extends TestCase
 
     public function test_dangerous_before_hardening_includes_emergency_support_access_while_the_gap_remains(): void
     {
-        $registry = new ComplianceGapRegistryService();
+        $registry = new ComplianceGapRegistryService;
         $this->assertTrue($registry->isTracked('emergency_support_access_high_risk_approval_not_wired'), 'This test assumes the existing emergency-access gap is still open.');
 
         $dangerous = array_keys($this->service->dangerousBeforeHardening());
@@ -138,7 +137,7 @@ class AdminControlCatalogMappingServiceTest extends TestCase
         $this->assertContains('support_controls.approve_emergency_support_access', $dangerous);
     }
 
-    public function test_byKey_returns_null_for_an_unknown_key(): void
+    public function test_by_key_returns_null_for_an_unknown_key(): void
     {
         $this->assertNull($this->service->byKey('does_not_exist.control'));
     }

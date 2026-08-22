@@ -8,6 +8,7 @@ use App\Enums\OffboardingExportStatus;
 use App\Enums\RetentionRecordType;
 use App\Models\Firm;
 use App\Models\KeyDestructionRequest;
+use App\Models\OffboardingExport;
 use App\Models\OffboardingRequest;
 use App\Models\PlatformAdmin;
 use App\Models\TenantEncryptionKey;
@@ -26,8 +27,7 @@ class KeyDestructionRequestService
     public function __construct(
         private readonly RetentionPolicyService $retentionPolicyService,
         private readonly LegalHoldService $legalHoldService,
-    ) {
-    }
+    ) {}
 
     public function request(
         Firm $firm,
@@ -36,7 +36,7 @@ class KeyDestructionRequestService
         ?OffboardingRequest $offboardingRequest = null,
         ?TenantEncryptionKey $tenantEncryptionKey = null,
     ): KeyDestructionRequest {
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => KeyDestructionRequest::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => KeyDestructionRequest::create([
             'firm_id' => $firm->id,
             'offboarding_request_id' => $offboardingRequest?->id,
             'tenant_encryption_key_id' => $tenantEncryptionKey?->id,
@@ -50,7 +50,7 @@ class KeyDestructionRequestService
     public function checkClearance(KeyDestructionRequest $request): KeyDestructionClearanceResult
     {
         $exportCleared = $request->offboarding_request_id !== null
-            && \App\Models\OffboardingExport::query()
+            && OffboardingExport::query()
                 ->where('offboarding_request_id', $request->offboarding_request_id)
                 ->where('status', OffboardingExportStatus::Verified->value)
                 ->exists();
@@ -69,7 +69,7 @@ class KeyDestructionRequestService
             return new KeyDestructionClearanceResult(true, false, false, 'Retention policy has not cleared for this firm.');
         }
 
-        $legalHoldCleared = (new TenantContextService())->runWithFirmContext($firm, fn () => ! $this->legalHoldService->hasActiveHold($firm, LegalHoldScope::Firm));
+        $legalHoldCleared = (new TenantContextService)->runWithFirmContext($firm, fn () => ! $this->legalHoldService->hasActiveHold($firm, LegalHoldScope::Firm));
 
         if (! $legalHoldCleared) {
             return new KeyDestructionClearanceResult(true, true, false, 'An active legal hold blocks key destruction.');
@@ -89,12 +89,12 @@ class KeyDestructionRequestService
                 default => KeyDestructionRequestStatus::LegalHoldBlocked,
             };
 
-            (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => $status]));
+            (new TenantContextService)->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => $status]));
 
             throw new \RuntimeException($clearance->reason ?? 'Key destruction request is not yet clear for approval.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request) {
+        return (new TenantContextService)->runWithFirmContext($request->firm_id, function () use ($request) {
             $request->update(['status' => KeyDestructionRequestStatus::PendingApproval]);
 
             return $request->fresh();
@@ -103,7 +103,7 @@ class KeyDestructionRequestService
 
     public function cancel(KeyDestructionRequest $request, string $reason): KeyDestructionRequest
     {
-        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request, $reason) {
+        return (new TenantContextService)->runWithFirmContext($request->firm_id, function () use ($request, $reason) {
             $request->update([
                 'status' => KeyDestructionRequestStatus::Cancelled,
                 'cancelled_at' => now(),

@@ -55,7 +55,7 @@ class IntegrationOutboxTimestampPrecisionTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new IntegrationOutboxEventService(new WebhookRetryPolicyService(), new TimelineEventRecorder(), new IntegrationRequeueAuditLogger());
+        $this->service = new IntegrationOutboxEventService(new WebhookRetryPolicyService, new TimelineEventRecorder, new IntegrationRequeueAuditLogger);
     }
 
     protected function tearDown(): void

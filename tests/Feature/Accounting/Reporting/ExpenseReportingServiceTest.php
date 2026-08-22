@@ -11,6 +11,7 @@ use App\Models\Matter;
 use App\Services\AccountingEntitlementPolicyService;
 use App\Services\EntitlementService;
 use App\Services\ExpenseReportingService;
+use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -23,6 +24,7 @@ class ExpenseReportingServiceTest extends TestCase
     use RefreshDatabase;
 
     private ExpenseReportingService $service;
+
     private EntitlementService $entitlements;
 
     protected function setUp(): void
@@ -156,7 +158,7 @@ class ExpenseReportingServiceTest extends TestCase
         // leftover fixture-setup context must be cleared explicitly here,
         // otherwise this test would not actually be proving "no ambient
         // context" at all, and would pass for the wrong reason.
-        (new \App\Services\TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         // No ambient tenant context has been established anywhere in
         // this test — query() itself only returns an unexecuted

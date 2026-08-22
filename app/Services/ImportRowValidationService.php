@@ -32,8 +32,7 @@ class ImportRowValidationService
     public function __construct(
         private readonly ImportMappingService $mappingService,
         private readonly ImportAuditService $auditService,
-    ) {
-    }
+    ) {}
 
     public function validateRow(ImportRow $row): ImportRow
     {
@@ -69,7 +68,7 @@ class ImportRowValidationService
 
     public function validateBatch(ImportBatch $batch): ImportBatch
     {
-        return (new TenantContextService())->runWithFirmContext($batch->firm_id, function () use ($batch) {
+        return (new TenantContextService)->runWithFirmContext($batch->firm_id, function () use ($batch) {
             foreach ($batch->rows as $row) {
                 $this->validateRow($row);
             }

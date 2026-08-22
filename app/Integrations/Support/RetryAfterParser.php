@@ -32,9 +32,7 @@ use DateTimeInterface;
  */
 final class RetryAfterParser
 {
-    public function __construct(private readonly int $maxSeconds)
-    {
-    }
+    public function __construct(private readonly int $maxSeconds) {}
 
     public function parse(string $rawValue, DateTimeImmutable $now): ?int
     {

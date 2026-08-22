@@ -39,7 +39,7 @@ class SyncRunServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new SyncRunService(new TimelineEventRecorder());
+        $this->service = new SyncRunService(new TimelineEventRecorder);
     }
 
     // ------------------------------------------------------------
@@ -359,7 +359,7 @@ class SyncRunServiceTest extends TestCase
 
     private function cursorWith(CursorStatus $status, ?string $cursorValue): IntegrationSyncCursor
     {
-        $cursor = new IntegrationSyncCursor();
+        $cursor = new IntegrationSyncCursor;
         $cursor->status = $status;
         $cursor->cursor_value = $cursorValue;
 

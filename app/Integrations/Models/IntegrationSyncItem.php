@@ -28,7 +28,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class IntegrationSyncItem extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     protected $table = 'integration_sync_items';
 

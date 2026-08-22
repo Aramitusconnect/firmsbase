@@ -10,6 +10,7 @@ use App\Integrations\Policies\FirmIntegrationPolicy;
 use App\Integrations\Services\IntegrationAccessPolicyService;
 use App\Models\Firm;
 use App\Models\FirmUser;
+use App\Models\User;
 use App\Services\TimelineEventRecorder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -36,7 +37,7 @@ class FirmIntegrationPolicyTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->policy = new FirmIntegrationPolicy(new IntegrationAccessPolicyService(new TimelineEventRecorder()));
+        $this->policy = new FirmIntegrationPolicy(new IntegrationAccessPolicyService(new TimelineEventRecorder));
     }
 
     private function actorFor(Firm $firm, FirmUserRole $role): FirmUser
@@ -147,7 +148,7 @@ class FirmIntegrationPolicyTest extends TestCase
     {
         $firm = Firm::factory()->create();
         $connection = $this->createWithFirmContext($firm, fn () => FirmIntegration::factory()->forFirm($firm)->create());
-        $orphanUser = \App\Models\User::factory()->create();
+        $orphanUser = User::factory()->create();
 
         $this->assertFalse($this->policy->viewAny($orphanUser));
         $this->assertFalse($this->policy->view($orphanUser, $connection));

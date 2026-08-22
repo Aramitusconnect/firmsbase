@@ -51,8 +51,7 @@ final readonly class PlatformIntegrationConnectionSummary
         public ?Carbon $nextRetryAt,
         public ?string $maskedExternalAccountId,
         public bool $webhookRoutingConfigured,
-    ) {
-    }
+    ) {}
 
     /**
      * $lastFailureCategory is passed explicitly (never sourced from

@@ -37,12 +37,11 @@ class ImportPreviewService
         private readonly ImportRowValidationService $validationService,
         private readonly ImportDuplicateDetectionService $duplicateDetectionService,
         private readonly ImportAuditService $auditService,
-    ) {
-    }
+    ) {}
 
     public function preview(ImportBatch $batch): ImportPreviewResult
     {
-        return (new TenantContextService())->runWithFirmContext($batch->firm_id, function () use ($batch) {
+        return (new TenantContextService)->runWithFirmContext($batch->firm_id, function () use ($batch) {
             $this->validationService->validateBatch($batch);
 
             foreach ($batch->rows()->where('status', ImportRowStatus::Validated->value)->get() as $row) {

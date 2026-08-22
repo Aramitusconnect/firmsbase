@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Enums\FormDraftStatus;
-use App\Enums\FormDraftValueSource;
 use App\Enums\FormMappingContentStatus;
 use App\Enums\FormReviewEventType;
 use App\Enums\WebhookEventType;
@@ -70,8 +69,7 @@ class FormReviewService
         private readonly FormMissingDataDetectionService $missingDataDetectionService,
         private readonly FormReviewChecklistService $checklistService,
         private readonly FormAndDocumentAccessPolicyService $accessPolicy,
-    ) {
-    }
+    ) {}
 
     public function moveToReadyForReview(FormDraft $draft): FormDraft
     {
@@ -80,7 +78,7 @@ class FormReviewService
         if (! $missingResult->isComplete()) {
             $this->transitions->assertTransitionAllowed($draft->status->value, 'needs_data');
 
-            (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft) {
+            (new TenantContextService)->runWithFirmContext($draft->firm_id, function () use ($draft) {
                 $draft->update(['status' => FormDraftStatus::NeedsData]);
             });
 
@@ -91,7 +89,7 @@ class FormReviewService
 
         $this->transitions->assertTransitionAllowed($draft->status->value, FormDraftStatus::ReadyForReview->value);
 
-        return (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft) {
+        return (new TenantContextService)->runWithFirmContext($draft->firm_id, function () use ($draft) {
             $draft->update(['status' => FormDraftStatus::ReadyForReview]);
             $this->recordEvent($draft, FormReviewEventType::MarkedReadyForReview, $draft->generatedByFirmUser);
 
@@ -103,7 +101,7 @@ class FormReviewService
     {
         $this->transitions->assertTransitionAllowed($draft->status->value, FormDraftStatus::AttorneyReview->value);
 
-        return (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft, $actor) {
+        return (new TenantContextService)->runWithFirmContext($draft->firm_id, function () use ($draft, $actor) {
             $draft->update(['status' => FormDraftStatus::AttorneyReview]);
             $this->recordEvent($draft, FormReviewEventType::SubmittedForAttorneyReview, $actor);
 
@@ -133,7 +131,7 @@ class FormReviewService
             ->contains(fn ($value) => $value->formMappingRule?->content_status === FormMappingContentStatus::SampleOnly);
 
         if ($usedSampleMapping) {
-            (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft) {
+            (new TenantContextService)->runWithFirmContext($draft->firm_id, function () use ($draft) {
                 $draft->update(['used_sample_mapping' => true]);
             });
 
@@ -143,7 +141,7 @@ class FormReviewService
             );
         }
 
-        $draft = (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft, $actor) {
+        $draft = (new TenantContextService)->runWithFirmContext($draft->firm_id, function () use ($draft, $actor) {
             $draft->update([
                 'status' => FormDraftStatus::Approved,
                 'used_sample_mapping' => false,
@@ -176,7 +174,7 @@ class FormReviewService
 
         $this->transitions->assertTransitionAllowed($draft->status->value, FormDraftStatus::Rejected->value);
 
-        return (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft, $actor, $reason) {
+        return (new TenantContextService)->runWithFirmContext($draft->firm_id, function () use ($draft, $actor, $reason) {
             $draft->update(['status' => FormDraftStatus::Rejected, 'reviewed_by_firm_user_id' => $actor->id, 'reviewed_at' => now()]);
             $this->recordEvent($draft, FormReviewEventType::Rejected, $actor, $reason);
 
@@ -188,7 +186,7 @@ class FormReviewService
     {
         $this->transitions->assertTransitionAllowed($draft->status->value, FormDraftStatus::Revised->value);
 
-        return (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft, $actor, $notes) {
+        return (new TenantContextService)->runWithFirmContext($draft->firm_id, function () use ($draft, $actor, $notes) {
             $draft->update(['status' => FormDraftStatus::Revised]);
             $this->recordEvent($draft, FormReviewEventType::RequestedRevision, $actor, $notes);
 
@@ -212,7 +210,7 @@ class FormReviewService
         // non-nested wrap.
         $result = $this->moveToReadyForReview($draft);
 
-        (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($result, $actor) {
+        (new TenantContextService)->runWithFirmContext($draft->firm_id, function () use ($result, $actor) {
             $this->recordEvent($result, FormReviewEventType::ResubmittedAfterRevision, $actor);
         });
 
@@ -223,7 +221,7 @@ class FormReviewService
     {
         $this->transitions->assertTransitionAllowed($draft->status->value, FormDraftStatus::Archived->value);
 
-        return (new TenantContextService())->runWithFirmContext($draft->firm_id, function () use ($draft, $actor) {
+        return (new TenantContextService)->runWithFirmContext($draft->firm_id, function () use ($draft, $actor) {
             $draft->update(['status' => FormDraftStatus::Archived]);
             $this->recordEvent($draft, FormReviewEventType::Archived, $actor);
 

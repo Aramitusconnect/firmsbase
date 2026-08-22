@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Integrations\Admin;
 
 use App\Models\Firm;
+use App\Services\RowLevelSecurityCoverageMappingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -147,7 +148,7 @@ final class Checkpoint11RollbackReapplicationTest extends TestCase
         $migration->down();
         $migration->up();
 
-        $coverage = new \App\Services\RowLevelSecurityCoverageMappingService;
+        $coverage = new RowLevelSecurityCoverageMappingService;
 
         $this->assertContains('integration_platform_overview_summaries', $coverage->exemptTables());
         $this->assertNotContains('integration_platform_overview_summaries', $coverage->forcedTables());

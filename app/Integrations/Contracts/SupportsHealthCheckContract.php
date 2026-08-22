@@ -25,9 +25,9 @@ interface SupportsHealthCheckContract
     /**
      * Perform a health check for the given connection context.
      *
-     * @param array<string, mixed> $context
+     * @param  array<string, mixed>  $context
      * @return array<string, mixed> health result shape (e.g. status,
-     *                               checked-at timestamp, detail).
+     *                              checked-at timestamp, detail).
      */
     public function checkHealth(array $context): array;
 }

@@ -49,9 +49,7 @@ final class SyncRunService
         ],
     ];
 
-    public function __construct(private readonly TimelineEventRecorder $events)
-    {
-    }
+    public function __construct(private readonly TimelineEventRecorder $events) {}
 
     /**
      * Starts a new run for a (connection, resource_type, direction)

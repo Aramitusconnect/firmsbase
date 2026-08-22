@@ -27,7 +27,7 @@ final class PkceServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->pkce = new PkceService();
+        $this->pkce = new PkceService;
     }
 
     // ---------------------------------------------------------------

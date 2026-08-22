@@ -2,8 +2,8 @@
 
 namespace Database\Factories;
 
-use App\Enums\PdfViewEventAction;
 use App\Enums\PdfViewerViewerType;
+use App\Enums\PdfViewEventAction;
 use App\Enums\SignatureSourceDocumentType;
 use App\Models\Document;
 use App\Models\Firm;
@@ -41,7 +41,7 @@ class PdfViewEventFactory extends Factory
 
         $models = $results instanceof Model ? new Collection([$results]) : $results;
 
-        $service = new TenantContextService();
+        $service = new TenantContextService;
 
         $models->groupBy('firm_id')->each(function (Collection $group) use ($service) {
             $service->setDatabaseTenantContextForFirmId($group->first()->firm_id);

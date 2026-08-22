@@ -7,6 +7,7 @@ namespace App\Integrations\Services;
 use App\Integrations\Enums\WebhookInboundEventStatus;
 use App\Integrations\Models\IntegrationInboundWebhookEvent;
 use App\Services\TenantContextService;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -71,17 +72,15 @@ final class InboundWebhookEventService
 
     private const DEFAULT_DELETE_AFTER_DAYS = 2555;
 
-    public function __construct(private readonly TenantContextService $tenantContext)
-    {
-    }
+    public function __construct(private readonly TenantContextService $tenantContext) {}
 
     /**
      * @param  array<string, mixed>  $sanitizedPayloadReference  already-sanitized, allowlisted field map — never raw provider data.
      * @return array{event: IntegrationInboundWebhookEvent, was_newly_created: bool} `was_newly_created` lets the
-     *         caller (App\Integrations\Http\Controllers\InboundWebhookController) record a firm-attributed
-     *         timeline event via App\Services\TimelineEventRecorder ONLY the first time this exact
-     *         (firm_integration_id, provider_key, provider_event_id) triple is ever seen — a retried/duplicate
-     *         delivery re-selects the SAME existing row and must not spam a second timeline entry.
+     *                                                                               caller (App\Integrations\Http\Controllers\InboundWebhookController) record a firm-attributed
+     *                                                                               timeline event via App\Services\TimelineEventRecorder ONLY the first time this exact
+     *                                                                               (firm_integration_id, provider_key, provider_event_id) triple is ever seen — a retried/duplicate
+     *                                                                               delivery re-selects the SAME existing row and must not spam a second timeline entry.
      */
     public function recordVerifiedEvent(
         int $firmId,
@@ -92,7 +91,7 @@ final class InboundWebhookEventService
         ?string $receiptBodyHash,
         ?string $eventType,
         array $sanitizedPayloadReference,
-        \Illuminate\Support\Carbon $receivedAt,
+        Carbon $receivedAt,
     ): array {
         // Note: config('integrations.webhook.event_delete_after_days',
         // self::DEFAULT_DELETE_AFTER_DAYS) is the longer delete-after

@@ -34,8 +34,7 @@ class AccountingExportSimulationService
     public function __construct(
         private readonly AccountingExportBatchService $batchService,
         private readonly AccountingExportErrorLogger $errorLogger,
-    ) {
-    }
+    ) {}
 
     public function run(AccountingExportBatch $batch): AccountingExportBatch
     {
@@ -43,21 +42,21 @@ class AccountingExportSimulationService
 
         $anyFailed = false;
 
-        $pendingLines = (new TenantContextService())->runWithFirmContext(
+        $pendingLines = (new TenantContextService)->runWithFirmContext(
             $batch->firm_id,
             fn () => $batch->lines()->where('status', AccountingExportLineStatus::Pending->value)->get(),
         );
 
         foreach ($pendingLines as $line) {
             if ($line->chart_of_accounts_id === null) {
-                (new TenantContextService())->runWithFirmContext($batch->firm_id, fn () => $line->update(['status' => AccountingExportLineStatus::Failed]));
-                (new TenantContextService())->runWithFirmContext($batch->firm_id, fn () => $this->errorLogger->log($line, 'chart_of_accounts_id', 'No chart of accounts mapping was found for this record.'));
+                (new TenantContextService)->runWithFirmContext($batch->firm_id, fn () => $line->update(['status' => AccountingExportLineStatus::Failed]));
+                (new TenantContextService)->runWithFirmContext($batch->firm_id, fn () => $this->errorLogger->log($line, 'chart_of_accounts_id', 'No chart of accounts mapping was found for this record.'));
                 $anyFailed = true;
 
                 continue;
             }
 
-            (new TenantContextService())->runWithFirmContext($batch->firm_id, fn () => $line->update(['status' => AccountingExportLineStatus::Exported]));
+            (new TenantContextService)->runWithFirmContext($batch->firm_id, fn () => $line->update(['status' => AccountingExportLineStatus::Exported]));
         }
 
         return $anyFailed

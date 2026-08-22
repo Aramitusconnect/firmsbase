@@ -9,6 +9,7 @@ use App\Enums\EmailSyncOutcome;
 use App\Models\EmailAccount;
 use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
+use App\Models\Firm;
 use App\Services\EmailProvider\EmailProviderClient;
 use App\ValueObjects\EmailSyncRunResult;
 
@@ -70,15 +71,14 @@ class EmailSyncService
         private readonly EmailBodyEncryptionService $bodyEncryption,
         private readonly EmailSyncAuditService $auditService,
         private readonly EmailAccessPolicyService $accessPolicy,
-    ) {
-    }
+    ) {}
 
     public function sync(EmailAccount $account): EmailSyncRunResult
     {
         $firm = $account->firm;
 
         if (! $this->accessPolicy->canUseEmail($firm->id)) {
-            (new TenantContextService())->runWithFirmContext($firm->id, fn () => $this->auditService->record(
+            (new TenantContextService)->runWithFirmContext($firm->id, fn () => $this->auditService->record(
                 $firm,
                 $account,
                 EmailSyncEventType::SyncRun,
@@ -90,7 +90,7 @@ class EmailSyncService
         }
 
         if ($account->storage_mode === EmailStorageMode::Disabled) {
-            (new TenantContextService())->runWithFirmContext($firm->id, fn () => $this->auditService->record(
+            (new TenantContextService)->runWithFirmContext($firm->id, fn () => $this->auditService->record(
                 $firm,
                 $account,
                 EmailSyncEventType::SyncRun,
@@ -101,7 +101,7 @@ class EmailSyncService
             return new EmailSyncRunResult($account->id, EmailSyncOutcome::Blocked, 0);
         }
 
-        $sinceCursor = (new TenantContextService())->runWithFirmContext(
+        $sinceCursor = (new TenantContextService)->runWithFirmContext(
             $firm->id,
             fn () => $this->auditService->latestCursorFor($account),
         );
@@ -121,7 +121,7 @@ class EmailSyncService
                 $anyEncryptionFailed = true;
             }
 
-            (new TenantContextService())->runWithFirmContext($firm->id, fn () => $this->auditService->record(
+            (new TenantContextService)->runWithFirmContext($firm->id, fn () => $this->auditService->record(
                 $firm,
                 $account,
                 EmailSyncEventType::MessageCaptured,
@@ -130,14 +130,14 @@ class EmailSyncService
             ));
         }
 
-        (new TenantContextService())->runWithFirmContext(
+        (new TenantContextService)->runWithFirmContext(
             $firm->id,
             fn () => $account->update(['last_synced_at' => now()]),
         );
 
         $outcome = $anyEncryptionFailed ? EmailSyncOutcome::PartialFailure : EmailSyncOutcome::Success;
 
-        (new TenantContextService())->runWithFirmContext($firm->id, fn () => $this->auditService->record(
+        (new TenantContextService)->runWithFirmContext($firm->id, fn () => $this->auditService->record(
             $firm,
             $account,
             EmailSyncEventType::SyncRun,
@@ -149,7 +149,7 @@ class EmailSyncService
         return new EmailSyncRunResult($account->id, $outcome, $captured, $resultingCursor);
     }
 
-    private function captureMessage(\App\Models\Firm $firm, EmailAccount $account, array $fixture): EmailMessage
+    private function captureMessage(Firm $firm, EmailAccount $account, array $fixture): EmailMessage
     {
         $storageMode = $account->storage_mode;
         $bodyStatus = EmailBodyStatus::NotStored;
@@ -170,7 +170,7 @@ class EmailSyncService
 
         $attachments = $fixture['attachments'] ?? [];
 
-        $message = (new TenantContextService())->runWithFirmContext(
+        $message = (new TenantContextService)->runWithFirmContext(
             $firm->id,
             fn () => EmailMessage::create([
                 'firm_id' => $firm->id,
@@ -192,7 +192,7 @@ class EmailSyncService
         );
 
         foreach ($attachments as $attachmentFixture) {
-            (new TenantContextService())->runWithFirmContext(
+            (new TenantContextService)->runWithFirmContext(
                 $firm->id,
                 fn () => EmailAttachment::create([
                     'firm_id' => $firm->id,

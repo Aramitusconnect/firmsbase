@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\CustomerHealthRiskLevel;
 use App\Models\CustomerSuccessHealthScore;
 use App\Models\Firm;
 use App\Models\Organization;
@@ -50,8 +51,8 @@ class CustomerSuccessConsoleService
 
         $memberFirmCount = $firms->count();
         $averageScore = $snapshots->isEmpty() ? 0.0 : round($snapshots->avg(fn (CustomerSuccessSnapshot $s) => $s->score), 2);
-        $atRiskFirmCount = $snapshots->filter(fn (CustomerSuccessSnapshot $s) => $s->riskLevel === \App\Enums\CustomerHealthRiskLevel::AtRisk)->count();
-        $criticalFirmCount = $snapshots->filter(fn (CustomerSuccessSnapshot $s) => $s->riskLevel === \App\Enums\CustomerHealthRiskLevel::Critical)->count();
+        $atRiskFirmCount = $snapshots->filter(fn (CustomerSuccessSnapshot $s) => $s->riskLevel === CustomerHealthRiskLevel::AtRisk)->count();
+        $criticalFirmCount = $snapshots->filter(fn (CustomerSuccessSnapshot $s) => $s->riskLevel === CustomerHealthRiskLevel::Critical)->count();
 
         return new OrganizationSuccessRollup(
             organizationId: $organization->id,

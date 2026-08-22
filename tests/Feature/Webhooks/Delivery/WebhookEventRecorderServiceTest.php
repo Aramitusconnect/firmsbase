@@ -3,7 +3,10 @@
 namespace Tests\Feature\Webhooks\Delivery;
 
 use App\Enums\WebhookEventType;
+use App\Models\Firm;
 use App\Models\Matter;
+use App\Models\WebhookDelivery;
+use App\Models\WebhookEvent;
 use App\Services\TenantContextService;
 use App\Services\WebhookEventRecorderService;
 use App\Services\WebhookSubscriptionService;
@@ -48,7 +51,7 @@ class WebhookEventRecorderServiceTest extends TestCase
 
         $matter = Matter::factory()->create(['firm_id' => $firm->id]);
 
-        $event = app(\App\Services\WebhookEventRecorderService::class)->record($firm, WebhookEventType::MatterCreated, $matter);
+        $event = app(WebhookEventRecorderService::class)->record($firm, WebhookEventType::MatterCreated, $matter);
 
         $this->assertNotNull($event);
         $this->assertDatabaseCount('webhook_events', 1);
@@ -61,10 +64,10 @@ class WebhookEventRecorderServiceTest extends TestCase
 
     public function test_record_returns_null_and_never_throws_when_the_entitlement_is_disabled(): void
     {
-        $firm = \App\Models\Firm::factory()->create();
+        $firm = Firm::factory()->create();
         $matter = Matter::factory()->create(['firm_id' => $firm->id]);
 
-        $event = app(\App\Services\WebhookEventRecorderService::class)->record($firm, WebhookEventType::MatterCreated, $matter);
+        $event = app(WebhookEventRecorderService::class)->record($firm, WebhookEventType::MatterCreated, $matter);
 
         $this->assertNull($event);
         $this->assertDatabaseCount('webhook_events', 0);
@@ -79,9 +82,9 @@ class WebhookEventRecorderServiceTest extends TestCase
         // internally — record() must catch this and return null rather
         // than letting the exception escape into the calling business
         // workflow (correction #16).
-        $subject = new \stdClass();
+        $subject = new \stdClass;
 
-        $event = app(\App\Services\WebhookEventRecorderService::class)->record($firm, WebhookEventType::MatterCreated, $subject);
+        $event = app(WebhookEventRecorderService::class)->record($firm, WebhookEventType::MatterCreated, $subject);
 
         $this->assertNull($event);
     }
@@ -111,18 +114,18 @@ class WebhookEventRecorderServiceTest extends TestCase
 
         $matter = $this->runWithFirmContext($firm, fn () => Matter::factory()->create(['firm_id' => $firm->id]));
 
-        (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $matter) {
+        (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $matter) {
             DB::afterCommit(function () use ($firm, $matter) {
                 app(WebhookEventRecorderService::class)->record($firm, WebhookEventType::MatterCreated, $matter);
             });
         });
 
-        $event = $this->runWithFirmContext($firm, fn () => \App\Models\WebhookEvent::query()->where('firm_id', $firm->id)->first());
+        $event = $this->runWithFirmContext($firm, fn () => WebhookEvent::query()->where('firm_id', $firm->id)->first());
 
         $this->assertNotNull($event, 'WebhookEvent must actually be persisted when record() is invoked from inside a real DB::afterCommit() closure.');
         $this->assertSame(WebhookEventType::MatterCreated, $event->event_type);
 
-        $deliveryExists = $this->runWithFirmContext($firm, fn () => \App\Models\WebhookDelivery::query()
+        $deliveryExists = $this->runWithFirmContext($firm, fn () => WebhookDelivery::query()
             ->where('webhook_subscription_id', $subscription->id)
             ->where('webhook_event_id', $event->id)
             ->exists());

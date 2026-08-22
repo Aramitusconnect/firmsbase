@@ -40,8 +40,7 @@ final readonly class FirmIntegrationConnectionListItem
         public ?HealthSummaryState $lastHealthStatus,
         public ?Carbon $lastHealthCheckAt,
         public ?string $errorReason,
-    ) {
-    }
+    ) {}
 
     public static function fromModel(FirmIntegration $connection): self
     {

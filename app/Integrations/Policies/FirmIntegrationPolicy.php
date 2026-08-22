@@ -54,8 +54,7 @@ class FirmIntegrationPolicy
 {
     public function __construct(
         private readonly IntegrationAccessPolicyService $accessPolicy,
-    ) {
-    }
+    ) {}
 
     /**
      * List-visibility gate (e.g. a future Firm panel "Integrations"

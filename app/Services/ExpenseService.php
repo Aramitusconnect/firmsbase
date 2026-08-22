@@ -33,8 +33,7 @@ class ExpenseService
     public function __construct(
         private readonly AccountingEntitlementPolicyService $entitlementPolicy,
         private readonly TenantSafeAccountingPolicyService $tenantSafePolicy,
-    ) {
-    }
+    ) {}
 
     public function create(
         Firm $firm,
@@ -55,7 +54,7 @@ class ExpenseService
             throw new \RuntimeException('Matter does not belong to this firm.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, fn () => Expense::create([
+        return (new TenantContextService)->runWithFirmContext($firm, fn () => Expense::create([
             'firm_id' => $firm->id,
             'matter_id' => $matter?->id,
             'expense_category_id' => $category->id,
@@ -79,7 +78,7 @@ class ExpenseService
             throw new \RuntimeException('Only a draft expense may be submitted.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($expense) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($expense) {
             $expense->update(['status' => ExpenseStatus::Submitted]);
 
             return $expense->fresh();
@@ -95,7 +94,7 @@ class ExpenseService
             throw new \RuntimeException('Only a draft expense may be edited.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($expense, $attributes) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($expense, $attributes) {
             $expense->update(array_intersect_key($attributes, array_flip([
                 'vendor_name', 'amount_cents', 'currency', 'expense_date',
                 'reimbursable', 'description', 'expense_category_id', 'matter_id',
@@ -114,7 +113,7 @@ class ExpenseService
             throw new \RuntimeException('Expense is already voided.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($expense) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($expense) {
             $expense->update(['status' => ExpenseStatus::Voided]);
 
             return $expense->fresh();

@@ -27,6 +27,5 @@ final readonly class ConnectionHealthSummary
         public int $consecutiveFailures,
         public ?Carbon $nextRetryAt,
         public ?string $sanitizedDiagnosticSummary,
-    ) {
-    }
+    ) {}
 }

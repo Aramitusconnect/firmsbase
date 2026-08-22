@@ -3,6 +3,9 @@
 namespace Tests\Feature\Governance\ProfessionalReviewGate;
 
 use App\Enums\GovernanceMappingStatus;
+use App\Services\ConsentService;
+use App\Services\PaymentClassificationService;
+use App\Services\PlatformStaffAccessPolicyService;
 use App\Services\ProfessionalReviewGateMappingService;
 use Tests\TestCase;
 
@@ -20,7 +23,7 @@ class ProfessionalReviewSecurityPaymentTrustConsentTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new ProfessionalReviewGateMappingService();
+        $this->service = new ProfessionalReviewGateMappingService;
     }
 
     public function test_hidden_navigation_is_not_accepted_as_security_evidence_by_itself(): void
@@ -33,7 +36,7 @@ class ProfessionalReviewSecurityPaymentTrustConsentTest extends TestCase
 
         // The gate must cite a real backend enforcement class, not a
         // route/navigation absence, as its owning evidence.
-        $this->assertSame(\App\Services\PlatformStaffAccessPolicyService::class, $item->owning_class);
+        $this->assertSame(PlatformStaffAccessPolicyService::class, $item->owning_class);
     }
 
     public function test_payment_classification_and_ledger_gate_is_evaluated(): void
@@ -42,7 +45,7 @@ class ProfessionalReviewSecurityPaymentTrustConsentTest extends TestCase
 
         $this->assertNotNull($item);
         $this->assertSame(GovernanceMappingStatus::Implemented, $item->status);
-        $this->assertSame(\App\Services\PaymentClassificationService::class, $item->owning_class);
+        $this->assertSame(PaymentClassificationService::class, $item->owning_class);
         $this->assertFileExists(app_path('Services/PaymentClassificationService.php'));
     }
 
@@ -63,7 +66,7 @@ class ProfessionalReviewSecurityPaymentTrustConsentTest extends TestCase
 
         $this->assertNotNull($item);
         $this->assertSame(GovernanceMappingStatus::Implemented, $item->status);
-        $this->assertSame(\App\Services\ConsentService::class, $item->owning_class);
+        $this->assertSame(ConsentService::class, $item->owning_class);
         $this->assertStringContainsString('revoke', $item->notes);
     }
 
@@ -73,7 +76,7 @@ class ProfessionalReviewSecurityPaymentTrustConsentTest extends TestCase
 
         $this->assertNotNull($item);
         $this->assertSame(GovernanceMappingStatus::Implemented, $item->status);
-        $this->assertSame(\App\Services\PlatformStaffAccessPolicyService::class, $item->owning_class);
+        $this->assertSame(PlatformStaffAccessPolicyService::class, $item->owning_class);
         $this->assertStringContainsString('HighRiskPlatformChangePolicyService', $item->notes);
         $this->assertFileExists(app_path('Services/PlatformStaffAccessPolicyService.php'));
     }

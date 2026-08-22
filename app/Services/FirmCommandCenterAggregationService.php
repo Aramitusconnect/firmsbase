@@ -58,65 +58,65 @@ class FirmCommandCenterAggregationService
         $asOf = $asOf ?? now();
 
         return new CommandCenterSnapshot(
-            newLeadsCount: (new TenantContextService())->runWithFirmContext($firm, fn () => FirmLead::query()
+            newLeadsCount: (new TenantContextService)->runWithFirmContext($firm, fn () => FirmLead::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', FirmLeadStatus::New)
                 ->count()),
-            consultationsCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Consultation::query()
+            consultationsCount: (new TenantContextService)->runWithFirmContext($firm, fn () => Consultation::query()
                 ->where('firm_id', $firm->id)
                 ->whereNull('held_at')
                 ->where('scheduled_at', '>=', $asOf)
                 ->count()),
-            mattersWaitingOnClientCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Matter::query()
+            mattersWaitingOnClientCount: (new TenantContextService)->runWithFirmContext($firm, fn () => Matter::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', MatterStatus::WaitingOnClient)
                 ->count()),
-            mattersReadyForReviewCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Matter::query()
+            mattersReadyForReviewCount: (new TenantContextService)->runWithFirmContext($firm, fn () => Matter::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', MatterStatus::ReadyForReview)
                 ->count()),
-            documentsNeedingApprovalCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Document::query()
+            documentsNeedingApprovalCount: (new TenantContextService)->runWithFirmContext($firm, fn () => Document::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', DocumentStatus::PendingReview)
                 ->count()),
-            deadlinesThisWeekCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Deadline::query()
+            deadlinesThisWeekCount: (new TenantContextService)->runWithFirmContext($firm, fn () => Deadline::query()
                 ->where('firm_id', $firm->id)
                 ->whereNotIn('status', [DeadlineStatus::Completed, DeadlineStatus::Cancelled])
                 ->whereBetween('due_at', [$asOf->copy()->startOfDay(), $asOf->copy()->addDays(7)->endOfDay()])
                 ->count()),
-            unpaidInvoicesCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Invoice::query()
+            unpaidInvoicesCount: (new TenantContextService)->runWithFirmContext($firm, fn () => Invoice::query()
                 ->where('firm_id', $firm->id)
                 ->whereIn('status', [InvoiceStatus::Sent, InvoiceStatus::PartiallyPaid])
                 ->count()),
-            installmentsDueCount: (new TenantContextService())->runWithFirmContext($firm, fn () => PaymentPlanInstallment::query()
+            installmentsDueCount: (new TenantContextService)->runWithFirmContext($firm, fn () => PaymentPlanInstallment::query()
                 ->whereHas('paymentPlan', fn ($query) => $query->where('firm_id', $firm->id))
                 ->where('status', PaymentPlanInstallmentStatus::Due)
                 ->count()),
-            installmentsMissedCount: (new TenantContextService())->runWithFirmContext($firm, fn () => PaymentPlanInstallment::query()
+            installmentsMissedCount: (new TenantContextService)->runWithFirmContext($firm, fn () => PaymentPlanInstallment::query()
                 ->whereHas('paymentPlan', fn ($query) => $query->where('firm_id', $firm->id))
                 ->where('status', PaymentPlanInstallmentStatus::Missed)
                 ->count()),
-            failedPaymentsCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Payment::query()
+            failedPaymentsCount: (new TenantContextService)->runWithFirmContext($firm, fn () => Payment::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', PaymentStatus::Failed)
                 ->count()),
-            inactiveClientsCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Client::query()
+            inactiveClientsCount: (new TenantContextService)->runWithFirmContext($firm, fn () => Client::query()
                 ->where('firm_id', $firm->id)
                 ->where('updated_at', '<=', $asOf->copy()->subDays($inactiveClientDays))
                 ->count()),
-            overdueTasksCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Task::query()
+            overdueTasksCount: (new TenantContextService)->runWithFirmContext($firm, fn () => Task::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', TaskStatus::Overdue)
                 ->count()),
-            blockedTasksCount: (new TenantContextService())->runWithFirmContext($firm, fn () => Task::query()
+            blockedTasksCount: (new TenantContextService)->runWithFirmContext($firm, fn () => Task::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', TaskStatus::Blocked)
                 ->count()),
-            formsReadyForReviewCount: (new TenantContextService())->runWithFirmContext($firm, fn () => FormDraft::query()
+            formsReadyForReviewCount: (new TenantContextService)->runWithFirmContext($firm, fn () => FormDraft::query()
                 ->where('firm_id', $firm->id)
                 ->where('status', FormDraftStatus::ReadyForReview)
                 ->count()),
-            documentChaseEscalationsCount: (new TenantContextService())->runWithFirmContext($firm, fn () => DocumentChaseEvent::query()
+            documentChaseEscalationsCount: (new TenantContextService)->runWithFirmContext($firm, fn () => DocumentChaseEvent::query()
                 ->where('firm_id', $firm->id)
                 ->where('event_type', 'escalated')
                 ->count()),

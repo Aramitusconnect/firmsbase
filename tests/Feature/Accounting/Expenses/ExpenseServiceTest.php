@@ -20,6 +20,7 @@ class ExpenseServiceTest extends TestCase
     use RefreshDatabase;
 
     private ExpenseService $service;
+
     private EntitlementService $entitlements;
 
     protected function setUp(): void
@@ -28,7 +29,7 @@ class ExpenseServiceTest extends TestCase
         $this->entitlements = app(EntitlementService::class);
         $this->service = new ExpenseService(
             new AccountingEntitlementPolicyService($this->entitlements),
-            new TenantSafeAccountingPolicyService(),
+            new TenantSafeAccountingPolicyService,
         );
     }
 

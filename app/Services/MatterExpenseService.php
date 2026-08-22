@@ -28,8 +28,7 @@ class MatterExpenseService
     public function __construct(
         private readonly AccountingEntitlementPolicyService $entitlementPolicy,
         private readonly TenantSafeAccountingPolicyService $tenantSafePolicy,
-    ) {
-    }
+    ) {}
 
     public function link(Firm $firm, Matter $matter, Expense $expense): MatterExpense
     {
@@ -65,7 +64,7 @@ class MatterExpenseService
         // ran under one context and a write that ran under another could
         // race or, worse, mask the FORCE RLS-driven zero-rows-visible
         // failure mode as a false "not linked yet" result.
-        return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $matter, $expense) {
+        return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $matter, $expense) {
             if ($expense->matterExpense()->exists()) {
                 throw new \RuntimeException('This expense is already linked to a matter.');
             }

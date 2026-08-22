@@ -7,11 +7,16 @@ use App\Enums\SignatureRequestStatus;
 use App\Models\Document;
 use App\Models\Firm;
 use App\Models\FirmUser;
+use App\Models\SignatureRequest;
+use App\Models\SignatureRequestRecipient;
+use App\Services\AcknowledgmentSignatureFoundationService;
 use App\Services\EntitlementService;
 use App\Services\SignatureAndPdfAccessPolicyService;
 use App\Services\SignatureEventLogger;
 use App\Services\SignatureRequestWorkflowService;
 use App\Services\SignatureWorkflowTransitionService;
+use App\Services\TenantContextResolver;
+use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -26,8 +31,8 @@ class SignatureRequestWorkflowServiceTest extends TestCase
         parent::setUp();
 
         $this->service = new SignatureRequestWorkflowService(
-            new SignatureWorkflowTransitionService(),
-            new SignatureEventLogger(new \App\Services\AcknowledgmentSignatureFoundationService()),
+            new SignatureWorkflowTransitionService,
+            new SignatureEventLogger(new AcknowledgmentSignatureFoundationService),
             new SignatureAndPdfAccessPolicyService(app(EntitlementService::class)),
         );
     }
@@ -63,7 +68,7 @@ class SignatureRequestWorkflowServiceTest extends TestCase
         $document = Document::factory()->create(['firm_id' => $firm->id]);
         $request = $this->service->create($firm, 'Engagement Letter', $actor, $document);
 
-        \App\Models\SignatureRequestRecipient::factory()->forRequest($request)->create();
+        SignatureRequestRecipient::factory()->forRequest($request)->create();
 
         $this->expectException(\RuntimeException::class);
         $this->service->send($request, $actor);
@@ -75,7 +80,7 @@ class SignatureRequestWorkflowServiceTest extends TestCase
         $actor = FirmUser::factory()->role(FirmUserRole::Attorney)->create(['firm_id' => $firm->id]);
         $document = Document::factory()->create(['firm_id' => $firm->id]);
         $request = $this->service->create($firm, 'Engagement Letter', $actor, $document);
-        $recipient = \App\Models\SignatureRequestRecipient::factory()->forRequest($request)->create();
+        $recipient = SignatureRequestRecipient::factory()->forRequest($request)->create();
 
         $this->service->attorneyReview($request, $actor, 'Suitable for e-signature under UETA.');
         $request = $this->service->send($request->fresh(), $actor);
@@ -90,7 +95,7 @@ class SignatureRequestWorkflowServiceTest extends TestCase
         $actor = FirmUser::factory()->role(FirmUserRole::Attorney)->create(['firm_id' => $firm->id]);
         $document = Document::factory()->create(['firm_id' => $firm->id]);
         $request = $this->service->create($firm, 'Engagement Letter', $actor, $document);
-        $recipient = \App\Models\SignatureRequestRecipient::factory()->forRequest($request)->create();
+        $recipient = SignatureRequestRecipient::factory()->forRequest($request)->create();
 
         $voided = $this->service->void($request, $actor, 'Client withdrew.');
 
@@ -137,13 +142,13 @@ class SignatureRequestWorkflowServiceTest extends TestCase
         $actor = FirmUser::factory()->role(FirmUserRole::Attorney)->create(['firm_id' => $firm->id]);
         $document = Document::factory()->create(['firm_id' => $firm->id]);
         $request = $this->service->create($firm, 'Engagement Letter', $actor, $document);
-        \App\Models\SignatureRequestRecipient::factory()->forRequest($request)->create();
+        SignatureRequestRecipient::factory()->forRequest($request)->create();
         $this->service->attorneyReview($request, $actor, 'Suitable for e-signature under UETA.');
 
         $request = $this->runWithFirmContext($firm, fn () => $request->fresh());
 
-        (new \App\Services\TenantContextService())->clearDatabaseTenantContext();
-        \App\Services\TenantContextResolver::clear();
+        (new TenantContextService)->clearDatabaseTenantContext();
+        TenantContextResolver::clear();
         $this->assertNoDatabaseTenantContext();
 
         $sent = $this->service->send($request, $actor);
@@ -182,13 +187,13 @@ class SignatureRequestWorkflowServiceTest extends TestCase
         $actor = FirmUser::factory()->role(FirmUserRole::Attorney)->create(['firm_id' => $firm->id]);
         $document = Document::factory()->create(['firm_id' => $firm->id]);
         $request = $this->service->create($firm, 'Engagement Letter', $actor, $document);
-        \App\Models\SignatureRequestRecipient::factory()->count(3)->forRequest($request)->create();
+        SignatureRequestRecipient::factory()->count(3)->forRequest($request)->create();
         $this->service->attorneyReview($request, $actor, 'Suitable for e-signature under UETA.');
 
         $request = $this->runWithFirmContext($firm, fn () => $request->fresh());
 
         $callCount = 0;
-        \App\Models\SignatureRequestRecipient::updating(function () use (&$callCount) {
+        SignatureRequestRecipient::updating(function () use (&$callCount) {
             $callCount++;
 
             if ($callCount === 2) {
@@ -204,12 +209,12 @@ class SignatureRequestWorkflowServiceTest extends TestCase
                 $this->assertSame('simulated failure on the 2nd recipient update', $e->getMessage());
             }
         } finally {
-            \App\Models\SignatureRequestRecipient::flushEventListeners();
+            SignatureRequestRecipient::flushEventListeners();
         }
 
         $sentRecipientCount = $this->runWithFirmContext(
             $firm,
-            fn () => \App\Models\SignatureRequestRecipient::where('signature_request_id', $request->id)
+            fn () => SignatureRequestRecipient::where('signature_request_id', $request->id)
                 ->where('status', SignatureRequestStatus::Sent->value)
                 ->count(),
         );
@@ -220,7 +225,7 @@ class SignatureRequestWorkflowServiceTest extends TestCase
             'Exactly one recipient update must have committed before the simulated failure on the 2nd update — proving the loop is NOT wrapped in one shared, all-or-nothing transaction.'
         );
 
-        $requestStatus = $this->runWithFirmContext($firm, fn () => \App\Models\SignatureRequest::find($request->id)->status);
+        $requestStatus = $this->runWithFirmContext($firm, fn () => SignatureRequest::find($request->id)->status);
 
         $this->assertSame(
             SignatureRequestStatus::Sent,

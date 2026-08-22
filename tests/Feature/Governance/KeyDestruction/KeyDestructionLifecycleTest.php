@@ -6,6 +6,7 @@ use App\Enums\KeyDestructionRequestStatus;
 use App\Enums\LegalHoldScope;
 use App\Enums\RetentionPolicyStatus;
 use App\Enums\RetentionRecordType;
+use App\Models\OffboardingExport;
 use App\Models\RetentionPolicy;
 use App\Services\EncryptionKeyService;
 use App\Services\KeyDestructionApprovalService;
@@ -39,7 +40,7 @@ class KeyDestructionLifecycleTest extends TestCase
         ]);
     }
 
-    private function verifiedExportFor($firm, $admin): \App\Models\OffboardingExport
+    private function verifiedExportFor($firm, $admin): OffboardingExport
     {
         $offboardingRequest = app(OffboardingRequestService::class)->request($firm, $admin, 'Offboarding.');
         $export = app(OffboardingExportService::class)->generate($offboardingRequest, requestedByPlatformAdmin: $admin);

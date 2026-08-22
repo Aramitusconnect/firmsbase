@@ -27,7 +27,7 @@ class FormAndDocumentTenantIsolationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->policy = new TenantSafeFormAndDocumentPolicyService();
+        $this->policy = new TenantSafeFormAndDocumentPolicyService;
     }
 
     public function test_form_draft_belonging_to_a_different_firm_is_rejected(): void

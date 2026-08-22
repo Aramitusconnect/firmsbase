@@ -163,8 +163,8 @@ final class CapabilityContractTest extends TestCase
         // constant both times). Full non-hardcoded-secret coverage lives
         // in TestProviderStubTest; this is the orthogonality-focused
         // half of that same proof.
-        $provider = new TestProvider();
-        $pkce = new PkceService();
+        $provider = new TestProvider;
+        $pkce = new PkceService;
 
         $firstVerifier = $pkce->generateVerifier();
         $firstCode = $provider->simulateAuthorizationGrant($pkce->challengeForVerifier($firstVerifier));

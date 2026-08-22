@@ -17,7 +17,7 @@ interface SupportsDisconnectContract
      * Ask the provider to revoke access for the given connection
      * context (e.g. revoke an OAuth token, deactivate an API key).
      *
-     * @param array<string, mixed> $context
+     * @param  array<string, mixed>  $context
      * @return bool whether the provider confirmed revocation.
      */
     public function revokeAtProvider(array $context): bool;

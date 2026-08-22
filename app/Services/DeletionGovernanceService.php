@@ -6,6 +6,7 @@ use App\Enums\DeletionRequestStatus;
 use App\Enums\HighRiskChangeRequestStatus;
 use App\Enums\LegalHoldScope;
 use App\Enums\OffboardingExportStatus;
+use App\Enums\RetentionRecordType;
 use App\Models\DeletionRequest;
 use App\ValueObjects\DeletionClearanceResult;
 
@@ -23,10 +24,9 @@ class DeletionGovernanceService
     public function __construct(
         private readonly RetentionPolicyService $retentionPolicyService,
         private readonly LegalHoldService $legalHoldService,
-    ) {
-    }
+    ) {}
 
-    public function checkClearance(DeletionRequest $request, \App\Enums\RetentionRecordType $recordType): DeletionClearanceResult
+    public function checkClearance(DeletionRequest $request, RetentionRecordType $recordType): DeletionClearanceResult
     {
         $exportCleared = $request->offboarding_export_id !== null
             && $request->offboardingExport?->status === OffboardingExportStatus::Verified;
@@ -45,7 +45,7 @@ class DeletionGovernanceService
             return new DeletionClearanceResult(true, false, false, 'Retention policy has not cleared for this record.');
         }
 
-        $legalHoldCleared = (new TenantContextService())->runWithFirmContext($firm, fn () => ! $this->legalHoldService->hasActiveHold($firm, LegalHoldScope::Matter, $request->subject_id)
+        $legalHoldCleared = (new TenantContextService)->runWithFirmContext($firm, fn () => ! $this->legalHoldService->hasActiveHold($firm, LegalHoldScope::Matter, $request->subject_id)
             && ! $this->legalHoldService->hasActiveHold($firm, LegalHoldScope::Firm));
 
         if (! $legalHoldCleared) {
@@ -55,7 +55,7 @@ class DeletionGovernanceService
         return new DeletionClearanceResult(true, true, true);
     }
 
-    public function submitForApproval(DeletionRequest $request, \App\Enums\RetentionRecordType $recordType): DeletionRequest
+    public function submitForApproval(DeletionRequest $request, RetentionRecordType $recordType): DeletionRequest
     {
         $clearance = $this->checkClearance($request, $recordType);
 
@@ -66,12 +66,12 @@ class DeletionGovernanceService
                 default => DeletionRequestStatus::LegalHoldBlocked,
             };
 
-            (new TenantContextService())->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => $status]));
+            (new TenantContextService)->runWithFirmContext($request->firm_id, fn () => $request->update(['status' => $status]));
 
             throw new \RuntimeException($clearance->reason ?? 'Deletion request is not yet clear for approval.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request) {
+        return (new TenantContextService)->runWithFirmContext($request->firm_id, function () use ($request) {
             $request->update(['status' => DeletionRequestStatus::PendingApproval]);
 
             return $request->fresh();
@@ -89,7 +89,7 @@ class DeletionGovernanceService
             throw new \RuntimeException('Deletion request cannot be finalized without an Approved deletion_approvals row.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($request->firm_id, function () use ($request) {
+        return (new TenantContextService)->runWithFirmContext($request->firm_id, function () use ($request) {
             $request->update(['status' => DeletionRequestStatus::ReadyForExecution]);
 
             return $request->fresh();

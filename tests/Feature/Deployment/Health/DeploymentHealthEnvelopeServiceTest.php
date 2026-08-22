@@ -2,9 +2,11 @@
 
 namespace Tests\Feature\Deployment\Health;
 
+use App\Enums\CustomerType;
 use App\Enums\DeploymentHealthReportMode;
 use App\Enums\DeploymentMode;
 use App\Enums\HealthCheckStatus;
+use App\Models\DeploymentHealthCheck;
 use App\Models\PrivateEnterpriseSettings;
 use App\Services\DeploymentHealthEnvelopeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -35,7 +37,7 @@ class DeploymentHealthEnvelopeServiceTest extends TestCase
 
     public function test_envelope_carries_no_pii_or_firm_identifying_content_beyond_the_id(): void
     {
-        $firm = $this->makeDeploymentFirm(DeploymentMode::Dedicated, \App\Enums\CustomerType::LawFirm);
+        $firm = $this->makeDeploymentFirm(DeploymentMode::Dedicated, CustomerType::LawFirm);
 
         app(DeploymentHealthEnvelopeService::class)->buildEnvelope($firm, '2026.7.0', '2026.7.0');
 
@@ -44,7 +46,7 @@ class DeploymentHealthEnvelopeServiceTest extends TestCase
         // be explicitly wrapped, or it would incorrectly find no row.
         $row = $this->runWithFirmContext(
             $firm,
-            fn () => \App\Models\DeploymentHealthCheck::query()->where('firm_id', $firm->id)->firstOrFail(),
+            fn () => DeploymentHealthCheck::query()->where('firm_id', $firm->id)->firstOrFail(),
         );
 
         $this->assertStringNotContainsString($firm->name, (string) $row->detail);
@@ -80,7 +82,7 @@ class DeploymentHealthEnvelopeServiceTest extends TestCase
         $this->assertSame(DeploymentHealthReportMode::Live, $envelope->reportedVia);
     }
 
-    public function test_reportOffline_never_makes_a_network_call_and_writes_locally(): void
+    public function test_report_offline_never_makes_a_network_call_and_writes_locally(): void
     {
         $firm = $this->makeDeploymentFirm(DeploymentMode::PrivateEnterprise);
 

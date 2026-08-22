@@ -4,6 +4,7 @@ namespace Tests\Feature\Ai\ProviderKeys;
 
 use App\Enums\AiProvider;
 use App\Enums\AiProviderKeyStatus;
+use App\Models\FirmAiProviderKey;
 use App\Models\User;
 use App\Services\AiProviderKeyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -84,7 +85,7 @@ class AiProviderKeyServiceTest extends TestCase
         $service->generate($firm, AiProvider::OpenAi, $user);
         $service->generate($firm, AiProvider::Anthropic, $user);
 
-        $activeCount = \App\Models\FirmAiProviderKey::query()
+        $activeCount = FirmAiProviderKey::query()
             ->where('firm_id', $firm->id)
             ->where('provider', AiProvider::OpenAi->value)
             ->where('status', AiProviderKeyStatus::Active->value)
@@ -94,15 +95,15 @@ class AiProviderKeyServiceTest extends TestCase
 
         // Rotating creates a second row for the SAME provider — the
         // partial unique index must still allow exactly one active row.
-        $original = \App\Models\FirmAiProviderKey::query()
+        $original = FirmAiProviderKey::query()
             ->where('firm_id', $firm->id)
             ->where('provider', AiProvider::OpenAi->value)
             ->first();
 
         $service->rotate($firm, $original, $user);
 
-        $this->assertSame(2, \App\Models\FirmAiProviderKey::query()->where('firm_id', $firm->id)->where('provider', AiProvider::OpenAi->value)->count());
-        $this->assertSame(1, \App\Models\FirmAiProviderKey::query()->where('firm_id', $firm->id)->where('provider', AiProvider::OpenAi->value)->where('status', AiProviderKeyStatus::Active->value)->count());
+        $this->assertSame(2, FirmAiProviderKey::query()->where('firm_id', $firm->id)->where('provider', AiProvider::OpenAi->value)->count());
+        $this->assertSame(1, FirmAiProviderKey::query()->where('firm_id', $firm->id)->where('provider', AiProvider::OpenAi->value)->where('status', AiProviderKeyStatus::Active->value)->count());
     }
 
     /**

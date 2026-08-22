@@ -36,9 +36,7 @@ use App\Models\Matter;
  */
 class EmailMessageLinkingService
 {
-    public function __construct(private readonly EmailSyncAuditService $auditService)
-    {
-    }
+    public function __construct(private readonly EmailSyncAuditService $auditService) {}
 
     public function link(
         EmailMessage $message,
@@ -63,7 +61,7 @@ class EmailMessageLinkingService
             throw new \RuntimeException('Actor does not belong to the same firm as the email message.');
         }
 
-        return (new TenantContextService())->runWithFirmContext($message->firm_id, function () use ($message, $matter, $client, $actor, $isPrimary) {
+        return (new TenantContextService)->runWithFirmContext($message->firm_id, function () use ($message, $matter, $client, $actor, $isPrimary) {
             $link = EmailMessageLink::create([
                 'firm_id' => $message->firm_id,
                 'email_message_id' => $message->id,
@@ -78,7 +76,7 @@ class EmailMessageLinkingService
                 $message->emailAccount,
                 EmailSyncEventType::MessageLinked,
                 EmailSyncOutcome::Success,
-                detail: "email_message_id={$message->id} linked (matter_id=".($matter?->id ?? 'null').", client_id=".($client?->id ?? 'null').')',
+                detail: "email_message_id={$message->id} linked (matter_id=".($matter?->id ?? 'null').', client_id='.($client?->id ?? 'null').')',
             );
 
             return $link;
@@ -98,6 +96,6 @@ class EmailMessageLinkingService
             throw new \RuntimeException('Actor does not belong to the same firm as the email message link.');
         }
 
-        (new TenantContextService())->runWithFirmContext($link->firm_id, fn () => $link->delete());
+        (new TenantContextService)->runWithFirmContext($link->firm_id, fn () => $link->delete());
     }
 }

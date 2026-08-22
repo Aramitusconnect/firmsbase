@@ -28,7 +28,7 @@ class TenantContextServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->tenantContext = new TenantContextService();
+        $this->tenantContext = new TenantContextService;
     }
 
     public function test_has_firm_context_is_false_before_any_context_is_set(): void

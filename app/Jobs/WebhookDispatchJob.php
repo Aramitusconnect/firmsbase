@@ -48,9 +48,7 @@ class WebhookDispatchJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels, TenantAwareJobContext;
 
-    public function __construct(public int $webhookDeliveryId, public int $firmId)
-    {
-    }
+    public function __construct(public int $webhookDeliveryId, public int $firmId) {}
 
     public function handle(
         FakeWebhookTransport $transport,

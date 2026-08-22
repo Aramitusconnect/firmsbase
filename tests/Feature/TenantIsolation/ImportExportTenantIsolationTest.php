@@ -4,14 +4,16 @@ namespace Tests\Feature\TenantIsolation;
 
 use App\Enums\ImportEntityType;
 use App\Enums\ImportSourceType;
-use App\Models\Firm;
-use App\Services\ImportBatchService;
-use App\Services\ImportAuditService;
-use App\Services\TenantSafeImportExportPolicyService;
 use App\Exceptions\TenantIsolationException;
 use App\Models\ExportJob;
+use App\Models\Firm;
+use App\Models\ImportBatch;
+use App\Models\MigrationProject;
+use App\Services\ImportAuditService;
+use App\Services\ImportBatchService;
 use App\Services\TenantContextResolver;
 use App\Services\TenantContextService;
+use App\Services\TenantSafeImportExportPolicyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -35,7 +37,7 @@ class ImportExportTenantIsolationTest extends TestCase
     {
         $firmA = Firm::factory()->create();
         $firmB = Firm::factory()->create();
-        $batchService = new ImportBatchService(new ImportAuditService());
+        $batchService = new ImportBatchService(new ImportAuditService);
         $batchService->create($firmA, ImportEntityType::Client, ImportSourceType::CsvUpload);
         $batchService->create($firmB, ImportEntityType::Client, ImportSourceType::CsvUpload);
 
@@ -47,9 +49,9 @@ class ImportExportTenantIsolationTest extends TestCase
         // (fail-closed), not the pre-FORCE 1 row. Establish BOTH layers of
         // context (PHP-memory, for BelongsToTenant's global scope, and the
         // database session setting, for RLS) via runWithFirmContext().
-        $visibleBatches = (new TenantContextService())->runWithFirmContext(
+        $visibleBatches = (new TenantContextService)->runWithFirmContext(
             $firmA,
-            fn () => \App\Models\ImportBatch::query()->get()
+            fn () => ImportBatch::query()->get()
         );
 
         $this->assertCount(1, $visibleBatches);
@@ -71,7 +73,7 @@ class ImportExportTenantIsolationTest extends TestCase
         // above, establishing both the PHP-memory context (for
         // BelongsToTenant's global scope) and the database session setting
         // (for RLS) for firmB before reading.
-        $visibleJobs = (new TenantContextService())->runWithFirmContext(
+        $visibleJobs = (new TenantContextService)->runWithFirmContext(
             $firmB,
             fn () => ExportJob::query()->get()
         );
@@ -84,12 +86,12 @@ class ImportExportTenantIsolationTest extends TestCase
     {
         $firmA = Firm::factory()->create();
         $firmB = Firm::factory()->create();
-        $batchService = new ImportBatchService(new ImportAuditService());
+        $batchService = new ImportBatchService(new ImportAuditService);
         $batch = $batchService->create($firmA, ImportEntityType::Client, ImportSourceType::CsvUpload);
 
         $this->expectException(TenantIsolationException::class);
 
-        (new TenantSafeImportExportPolicyService())->assertImportBatchBelongsToFirm($batch, $firmB);
+        (new TenantSafeImportExportPolicyService)->assertImportBatchBelongsToFirm($batch, $firmB);
     }
 
     public function test_tenant_safe_policy_service_rejects_cross_firm_export_job_access(): void
@@ -100,21 +102,21 @@ class ImportExportTenantIsolationTest extends TestCase
 
         $this->expectException(TenantIsolationException::class);
 
-        (new TenantSafeImportExportPolicyService())->assertExportJobBelongsToFirm($job, $firmB);
+        (new TenantSafeImportExportPolicyService)->assertExportJobBelongsToFirm($job, $firmB);
     }
 
     public function test_migration_project_global_scope_narrows_to_the_active_tenant(): void
     {
         $firmA = Firm::factory()->create();
         $firmB = Firm::factory()->create();
-        \App\Models\MigrationProject::factory()->forFirm($firmA)->create();
-        \App\Models\MigrationProject::factory()->forFirm($firmB)->create();
+        MigrationProject::factory()->forFirm($firmA)->create();
+        MigrationProject::factory()->forFirm($firmB)->create();
 
         // migration_projects now carries FORCE ROW LEVEL SECURITY (Wave 9);
         // see the two tests above for the full rationale.
-        $visibleProjects = (new TenantContextService())->runWithFirmContext(
+        $visibleProjects = (new TenantContextService)->runWithFirmContext(
             $firmA,
-            fn () => \App\Models\MigrationProject::query()->get()
+            fn () => MigrationProject::query()->get()
         );
 
         $this->assertCount(1, $visibleProjects);

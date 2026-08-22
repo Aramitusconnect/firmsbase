@@ -31,8 +31,7 @@ class WebhookEventRecorderService
         private readonly WebhookEntitlementPolicyService $entitlement,
         private readonly WebhookPayloadBuilderService $payloadBuilder,
         private readonly WebhookDeliveryService $deliveryService,
-    ) {
-    }
+    ) {}
 
     public function record(Firm $firm, WebhookEventType $type, object $subject): ?WebhookEvent
     {
@@ -45,7 +44,7 @@ class WebhookEventRecorderService
             // create(), subscription read, and enqueue() fan-out) —
             // fixes a decoy-wrap gap found during Wave 11 Phase 2 review
             // that previously left everything but build() unwrapped.
-            return (new TenantContextService())->runWithFirmContext($firm, function () use ($firm, $type, $subject) {
+            return (new TenantContextService)->runWithFirmContext($firm, function () use ($firm, $type, $subject) {
                 $payload = $this->payloadBuilder->build($type, $subject);
 
                 $event = WebhookEvent::create([

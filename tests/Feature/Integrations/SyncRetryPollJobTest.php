@@ -107,7 +107,8 @@ class SyncRetryPollJobTest extends TestCase
 
     private function registerFakePushProvider(?string $externalId = null, ?string $versionToken = null, bool $shouldFail = false, string $failCategory = 'rate_limited'): object
     {
-        $provider = new class($externalId, $versionToken, $shouldFail, $failCategory) implements IntegrationProviderContract, SupportsPushSyncContract {
+        $provider = new class($externalId, $versionToken, $shouldFail, $failCategory) implements IntegrationProviderContract, SupportsPushSyncContract
+        {
             public array $calls = [];
 
             public function __construct(
@@ -115,8 +116,7 @@ class SyncRetryPollJobTest extends TestCase
                 private readonly ?string $versionToken,
                 private readonly bool $shouldFail,
                 private readonly string $failCategory,
-            ) {
-            }
+            ) {}
 
             public function key(): ProviderKey
             {
@@ -249,7 +249,7 @@ class SyncRetryPollJobTest extends TestCase
             // IntegrationOutboxEventService::claim()/fail() already
             // establish for this exact class of lower-bound gate.
             $target = DB::selectOne(
-                "select to_timestamp(ceil(extract(epoch from ?::timestamptz))) as t",
+                'select to_timestamp(ceil(extract(epoch from ?::timestamptz))) as t',
                 [$t0]
             )->t;
 
@@ -318,7 +318,7 @@ class SyncRetryPollJobTest extends TestCase
             // Now call the REAL, actual SyncItemService::claimForRetry()
             // — the exact fixed production method — still inside the
             // SAME still-open transaction.
-            $claimed = (new SyncItemService(new TimelineEventRecorder(), new IntegrationRequeueAuditLogger()))->claimForRetry($item->id);
+            $claimed = (new SyncItemService(new TimelineEventRecorder, new IntegrationRequeueAuditLogger))->claimForRetry($item->id);
 
             $this->assertNotNull(
                 $claimed,
@@ -514,7 +514,7 @@ class SyncRetryPollJobTest extends TestCase
 
         // Seed a prior failure signal so recordSuccess()'s reset is
         // actually observable, not merely a fresh-row creation.
-        $this->runWithFirmContext($firm, fn () => (new HealthStateService(new TimelineEventRecorder()))->recordProviderError(
+        $this->runWithFirmContext($firm, fn () => (new HealthStateService(new TimelineEventRecorder))->recordProviderError(
             $connection->id,
             $firm->id,
             new SanitizedHealthDiagnostic(
@@ -689,7 +689,7 @@ class SyncRetryPollJobTest extends TestCase
             ]);
         });
 
-        $claimed = $this->runWithFirmContext($firm, fn () => (new SyncItemService(new TimelineEventRecorder(), new IntegrationRequeueAuditLogger()))->claimForRetry($item->id));
+        $claimed = $this->runWithFirmContext($firm, fn () => (new SyncItemService(new TimelineEventRecorder, new IntegrationRequeueAuditLogger))->claimForRetry($item->id));
 
         $this->assertNotNull($claimed, 'The real claimForRetry() must agree with the literal predicate proof above: a due row is claimable.');
         $this->assertSame(SyncItemStatus::Retrying, $claimed->status);
@@ -745,7 +745,7 @@ class SyncRetryPollJobTest extends TestCase
             DB::beginTransaction();
             DB::select('select set_config(?, ?, ?)', ['app.current_firm_id', (string) $firm->id, false]);
 
-            $claimedA = (new SyncItemService(new TimelineEventRecorder(), new IntegrationRequeueAuditLogger()))->claimForRetry($item->id);
+            $claimedA = (new SyncItemService(new TimelineEventRecorder, new IntegrationRequeueAuditLogger))->claimForRetry($item->id);
 
             $this->assertNotNull($claimedA, 'Connection A must successfully claim the single failed_retryable row.');
             $this->assertSame(SyncItemStatus::Retrying, $claimedA->status);
@@ -826,7 +826,7 @@ class SyncRetryPollJobTest extends TestCase
         // SAME id, now that A's claim has committed and moved the row
         // off failed_retryable, must return null — the row can never
         // be claimed twice, concurrently OR sequentially.
-        $secondClaim = $this->runWithFirmContext($firm, fn () => (new SyncItemService(new TimelineEventRecorder(), new IntegrationRequeueAuditLogger()))->claimForRetry($item->id));
+        $secondClaim = $this->runWithFirmContext($firm, fn () => (new SyncItemService(new TimelineEventRecorder, new IntegrationRequeueAuditLogger))->claimForRetry($item->id));
         $this->assertNull($secondClaim, 'A row already claimed (no longer failed_retryable) must never be claimable again — sequential double-claim must also be impossible.');
     }
 

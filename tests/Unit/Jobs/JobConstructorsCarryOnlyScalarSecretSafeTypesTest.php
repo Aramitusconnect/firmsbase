@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Jobs;
 
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Model;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 use ReflectionNamedType;
@@ -217,16 +218,12 @@ final class JobConstructorsCarryOnlyScalarSecretSafeTypesTest extends TestCase
  */
 final class SyntheticJobWithModelParameterForTestingOnly
 {
-    public function __construct(private readonly \Illuminate\Database\Eloquent\Model $model)
-    {
-    }
+    public function __construct(private readonly Model $model) {}
 }
 
 final class SyntheticJobWithUntypedParameterForTestingOnly
 {
-    public function __construct(private $anything)
-    {
-    }
+    public function __construct(private $anything) {}
 }
 
 enum SyntheticSafeEnumForTestingOnly: string
@@ -243,6 +240,5 @@ final class SyntheticJobWithSafeParametersForTestingOnly
         private readonly float $amount,
         private readonly SyntheticSafeEnumForTestingOnly $kind,
         private readonly \DateTimeImmutable $occurredAt,
-    ) {
-    }
+    ) {}
 }

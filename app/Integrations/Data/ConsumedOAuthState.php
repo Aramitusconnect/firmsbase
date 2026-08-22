@@ -28,6 +28,5 @@ final class ConsumedOAuthState
         public readonly string $redirectUri,
         public readonly string $pkceVerifierPlaintext,
         public readonly DateTimeInterface $consumedAt,
-    ) {
-    }
+    ) {}
 }

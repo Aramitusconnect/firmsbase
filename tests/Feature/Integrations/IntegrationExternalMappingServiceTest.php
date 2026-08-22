@@ -35,7 +35,7 @@ class IntegrationExternalMappingServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new IntegrationExternalMappingService();
+        $this->service = new IntegrationExternalMappingService;
     }
 
     // ------------------------------------------------------------

@@ -24,8 +24,7 @@ class WebhookSecretService
     public function __construct(
         private readonly EmailBodyEncryptionService $encryption,
         private readonly TenantSafeWebhookPolicyService $tenantSafePolicy,
-    ) {
-    }
+    ) {}
 
     /**
      * Relies entirely on ambient caller-supplied tenant context — no

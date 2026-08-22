@@ -19,6 +19,7 @@ use App\Models\PlatformAdmin;
 use App\Models\SupportAccessRequest;
 use App\Models\SupportAccessSession;
 use App\Services\PlatformRoleService;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
@@ -90,7 +91,7 @@ final class PlatformIntegrationAdminUiSecretSafetyTest extends TestCase
         ]);
 
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $test = Livewire::test(PlatformIntegrationOverviewPage::class);
@@ -105,9 +106,9 @@ final class PlatformIntegrationAdminUiSecretSafetyTest extends TestCase
 
     public function test_the_firm_integrations_page_never_leaks_the_webhook_routing_token_marker(): void
     {
-        [$firm, ] = $this->fixtureWithAllMarkersPlanted();
+        [$firm] = $this->fixtureWithAllMarkersPlanted();
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $test = Livewire::test(PlatformFirmIntegrationsPage::class, ['firmUuid' => $firm->uuid]);
@@ -125,7 +126,7 @@ final class PlatformIntegrationAdminUiSecretSafetyTest extends TestCase
         [$firm, $connection] = $this->fixtureWithAllMarkersPlanted();
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
         $this->activeSessionFor($admin, $firm);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $test = Livewire::test(PlatformFirmIntegrationDetailPage::class, [
@@ -141,7 +142,7 @@ final class PlatformIntegrationAdminUiSecretSafetyTest extends TestCase
     {
         [$firm, $connection] = $this->fixtureWithAllMarkersPlanted();
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $test = Livewire::test(PlatformFirmIntegrationDetailPage::class, [
@@ -157,7 +158,7 @@ final class PlatformIntegrationAdminUiSecretSafetyTest extends TestCase
     {
         [$firm, $connection] = $this->fixtureWithAllMarkersPlanted();
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $test = Livewire::test(PlatformFirmIntegrationDetailPage::class, [
@@ -174,7 +175,7 @@ final class PlatformIntegrationAdminUiSecretSafetyTest extends TestCase
         [$firm, $connection] = $this->fixtureWithAllMarkersPlanted();
         // Ceiling role, but deliberately NO active support-access session.
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $test = Livewire::test(PlatformFirmIntegrationDetailPage::class, [
@@ -191,7 +192,7 @@ final class PlatformIntegrationAdminUiSecretSafetyTest extends TestCase
         [$firm, $connection] = $this->fixtureWithAllMarkersPlanted();
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
         $this->activeSessionFor($admin, $firm);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $test = Livewire::test(PlatformFirmIntegrationDetailPage::class, [
@@ -213,7 +214,7 @@ final class PlatformIntegrationAdminUiSecretSafetyTest extends TestCase
         ]));
 
         $admin = $this->adminWithRole(PlatformRoleCode::SuperAdmin);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->actingAs($admin, 'platform_admin');
 
         $test = Livewire::test(PlatformFirmIntegrationDetailPage::class, [

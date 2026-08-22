@@ -84,8 +84,8 @@ return new class extends Migration
             $table->foreignId('firm_integration_id'); // bare column; composite FK below is the sole constraint
 
             $table->string('credential_type'); // 'oauth_access_token' | 'oauth_refresh_token' | 'api_key' | 'webhook_signing_secret'
-                                                 // NEVER consulted by any RLS predicate; 'webhook_signing_secret' rows
-                                                 // are never written by any Checkpoint 4 code path (no creation flow exists yet)
+            // NEVER consulted by any RLS predicate; 'webhook_signing_secret' rows
+            // are never written by any Checkpoint 4 code path (no creation flow exists yet)
             $table->text('encrypted_payload_ciphertext');
             $table->foreignId('encryption_key_id')->constrained('tenant_encryption_keys')->restrictOnDelete();
             $table->string('status')->default('active'); // active | rotated | revoked

@@ -3,8 +3,15 @@
 namespace Tests\Feature\Governance\DeploymentEnvironment;
 
 use App\Enums\GovernanceMappingStatus;
+use App\Enums\IntegrationType;
+use App\Models\Firm;
+use App\Services\DedicatedCustomerTypeApprovalService;
+use App\Services\DeploymentHealthEnvelopeService;
 use App\Services\DeploymentModeCoverageMappingService;
+use App\Services\FleetMigrationOrchestrationService;
+use App\Services\LicenseFileValidationService;
 use App\Services\RowLevelSecurityCoverageMappingService;
+use App\Services\VersionSkewPolicyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -39,7 +46,7 @@ class DeploymentModeCoverageMappingServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new DeploymentModeCoverageMappingService();
+        $this->service = new DeploymentModeCoverageMappingService;
     }
 
     public function test_all_eighteen_deployment_mode_control_keys_are_declared_explicitly(): void
@@ -113,7 +120,7 @@ class DeploymentModeCoverageMappingServiceTest extends TestCase
         // remediation task, the firms root-table policy design, and the
         // support-access policy shape design) rather than the
         // now-resolved uncovered-table count.
-        $uncoveredCount = count((new RowLevelSecurityCoverageMappingService())->missingPreparedTables());
+        $uncoveredCount = count((new RowLevelSecurityCoverageMappingService)->missingPreparedTables());
         $this->assertSame(0, $uncoveredCount, 'Wave 11 must have closed every remaining uncovered tenant-owned table.');
 
         $item = $this->service->byKey('saas_firm_isolation_rls_defense_in_depth');
@@ -143,11 +150,11 @@ class DeploymentModeCoverageMappingServiceTest extends TestCase
 
     public function test_dedicated_controls_map_to_phase_16_services(): void
     {
-        $this->assertSame(\App\Services\LicenseFileValidationService::class, $this->service->byKey('dedicated_signed_offline_license_validation')->owning_class);
-        $this->assertSame(\App\Services\FleetMigrationOrchestrationService::class, $this->service->byKey('dedicated_fleet_migration_enrollment')->owning_class);
-        $this->assertSame(\App\Services\VersionSkewPolicyService::class, $this->service->byKey('dedicated_version_skew_limit')->owning_class);
-        $this->assertSame(\App\Services\DeploymentHealthEnvelopeService::class, $this->service->byKey('dedicated_deployment_health_checks')->owning_class);
-        $this->assertSame(\App\Services\DedicatedCustomerTypeApprovalService::class, $this->service->byKey('dedicated_customer_type_controls')->owning_class);
+        $this->assertSame(LicenseFileValidationService::class, $this->service->byKey('dedicated_signed_offline_license_validation')->owning_class);
+        $this->assertSame(FleetMigrationOrchestrationService::class, $this->service->byKey('dedicated_fleet_migration_enrollment')->owning_class);
+        $this->assertSame(VersionSkewPolicyService::class, $this->service->byKey('dedicated_version_skew_limit')->owning_class);
+        $this->assertSame(DeploymentHealthEnvelopeService::class, $this->service->byKey('dedicated_deployment_health_checks')->owning_class);
+        $this->assertSame(DedicatedCustomerTypeApprovalService::class, $this->service->byKey('dedicated_customer_type_controls')->owning_class);
     }
 
     public function test_private_enterprise_data_region_status_reflects_aws_inspection(): void
@@ -156,9 +163,9 @@ class DeploymentModeCoverageMappingServiceTest extends TestCase
 
         // AWS inspection confirmed firms.data_region is a real column.
         $this->assertSame(GovernanceMappingStatus::Implemented, $item->status);
-        $this->assertSame(\App\Models\Firm::class, $item->owning_class);
+        $this->assertSame(Firm::class, $item->owning_class);
 
-        $firm = new \App\Models\Firm();
+        $firm = new Firm;
         $this->assertContains('data_region', $firm->getFillable());
     }
 
@@ -168,7 +175,7 @@ class DeploymentModeCoverageMappingServiceTest extends TestCase
 
         $this->assertSame(GovernanceMappingStatus::PartiallyImplemented, $item->status);
 
-        $declaredTypes = array_map(fn ($case) => $case->value, \App\Enums\IntegrationType::cases());
+        $declaredTypes = array_map(fn ($case) => $case->value, IntegrationType::cases());
         $this->assertNotContains('ai_provider', $declaredTypes);
         $this->assertNotContains('sms', $declaredTypes);
         $this->assertNotContains('whatsapp', $declaredTypes);
@@ -188,7 +195,7 @@ class DeploymentModeCoverageMappingServiceTest extends TestCase
         }
     }
 
-    public function test_byKey_returns_null_for_an_unknown_key(): void
+    public function test_by_key_returns_null_for_an_unknown_key(): void
     {
         $this->assertNull($this->service->byKey('does_not_exist'));
     }

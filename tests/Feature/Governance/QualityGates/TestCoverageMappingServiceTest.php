@@ -3,6 +3,7 @@
 namespace Tests\Feature\Governance\QualityGates;
 
 use App\Enums\GovernanceMappingStatus;
+use App\Services\PermissionMatrixMappingService;
 use App\Services\RowLevelSecurityCoverageMappingService;
 use App\Services\TestCoverageMappingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -45,7 +46,7 @@ class TestCoverageMappingServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new TestCoverageMappingService();
+        $this->service = new TestCoverageMappingService;
     }
 
     public function test_all_twenty_four_test_group_keys_are_declared_explicitly(): void
@@ -68,7 +69,7 @@ class TestCoverageMappingServiceTest extends TestCase
         $this->assertCount(count($keys), array_unique($keys), 'Duplicate test group key(s) found.');
     }
 
-    public function test_byKey_resolves_every_declared_key(): void
+    public function test_by_key_resolves_every_declared_key(): void
     {
         foreach (self::REQUIRED_KEYS as $key) {
             $this->assertNotNull($this->service->byKey($key), "byKey() could not resolve: {$key}");
@@ -120,7 +121,7 @@ class TestCoverageMappingServiceTest extends TestCase
         // cross-firm-pivot-mismatch remediation task, the firms
         // root-table policy design, and the support-access policy shape
         // design) rather than the now-resolved uncovered-table count.
-        $uncoveredCount = count((new RowLevelSecurityCoverageMappingService())->missingPreparedTables());
+        $uncoveredCount = count((new RowLevelSecurityCoverageMappingService)->missingPreparedTables());
         $this->assertSame(0, $uncoveredCount, 'Wave 11 must have closed every remaining uncovered tenant-owned table.');
 
         $item = $this->service->byKey('tenant_isolation_broken_scope_caught_by_rls');
@@ -154,7 +155,7 @@ class TestCoverageMappingServiceTest extends TestCase
 
         $this->assertNotSame(GovernanceMappingStatus::Implemented, $item->status);
 
-        $orgAdmin = (new \App\Services\PermissionMatrixMappingService())->byKey('org_admin');
+        $orgAdmin = (new PermissionMatrixMappingService)->byKey('org_admin');
         $this->assertSame(GovernanceMappingStatus::NotFound, $orgAdmin->status);
     }
 

@@ -92,8 +92,7 @@ final class SyncRetryPollJob implements ShouldQueue
         // Callers now pass a JSON-encoded string; decoded back to an
         // array in resolveOneRetry() below before use.
         public readonly ?string $providerContext = null,
-    ) {
-    }
+    ) {}
 
     public function middleware(): array
     {

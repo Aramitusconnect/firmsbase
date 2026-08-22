@@ -2,15 +2,16 @@
 
 namespace Tests\Feature\Forms\DocumentGeneration;
 
-use App\Enums\DocumentTemplateContentStatus;
 use App\Enums\FirmUserRole;
 use App\Enums\GeneratedDocumentStatus;
 use App\Models\DocumentTemplateVersion;
 use App\Models\FirmUser;
 use App\Models\GeneratedDocument;
 use App\Services\DocumentReviewService;
+use App\Services\EntitlementService;
 use App\Services\FormAndDocumentAccessPolicyService;
 use App\Services\ReviewWorkflowTransitionService;
+use App\Services\TenantContextService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -24,8 +25,8 @@ class DocumentReviewServiceTest extends TestCase
     {
         parent::setUp();
         $this->service = new DocumentReviewService(
-            new ReviewWorkflowTransitionService(),
-            new FormAndDocumentAccessPolicyService(app(\App\Services\EntitlementService::class)),
+            new ReviewWorkflowTransitionService,
+            new FormAndDocumentAccessPolicyService(app(EntitlementService::class)),
         );
     }
 
@@ -99,7 +100,7 @@ class DocumentReviewServiceTest extends TestCase
         // setup noise, not something resubmitAfterRevision() itself
         // leaks. Clearing it here isolates the context-lifecycle
         // assertion below to what THIS service call actually does.
-        (new \App\Services\TenantContextService())->clearDatabaseTenantContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
 
         $document = $this->service->resubmitAfterRevision($document, $attorney);
 

@@ -117,7 +117,7 @@ final class PersistentMiddlewareTenantContextLifetimeTest extends TestCase
                     "select current_setting('app.current_firm_id', true) as value"
                 )->value;
 
-                return new Response();
+                return new Response;
             });
 
         // Proves the middleware genuinely ran and genuinely established

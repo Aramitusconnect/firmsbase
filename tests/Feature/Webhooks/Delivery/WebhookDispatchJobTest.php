@@ -7,8 +7,13 @@ use App\Enums\WebhookDeliveryStatus;
 use App\Jobs\WebhookDispatchJob;
 use App\Models\Firm;
 use App\Models\WebhookDelivery;
+use App\Models\WebhookEvent;
+use App\Models\WebhookSubscription;
 use App\Services\FakeWebhookTransport;
+use App\Services\TenantContextResolver;
+use App\Services\TenantContextService;
 use App\Services\WebhookDeliveryAttemptService;
+use App\Services\WebhookDeliveryService;
 use App\Services\WebhookSecretService;
 use App\Services\WebhookSignatureService;
 use App\Services\WebhookSubscriptionService;
@@ -37,7 +42,7 @@ class WebhookDispatchJobTest extends TestCase
     use RefreshDatabase, SetsUpWebhookEntitledFirm;
 
     /**
-     * @return array{0: Firm, 1: \App\Models\WebhookSubscription, 2: WebhookDelivery}
+     * @return array{0: Firm, 1: WebhookSubscription, 2: WebhookDelivery}
      */
     private function makeDelivery(): array
     {
@@ -46,8 +51,8 @@ class WebhookDispatchJobTest extends TestCase
         $subscription = app(WebhookSubscriptionService::class)->create($firm, $owner, ['matter.created'], 'https://example.com/hooks', $owner);
         app(WebhookSecretService::class)->generate($firm, $subscription);
 
-        $event = $this->runWithFirmContext($firm, fn () => \App\Models\WebhookEvent::factory()->forFirm($firm)->create());
-        $delivery = app(\App\Services\WebhookDeliveryService::class)->enqueue($event, $subscription);
+        $event = $this->runWithFirmContext($firm, fn () => WebhookEvent::factory()->forFirm($firm)->create());
+        $delivery = app(WebhookDeliveryService::class)->enqueue($event, $subscription);
 
         return [$firm, $subscription, $delivery];
     }
@@ -74,7 +79,7 @@ class WebhookDispatchJobTest extends TestCase
     {
         [$firm, , $delivery] = $this->makeDelivery();
 
-        $transport = new FakeWebhookTransport();
+        $transport = new FakeWebhookTransport;
         $job = new WebhookDispatchJob($delivery->id, $firm->id);
         $job->handle($transport, app(WebhookSignatureService::class), app(WebhookSecretService::class), app(WebhookDeliveryAttemptService::class));
 
@@ -125,7 +130,7 @@ class WebhookDispatchJobTest extends TestCase
 
         $job = new WebhookDispatchJob(999999999, $firm->id);
 
-        $job->handle(new FakeWebhookTransport(), app(WebhookSignatureService::class), app(WebhookSecretService::class), app(WebhookDeliveryAttemptService::class));
+        $job->handle(new FakeWebhookTransport, app(WebhookSignatureService::class), app(WebhookSecretService::class), app(WebhookDeliveryAttemptService::class));
 
         $this->assertTrue(true);
     }
@@ -136,11 +141,11 @@ class WebhookDispatchJobTest extends TestCase
         $owner = $this->makeFirmOwner($firm);
         $subscription = app(WebhookSubscriptionService::class)->create($firm, $owner, ['matter.created'], 'https://example.com/hooks', $owner);
         // No secret generated for this subscription.
-        $event = $this->runWithFirmContext($firm, fn () => \App\Models\WebhookEvent::factory()->forFirm($firm)->create());
-        $delivery = app(\App\Services\WebhookDeliveryService::class)->enqueue($event, $subscription);
+        $event = $this->runWithFirmContext($firm, fn () => WebhookEvent::factory()->forFirm($firm)->create());
+        $delivery = app(WebhookDeliveryService::class)->enqueue($event, $subscription);
 
         $job = new WebhookDispatchJob($delivery->id, $firm->id);
-        $job->handle(new FakeWebhookTransport(), app(WebhookSignatureService::class), app(WebhookSecretService::class), app(WebhookDeliveryAttemptService::class));
+        $job->handle(new FakeWebhookTransport, app(WebhookSignatureService::class), app(WebhookSecretService::class), app(WebhookDeliveryAttemptService::class));
 
         $this->runWithFirmContext($firm, function () use ($delivery) {
             $this->assertDatabaseHas('webhook_delivery_attempts', [
@@ -167,8 +172,8 @@ class WebhookDispatchJobTest extends TestCase
         // before constructing/handling the job — matching a fresh
         // queue-worker process picking up this job with nothing else
         // having run beforehand.
-        \App\Services\TenantContextResolver::clear();
-        (new \App\Services\TenantContextService())->clearDatabaseTenantContext();
+        TenantContextResolver::clear();
+        (new TenantContextService)->clearDatabaseTenantContext();
         $this->assertNoDatabaseTenantContext();
 
         $transport = new FakeWebhookTransport(WebhookTransportResult::success(200, 'ok'));

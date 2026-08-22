@@ -84,7 +84,7 @@ final class RetentionSweepLegalHoldGuardTest extends TestCase
     private function sweep(Firm $firm): void
     {
         $job = new RetentionSweepJob($firm->id, false, 500);
-        $job->handle(new RetentionSweepAuditLogger());
+        $job->handle(new RetentionSweepAuditLogger);
     }
 
     private function agedSyncItem(Firm $firm, FirmIntegration $connection): IntegrationSyncItem

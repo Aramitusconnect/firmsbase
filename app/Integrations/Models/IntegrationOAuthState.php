@@ -69,7 +69,7 @@ use RuntimeException;
  */
 class IntegrationOAuthState extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     protected $table = 'integration_oauth_states';
 

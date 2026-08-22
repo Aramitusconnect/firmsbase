@@ -36,7 +36,7 @@ class FirmIntegrationSerializationSafetyTest extends TestCase
 
     public function test_webhook_routing_token_is_declared_hidden_on_the_model(): void
     {
-        $model = new FirmIntegration();
+        $model = new FirmIntegration;
 
         $this->assertContains('webhook_routing_token', $model->getHidden());
     }
@@ -86,7 +86,7 @@ class FirmIntegrationSerializationSafetyTest extends TestCase
 
     public function test_no_other_column_became_accidentally_hidden(): void
     {
-        $model = new FirmIntegration();
+        $model = new FirmIntegration;
 
         $this->assertSame(['webhook_routing_token'], $model->getHidden(), 'The Checkpoint 9 fix is a ONE-LINE, additive-only change — no other column may be hidden.');
     }
@@ -104,7 +104,7 @@ class FirmIntegrationSerializationSafetyTest extends TestCase
         // today), while requiring the gap to be disclosed as a named
         // residual risk. This assertion documents the model's CURRENT,
         // accepted-for-now shape.
-        $model = new IntegrationConflict();
+        $model = new IntegrationConflict;
 
         $this->assertNotContains('local_value', $model->getHidden());
         $this->assertNotContains('external_value', $model->getHidden());

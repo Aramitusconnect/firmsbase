@@ -5,6 +5,7 @@ namespace Tests\Feature\Imports;
 use App\Enums\ImportBatchStatus;
 use App\Enums\ImportEntityType;
 use App\Enums\ImportSourceType;
+use App\Models\Client;
 use App\Models\Firm;
 use App\Services\ImportAuditService;
 use App\Services\ImportBatchService;
@@ -57,13 +58,15 @@ class ImportPreviewServiceTest extends TestCase
     use RefreshDatabase;
 
     private ImportPreviewService $service;
+
     private ImportBatchService $batchService;
+
     private ImportMappingService $mappingService;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $auditService = new ImportAuditService();
+        $auditService = new ImportAuditService;
         $this->mappingService = new ImportMappingService($auditService);
         $this->batchService = new ImportBatchService($auditService);
         $this->service = new ImportPreviewService(
@@ -124,7 +127,7 @@ class ImportPreviewServiceTest extends TestCase
     public function test_preview_genuinely_succeeds_with_no_ambient_context_established_by_the_caller(): void
     {
         $firm = Firm::factory()->create();
-        $existing = \App\Models\Client::factory()->create(['firm_id' => $firm->id, 'email' => 'dup-preview-fix@example.test']);
+        $existing = Client::factory()->create(['firm_id' => $firm->id, 'email' => 'dup-preview-fix@example.test']);
 
         $batch = $this->batchService->create($firm, ImportEntityType::Client, ImportSourceType::CsvUpload);
         $this->mappingService->saveMappings($batch, [
@@ -134,8 +137,8 @@ class ImportPreviewServiceTest extends TestCase
             ['email' => 'dup-preview-fix@example.test'],
         ]);
 
-        (new TenantContextService())->clearDatabaseTenantContext();
-        (new TenantContextService())->clearFirmContext();
+        (new TenantContextService)->clearDatabaseTenantContext();
+        (new TenantContextService)->clearFirmContext();
         $this->assertNoDatabaseTenantContext();
 
         // $batch is the already-hydrated, in-memory object returned by
@@ -154,6 +157,6 @@ class ImportPreviewServiceTest extends TestCase
         $row = $this->runWithFirmContext($firm, fn () => $batch->rows()->first());
         $this->assertTrue($row->is_duplicate);
         $this->assertSame($existing->id, $row->duplicate_of_id);
-        $this->assertSame(\App\Models\Client::class, $row->duplicate_of_type);
+        $this->assertSame(Client::class, $row->duplicate_of_type);
     }
 }

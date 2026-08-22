@@ -112,7 +112,7 @@ final class TestProviderStubTest extends TestCase
     {
         Http::fake();
 
-        $provider = new TestProvider();
+        $provider = new TestProvider;
 
         $provider->key();
         $provider->displayName();
@@ -120,7 +120,7 @@ final class TestProviderStubTest extends TestCase
         $provider->isConfigured();
         $provider->supportedAuthMethods();
         $provider->authorizationUrl(['client_id' => 'x']);
-        $pkce = new PkceService();
+        $pkce = new PkceService;
         $verifier = $pkce->generateVerifier();
         $mintedCode = $provider->simulateAuthorizationGrant($pkce->challengeForVerifier($verifier));
         $provider->exchangeCodeForToken($mintedCode, ['code_verifier' => $verifier]);
@@ -178,8 +178,8 @@ final class TestProviderStubTest extends TestCase
 
     public function test_exchange_code_for_token_generates_different_access_and_refresh_tokens_each_call(): void
     {
-        $provider = new TestProvider();
-        $pkce = new PkceService();
+        $provider = new TestProvider;
+        $pkce = new PkceService;
 
         // Two distinct, freshly minted authorization codes — each
         // exchanged exactly once — rather than the same code exchanged
@@ -209,8 +209,8 @@ final class TestProviderStubTest extends TestCase
         // exactly ONE authorization code, exchanges it once
         // successfully, then proves a second exchange of that SAME code
         // is rejected — replay protection remains intact.
-        $provider = new TestProvider();
-        $pkce = new PkceService();
+        $provider = new TestProvider;
+        $pkce = new PkceService;
 
         $verifier = $pkce->generateVerifier();
         $code = $provider->simulateAuthorizationGrant($pkce->challengeForVerifier($verifier));
@@ -225,7 +225,7 @@ final class TestProviderStubTest extends TestCase
 
     public function test_refresh_token_generates_different_access_and_refresh_tokens_each_call(): void
     {
-        $provider = new TestProvider();
+        $provider = new TestProvider;
 
         $first = $provider->refreshToken('same-refresh-token');
         $second = $provider->refreshToken('same-refresh-token');
@@ -236,7 +236,7 @@ final class TestProviderStubTest extends TestCase
 
     public function test_incremental_cursor_is_generated_fresh_each_call(): void
     {
-        $provider = new TestProvider();
+        $provider = new TestProvider;
 
         $first = $provider->incrementalCursorFor([], 'contact');
         $second = $provider->incrementalCursorFor([], 'contact');
@@ -248,7 +248,7 @@ final class TestProviderStubTest extends TestCase
 
     public function test_webhook_subscribe_generates_a_different_subscription_id_each_call(): void
     {
-        $provider = new TestProvider();
+        $provider = new TestProvider;
 
         $first = $provider->subscribe([]);
         $second = $provider->subscribe([]);
@@ -258,7 +258,7 @@ final class TestProviderStubTest extends TestCase
 
     public function test_webhook_renew_subscription_generates_a_different_subscription_id_each_call(): void
     {
-        $provider = new TestProvider();
+        $provider = new TestProvider;
 
         $first = $provider->renewSubscription([]);
         $second = $provider->renewSubscription([]);
@@ -276,8 +276,8 @@ final class TestProviderStubTest extends TestCase
         $propertyReflection = new ReflectionProperty(TestProvider::class, 'webhookSigningKey');
         $propertyReflection->setAccessible(true);
 
-        $first = $propertyReflection->getValue(new TestProvider());
-        $second = $propertyReflection->getValue(new TestProvider());
+        $first = $propertyReflection->getValue(new TestProvider);
+        $second = $propertyReflection->getValue(new TestProvider);
 
         $this->assertNotSame($first, $second);
         $this->assertNotEmpty($first);
@@ -286,7 +286,7 @@ final class TestProviderStubTest extends TestCase
 
     public function test_pull_and_push_generate_different_external_ids_each_call(): void
     {
-        $provider = new TestProvider();
+        $provider = new TestProvider;
 
         $firstPush = $provider->push([], 'contact', []);
         $secondPush = $provider->push([], 'contact', []);
@@ -315,7 +315,7 @@ final class TestProviderStubTest extends TestCase
 
     public function test_push_with_a_matching_idempotency_key_returns_the_identical_response_on_a_second_call(): void
     {
-        $provider = new TestProvider();
+        $provider = new TestProvider;
 
         $first = $provider->push(['idempotency_key' => 'same-key-value'], 'contact', ['name' => 'Ada']);
         $second = $provider->push(['idempotency_key' => 'same-key-value'], 'contact', ['name' => 'Ada']);
@@ -331,7 +331,7 @@ final class TestProviderStubTest extends TestCase
         // Companion proof: F4's dedup is keyed on the idempotency key
         // itself, not merely "any second call" — a DIFFERENT key must
         // still produce fresh, independent values.
-        $provider = new TestProvider();
+        $provider = new TestProvider;
 
         $first = $provider->push(['idempotency_key' => 'key-one'], 'contact', []);
         $second = $provider->push(['idempotency_key' => 'key-two'], 'contact', []);
@@ -341,7 +341,7 @@ final class TestProviderStubTest extends TestCase
 
     public function test_reset_simulation_state_clears_the_idempotency_registry(): void
     {
-        $provider = new TestProvider();
+        $provider = new TestProvider;
 
         $before = $provider->push(['idempotency_key' => 'a-key-to-be-cleared'], 'contact', []);
 
@@ -363,7 +363,7 @@ final class TestProviderStubTest extends TestCase
 
     public function test_rotate_webhook_signing_key_current_and_previous_candidates_both_verify(): void
     {
-        $provider = new TestProvider();
+        $provider = new TestProvider;
         $body = json_encode(['event_id' => 'evt-rotation-1', 'event_type' => 'test.resource.created', 'payload' => []]);
         $this->assertIsString($body);
 
@@ -390,7 +390,7 @@ final class TestProviderStubTest extends TestCase
 
     public function test_rotate_webhook_signing_key_twice_discards_the_first_previous_key_never_accumulates_more_than_one(): void
     {
-        $provider = new TestProvider();
+        $provider = new TestProvider;
         $body = json_encode(['event_id' => 'evt-rotation-2', 'event_type' => 'test.resource.created', 'payload' => []]);
         $this->assertIsString($body);
 
@@ -484,21 +484,21 @@ final class TestProviderStubTest extends TestCase
     {
         $this->setEnvFlag(null);
 
-        $this->assertFalse((new TestProvider())->isConfigured());
+        $this->assertFalse((new TestProvider)->isConfigured());
     }
 
     public function test_is_configured_is_false_when_the_environment_flag_is_explicitly_false(): void
     {
         $this->setEnvFlag('false');
 
-        $this->assertFalse((new TestProvider())->isConfigured());
+        $this->assertFalse((new TestProvider)->isConfigured());
     }
 
     public function test_is_configured_is_true_only_when_the_environment_flag_is_explicitly_true(): void
     {
         $this->setEnvFlag('true');
 
-        $this->assertTrue((new TestProvider())->isConfigured());
+        $this->assertTrue((new TestProvider)->isConfigured());
     }
 
     public function test_is_configured_rejects_a_non_boolean_truthy_looking_string(): void
@@ -508,7 +508,7 @@ final class TestProviderStubTest extends TestCase
         // validated boolean gate, not a loose truthy check.
         $this->setEnvFlag('yes-please-enable-it');
 
-        $this->assertFalse((new TestProvider())->isConfigured());
+        $this->assertFalse((new TestProvider)->isConfigured());
     }
 
     // ---------------------------------------------------------------

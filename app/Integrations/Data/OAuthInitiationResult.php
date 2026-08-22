@@ -25,6 +25,5 @@ final class OAuthInitiationResult
         public readonly string $authorizationUrl,
         public readonly int $oauthStateId,
         public readonly DateTimeInterface $expiresAt,
-    ) {
-    }
+    ) {}
 }

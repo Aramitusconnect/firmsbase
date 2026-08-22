@@ -41,9 +41,9 @@ final class OAuthStateTokenGeneratorTest extends TestCase
         parent::setUp();
 
         $this->service = new IntegrationOAuthStateService(
-            new EmailBodyEncryptionService(new EncryptionKeyService()),
-            new PkceService(),
-            new ProviderRedirectUrlValidator(),
+            new EmailBodyEncryptionService(new EncryptionKeyService),
+            new PkceService,
+            new ProviderRedirectUrlValidator,
         );
     }
 
