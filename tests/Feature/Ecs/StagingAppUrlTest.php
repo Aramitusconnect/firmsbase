@@ -93,7 +93,9 @@ class StagingAppUrlTest extends TestCase
 
     public function test_shared_environment_includes_app_url_from_the_variable(): void
     {
-        preg_match('/shared_environment\s*=\s*\{.*?\n  }/s', $this->stagingMain(), $matches);
+        // shared_environment is wrapped in merge({...}, local.canonical_hostname_environment)
+        // (see commit c6220ee7) rather than a plain map literal.
+        preg_match('/shared_environment\s*=\s*merge\(.*?\n  \)/s', $this->stagingMain(), $matches);
         $this->assertNotEmpty($matches, 'Could not locate local.shared_environment.');
 
         $this->assertMatchesRegularExpression(

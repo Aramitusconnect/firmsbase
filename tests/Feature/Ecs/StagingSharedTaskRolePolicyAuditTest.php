@@ -317,7 +317,11 @@ class StagingSharedTaskRolePolicyAuditTest extends TestCase
         // a hardcoded literal — so the total across the file is now 2.
         $this->assertSame(2, preg_match_all('/DB_USERNAME\s*=/', $staging));
 
-        preg_match('/shared_environment\s*=\s*\{(.*?)\n  \}/s', $staging, $sharedMatches);
+        // shared_environment is wrapped in merge({...}, local.canonical_hostname_environment)
+        // (see commit c6220ee7) — isolate just the inner map literal (merge()'s
+        // first argument), not its second argument, so this count stays scoped
+        // to shared_environment's own body.
+        preg_match('/shared_environment\s*=\s*merge\(\s*\{(.*?)\n    \},/s', $staging, $sharedMatches);
         $this->assertNotEmpty($sharedMatches, 'Could not isolate the shared_environment map body.');
         $this->assertSame(
             1,

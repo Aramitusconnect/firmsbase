@@ -214,7 +214,10 @@ class SesConsumerTerraformIamTest extends TestCase
     {
         $main = $this->stagingMain();
 
-        preg_match('/shared_environment\s*=\s*\{.*?\n  }/s', $main, $sharedEnv);
+        // shared_environment is wrapped in merge({...}, local.canonical_hostname_environment)
+        // (see commit c6220ee7) rather than a plain map literal — match through
+        // the merge(...) call, not a bare "= {".
+        preg_match('/shared_environment\s*=\s*merge\(.*?\n  \)/s', $main, $sharedEnv);
         preg_match('/ses_events_environment\s*=\s*\{.*?\n  }/s', $main, $sesEnv);
         $this->assertNotEmpty($sharedEnv);
         $this->assertNotEmpty($sesEnv);
@@ -228,7 +231,10 @@ class SesConsumerTerraformIamTest extends TestCase
         preg_match('/ses_events_environment\s*=\s*\{(.*?)\n  }/s', $this->stagingMain(), $matches);
         $this->assertNotEmpty($matches);
         $this->assertStringContainsString('SES_EVENTS_QUEUE_URL', $matches[1]);
-        $this->assertStringContainsString('var.ses_events_queue_url', $matches[1]);
+        // var.ses_events_queue_url was removed when the SES pipeline became
+        // Terraform-managed (commit 6fed3adf) — every caller now reads
+        // module.ses_events_pipeline's own output directly.
+        $this->assertStringContainsString('module.ses_events_pipeline.queue_url', $matches[1]);
 
         // And never inside local.hmac_secret or local.shared_secrets.
         preg_match('/hmac_secret\s*=\s*\{(.*?)\}/s', $this->stagingMain(), $hmacMatches);
